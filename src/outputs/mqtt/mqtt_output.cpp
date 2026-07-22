@@ -243,9 +243,16 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
 
     if (bridge.relayCount > 0) {
         // Enabling/disabling the feature adds or removes the switch entities themselves,
-        // so it forces a discovery re-announce; a mask change just acks the states.
-        if (bridge.relaysEnabled != lastRelaysEnabled_) {
+        // and a ROLE change renames switches, rebuilds the select options and changes the
+        // derived mode -- both force a discovery re-announce; a mask change just acks.
+        std::string rolesSig;
+        for (const auto& role : bridge.relayRoles) {
+            rolesSig += role;
+            rolesSig += '\n';
+        }
+        if (bridge.relaysEnabled != lastRelaysEnabled_ || rolesSig != lastRelayRolesSig_) {
             lastRelaysEnabled_  = bridge.relaysEnabled;
+            lastRelayRolesSig_  = rolesSig;
             discoveryPublished_ = false;
             relayStateForced_   = true;
         }

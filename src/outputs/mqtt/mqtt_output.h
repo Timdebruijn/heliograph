@@ -125,6 +125,11 @@ private:
     bool    relayStateForced_  = true;
     uint8_t lastRelayMask_     = 0;
     bool    lastRelaysEnabled_ = false;
+    /// Signature of the configured roles at the last publish. Roles rename the switches,
+    /// rebuild the select options AND change the derived mode, so a role change must
+    /// re-announce discovery and re-ack state -- "applied immediately" would otherwise
+    /// only be true after the next reconnect (self-review of PR #3).
+    std::string lastRelayRolesSig_;
 
 public:
     uint8_t lastDisconnectReason() const { return lastDisconnectReason_; }
