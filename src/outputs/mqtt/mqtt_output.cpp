@@ -270,7 +270,6 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
             if (!drm::optionsFor(roles).empty()) {
                 const std::string mode = drm::modeFrom(roles, bridge.relayMask);
                 g_client.publish(topics_.drmState().c_str(), 1, true, mode.c_str());
-                lastDrmMode_ = mode;
             }
             lastRelayMask_    = bridge.relayMask;
             relayStateForced_ = false;

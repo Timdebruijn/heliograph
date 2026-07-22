@@ -503,7 +503,14 @@ bool RestApi::begin() {
             sendError(request, {400, "missing_parameter", "expected ?mode=<name>"});
             return;
         }
-        const std::string mode = request->getParam("mode")->value().c_str();
+        // Same bound as the MQTT path: mode names are short ("normal", "drm0".."drm8"),
+        // so anything empty or oversized is rejected before it is copied around.
+        const String& raw = request->getParam("mode")->value();
+        if (raw.length() == 0 || raw.length() > 16) {
+            sendError(request, {400, "invalid_mode", "mode names are short strings"});
+            return;
+        }
+        const std::string mode = raw.c_str();
         switch (context_.setDrmMode(mode)) {
             case CommandResult::Ok:
                 request->send(200, kJson, "{\"status\":\"ok\"}");

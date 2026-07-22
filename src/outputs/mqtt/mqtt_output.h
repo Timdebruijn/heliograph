@@ -112,7 +112,6 @@ private:
 
     RelayCommandFn relayCommand_;
     DrmCommandFn   drmCommand_;
-    std::string    lastDrmMode_;  ///< last acked mode; republished on change
     uint8_t        relayCount_ = 0;  ///< copied at begin() for topic parsing in the callback
     /// Set by onMessage (MQTT task) on EVERY received relay command, consumed by loop().
     /// Without it a refused or no-op command changes no state, nothing gets published, and
