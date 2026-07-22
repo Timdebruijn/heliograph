@@ -3,7 +3,7 @@
 > A heliograph signalled messages with sunlight. This one translates what your solar
 > inverter is saying into languages the rest of your network speaks.
 
-Firmware for the **Waveshare ESP32-S3-Relay-1CH** that reads solar inverters and hybrid
+Firmware for the **Waveshare ESP32-S3-RS485-CAN** that reads solar inverters and hybrid
 systems over RS485 and republishes everything in the formats your tooling already speaks:
 **MQTT + Home Assistant discovery, Modbus TCP, REST/JSON, Prometheus**. One box next to
 the inverter, every integration for free.

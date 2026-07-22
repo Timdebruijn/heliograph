@@ -146,7 +146,7 @@ Discovery payload per measurement:
 ### Two devices
 
 - **Bridge** (`heliograph-a1b2c3`): manufacturer "Heliograph open-source project", model
-  "Waveshare ESP32-S3-Relay-1CH", firmware version. Carries the diagnostic entities (RSSI,
+  "Waveshare ESP32-S3-RS485-CAN", firmware version. Carries the diagnostic entities (RSSI,
   uptime, heap, poll counter).
 - **Inverter** (`heliograph-a1b2c3_inverter`): manufacturer/model/serial number from
   `DeviceIdentity`, with `via_device` pointing to the bridge. Carries the measurements.

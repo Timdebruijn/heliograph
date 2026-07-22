@@ -7,7 +7,7 @@
 // remains host-testable; all concurrency lives here.
 //
 // VERIFIED ON HARDWARE 2026-07-17: serves FC3/FC4 on port 502 to pymodbus 3.14 from a
-// Waveshare ESP32-S3-Relay-1CH. The API used here was read from the eModbus sources
+// Waveshare ESP32-S3-RS485-CAN. The API used here was read from the eModbus sources
 // (src/ModbusServerTCPasync.h, src/ModbusServer.h, src/ModbusTypeDefs.h,
 // examples/TCPServerAsync), not from memory.
 //

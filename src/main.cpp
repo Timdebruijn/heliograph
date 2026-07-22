@@ -3,12 +3,11 @@
 // Heliograph — firmware entry point.
 //
 // Boot order matters and is deliberate:
-//   1. relay off, before anything that can fail or block;
-//   2. serial;
-//   3. configuration from NVS (nothing else can be decided without it);
-//   4. WiFi, or the setup portal when unprovisioned;
-//   5. driver + poll task -- started even without a network, because RS485 does not need one;
-//   6. outputs, only once there is a network to serve them on.
+//   1. serial;
+//   2. configuration from NVS (nothing else can be decided without it);
+//   3. WiFi, or the setup portal when unprovisioned;
+//   4. driver + poll task -- started even without a network, because RS485 does not need one;
+//   5. outputs, only once there is a network to serve them on.
 //
 // There are no credentials in this file and none in the image. An unprovisioned device puts
 // up Heliograph-Setup-XXXX and waits.
@@ -23,7 +22,7 @@
 #include <vector>
 
 #include "app/discovery_runner.h"
-#include "boards/waveshare_esp32_s3_relay_1ch.h"
+#include "boards/waveshare_esp32_s3_rs485_can.h"
 #include "config/configuration.h"
 #include "config/configuration_store.h"
 #include "config/nvs_backend.h"
@@ -48,7 +47,7 @@ namespace {
 // image identifiable over the API. Without it two different builds both reported "0.1.0" and a
 // flash could not be told from the previous one -- exactly what bit the post-flash check on
 // 2026-07-21. Bumped to 0.2.0 for the Fase 9 review batch.
-constexpr const char* kFirmwareVersion = "0.5.1 (" __DATE__ " " __TIME__ ")";
+constexpr const char* kFirmwareVersion = "0.5.2 (" __DATE__ " " __TIME__ ")";
 
 Rs485Transport     g_transport;
 DriverRegistry     g_registry;
@@ -89,13 +88,6 @@ uint64_t nowMs() { return static_cast<uint64_t>(millis()); }
 
 /// Owns discovery runs. The web handler requests; rs485Task runs, because it owns the bus.
 DiscoveryRunner g_discovery{g_registry, nowMs};
-
-/// Drives the relay to its safe state. The first thing that happens, before anything that can
-/// fail. This is the only function that touches the pin, and it only ever turns it off.
-void forceRelayOff() {
-    pinMode(board::kRelayCh1, OUTPUT);
-    digitalWrite(board::kRelayCh1, board::kRelayActiveHigh ? LOW : HIGH);
-}
 
 /// The configured driver, or the highest-priority one compiled in. No manufacturer name here.
 std::string selectedDriverId() {
@@ -349,8 +341,9 @@ void rs485Task(void* /*arg*/) {
 }  // namespace
 
 void setup() {
-    forceRelayOff();
-
+    // No GPIO forcing here. Earlier revisions drove GPIO47 low first thing, believing this
+    // board was the Relay-1CH and that pin its relay. The real board (RS485-CAN) has no
+    // relay, and the safest state for a pin with no known function is untouched hi-Z.
     Serial.begin(115200);
     const uint32_t serialDeadline = millis() + 2000;
     while (!Serial && millis() < serialDeadline) {

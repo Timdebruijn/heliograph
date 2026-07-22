@@ -620,7 +620,7 @@ static void test_bridge_diagnostic_entities() {
     TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/diagnostics", doc["state_topic"]);
     // These belong to the bridge device, not the inverter.
     TEST_ASSERT_EQUAL_STRING("heliograph-a1b2c3", doc["device"]["identifiers"][0]);
-    TEST_ASSERT_EQUAL_STRING("Waveshare ESP32-S3-Relay-1CH", doc["device"]["model"]);
+    TEST_ASSERT_EQUAL_STRING("Waveshare ESP32-S3-RS485-CAN", doc["device"]["model"]);
 }
 
 static void test_sanitize_id() {

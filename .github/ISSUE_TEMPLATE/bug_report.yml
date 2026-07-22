@@ -14,7 +14,7 @@ body:
     id: hardware
     attributes:
       label: Board and inverter
-      placeholder: "Waveshare ESP32-S3-Relay-1CH + EverSolar TL3000"
+      placeholder: "Waveshare ESP32-S3-RS485-CAN + EverSolar TL3000"
     validations:
       required: true
   - type: textarea

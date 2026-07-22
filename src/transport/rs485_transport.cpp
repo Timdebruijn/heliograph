@@ -6,7 +6,7 @@
 
 #include <Arduino.h>
 
-#include "boards/waveshare_esp32_s3_relay_1ch.h"
+#include "boards/waveshare_esp32_s3_rs485_can.h"
 #include "diagnostics/logger.h"
 
 namespace heliograph {

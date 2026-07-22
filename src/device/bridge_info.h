@@ -49,7 +49,7 @@ struct BridgeInfo {
 
     /// The board this firmware is running on. Reported to Home Assistant as the bridge
     /// device's model.
-    std::string boardName = "Waveshare ESP32-S3-Relay-1CH";
+    std::string boardName = "Waveshare ESP32-S3-RS485-CAN";
 };
 
 }  // namespace heliograph

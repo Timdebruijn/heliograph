@@ -503,7 +503,7 @@ static void test_diagnostics_payload_has_no_secrets() {
     TEST_ASSERT_TRUE(json.find("password") == std::string::npos);
     auto doc = parse(json);
     TEST_ASSERT_EQUAL_UINT32(1, doc["poll_success_total"].as<uint32_t>());
-    TEST_ASSERT_EQUAL_STRING("Waveshare ESP32-S3-Relay-1CH", doc["board"]);
+    TEST_ASSERT_EQUAL_STRING("Waveshare ESP32-S3-RS485-CAN", doc["board"]);
 }
 
 static void test_oversized_response_is_refused() {
