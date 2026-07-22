@@ -1,21 +1,48 @@
-.pio
-.cache
-.dummy
-.vscode/.browse.c_cpp.db*
-.vscode/c_cpp_properties.json
-.vscode/launch.json
-.vscode/ipch
+# --- Build output ---------------------------------------------------------------
+.pio/
+.cache/
 compile_commands.json
 
-# Generated at build time by tools/gen_profiles.py from profiles/*/*.toml
+# Generated at build time by tools/gen_profiles.py from profiles/*/*.toml. Never
+# commit it: the TOML files are the source of truth, and a stale generated copy
+# in the tree is exactly the drift the codegen exists to prevent.
 profiles_generated.cpp
 
-# Local scratch
+# --- Local configuration --------------------------------------------------------
+# PlatformIO's conventional per-user override file (upload ports, local flags).
+# Anything in it is machine-specific by definition.
+platformio_override.ini
+
+# --- Editors and IDEs -----------------------------------------------------------
+# .vscode/extensions.json IS committed (recommended extensions); the rest is local.
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# --- Operating system junk ------------------------------------------------------
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# --- Python tooling -------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# --- Local scratch --------------------------------------------------------------
 *.log
 .ui_stub.html
-__pycache__/
+.dummy
 dist/
 site/
 
-# Internal phase tracker, not part of the public repo
+# --- Not part of the public repo ------------------------------------------------
+# Internal phase tracker (personal planning, test evidence).
 docs/implementation-plan.md
