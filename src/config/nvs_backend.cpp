@@ -15,7 +15,7 @@ namespace heliograph {
 
 bool NvsBackend::read(const std::string& key, std::string& value) const {
     Preferences prefs;
-    if (!prefs.begin(kStorageNamespace, /*readOnly=*/true)) {
+    if (!prefs.begin(namespace_, /*readOnly=*/true)) {
         return false;
     }
     if (!prefs.isKey(key.c_str())) {
@@ -32,7 +32,7 @@ bool NvsBackend::read(const std::string& key, std::string& value) const {
 
 bool NvsBackend::write(const std::string& key, const std::string& value) {
     Preferences prefs;
-    if (!prefs.begin(kStorageNamespace, /*readOnly=*/false)) {
+    if (!prefs.begin(namespace_, /*readOnly=*/false)) {
         return false;
     }
     const size_t written = prefs.putString(key.c_str(), value.c_str());
@@ -44,7 +44,7 @@ bool NvsBackend::write(const std::string& key, const std::string& value) {
 
 bool NvsBackend::erase() {
     Preferences prefs;
-    if (!prefs.begin(kStorageNamespace, /*readOnly=*/false)) {
+    if (!prefs.begin(namespace_, /*readOnly=*/false)) {
         return false;
     }
     const bool ok = prefs.clear();

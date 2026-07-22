@@ -48,14 +48,15 @@ namespace {
 // image identifiable over the API. Without it two different builds both reported "0.1.0" and a
 // flash could not be told from the previous one -- exactly what bit the post-flash check on
 // 2026-07-21. Bumped to 0.2.0 for the Fase 9 review batch.
-constexpr const char* kFirmwareVersion = "0.5.0 (" __DATE__ " " __TIME__ ")";
+constexpr const char* kFirmwareVersion = "0.5.1 (" __DATE__ " " __TIME__ ")";
 
 Rs485Transport     g_transport;
 DriverRegistry     g_registry;
 DeviceManager      g_devices;
 Diagnostics        g_diagnostics;
 NvsBackend         g_nvs;
-ConfigurationStore g_store{g_nvs};
+NvsBackend         g_nvsLegacy{kLegacyStorageNamespace};  // pre-rename config, read-only
+ConfigurationStore g_store{g_nvs, &g_nvsLegacy};
 Configuration      g_config;
 WifiManager        g_wifi;
 TimeManager        g_time;

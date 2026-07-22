@@ -97,6 +97,59 @@ static void test_save_then_load_round_trips_everything() {
     TEST_ASSERT_TRUE(loaded.provisioned());
 }
 
+static void test_config_under_the_legacy_namespace_is_adopted() {
+    // The 0.5.0 rename changed the NVS namespace and stranded every existing config under
+    // the old name: an OTA'd device booted "unprovisioned" with its settings intact in
+    // flash (live, 2026-07-22). load() must adopt the legacy blob, persist it under the
+    // new namespace, and leave the legacy copy alone so a 0.4.x rollback still finds it.
+    MemoryBackend legacy;
+    {
+        ConfigurationStore old(legacy);
+        TEST_ASSERT_TRUE(old.save(provisionedConfig()));
+    }
+    MemoryBackend      fresh;
+    ConfigurationStore store(fresh, &legacy);
+
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Migrated, store.load(loaded));
+    TEST_ASSERT_TRUE(loaded.provisioned());
+    TEST_ASSERT_EQUAL_STRING("thuisnetwerk", loaded.wifi.ssid.c_str());
+    TEST_ASSERT_EQUAL_STRING("GeheimMqttWachtwoord", loaded.mqtt.password.c_str());
+
+    // Persisted under the new namespace: the next load no longer needs the legacy source.
+    TEST_ASSERT_TRUE(fresh.contains(kStorageKeyConfig));
+    ConfigurationStore rebooted(fresh);
+    Configuration      after;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, rebooted.load(after));
+    TEST_ASSERT_EQUAL_STRING("thuisnetwerk", after.wifi.ssid.c_str());
+
+    // Legacy copy untouched (rollback safety).
+    TEST_ASSERT_TRUE(legacy.contains(kStorageKeyConfig));
+}
+
+static void test_primary_config_wins_over_legacy() {
+    // Once anything is stored under the new namespace, the legacy blob is history -- it
+    // must never override newer settings on a later boot.
+    MemoryBackend legacy;
+    {
+        ConfigurationStore old(legacy);
+        auto               stale = provisionedConfig();
+        stale.bridgeName         = "Oud";
+        TEST_ASSERT_TRUE(old.save(stale));
+    }
+    MemoryBackend fresh;
+    {
+        ConfigurationStore current(fresh);
+        auto               newer = provisionedConfig();
+        newer.bridgeName         = "Nieuw";
+        TEST_ASSERT_TRUE(current.save(newer));
+    }
+    ConfigurationStore store(fresh, &legacy);
+    Configuration      loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_EQUAL_STRING("Nieuw", loaded.bridgeName.c_str());
+}
+
 // --- ntp ----------------------------------------------------------------------------------
 
 static void test_ntp_settings_round_trip_through_storage() {
@@ -531,6 +584,8 @@ int main(int, char**) {
     RUN_TEST(test_a_working_bridge_confirms_eventually_even_without_wifi);
     RUN_TEST(test_first_boot_finds_nothing_and_keeps_defaults);
     RUN_TEST(test_save_then_load_round_trips_everything);
+    RUN_TEST(test_config_under_the_legacy_namespace_is_adopted);
+    RUN_TEST(test_primary_config_wins_over_legacy);
     RUN_TEST(test_ntp_settings_round_trip_through_storage);
     RUN_TEST(test_ntp_has_defaults_that_work_out_of_the_box);
     RUN_TEST(test_ntp_patch_applies_from_the_settings_form);

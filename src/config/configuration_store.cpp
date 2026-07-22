@@ -267,18 +267,33 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
     return needsMigration ? LoadResult::Migrated : LoadResult::Ok;
 }
 
-ConfigurationStore::ConfigurationStore(KeyValueBackend& backend) : backend_(backend) {}
+ConfigurationStore::ConfigurationStore(KeyValueBackend& backend, KeyValueBackend* legacy)
+    : backend_(backend), legacy_(legacy) {}
 
 LoadResult ConfigurationStore::load(Configuration& out) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::string                 blob;
+    bool migratedFromLegacy = false;
     if (!backend_.read(kStorageKeyConfig, blob) || blob.empty()) {
-        return LoadResult::NotFound;
+        // Rename migration: the primary namespace is empty, but a pre-rename image may have
+        // left the configuration under the old one. Adopt it -- otherwise an OTA from 0.4.x
+        // boots "unprovisioned" with the config sitting intact in flash. The legacy copy is
+        // deliberately not erased, so a bootloader rollback to 0.4.x still finds it.
+        if (legacy_ == nullptr || !legacy_->read(kStorageKeyConfig, blob) || blob.empty()) {
+            return LoadResult::NotFound;
+        }
+        migratedFromLegacy = true;
     }
     Configuration parsed;
-    const auto    result = deserializeConfigFromStorage(blob, parsed);
+    auto          result = deserializeConfigFromStorage(blob, parsed);
     if (result == LoadResult::Ok || result == LoadResult::Migrated) {
         out = parsed;
+        if (migratedFromLegacy) {
+            // Persist under the new namespace so the next boot reads it directly. A failed
+            // write is not fatal: the legacy copy remains, and this path simply runs again.
+            backend_.write(kStorageKeyConfig, blob);
+            result = LoadResult::Migrated;
+        }
     } else if (result == LoadResult::FutureVersion || result == LoadResult::Corrupt) {
         // The refused document may still have yielded a salvaged network identity (WiFi +
         // admin credentials -- see salvageIdentity). Carry exactly those five fields over

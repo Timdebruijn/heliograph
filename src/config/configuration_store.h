@@ -62,7 +62,14 @@ const char* loadResultName(LoadResult result);
 
 class ConfigurationStore {
 public:
-    explicit ConfigurationStore(KeyValueBackend& backend);
+    /// `legacy`, when given, is a read-only fallback: if the primary backend holds no config
+    /// but the legacy one does, load() adopts that blob and writes it to the primary. Exists
+    /// because the project rename (0.5.0) changed the NVS namespace, which stranded every
+    /// existing configuration under the old name -- a device that updated over the air came
+    /// up "unprovisioned" with its config sitting intact in flash (live, 2026-07-22, Tim's
+    /// bridge). The legacy blob is left in place on purpose: a rollback to a 0.4.x image
+    /// must still find it.
+    explicit ConfigurationStore(KeyValueBackend& backend, KeyValueBackend* legacy = nullptr);
 
     /// Reads, migrates if needed, and validates. On anything other than Ok/Migrated, `out` is
     /// left at its defaults -- never partially populated.
@@ -77,6 +84,7 @@ public:
 
 private:
     KeyValueBackend&   backend_;
+    KeyValueBackend*   legacy_;
     mutable std::mutex mutex_;
 };
 
@@ -91,6 +99,9 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out);
 LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& out);
 
 inline constexpr const char* kStorageNamespace = "heliograph";
+/// The pre-rename namespace (project was called differently before 0.5.0). Read-only
+/// migration source; never written to.
+inline constexpr const char* kLegacyStorageNamespace = "solarbridge";
 inline constexpr const char* kStorageKeyConfig = "config";
 
 }  // namespace heliograph
