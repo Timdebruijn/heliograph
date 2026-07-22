@@ -79,6 +79,24 @@ struct EversolarRig {
     }
 };
 
+static void test_relay_registers_use_the_sentinel_without_hardware() {
+    // "No relay hardware" and "relays, none energised" are different statements; the
+    // sentinel keeps them apart. Control never goes through Modbus -- these are read-only.
+    EversolarRig r;
+    r.pollAndRender();
+    uint16_t v = 0;
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagRelayCount, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(0xFFFF, v);
+
+    r.bridge.relayCount = 6;
+    r.bridge.relayMask  = 0b100101;
+    r.pollAndRender();
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagRelayCount, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(6, v);
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagRelayMask, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(0b100101, v);
+}
+
 // --- schema and framing --------------------------------------------------------------------
 
 static void test_schema_version_is_published() {
@@ -477,5 +495,6 @@ int main(int, char**) {
     RUN_TEST(test_a_32bit_error_code_saturates_the_16bit_register);
     RUN_TEST(test_validity_bitmap_and_nan_always_agree);
     RUN_TEST(test_validity_bits_fit_the_reserved_space);
+    RUN_TEST(test_relay_registers_use_the_sentinel_without_hardware);
     return UNITY_END();
 }

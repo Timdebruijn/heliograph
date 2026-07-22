@@ -90,6 +90,14 @@ struct NtpSettings {
     std::string timezoneName = "Europe/Amsterdam";
 };
 
+struct RelaySettings {
+    /// Master enable for the board's relays (DRM curtailment contacts). Off by default:
+    /// a relay board with factory settings must be inert. Boards without relays ignore
+    /// this entirely. Note the double gate: security.readOnlyMode must ALSO be off before
+    /// a relay moves -- enabling relays alone is not enough, by design.
+    bool enabled = false;
+};
+
 struct SecuritySettings {
     std::string adminUsername = "admin";
     std::string adminPassword;  ///< never serialised, never logged; empty = mutations refused
@@ -105,6 +113,7 @@ struct Configuration {
     ModbusSettings   modbus;
     PollingSettings  polling;
     DriverSettings   driver;
+    RelaySettings    relays;
     NtpSettings      ntp;
     SecuritySettings security;
     LogLevel         logLevel = LogLevel::Info;

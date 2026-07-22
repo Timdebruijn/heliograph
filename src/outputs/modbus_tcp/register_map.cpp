@@ -283,6 +283,15 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
     writeU16(reg::kDiagFirmwareMajor, bridge.firmwareMajor);
     writeU16(reg::kDiagFirmwareMinor, bridge.firmwareMinor);
     writeU16(reg::kDiagFirmwarePatch, bridge.firmwarePatch);
+    // Read-only observation of the bridge relays; the sentinel distinguishes "no relay
+    // hardware" from "relays, none energised". Control never goes through Modbus.
+    if (bridge.relayCount > 0) {
+        writeU16(reg::kDiagRelayCount, bridge.relayCount);
+        writeU16(reg::kDiagRelayMask, bridge.relayMask);
+    } else {
+        writeU16(reg::kDiagRelayCount, kInvalidU16);
+        writeU16(reg::kDiagRelayMask, kInvalidU16);
+    }
 }
 
 bool RegisterMap::read(uint16_t address, uint16_t count, uint16_t* out) const {

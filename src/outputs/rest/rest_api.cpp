@@ -437,6 +437,57 @@ bool RestApi::begin() {
         request->send(202, kJson, "{\"status\":\"accepted\"}");
     });
 
+    // Bridge relay control (DRM contacts). One explicit route per possible index (max 8)
+    // rather than a regex route: ESPAsyncWebServer only matches regex paths when built
+    // with ASYNCWEBSERVER_REGEX, and eight fixed strings are cheaper than that flag. The
+    // state travels in the query (?on=true|false) -- a JSON body would need the whole
+    // collectBody dance for one boolean. Admin-gated and rate-limited like every other
+    // mutation; the RelayController's gates (read-only mode, relays.enabled) decide next.
+    for (uint8_t relayIndex = 0; relayIndex < 8; ++relayIndex) {
+        const std::string path = "/api/v1/relays/" + std::to_string(relayIndex) + "/set";
+        g_server->on(path.c_str(), HTTP_POST,
+                     [this, authorised, rateLimited, relayIndex](AsyncWebServerRequest* request) {
+        if (!authorised(request) || rateLimited(request)) {
+            return;
+        }
+        if (!context_.setRelay) {
+            sendError(request, {404, "no_relays", "this board has no relays"});
+            return;
+        }
+        if (!request->hasParam("on")) {
+            sendError(request, {400, "missing_parameter", "expected ?on=true or ?on=false"});
+            return;
+        }
+        const String v = request->getParam("on")->value();
+        if (v != "true" && v != "false") {
+            sendError(request, {400, "invalid_parameter", "expected ?on=true or ?on=false"});
+            return;
+        }
+        switch (context_.setRelay(relayIndex, v == "true")) {
+            case CommandResult::Ok:
+                request->send(200, kJson, "{\"status\":\"ok\"}");
+                return;
+            case CommandResult::ReadOnlyMode:
+                sendError(request, {403, "read_only_mode",
+                                    "security.read_only_mode is on; relays cannot move"});
+                return;
+            case CommandResult::Rejected:
+                sendError(request, {403, "relays_disabled",
+                                    "relays.enabled is off in the configuration"});
+                return;
+            case CommandResult::OutOfRange:
+                sendError(request, {404, "no_such_relay", "relay index out of range"});
+                return;
+            case CommandResult::RateLimited:
+                sendError(request, {429, "rate_limited", "too many relay commands"});
+                return;
+            default:
+                sendError(request, {500, "relay_error", "relay command failed"});
+                return;
+        }
+        });
+    }
+
     g_server->on("/api/v1/actions/discover", HTTP_POST,
                  [this, authorised, rateLimited](AsyncWebServerRequest* request) {
         if (!authorised(request) || rateLimited(request)) {

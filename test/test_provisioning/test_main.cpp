@@ -150,6 +150,25 @@ static void test_primary_config_wins_over_legacy() {
     TEST_ASSERT_EQUAL_STRING("Nieuw", loaded.bridgeName.c_str());
 }
 
+static void test_relays_enabled_defaults_off_and_round_trips() {
+    // A relay board with factory settings must be inert: the flag defaults to false, and
+    // only an explicit patch turns it on. It must survive storage like everything else.
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    auto               c = provisionedConfig();
+    TEST_ASSERT_FALSE(c.relays.enabled);
+
+    ConfigError e;
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"relays":{"enabled":true}})", c, e));
+    TEST_ASSERT_TRUE(c.relays.enabled);
+    TEST_ASSERT_TRUE(store.save(c));
+
+    ConfigurationStore reloaded(backend);
+    Configuration      after;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, reloaded.load(after));
+    TEST_ASSERT_TRUE(after.relays.enabled);
+}
+
 // --- ntp ----------------------------------------------------------------------------------
 
 static void test_ntp_settings_round_trip_through_storage() {
@@ -584,6 +603,7 @@ int main(int, char**) {
     RUN_TEST(test_a_working_bridge_confirms_eventually_even_without_wifi);
     RUN_TEST(test_first_boot_finds_nothing_and_keeps_defaults);
     RUN_TEST(test_save_then_load_round_trips_everything);
+    RUN_TEST(test_relays_enabled_defaults_off_and_round_trips);
     RUN_TEST(test_config_under_the_legacy_namespace_is_adopted);
     RUN_TEST(test_primary_config_wins_over_legacy);
     RUN_TEST(test_ntp_settings_round_trip_through_storage);

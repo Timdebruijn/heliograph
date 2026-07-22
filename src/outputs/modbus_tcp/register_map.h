@@ -123,6 +123,12 @@ inline constexpr uint16_t kDiagInvalidFrames = 818;  // uint32
 inline constexpr uint16_t kDiagFirmwareMajor = 820;  // uint16
 inline constexpr uint16_t kDiagFirmwareMinor = 821;  // uint16
 inline constexpr uint16_t kDiagFirmwarePatch = 822;  // uint16
+// Bridge relays (DRM contacts). READ-ONLY here by design: relay control goes through the
+// admin-gated REST/MQTT paths with their safety gates; the unauthenticated Modbus surface
+// only ever observes. 0xFFFF sentinel on boards without relays (count 0 would claim
+// "a board with zero relays exists here", which is a different statement than "none").
+inline constexpr uint16_t kDiagRelayCount = 850;  // uint16, 0xFFFF = no relay hardware
+inline constexpr uint16_t kDiagRelayMask  = 851;  // uint16 bitmask, bit i = relay i energised
 }  // namespace reg
 
 /// Bit positions in the validity bitmap at reg::kValidityBitmap.

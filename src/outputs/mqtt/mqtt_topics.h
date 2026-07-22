@@ -24,6 +24,16 @@ public:
     std::string identity() const { return prefix_ + "/identity"; }
     std::string capabilities() const { return prefix_ + "/capabilities"; }
 
+    /// Bridge relay control (DRM contacts). Commands come in on relaySet, acknowledged
+    /// state goes out on relayState. The one wildcard subscription this firmware has.
+    std::string relaySet(uint8_t index) const {
+        return prefix_ + "/relay/" + std::to_string(index) + "/set";
+    }
+    std::string relayState(uint8_t index) const {
+        return prefix_ + "/relay/" + std::to_string(index) + "/state";
+    }
+    std::string relaySetWildcard() const { return prefix_ + "/relay/+/set"; }
+
     const std::string& prefix() const { return prefix_; }
 
 private:

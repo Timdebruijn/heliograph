@@ -52,6 +52,10 @@ private:
     RateLimitPolicy rateLimit_;
     bool            readOnly_ = true;
 
+    // Explicit flag, not a "0 means never" sentinel: millis() at boot IS near zero, and
+    // the sentinel collision let the first post-boot window bypass the throttle (found by
+    // the RelayController's twin of this logic, 2026-07-22).
+    bool     everAccepted_   = false;
     uint64_t lastAcceptedMs_ = 0;
     uint32_t burstUsed_      = 0;
 };

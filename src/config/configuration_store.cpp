@@ -99,6 +99,7 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     modbus["write_enabled"]       = config.modbus.writeEnabled;
 
     doc["polling"]["interval_seconds"] = config.polling.intervalSeconds;
+    doc["relays"]["enabled"]           = config.relays.enabled;
 
     JsonObject driver     = doc["driver"].to<JsonObject>();
     driver["id"]          = config.driver.id;
@@ -223,6 +224,9 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
     }
     if (JsonObjectConst polling = doc["polling"]; !polling.isNull()) {
         if (polling["interval_seconds"].is<uint32_t>()) parsed.polling.intervalSeconds = polling["interval_seconds"].as<uint32_t>();
+    }
+    if (JsonObjectConst relays = doc["relays"]; !relays.isNull()) {
+        if (relays["enabled"].is<bool>()) parsed.relays.enabled = relays["enabled"].as<bool>();
     }
     if (JsonObjectConst driver = doc["driver"]; !driver.isNull()) {
         if (driver["id"].is<const char*>())    parsed.driver.id = driver["id"].as<const char*>();

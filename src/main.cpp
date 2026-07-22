@@ -38,6 +38,7 @@
 #include "outputs/modbus_tcp/modbus_tcp_server.h"
 #include "outputs/mqtt/mqtt_output.h"
 #include "outputs/rest/rest_api.h"
+#include "relays/relay_controller.h"
 #include "state/state_store.h"
 #include "transport/rs485_transport.h"
 
@@ -49,7 +50,7 @@ namespace {
 // image identifiable over the API. Without it two different builds both reported "0.1.0" and a
 // flash could not be told from the previous one -- exactly what bit the post-flash check on
 // 2026-07-21. Bumped to 0.2.0 for the Fase 9 review batch.
-constexpr const char* kFirmwareVersion = "0.6.1 (" __DATE__ " " __TIME__ ")";
+constexpr const char* kFirmwareVersion = "0.7.0 (" __DATE__ " " __TIME__ ")";
 
 Rs485Transport     g_transport;
 DriverRegistry     g_registry;
@@ -87,6 +88,12 @@ std::atomic<uint64_t> g_rebootAtMs{0};
 std::atomic<bool> g_manualPollRequested{false};
 
 uint64_t nowMs() { return static_cast<uint64_t>(millis()); }
+
+/// The bridge's DRM relays (empty on boards without them). Commands arrive on two tasks
+/// (REST via AsyncTCP, MQTT via the client's task); g_relayMutex serialises them and the
+/// state reads in bridgeInfo(). The controller itself stays lock-free and host-testable.
+RelayController g_relays{nowMs};
+std::mutex      g_relayMutex;
 
 /// Owns discovery runs. The web handler requests; rs485Task runs, because it owns the bus.
 DiscoveryRunner g_discovery{g_registry, nowMs};
@@ -128,6 +135,16 @@ BridgeInfo bridgeInfo() {
     info.ntpServer        = ntpSource.server;
     info.ntpFromDhcp      = ntpSource.fromDhcp;
     info.otaImageState    = ota::imageStateName();
+    if (g_relays.count() > 0) {
+        std::lock_guard<std::mutex> lock(g_relayMutex);
+        info.relayCount    = g_relays.count();
+        info.relaysEnabled = g_relays.enabled();
+        for (uint8_t i = 0; i < g_relays.count(); ++i) {
+            if (g_relays.energised(i)) {
+                info.relayMask |= static_cast<uint8_t>(1u << i);
+            }
+        }
+    }
     return info;
 }
 
@@ -240,6 +257,12 @@ void startOutputs() {
         cfg.qos              = configSnapshot.mqtt.qos;
         g_mqtt               = std::make_unique<mqtt::MqttOutput>(cfg);
         g_mqtt->setDiagnostics(&g_diagnostics);
+        if (g_relays.count() > 0) {
+            g_mqtt->setRelayCommandHandler([](uint8_t index, bool on) {
+                std::lock_guard<std::mutex> lock(g_relayMutex);
+                return g_relays.set(index, on);
+            });
+        }
         g_mqtt->begin(bridgeInfo());
         // The host is not a secret; the password must never reach a log.
         log::info("mqtt: broker %s:%u", cfg.host.c_str(), cfg.port);
@@ -259,8 +282,23 @@ void startRestApi() {
     // bridgeInfo(); without the lock that is a use-after-free waiting on a settings save
     // landing mid-poll (review, 2026-07-21).
     ctx.applyConfig = [](const Configuration& c) {
-        std::lock_guard<std::mutex> lock(g_configMutex);
-        g_config = c;
+        {
+            std::lock_guard<std::mutex> lock(g_configMutex);
+            g_config = c;
+        }
+        // The relay gates follow the config immediately -- no restart. Closing EITHER
+        // gate also releases every relay: with the gate closed, no command -- not even
+        // OFF -- would get through, so an energised contact would otherwise stay frozen
+        // with DRM asserted and no way to release it. The failsafe direction (contacts
+        // open, inverter runs) is the only state a closed gate may leave behind.
+        {
+            std::lock_guard<std::mutex> lock(g_relayMutex);
+            g_relays.setReadOnlyMode(c.security.readOnlyMode);
+            g_relays.setEnabled(c.relays.enabled);
+            if (!c.relays.enabled || c.security.readOnlyMode) {
+                g_relays.allOff();
+            }
+        }
     };
     ctx.bridgeInfo  = bridgeInfo;
     ctx.clock       = nowMs;
@@ -291,6 +329,14 @@ void startRestApi() {
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
     ctx.portalActive        = [] { return g_wifi.portalActive(); };
     ctx.scanNetworks        = scanNetworksJson;
+    if (g_relays.count() > 0) {
+        // Behind the same mutex as the MQTT path: REST commands arrive on the AsyncTCP
+        // task, MQTT commands on the MQTT task.
+        ctx.setRelay = [](uint8_t index, bool on) {
+            std::lock_guard<std::mutex> lock(g_relayMutex);
+            return g_relays.set(index, on);
+        };
+    }
 
     g_rest = std::make_unique<rest::RestApi>(ctx);
     g_rest->begin();
@@ -388,6 +434,28 @@ void setup() {
             log::warn("rtc: present but time not set (first boot or empty backup supply)");
         }
     }
+
+    // Relays, on boards that have them: pins to OUTPUT and everything de-energised before
+    // anything else can fail. The gates start closed (read-only on, enabled off) and only
+    // the config below opens them. Under HELIOGRAPH_MOCK_RELAYS the mock build exposes
+    // virtual relays through the full MQTT/REST/HA stack without touching a single pin.
+#if defined(HELIOGRAPH_MOCK_RELAYS)
+    g_relays.begin(HELIOGRAPH_MOCK_RELAYS, [](uint8_t i, bool on) {
+        log::info("relay[mock] %u -> %s", i + 1, on ? "ON" : "OFF");
+    });
+#else
+    if (board::kRelayCount > 0) {
+        for (int i = 0; i < board::kRelayCount; ++i) {
+            pinMode(board::kRelayPins[i], OUTPUT);
+        }
+        g_relays.begin(static_cast<uint8_t>(board::kRelayCount), [](uint8_t i, bool on) {
+            digitalWrite(board::kRelayPins[i],
+                         (on == board::kRelayActiveHigh) ? HIGH : LOW);
+        });
+    }
+#endif
+    g_relays.setReadOnlyMode(g_config.security.readOnlyMode);
+    g_relays.setEnabled(g_config.relays.enabled);
 
     // A factory-fresh device gets a UNIQUE default hostname (heliograph-a1b2c3, from the
     // MAC) instead of the shared "heliograph": two bridges on one LAN -- configuring a

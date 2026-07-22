@@ -270,6 +270,8 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
 
     doc["polling"]["interval_seconds"] = config.polling.intervalSeconds;
 
+    doc["relays"]["enabled"] = config.relays.enabled;
+
     JsonObject driver           = doc["driver"].to<JsonObject>();
     driver["id"]                = config.driver.id;
     driver["auto_detect"]       = config.driver.autoDetect;
@@ -357,6 +359,10 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
         }
     }
 
+
+    if (JsonObjectConst relays = doc["relays"]; !relays.isNull()) {
+        if (!patchBool(relays["enabled"], merged.relays.enabled, "relays.enabled", error)) return false;
+    }
 
     if (JsonObjectConst ntp = doc["ntp"]; !ntp.isNull()) {
         if (!patchBool(ntp["enabled"], merged.ntp.enabled, "ntp.enabled", error)) return false;

@@ -8,6 +8,8 @@
 #include "home_assistant_discovery.h"
 #include "mqtt_payloads.h"
 
+#include <cstring>
+
 #if defined(ESP32)
 
 #include <espMqttClient.h>
@@ -69,6 +71,56 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
         lastDisconnectReason_ = static_cast<uint8_t>(reason);
     });
 
+    relayCount_ = bridge.relayCount;
+    if (relayCount_ > 0) {
+        // The one message handler this firmware has. Topic and payload are attacker-
+        // influenced data from anyone who can publish on the broker; parse defensively and
+        // let the RelayController's gates decide. Runs on the MQTT task -- the handler
+        // installed by main serialises against REST with a mutex.
+        g_client.onMessage([this](const espMqttClientTypes::MessageProperties&,
+                                  const char* topic, const uint8_t* payload, size_t len,
+                                  size_t index, size_t total) {
+            if (relayCommand_ == nullptr || topic == nullptr || index != 0 || len != total) {
+                return;  // no handler, or a fragmented message (never valid for ON/OFF)
+            }
+            const std::string t(topic);
+            const std::string prefix = topics_.prefix() + "/relay/";
+            if (t.rfind(prefix, 0) != 0 || t.size() <= prefix.size()) {
+                return;
+            }
+            const size_t slash = t.find('/', prefix.size());
+            if (slash == std::string::npos || t.substr(slash) != "/set") {
+                return;
+            }
+            const std::string num = t.substr(prefix.size(), slash - prefix.size());
+            if (num.empty() || num.size() > 2 ||
+                num.find_first_not_of("0123456789") != std::string::npos) {
+                return;
+            }
+            const int idx = std::stoi(num);
+            if (idx < 0 || idx >= relayCount_) {
+                return;
+            }
+            char body[8] = {};
+            memcpy(body, payload, len < sizeof(body) - 1 ? len : sizeof(body) - 1);
+            bool on;
+            if (strcmp(body, "ON") == 0 || strcmp(body, "1") == 0) {
+                on = true;
+            } else if (strcmp(body, "OFF") == 0 || strcmp(body, "0") == 0) {
+                on = false;
+            } else {
+                return;  // unknown payload: ignore rather than guess
+            }
+            // Outcome is not published from here (wrong task); the flag makes loop() ack
+            // the real state on its next tick REGARDLESS of whether the state changed --
+            // a refused or no-op command otherwise changes no mask bit, nothing would be
+            // published, and the HA switch would hang in "switching" instead of snapping
+            // back.
+            relayCommand_(static_cast<uint8_t>(idx), on);
+            relayAckRequested_ = true;
+        });
+    }
+
     started_          = true;
     nextReconnectMs_  = 0;
     reconnectDelayMs_ = 1000;
@@ -89,6 +141,11 @@ void MqttOutput::publishDiscovery(const DeviceState& state, const BridgeInfo& br
     for (const auto& e : buildBridgeDiagnosticEntities(bridge, topics_, config_.discoveryPrefix)) {
         g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
     }
+    // Relay switches -- or, when the feature is disabled on a relay board, empty retained
+    // payloads that remove previously announced switches from Home Assistant.
+    for (const auto& e : buildRelayEntities(bridge, topics_, config_.discoveryPrefix)) {
+        g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
+    }
     discoveryPublished_ = true;
 }
 
@@ -104,8 +161,12 @@ void MqttOutput::onConnected(const DeviceState& state, const BridgeInfo& bridge)
     }
     publishDiscovery(state, bridge);
 
-    // No subscriptions. Every driver in this build is read-only, so there is no command
-    // topic to listen on -- which follows from the capabilities, not from a decision here.
+    // The relay command topic is the only subscription; inverter drivers stay read-only
+    // and get no command topic -- that follows from the capabilities, not a decision here.
+    if (relayCount_ > 0) {
+        g_client.subscribe(topics_.relaySetWildcard().c_str(), 1);
+        relayStateForced_ = true;  // fresh session: ack the current states once
+    }
 }
 
 void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
@@ -166,6 +227,26 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
         }
         // If the payload did not fit it is dropped rather than truncated, and the throttle
         // is left untouched so the next attempt retries.
+    }
+
+    if (bridge.relayCount > 0) {
+        // Enabling/disabling the feature adds or removes the switch entities themselves,
+        // so it forces a discovery re-announce; a mask change just acks the states.
+        if (bridge.relaysEnabled != lastRelaysEnabled_) {
+            lastRelaysEnabled_  = bridge.relaysEnabled;
+            discoveryPublished_ = false;
+            relayStateForced_   = true;
+        }
+        if (relayStateForced_ || relayAckRequested_.exchange(false) ||
+            bridge.relayMask != lastRelayMask_) {
+            for (uint8_t i = 0; i < bridge.relayCount; ++i) {
+                const bool on = (bridge.relayMask >> i) & 1;
+                g_client.publish(topics_.relayState(i).c_str(), 1, true,
+                                 on ? "ON" : "OFF");
+            }
+            lastRelayMask_    = bridge.relayMask;
+            relayStateForced_ = false;
+        }
     }
 
     if (nowMs - lastDiagnosticsMs_ >= config_.diagnosticsIntervalMs) {
