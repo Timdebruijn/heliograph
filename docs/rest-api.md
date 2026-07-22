@@ -1,37 +1,38 @@
-# REST API-ontwerp
+# REST API design
 
 Server: **ESP32Async/ESPAsyncWebServer 3.11.2** (LGPL-3.0) + AsyncTCP 3.4.10.
-JSON: ArduinoJson 7.4.3. Alle handlers zijn non-blocking en lezen uitsluitend een
-`shared_ptr<const DeviceState>`-snapshot — een trage of falende REST-client kan de RS485-poll
-niet raken.
+JSON: ArduinoJson 7.4.3. All handlers are non-blocking and only read a
+`shared_ptr<const DeviceState>` snapshot — a slow or failing REST client cannot affect
+the RS485 poll.
 
-Versionering in het pad: `/api/v1/`. Breaking changes → `/api/v2/`.
+Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 
 ## Endpoints
 
-| Methode | Pad | Auth | Omschrijving |
+| Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/api/v1/status` | — | Samenvatting bridge + device |
-| GET | `/api/v1/devices` | — | Lijst device-ID's |
-| GET | `/api/v1/devices/<id>` | — | Eén device |
-| GET | `/api/v1/devices/<id>/measurements` | — | Alle metingen |
+| GET | `/api/v1/status` | — | Summary of bridge + device |
+| GET | `/api/v1/devices` | — | List device IDs |
+| GET | `/api/v1/devices/<id>` | — | Single device |
+| GET | `/api/v1/devices/<id>/measurements` | — | All measurements |
 | GET | `/api/v1/devices/<id>/capabilities` | — | Capabilities |
-| GET | `/api/v1/diagnostics` | — | Diagnostiek |
-| GET | `/api/v1/drivers` | — | Geregistreerde drivers + descriptors |
-| GET | `/api/v1/config` | — | Config **zonder secrets** |
-| PATCH | `/api/v1/config` | **✔** | Config wijzigen |
-| POST | `/api/v1/actions/discover` | **✔** | Discovery starten |
-| POST | `/api/v1/actions/poll` | **✔** | Directe poll forceren |
-| POST | `/api/v1/actions/reboot` | **✔** | Herstart |
-| POST | `/api/v1/ota` | **✔** | Firmware-upload |
+| GET | `/api/v1/diagnostics` | — | Diagnostics |
+| GET | `/api/v1/drivers` | — | Registered drivers + descriptors |
+| GET | `/api/v1/config` | — | Config **without secrets** |
+| PATCH | `/api/v1/config` | **✔** | Change config |
+| POST | `/api/v1/actions/discover` | **✔** | Start discovery |
+| POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
+| POST | `/api/v1/actions/reboot` | **✔** | Reboot |
+| POST | `/api/v1/ota` | **✔** | Firmware upload |
 | GET | `/api/v1/events` | — | Server-Sent Events (live updates) |
 | GET | `/metrics` | — | Prometheus |
 
-`/api/v1/drivers` staat niet in de opdracht maar is nodig voor de discoverywizard: die moet de
-beschikbare drivers en hun supportniveau kunnen tonen zonder ze hard te coderen in de frontend.
+`/api/v1/drivers` is not in the assignment but is needed for the discovery wizard: it
+must be able to show the available drivers and their support level without hardcoding
+them in the frontend.
 
-Er zijn **geen control-endpoints** (`/actions/set-power-limit` e.d.). Die verschijnen pas
-wanneer een driver write-capabilities heeft.
+There are **no control endpoints** (`/actions/set-power-limit` etc.). Those only appear
+once a driver has write capabilities.
 
 ## `GET /api/v1/status`
 
@@ -63,9 +64,9 @@ wanneer een driver write-capabilities heeft.
 }
 ```
 
-## Foutformaat
+## Error format
 
-Uniform, voor elke fout:
+Uniform, for every error:
 
 ```json
 {
@@ -77,22 +78,22 @@ Uniform, voor elke fout:
 }
 ```
 
-| HTTP | Wanneer |
+| HTTP | When |
 |---|---|
-| 400 | Ongeldige JSON, onbekend configveld, waarde buiten bereik |
-| 401 | Auth ontbreekt/onjuist op beveiligd endpoint |
-| 404 | Onbekend device of pad |
-| 409 | Discovery al bezig; RS485-bus bezet |
+| 400 | Invalid JSON, unknown config field, value out of range |
+| 401 | Auth missing/incorrect on a secured endpoint |
+| 404 | Unknown device or path |
+| 409 | Discovery already in progress; RS485 bus busy |
 | 413 | Body > 4 KB |
-| 429 | Rate limit (1 req/s op `/actions/*`) |
-| 503 | Nog geen geldige data (koude start) |
+| 429 | Rate limit (1 req/s on `/actions/*`) |
+| 503 | No valid data yet (cold start) |
 
-Nooit een HTTP 200 met een foutmelding in de body.
+Never an HTTP 200 with an error message in the body.
 
 ## Secrets
 
-`GET /api/v1/config` retourneert **nooit** wachtwoorden. Niet gemaskeerd-maar-aanwezig, maar
-weggelaten, met een booleaanse indicatie:
+`GET /api/v1/config` **never** returns passwords. Not masked-but-present, but
+omitted, with a boolean indicator:
 
 ```json
 {
@@ -106,32 +107,32 @@ weggelaten, met een booleaanse indicatie:
 }
 ```
 
-`PATCH` accepteert `"password": "..."` om te zetten en `"password": null` om te wissen. Een
-weggelaten veld blijft ongewijzigd.
+`PATCH` accepts `"password": "..."` to set it and `"password": null` to clear it. An
+omitted field stays unchanged.
 
-Wachtwoorden komen niet in logs, niet in SSE, niet in MQTT, niet in Prometheus.
+Passwords never appear in logs, in SSE, in MQTT, or in Prometheus.
 
 ## Auth
 
-HTTP Basic over onversleuteld HTTP — het apparaat draait op een vertrouwd LAN en TLS op een
-ESP32 met async webserver is de complexiteit hier niet waard. Dit staat expliciet in
-`docs/security.md` als beperking.
+HTTP Basic over unencrypted HTTP — the device runs on a trusted LAN, and TLS on an
+ESP32 with an async web server isn't worth the complexity here. This is stated explicitly in
+`docs/security.md` as a limitation.
 
-Standaard gebruikersnaam `admin`; wachtwoord wordt bij provisioning **verplicht** ingesteld —
-geen hardcoded default. Zonder wachtwoord weigeren alle muterende endpoints met 401.
+Default username `admin`; the password **must** be set during provisioning —
+no hardcoded default. Without a password, all mutating endpoints refuse with 401.
 
 ## SSE
 
-`GET /api/v1/events` stuurt bij elke state-wijziging (max 1×/s):
+`GET /api/v1/events` sends on every state change (max 1×/s):
 
 ```
 event: state
 data: {"ac.power.total":1842.0,"inverter_online":true,"data_stale":false}
 ```
 
-Maximaal 4 gelijktijdige SSE-clients; daarboven 503. Begrensd om de heap te beschermen.
-Valt SSE weg, dan pollt de webinterface `/api/v1/status` elke 5 s — SSE is een optimalisatie,
-geen afhankelijkheid.
+Maximum 4 concurrent SSE clients; beyond that, 503. Bounded to protect the heap.
+If SSE goes away, the web interface polls `/api/v1/status` every 5 s — SSE is an
+optimization, not a dependency.
 
 ## Prometheus
 
@@ -151,9 +152,9 @@ heliograph_uptime_seconds 86400
 heliograph_build_info{version="0.1.0",driver="eversolar_legacy"} 1
 ```
 
-Regels: lowercase, snake_case, basiseenheid in de naam, counters op `_total`. Het serienummer
-is **geen** label (high cardinality); het staat in `build_info` alleen als het echt nodig is —
-voorstel is het weg te laten. Ongeldige metingen worden **weggelaten**, niet als 0
-gepubliceerd; Prometheus gaat correct om met een ontbrekende sample.
+Rules: lowercase, snake_case, base unit in the name, counters end in `_total`. The serial
+number is **not** a label (high cardinality); it appears in `build_info` only if truly
+needed — the recommendation is to leave it out. Invalid measurements are **omitted**,
+not published as 0; Prometheus correctly handles a missing sample.
 
-Compile-time uit te schakelen met `-DENABLE_PROMETHEUS=0`.
+Can be disabled at compile time with `-DENABLE_PROMETHEUS=0`.

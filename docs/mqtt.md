@@ -1,48 +1,48 @@
-# MQTT-ontwerp
+# MQTT design
 
 Client: **espMqttClient 1.7.3** (MIT, non-blocking, QoS 0/1/2, LWT, auto-reconnect).
-MQTT is optioneel uitschakelbaar. Valt MQTT weg, dan blijven polling, Modbus TCP, REST en de
-webinterface volledig werken — dat is een acceptatiecriterium en wordt in Fase 9 getest door de
-broker hard af te sluiten.
+MQTT can optionally be disabled. If MQTT goes away, polling, Modbus TCP, REST, and the
+web interface keep working fully — that is an acceptance criterion and is tested in Phase 9 by
+hard-shutting-down the broker.
 
-`<bridge_id>` = `heliograph-<laatste 3 bytes MAC in hex>`, bijv. `heliograph-a1b2c3`.
-Configureerbaar; standaard afgeleid van de MAC zodat twee bridges nooit botsen.
+`<bridge_id>` = `heliograph-<last 3 bytes of MAC in hex>`, e.g. `heliograph-a1b2c3`.
+Configurable; defaults to being derived from the MAC so that two bridges never collide.
 
 ## Topics
 
-| Topic | Retained | QoS | Inhoud |
+| Topic | Retained | QoS | Content |
 |---|---|---|---|
 | `heliograph/<bridge_id>/availability` | ✔ | 1 | `online` / `offline` |
-| `heliograph/<bridge_id>/state` | ✔ | 0 | Metingen + status (JSON) |
-| `heliograph/<bridge_id>/diagnostics` | ✔ | 0 | Bridge-diagnostiek (JSON) |
-| `heliograph/<bridge_id>/identity` | ✔ | 1 | Device-identiteit (JSON) |
+| `heliograph/<bridge_id>/state` | ✔ | 0 | Measurements + status (JSON) |
+| `heliograph/<bridge_id>/diagnostics` | ✔ | 0 | Bridge diagnostics (JSON) |
+| `heliograph/<bridge_id>/identity` | ✔ | 1 | Device identity (JSON) |
 | `heliograph/<bridge_id>/capabilities` | ✔ | 1 | Capabilities (JSON) |
 
-**Last Will and Testament:** topic `availability`, payload `offline`, retained, QoS 1. Bij een
-nette afsluiting publiceert de bridge zelf `offline`.
+**Last Will and Testament:** topic `availability`, payload `offline`, retained, QoS 1. On a
+clean shutdown, the bridge publishes `offline` itself.
 
-Belangrijk onderscheid: `availability` gaat over de **bridge**, niet over de omvormer. Een
-omvormer die 's nachts uit staat maakt de bridge niet offline — dat zou in Home Assistant alle
-entities `unavailable` maken en de historie verpesten. De omvormerstatus zit in `state` als
-`inverter_online`.
+Important distinction: `availability` is about the **bridge**, not the inverter. An
+inverter that's off at night doesn't make the bridge offline — that would make all
+entities `unavailable` in Home Assistant and ruin the history. The inverter status lives in
+`state` as `inverter_online`.
 
-Er zijn **geen command-topics.** De actieve driver heeft geen write-capabilities, dus abonneert
-de bridge zich nergens op. Dat is geen configuratie maar een gevolg van
+There are **no command topics.** The active driver has no write capabilities, so the
+bridge doesn't subscribe to anything. That is not a configuration choice but a consequence of
 `capabilities.write.none()`.
 
-## Publicatiestrategie
+## Publishing strategy
 
-- **Publish-on-change** met deadband, om broker-spam te voorkomen: vermogen ≥ 5 W verschil,
-  spanning ≥ 0,5 V, energie bij elke wijziging, status bij elke wijziging.
-- **Periodieke forced refresh** elke 60 s (configureerbaar), ook zonder wijziging.
-- `identity` en `capabilities` alleen bij verandering of na (her)verbinding.
-- JSON-document begrensd: `JsonDocument` met expliciete capaciteitscontrole; overschrijding
-  logt een fout en publiceert niet — nooit een afgekapt JSON-bericht.
+- **Publish-on-change** with deadband, to avoid broker spam: power ≥ 5 W difference,
+  voltage ≥ 0.5 V, energy on every change, status on every change.
+- **Periodic forced refresh** every 60 s (configurable), even without a change.
+- `identity` and `capabilities` only on change or after (re)connection.
+- JSON document is bounded: `JsonDocument` with explicit capacity checking; exceeding it
+  logs an error and does not publish — never a truncated JSON message.
 
-## `state` — voorbeeld
+## `state` — example
 
-Alleen `supported` metingen verschijnen. De TL3000-20 heeft geen L2/L3 en geen batterij, dus
-die velden bestaan simpelweg niet in de payload:
+Only `supported` measurements appear. The TL3000-20 has no L2/L3 and no battery, so
+those fields simply do not exist in the payload:
 
 ```json
 {
@@ -74,16 +74,16 @@ die velden bestaan simpelweg niet in de payload:
 }
 ```
 
-Twee bewuste keuzes t.o.v. het voorbeeld in de opdracht:
+Two deliberate choices relative to the example in the assignment:
 
-1. **`status_text` is `"Unknown (1)"`, niet `"Normal"`.** De betekenis van `OP_MODE` is
-   nergens gedocumenteerd — niet in de referentie-implementatie, niet elders. Er wordt geen
-   tabel verzonnen. Zodra Fase 3 de codes over een etmaal heeft gelogd, komt er een echte
-   mapping.
-2. **`error_code` is `null`, niet `0`.** Het protocol kent geen uitleesbaar foutcodeveld. `0`
-   zou "geen fout" betekenen en dat weten we niet.
+1. **`status_text` is `"Unknown (1)"`, not `"Normal"`.** The meaning of `OP_MODE` is
+   documented nowhere — not in the reference implementation, not anywhere else. No
+   table is being invented. Once Phase 3 has logged the codes over a full day, a real
+   mapping will follow.
+2. **`error_code` is `null`, not `0`.** The protocol has no readable error code field. `0`
+   would mean "no error" and we don't know that.
 
-Bij een nachtelijke uitval:
+On a nighttime outage:
 
 ```json
 {
@@ -95,17 +95,17 @@ Bij een nachtelijke uitval:
 }
 ```
 
-`value: null` — geen nul. Een nul zou in Home Assistant als "0 W geproduceerd" in de statistiek
-belanden en de dagcurve vervalsen.
+`value: null` — not zero. A zero would end up in Home Assistant statistics as "0 W
+produced" and distort the daily curve.
 
 ## Home Assistant MQTT Discovery
 
-Prefix `homeassistant/` (configureerbaar). Entities worden **uitsluitend** gegenereerd uit
-`state.measurements` + `capabilities` — de discovery-module bevat geen enkele merkspecifieke
-regel en heeft geen tabel met EverSolar-velden. Een mapping `MeasurementType`/`Unit` →
-`device_class`/`state_class` volstaat.
+Prefix `homeassistant/` (configurable). Entities are generated **exclusively** from
+`state.measurements` + `capabilities` — the discovery module contains no brand-specific
+rule at all and has no table of EverSolar fields. A mapping from `MeasurementType`/`Unit` to
+`device_class`/`state_class` is sufficient.
 
-| Meting | device_class | state_class | Eenheid |
+| Measurement | device_class | state_class | Unit |
 |---|---|---|---|
 | `ac.power.total`, `dc.power.total` | `power` | `measurement` | W |
 | `*.voltage` | `voltage` | `measurement` | V |
@@ -116,7 +116,7 @@ regel en heeft geen tabel met EverSolar-velden. Een mapping `MeasurementType`/`U
 | `inverter.operating_hours` | `duration` | `total_increasing` | h |
 | `wifi_rssi` | `signal_strength` | `measurement` | dBm |
 
-Discovery-payload per meting:
+Discovery payload per measurement:
 
 ```json
 {
@@ -140,42 +140,42 @@ Discovery-payload per meting:
 }
 ```
 
-`value_template` levert `None` bij `value: null` → Home Assistant markeert de entity
-`unknown` in plaats van 0. Dat is precies gewenst 's nachts.
+`value_template` yields `None` for `value: null` → Home Assistant marks the entity
+`unknown` instead of 0. That is exactly what's wanted at night.
 
-### Twee devices
+### Two devices
 
 - **Bridge** (`heliograph-a1b2c3`): manufacturer "Heliograph open-source project", model
-  "Waveshare ESP32-S3-Relay-1CH", firmwareversie. Draagt de diagnostische entities (RSSI,
-  uptime, heap, pollteller).
-- **Inverter** (`heliograph-a1b2c3_inverter`): manufacturer/model/serienummer uit
-  `DeviceIdentity`, met `via_device` naar de bridge. Draagt de metingen.
+  "Waveshare ESP32-S3-Relay-1CH", firmware version. Carries the diagnostic entities (RSSI,
+  uptime, heap, poll counter).
+- **Inverter** (`heliograph-a1b2c3_inverter`): manufacturer/model/serial number from
+  `DeviceIdentity`, with `via_device` pointing to the bridge. Carries the measurements.
 
-Zo blijft de HA-devicepagina kloppen als er later een tweede omvormer bijkomt.
+This keeps the HA device page correct if a second inverter is added later.
 
-### Geen bedieningsentities
+### No control entities
 
-`capabilities.write` is leeg → er worden geen `number`-, `switch`- of `select`-entities
-aangemaakt. Dit is een lus over de write-bitset, geen driver-check.
+`capabilities.write` is empty → no `number`, `switch`, or `select` entities are
+created. This is a loop over the write bitset, not a driver check.
 
-## Het `supported`-veld: twee manieren om "niet beschikbaar" te zeggen
+## The `supported` field: two ways to say "not available"
 
-| Manier | Betekenis | Gedrag |
+| Way | Meaning | Behavior |
 |---|---|---|
-| Kanaal helemaal niet declareren | Het apparaat heeft dit niet (een string-omvormer heeft geen batterij) | Niets gepubliceerd |
-| `declareUnsupported()` | Het apparaat heeft het wél, maar dit protocol/deze firmware levert het niet | Niets gepubliceerd |
+| Not declaring the channel at all | The device doesn't have this (a string inverter has no battery) | Nothing published |
+| `declareUnsupported()` | The device does have it, but this protocol/firmware doesn't provide it | Nothing published |
 
-Beide worden door élke output identiek behandeld. Het verschil is intentie: de tweede houdt een
-vast schema zichtbaar zodat een latere driverversie het kanaal kan invullen zonder dat de vorm
-van de measurement-set verandert.
+Both are treated identically by every output. The difference is intent: the second keeps a
+fixed schema visible so a later driver version can populate the channel without the shape
+of the measurement set changing.
 
-Dit is niet cosmetisch. Zonder `declareUnsupported()` zou `Measurement::supported` altijd `true`
-zijn — een vlag die MQTT, Modbus en discovery netjes controleren en die niets ooit op `false`
-kan zetten. Dat is geen veiligheid maar een val: de eerste die hem wél op false zet, ontdekt
-dat de helft van de outputs het negeerde. Nu is het gedrag afgedwongen door tests.
+This is not cosmetic. Without `declareUnsupported()`, `Measurement::supported` would always
+be `true` — a flag that MQTT, Modbus, and discovery dutifully check and that nothing could
+ever set to `false`. That's not safety but a trap: the first one to actually set it false
+discovers that half the outputs ignored it. Now the behavior is enforced by tests.
 
 ## Reconnect
 
-Exponentiële back-off 1 s → 2 s → 4 s → … → max 60 s. Na verbinding: availability `online`,
-daarna identity/capabilities/discovery, dan state. De pollcyclus draait ondertussen gewoon
-door — `mqttTask` en `rs485Task` delen niets behalve de `StateStore`.
+Exponential back-off 1 s → 2 s → 4 s → … → max 60 s. After connecting: availability `online`,
+then identity/capabilities/discovery, then state. The poll cycle keeps running in the
+meantime — `mqttTask` and `rs485Task` share nothing but the `StateStore`.

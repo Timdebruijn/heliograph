@@ -1,186 +1,186 @@
-# Modbus TCP-registermap (ontwerp)
+# Modbus TCP register map (design)
 
-Dit is een **virtuele** Modbus TCP-server met een eigen registermap. De EverSolar TL3000-20
-spreekt zelf geen Modbus; de bridge decodeert het fabrikant-specifieke protocol en publiceert
-het resultaat hier. Er is dus geen enkele relatie met registers "in de omvormer" — deze map is
-volledig van dit project.
+This is a **virtual** Modbus TCP server with its own register map. The EverSolar TL3000-20
+does not speak Modbus itself; the bridge decodes the manufacturer-specific protocol and publishes
+the result here. So there is no relation whatsoever to registers "in the inverter" — this map is
+entirely specific to this project.
 
-Schemaversie: **1** (register 0-1). Ophogen bij elke breaking change.
+Schema version: **1** (register 0-1). Increment on every breaking change.
 
-## Conventies
+## Conventions
 
-| Onderwerp | Keuze |
+| Topic | Choice |
 |---|---|
-| Adressering in broncode | 0-based |
-| Documentatie | 0-based raw + 3xxxx/4xxxx-notatie |
+| Addressing in source code | 0-based |
+| Documentation | 0-based raw + 3xxxx/4xxxx notation |
 | Float | IEEE-754 `float32`, 2 registers |
 | Word order | **high word first** (big-endian, ABCD) |
-| Byte order | big-endian (Modbus-standaard) |
-| Metingen | **input registers** (FC4) |
-| Poort | 502 (configureerbaar) |
-| Unit-ID inverter | 1 (configureerbaar) |
-| Unit-ID diagnostics | 250 (configureerbaar) |
+| Byte order | big-endian (Modbus standard) |
+| Measurements | **input registers** (FC4) |
+| Port | 502 (configurable) |
+| Unit ID inverter | 1 (configurable) |
+| Unit ID diagnostics | 250 (configurable) |
 
-FC3 (Read Holding Registers) spiegelt dezelfde inhoud als FC4, zodat clients die alleen FC3
-kunnen (veel PLC's, sommige EVCC-configuraties) ook werken. FC6/FC16 zijn uitgeschakeld en
-retourneren exception **0x01 (Illegal Function)**, conform de read-only MVP.
+FC3 (Read Holding Registers) mirrors the same content as FC4, so clients that can only do FC3
+(many PLCs, some EVCC configurations) also work. FC6/FC16 are disabled and
+return exception **0x01 (Illegal Function)**, in line with the read-only MVP.
 
-## Ongeldige waarden — geen nul
+## Invalid values — never zero
 
-De opdracht verbiedt geloofwaardige nulwaarden voor onbekende velden. Daarom:
+The project brief prohibits plausible-looking zero values for unknown fields. Therefore:
 
-| Type | Waarde bij niet-ondersteund / ongeldig / stale |
+| Type | Value for unsupported / invalid / stale |
 |---|---|
 | `float32` | **NaN** (`0x7FC00000`) |
-| `uint16` / `uint32` / `int32` | **all-ones** (`0xFFFF`, `0xFFFFFFFF`) als sentinel |
+| `uint16` / `uint32` / `int32` | **all-ones** (`0xFFFF`, `0xFFFFFFFF`) as sentinel |
 
-Daarnaast is er een **validity bitmap** (600-699). Een client die NaN niet kan verwerken —
-en dat zijn er nogal wat, o.a. sommige Node-RED-nodes — leest eerst de bitmap en negeert dan
-de betreffende registers. Beide mechanismen zijn altijd consistent.
+In addition there is a **validity bitmap** (600-699). A client that cannot handle NaN —
+and there are quite a few, e.g. some Node-RED nodes — reads the bitmap first and then ignores
+the registers in question. Both mechanisms are always consistent.
 
-`0` betekent dus **altijd** een echt gemeten nul (bijvoorbeeld 0 W 's nachts), nooit "onbekend".
+`0` therefore **always** means a genuinely measured zero (for example 0 W at night), never "unknown".
 
-## Blokindeling
+## Block layout
 
-| Bereik | Inhoud |
+| Range | Content |
 |---|---|
-| 0-99 | Kern: schema, status, hoofdmetingen |
-| 100-199 | AC-fasen |
-| 200-299 | DC/MPPT-kanalen |
-| 300-399 | Batterij (leeg bij EverSolar) |
-| 400-499 | Grid meter (leeg bij EverSolar) |
-| 500-599 | Status en errors |
+| 0-99 | Core: schema, status, main measurements |
+| 100-199 | AC phases |
+| 200-299 | DC/MPPT channels |
+| 300-399 | Battery (empty for EverSolar) |
+| 400-499 | Grid meter (empty for EverSolar) |
+| 500-599 | Status and errors |
 | 600-699 | Capabilities + validity bitmap |
 | 700-799 | Identity strings |
 | 800-899 | Bridge diagnostics |
 
-## Kernblok (0-99)
+## Core block (0-99)
 
-| Raw | 3xxxx | Regs | Type | Betekenis | EverSolar |
+| Raw | 3xxxx | Regs | Type | Meaning | EverSolar |
 |---|---|---|---|---|---|
-| 0 | 30001 | 2 | uint32 | Registermap-schemaversie | 1 |
+| 0 | 30001 | 2 | uint32 | Register map schema version | 1 |
 | 2 | 30003 | 1 | uint16 | Bridge online (1/0) | ✔ |
 | 3 | 30004 | 1 | uint16 | Inverter online (1/0) | ✔ |
-| 4 | 30005 | 1 | uint16 | Data geldig (1/0) | ✔ |
+| 4 | 30005 | 1 | uint16 | Data valid (1/0) | ✔ |
 | 5 | 30006 | 1 | uint16 | Data stale (1/0) | ✔ |
-| 6 | 30007 | 1 | uint16 | Statuscode (ruwe `OP_MODE`) | ✔ |
-| 7 | 30008 | 1 | uint16 | Foutcode | ✖ `0xFFFF` |
-| 10 | 30011 | 2 | float32 | Totaal AC-vermogen (W) | ✔ `PAC` |
-| 12 | 30013 | 2 | float32 | AC-spanning L1 (V) | ✔ `VAC` |
-| 14 | 30015 | 2 | float32 | AC-stroom L1 (A) | ✔ `IAC` |
-| 16 | 30017 | 2 | float32 | Netfrequentie (Hz) | ✔ `FREQUENCY` |
-| 20 | 30021 | 2 | float32 | Totaal DC-vermogen (W) | ✔ *berekend* |
-| 22 | 30023 | 2 | float32 | DC-spanning MPPT1 (V) | ✔ `VPV` |
-| 24 | 30025 | 2 | float32 | DC-stroom MPPT1 (A) | ✔ `IPV` |
-| 30 | 30031 | 2 | float32 | Invertertemperatuur (°C) | ✔ `TEMP` |
-| 40 | 30041 | 2 | float32 | Energie vandaag (kWh) | ✔ `E_TODAY` |
-| 42 | 30043 | 2 | float32 | Totale energie (kWh) | ✔ `E_TOTAL` uint32 |
-| 44 | 30045 | 2 | uint32 | Bedrijfsuren (h) | ✔ `HOURS_UP` |
-| 50 | 30051 | 2 | uint32 | Seconden sinds geldige poll | ✔ |
-| 52 | 30053 | 2 | uint32 | Geslaagde polls | ✔ |
-| 54 | 30055 | 2 | uint32 | Mislukte polls | ✔ |
-| 56 | 30057 | 2 | uint32 | Checksumfouten | ✔ |
-| 58 | 30059 | 2 | uint32 | RS485-timeouts | ✔ |
+| 6 | 30007 | 1 | uint16 | Status code (raw `OP_MODE`) | ✔ |
+| 7 | 30008 | 1 | uint16 | Error code | ✖ `0xFFFF` |
+| 10 | 30011 | 2 | float32 | Total AC power (W) | ✔ `PAC` |
+| 12 | 30013 | 2 | float32 | AC voltage L1 (V) | ✔ `VAC` |
+| 14 | 30015 | 2 | float32 | AC current L1 (A) | ✔ `IAC` |
+| 16 | 30017 | 2 | float32 | Grid frequency (Hz) | ✔ `FREQUENCY` |
+| 20 | 30021 | 2 | float32 | Total DC power (W) | ✔ *calculated* |
+| 22 | 30023 | 2 | float32 | DC voltage MPPT1 (V) | ✔ `VPV` |
+| 24 | 30025 | 2 | float32 | DC current MPPT1 (A) | ✔ `IPV` |
+| 30 | 30031 | 2 | float32 | Inverter temperature (°C) | ✔ `TEMP` |
+| 40 | 30041 | 2 | float32 | Energy today (kWh) | ✔ `E_TODAY` |
+| 42 | 30043 | 2 | float32 | Total energy (kWh) | ✔ `E_TOTAL` uint32 |
+| 44 | 30045 | 2 | uint32 | Operating hours (h) | ✔ `HOURS_UP` |
+| 50 | 30051 | 2 | uint32 | Seconds since last valid poll | ✔ |
+| 52 | 30053 | 2 | uint32 | Successful polls | ✔ |
+| 54 | 30055 | 2 | uint32 | Failed polls | ✔ |
+| 56 | 30057 | 2 | uint32 | Checksum errors | ✔ |
+| 58 | 30059 | 2 | uint32 | RS485 timeouts | ✔ |
 | 60 | 30061 | 2 | int32 | Wifi RSSI (dBm) | ✔ |
-| 62 | 30063 | 2 | uint32 | Bridge-uptime (s) | ✔ |
+| 62 | 30063 | 2 | uint32 | Bridge uptime (s) | ✔ |
 
-Afwijking van het voorstel in de opdracht: **geen**. De map is overgenomen zoals voorgesteld.
+Deviation from the proposal in the project brief: **none**. The map was adopted as proposed.
 
-Twee opmerkingen:
+Two remarks:
 
-- **Register 20 (DC-vermogen totaal)** wordt niet door de omvormer geleverd. Het is
-  `VPV × IPV` (+ `VPV2 × IPV2` bij 2 strings). Dat is een afgeleide, geen meting. In het
-  interne model draagt het een `derived`-vlag; **Modbus kan dat onderscheid niet uitdrukken**
-  en publiceert het als een gewone geldige waarde. Wie de afgeleide status nodig heeft, moet
-  REST of MQTT gebruiken. Dit register is dus bewust iets minder eerlijk dan de rest van de
-  map — het alternatief (weglaten) kost meer dan het oplevert, want vrijwel elke consument
-  verwacht DC-vermogen.
-- **Register 7 (foutcode)** blijft `0xFFFF`. Het EverSolar-protocol kent geen uitleesbaar
-  foutcodeveld (zie `docs/eversolar-protocol.md`). Een nul zou hier "geen fout" suggereren.
+- **Register 20 (total DC power)** is not provided by the inverter. It is
+  `VPV × IPV` (+ `VPV2 × IPV2` with 2 strings). That is a derived value, not a measurement. In the
+  internal model it carries a `derived` flag; **Modbus cannot express that distinction**
+  and publishes it as a plain valid value. Anyone who needs the derived status must
+  use REST or MQTT. This register is therefore deliberately slightly less honest than the rest of
+  the map — the alternative (omitting it) costs more than it delivers, since virtually every
+  consumer expects DC power.
+- **Register 7 (error code)** stays `0xFFFF`. The EverSolar protocol has no readable
+  error code field (see `docs/eversolar-protocol.md`). A zero here would suggest "no error".
 
-## AC-fasen (100-199)
+## AC phases (100-199)
 
-Per fase 20 registers, vanaf 100. De TL3000-20 is 1-fasig; alleen L1 is gevuld.
+20 registers per phase, starting at 100. The TL3000-20 is single-phase; only L1 is populated.
 
-| Offset in blok | Regs | Type | Betekenis |
+| Offset in block | Regs | Type | Meaning |
 |---|---|---|---|
-| +0 | 2 | float32 | Spanning (V) |
-| +2 | 2 | float32 | Stroom (A) |
-| +4 | 2 | float32 | Vermogen (W) |
+| +0 | 2 | float32 | Voltage (V) |
+| +2 | 2 | float32 | Current (A) |
+| +4 | 2 | float32 | Power (W) |
 
-| Fase | Basis | EverSolar |
+| Phase | Base | EverSolar |
 |---|---|---|
-| L1 | 100 | spanning+stroom ✔, vermogen NaN |
-| L2 | 120 | alles NaN |
-| L3 | 140 | alles NaN |
+| L1 | 100 | voltage+current ✔, power NaN |
+| L2 | 120 | everything NaN |
+| L3 | 140 | everything NaN |
 
 ## DC/MPPT (200-299)
 
-Per MPPT 20 registers, vanaf 200.
+20 registers per MPPT, starting at 200.
 
-| Offset | Regs | Type | Betekenis |
+| Offset | Regs | Type | Meaning |
 |---|---|---|---|
-| +0 | 2 | float32 | Spanning (V) |
-| +2 | 2 | float32 | Stroom (A) |
-| +4 | 2 | float32 | Vermogen (W, afgeleid) |
+| +0 | 2 | float32 | Voltage (V) |
+| +2 | 2 | float32 | Current (A) |
+| +4 | 2 | float32 | Power (W, derived) |
 
-| MPPT | Basis | EverSolar |
+| MPPT | Base | EverSolar |
 |---|---|---|
 | 1 | 200 | ✔ |
-| 2 | 220 | ✔ *alleen bij 2-string-layout*, anders NaN |
+| 2 | 220 | ✔ *only with 2-string layout*, otherwise NaN |
 
-## Batterij (300-399) en grid meter (400-499)
+## Battery (300-399) and grid meter (400-499)
 
-Volledig gereserveerd. Bij EverSolar alles NaN / bitmap-bit 0. Ingevuld zodra een driver met
-batterij- of meterondersteuning wordt toegevoegd — zonder wijziging aan de map.
+Fully reserved. For EverSolar everything is NaN / bitmap bit 0. Populated once a driver with
+battery or meter support is added — without changing the map.
 
-## Status en errors (500-599)
+## Status and errors (500-599)
 
-| Raw | Regs | Type | Betekenis |
+| Raw | Regs | Type | Meaning |
 |---|---|---|---|
-| 500 | 1 | uint16 | Statuscode (ruw, = reg 6) |
-| 501 | 1 | uint16 | Foutcode (= reg 7) |
-| 502 | 1 | uint16 | Opeenvolgende mislukte polls |
-| 510 | 16 | string | `status_text`, ASCII, null-gepadded (32 tekens) |
+| 500 | 1 | uint16 | Status code (raw, = reg 6) |
+| 501 | 1 | uint16 | Error code (= reg 7) |
+| 502 | 1 | uint16 | Consecutive failed polls |
+| 510 | 16 | string | `status_text`, ASCII, null-padded (32 characters) |
 
 ## Capabilities + validity bitmap (600-699)
 
-| Raw | Regs | Type | Betekenis |
+| Raw | Regs | Type | Meaning |
 |---|---|---|---|
-| 600 | 4 | bitmap64 | `InverterCapability` read-bits |
-| 604 | 4 | bitmap64 | `InverterCapability` write-bits (MVP: alles 0) |
-| 610 | 8 | bitmap128 | **Validity bitmap** van de kernmetingen |
-| 620 | 1 | uint16 | Aantal AC-fasen (EverSolar: 1) |
-| 621 | 1 | uint16 | Aantal MPPT's (EverSolar: 1 of 2, uit framelengte) |
-| 622 | 1 | uint16 | Batterij aanwezig (0/1) |
+| 600 | 4 | bitmap64 | `InverterCapability` read bits |
+| 604 | 4 | bitmap64 | `InverterCapability` write bits (MVP: all 0) |
+| 610 | 8 | bitmap128 | **Validity bitmap** of the core measurements |
+| 620 | 1 | uint16 | Number of AC phases (EverSolar: 1) |
+| 621 | 1 | uint16 | Number of MPPTs (EverSolar: 1 or 2, from frame length) |
+| 622 | 1 | uint16 | Battery present (0/1) |
 | 623 | 1 | uint16 | Driver read-only (MVP: 1) |
 
-De bit-indices staan in de tabel verderop en zijn vastgelegd in `ValidityBit` in
-`src/outputs/modbus_tcp/register_map.h`. Die volgorde is onderdeel van de schemaversie en mag
-binnen versie 1 niet wijzigen.
+The bit indices are listed in the table further down and are fixed in `ValidityBit` in
+`src/outputs/modbus_tcp/register_map.h`. That order is part of the schema version and must not
+change within version 1.
 
-Register 623 = 1 vertelt een client op voorhand dat schrijven zinloos is. Dat is nuttiger dan
-alleen een exception op FC6.
+Register 623 = 1 tells a client up front that writing is pointless. That is more useful than
+just an exception on FC6.
 
 ## Identity strings (700-799)
 
-ASCII, null-gepadded, 2 tekens per register, big-endian.
+ASCII, null-padded, 2 characters per register, big-endian.
 
-| Raw | Regs | Tekens | Veld |
+| Raw | Regs | Chars | Field |
 |---|---|---|---|
 | 700 | 16 | 32 | Manufacturer |
 | 716 | 16 | 32 | Model |
-| 732 | 16 | 32 | Serienummer |
-| 748 | 8 | 16 | Firmwareversie inverter |
-| 756 | 8 | 16 | Driver-ID |
-| 764 | 8 | 16 | Bridge-firmwareversie |
+| 732 | 16 | 32 | Serial number |
+| 748 | 8 | 16 | Inverter firmware version |
+| 756 | 8 | 16 | Driver ID |
+| 764 | 8 | 16 | Bridge firmware version |
 
-Onbekende strings zijn volledig `0x00` — een lege string is hier ondubbelzinnig "onbekend",
-er is geen verwarring met een geldige waarde mogelijk.
+Unknown strings are entirely `0x00` — an empty string here is unambiguously "unknown",
+there is no possible confusion with a valid value.
 
-## Bridge diagnostics (800-899, ook op Unit-ID 250)
+## Bridge diagnostics (800-899, also on Unit ID 250)
 
-| Raw | Regs | Type | Betekenis |
+| Raw | Regs | Type | Meaning |
 |---|---|---|---|
 | 800 | 2 | uint32 | Uptime (s) |
 | 802 | 2 | uint32 | Free heap (bytes) |
@@ -189,34 +189,34 @@ er is geen verwarring met een geldige waarde mogelijk.
 | 807 | 1 | uint16 | Wifi RSSI (int16) |
 | 810 | 2 | uint32 | Wifi reconnects |
 | 812 | 2 | uint32 | MQTT reconnects |
-| 814 | 2 | uint32 | Modbus-clientverbindingen |
-| 816 | 2 | uint32 | REST-requests |
-| 818 | 2 | uint32 | Ongeldige frames |
-| 820 | 3 | uint16[3] | Firmwareversie major/minor/patch |
+| 814 | 2 | uint32 | Modbus client connections |
+| 816 | 2 | uint32 | REST requests |
+| 818 | 2 | uint32 | Invalid frames |
+| 820 | 3 | uint16[3] | Firmware version major/minor/patch |
 
-## Voorbeelden
+## Examples
 
 ### mbpoll
 
 ```bash
-# AC-vermogen (float32, high word first) — raw 10, mbpoll is 1-based
+# AC power (float32, high word first) — raw 10, mbpoll is 1-based
 mbpoll -m tcp -a 1 -t 4 -r 11 -c 2 -0 heliograph.local
-# Alle kernregisters
+# All core registers
 mbpoll -m tcp -a 1 -t 4 -r 1 -c 64 -0 heliograph.local
 ```
 
-Een volledige, werkende client staat in [`tools/read_modbus.py`](../tools/read_modbus.py) —
-die controleert de schemaversie, leest de validity bitmap en behandelt NaN correct.
+A complete, working client is in [`tools/read_modbus.py`](../tools/read_modbus.py) —
+it checks the schema version, reads the validity bitmap and handles NaN correctly.
 
 ### Python (pymodbus 3.x)
 
-**Let op de API-wijzigingen.** Dit voorbeeld is geverifieerd tegen **pymodbus 3.14** (2026-07):
+**Note the API changes.** This example has been verified against **pymodbus 3.14** (2026-07):
 
-- `slave=` heet nu `device_id=`;
-- `pymodbus.payload` (`BinaryPayloadDecoder`) **bestaat niet meer** — gebruik
+- `slave=` is now called `device_id=`;
+- `pymodbus.payload` (`BinaryPayloadDecoder`) **no longer exists** — use
   `client.convert_from_registers()`.
 
-Oudere voorbeelden op internet gebruiken nog de verwijderde API.
+Older examples found online still use the removed API.
 
 ```python
 from pymodbus.client import ModbusTcpClient
@@ -229,12 +229,12 @@ rr = c.read_input_registers(address=10, count=2, device_id=1)
 watts = c.convert_from_registers(
     rr.registers, ModbusClientMixin.DATATYPE.FLOAT32, word_order="big"
 )
-# NaN betekent onbekend: niet ondersteund door deze driver, of stale. Nooit 0.
-print("onbekend" if watts != watts else f"{watts:.1f} W")
+# NaN means unknown: not supported by this driver, or stale. Never 0.
+print("unknown" if watts != watts else f"{watts:.1f} W")
 c.close()
 ```
 
-Wie versie-onafhankelijk wil zijn, decodeert zelf — twee registers, high word first:
+Anyone who wants to be version-independent can decode it themselves — two registers, high word first:
 
 ```python
 import struct
@@ -270,12 +270,12 @@ modbus:
         state_class: total_increasing
 ```
 
-MQTT-discovery is voor Home Assistant de eenvoudiger route; deze Modbus-config is bedoeld voor
-wie Modbus al gebruikt.
+MQTT discovery is the simpler route for Home Assistant; this Modbus config is intended for
+those who already use Modbus.
 
 ### EVCC (custom meter)
 
-Er bestaat **geen** EVCC-template voor deze zelfgemaakte map — die moet handmatig:
+There is **no** EVCC template for this custom-built map — it has to be done manually:
 
 ```yaml
 meters:
@@ -293,16 +293,16 @@ meters:
 
 ### Node-RED
 
-Gebruik `modbus-read`: FC `InputRegister`, address `10`, quantity `2`, unit-id `1`. Zet daarna
-een `function`-node die twee words naar float32 omzet (high word first) **en NaN afvangt** —
-`Buffer.from` + `readFloatBE`, dan `if (Number.isNaN(v)) return null;`.
+Use `modbus-read`: FC `InputRegister`, address `10`, quantity `2`, unit ID `1`. Then add
+a `function` node that converts two words to float32 (high word first) **and catches NaN** —
+`Buffer.from` + `readFloatBE`, then `if (Number.isNaN(v)) return null;`.
 
-## Validity bitmap — bit-indices (schema v1)
+## Validity bitmap — bit indices (schema v1)
 
-Vastgelegd in `ValidityBit` in `src/outputs/modbus_tcp/register_map.h`. Binnen schemaversie 1
-mogen deze **niet** wijzigen; alleen achteraan aanvullen.
+Fixed in `ValidityBit` in `src/outputs/modbus_tcp/register_map.h`. Within schema version 1
+these **must not** change; only append at the end.
 
-| Bit | Meting | Bit | Meting |
+| Bit | Measurement | Bit | Measurement |
 |---|---|---|---|
 | 0 | `ac.power.total` | 15 | `ac.phase_l2.current` |
 | 1 | `ac.phase_l1.voltage` | 16 | `ac.phase_l2.power` |
@@ -315,27 +315,27 @@ mogen deze **niet** wijzigen; alleen achteraan aanvullen.
 | 8 | `energy.today` | 23 | `dc.mppt_2.power` |
 | 9 | `energy.total` | 24 | `battery.soc` |
 | 10 | `inverter.operating_hours` | 25 | `battery.voltage` |
-| 11 | statuscode | 26 | `battery.charge_power` |
-| 12 | foutcode | 27 | `battery.discharge_power` |
+| 11 | status code | 26 | `battery.charge_power` |
+| 12 | error code | 27 | `battery.discharge_power` |
 | 13 | `ac.phase_l1.power` | 28 | `grid.import_power` |
 | 14 | `ac.phase_l2.voltage` | 29 | `grid.export_power` |
 
-Bit `n` staat in register `610 + n/16`, op bitpositie `n % 16`.
+Bit `n` is in register `610 + n/16`, at bit position `n % 16`.
 
-**Garantie:** de bitmap en de NaN-sentinel spreken elkaar nooit tegen. Een bit is 1 dan en
-slechts dan als het bijbehorende float-register geen NaN is. Dit wordt afgedwongen door
+**Guarantee:** the bitmap and the NaN sentinel never contradict each other. A bit is 1 if and
+only if the corresponding float register is not NaN. This is enforced by
 `test_validity_bitmap_and_nan_always_agree`.
 
-## Stale data telt niet als meting
+## Stale data does not count as a measurement
 
-Wanneer `data_stale = 1` publiceert de bridge de metingen als **NaN**, niet als de laatst
-bekende waarde. De laatste waarde blijft wel in het interne model en is via REST/MQTT met een
-`stale`-vlag zichtbaar — maar Modbus kent geen manier om "dit getal is oud" mee te geven, dus
-zou een consument het als actueel behandelen. Onbekend is dan het eerlijkere antwoord.
+When `data_stale = 1`, the bridge publishes the measurements as **NaN**, not as the last
+known value. The last value does remain in the internal model and is visible via REST/MQTT with a
+`stale` flag — but Modbus has no way to indicate "this number is old", so a
+consumer would treat it as current. Unknown is therefore the more honest answer here.
 
-## Openstaand
+## Open items
 
-- Of `energy.today` als `total_increasing` bruikbaar blijft rond middernacht (reset naar 0)
-  hangt af van het gedrag van de omvormer — vast te stellen in Fase 9.
-- De eModbus-serverbedrading (`modbus_tcp_server.cpp`) is **nog niet gecompileerd**; alleen de
-  registermap is getest.
+- Whether `energy.today` remains usable as `total_increasing` around midnight (reset to 0)
+  depends on the inverter's behavior — to be determined in Phase 9.
+- The eModbus server wiring (`modbus_tcp_server.cpp`) has **not been compiled yet**; only the
+  register map has been tested.

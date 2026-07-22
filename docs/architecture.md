@@ -1,6 +1,6 @@
-# Architectuur
+# Architecture
 
-## Gelaagdheid
+## Layering
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -10,48 +10,48 @@
 ┌───────────────────────────────▼──────────────────────────────┐
 │ Transport      Transport (abstract)                          │
 │                Rs485Transport   MockTransport                │
-│                UART-config, framing-hulp, timeouts, buslock  │
+│                UART-config, framing help, timeouts, bus lock │
 └───────────────────────────────┬──────────────────────────────┘
-                                │  bytes in/uit — géén protocolkennis
+                                │  bytes in/out — no protocol knowledge
 ┌───────────────────────────────▼──────────────────────────────┐
 │ Driver         InverterDriver (abstract)                     │
 │                EversolarDriver  MockDriver                   │
 │                [later] GrowattDriver, SolaxDriver, ...       │
 └───────────────────────────────┬──────────────────────────────┘
-                                │  schrijft alleen ná volledig geldige poll
+                                │  writes only after a fully valid poll
 ┌───────────────────────────────▼──────────────────────────────┐
 │ State          DeviceContext → DeviceState (immutable snap)  │
 │                StateStore (thread-safe), DeviceManager       │
 └───────────────────────────────┬──────────────────────────────┘
-                                │  snapshots lezen — read-only
+                                │  reads snapshots — read-only
 ┌───────────────────────────────▼──────────────────────────────┐
 │ Outputs        MQTT │ Modbus TCP │ REST │ Web │ Prometheus   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-De harde regel: **merkspecifieke kennis bestaat uitsluitend in `src/drivers/<driver>/`.**
-Geen enkele outputmodule kent het woord "EverSolar", op één plek na: de string in
-`DeviceIdentity::manufacturer`, die uit de driver komt en als data wordt doorgegeven.
+The hard rule: **brand-specific knowledge exists exclusively in `src/drivers/<driver>/`.**
+No output module knows the word "EverSolar", except in one place: the string in
+`DeviceIdentity::manufacturer`, which comes from the driver and is passed through as data.
 
-Dit is mechanisch afdwingbaar en wordt gecontroleerd door `tools/check_layering.sh`:
+This is mechanically enforceable and is checked by `tools/check_layering.sh`:
 
 ```
-1. Merknamen komen niet voor buiten src/drivers/  — ook niet in commentaar
-2. De host-testbare kern includeert geen Arduino/ESP-IDF headers
-3. De fixtures zijn in sync met hun generator
+1. Brand names do not appear outside src/drivers/  — not even in comments
+2. The host-testable core does not include any Arduino/ESP-IDF headers
+3. The fixtures are in sync with their generator
 ```
 
-**Deze check moet volledig gedraaid worden.** Zijn laatste regel is `RESULT: PASS` of
-`RESULT: FAIL`. Eerdere versies eindigden met de "OK" van de láátste deelcheck, waardoor
-`check_layering.sh | tail -1` succes rapporteerde terwijl een eerdere check faalde — dat is
-precies wat er tijdens Fase 7 gebeurde, en het verborg een echte overtreding een fase lang.
+**This check must be run in full.** Its last line is `RESULT: PASS` or
+`RESULT: FAIL`. Earlier versions ended with the "OK" of the final sub-check, so that
+`check_layering.sh | tail -1` reported success while an earlier check had failed — that is
+exactly what happened during Phase 7, and it hid a real violation for an entire phase.
 
-Regel 1 geldt bewust ook voor commentaar. Zodra het canonieke model zichzelf gaat uitleggen
-in termen van één driver ("de EverSolar heeft dit veld niet"), verwatert de regel tot "ach,
-het is maar een comment" en is hij niet meer te handhaven. `errorCodeSupported` documenteert
-daarom *waarom* de vlag bestaat, niet welke omvormer hem nodig had.
+Rule 1 deliberately also applies to comments. The moment the canonical model starts explaining
+itself in terms of one driver ("the EverSolar doesn't have this field"), the rule dilutes into
+"ah, it's just a comment" and becomes unenforceable. `errorCodeSupported` therefore documents
+*why* the flag exists, not which inverter needed it.
 
-## Datastroom en taakmodel
+## Data flow and task model
 
 ```
         ┌──────────────┐   uart1 (excl.)   ┌──────────────┐
@@ -59,11 +59,11 @@ daarom *waarom* de vlag bestaat, niet welke omvormer hem nodig had.
         │ core 1 pr 5  │                   └──────────────┘
         │ 8192 B       │
         └──────┬───────┘
-               │ publish(snapshot)   ← enige schrijver
+               │ publish(snapshot)   ← only writer
         ┌──────▼───────┐
         │  StateStore  │  shared_ptr<const DeviceState>, mutex
         └──────┬───────┘
-               │ snapshot()          ← alleen lezers
+               │ snapshot()          ← only readers
      ┌─────────┼─────────┬─────────────┬────────────┐
      ▼         ▼         ▼             ▼            ▼
   mqttTask  AsyncTCP  AsyncTCP     loopTask     eModbus
@@ -71,41 +71,41 @@ daarom *waarom* de vlag bestaat, niet welke omvormer hem nodig had.
   pr 3      pr 3      pr 3         pr 1         pr 3
 ```
 
-### Taken
+### Tasks
 
-| Taak | Core | Prio | Stack | Verantwoordelijk voor | WDT |
+| Task | Core | Prio | Stack | Responsible for | WDT |
 |---|---|---|---|---|---|
-| `rs485Task` | 1 | 5 | 8192 | UART1, actieve driver, pollcyclus, discovery. 8192 sinds de stack-canary-crash van 2026-07-19 (TRACE-pad door newlib vsnprintf); zie main.cpp | ✔ |
-| `mqttTask` | 0 | 3 | 4096 | espMqttClient, publiceren, HA-discovery | ✔ |
-| `loopTask` (Arduino) | 1 | 1 | 8192 | Wifi-supervisie, mDNS, diagnostics, relais-safety | ✔ |
-| `async_tcp` (library) | 0 | 3 | 8192 | REST, web, SSE — AsyncTCP-beheerd | ✖ |
-| `eModbus server` (library) | 0 | 3 | 4096 | Modbus TCP-clients | ✖ |
+| `rs485Task` | 1 | 5 | 8192 | UART1, active driver, poll cycle, discovery. 8192 since the stack-canary crash of 2026-07-19 (TRACE path through newlib vsnprintf); see main.cpp | ✔ |
+| `mqttTask` | 0 | 3 | 4096 | espMqttClient, publishing, HA discovery | ✔ |
+| `loopTask` (Arduino) | 1 | 1 | 8192 | Wifi supervision, mDNS, diagnostics, relay safety | ✔ |
+| `async_tcp` (library) | 0 | 3 | 8192 | REST, web, SSE — managed by AsyncTCP | ✖ |
+| `eModbus server` (library) | 0 | 3 | 4096 | Modbus TCP clients | ✖ |
 
-Drie eigen taken, twee library-taken. Bewust minimaal.
+Three of our own tasks, two library tasks. Deliberately minimal.
 
-Onderbouwing van de core-verdeling: wifi/lwIP draait standaard op core 0. Door `rs485Task` op
-core 1 te pinnen kan netwerkdrukte de RS485-timing niet verstoren — precies het
-acceptatiecriterium "Modbus-clientfouten onderbreken inverterpolling niet". Omgekeerd zit
-`mqttTask` bij het netwerk op core 0.
+Rationale for the core split: wifi/lwIP runs on core 0 by default. By pinning `rs485Task` to
+core 1, network load cannot disturb RS485 timing — exactly the acceptance criterion
+"Modbus client errors do not interrupt inverter polling". Conversely, `mqttTask` sits with the
+network on core 0.
 
-Watchdog: `esp_task_wdt` met 30 s timeout; `rs485Task`, `mqttTask` en `loopTask` melden zich
-aan. `rs485Task` doet een `esp_task_wdt_reset()` per cyclus, óók wanneer de poll faalt — een
-onbereikbare omvormer mag nooit een reset veroorzaken.
+Watchdog: `esp_task_wdt` with a 30 s timeout; `rs485Task`, `mqttTask` and `loopTask` register
+with it. `rs485Task` calls `esp_task_wdt_reset()` every cycle, even when the poll fails — an
+unreachable inverter must never cause a reset.
 
-### Gedeelde resources en locking
+### Shared resources and locking
 
-| Resource | Eigenaar | Bescherming |
+| Resource | Owner | Protection |
 |---|---|---|
 | UART1 | `rs485Task` | `SemaphoreHandle_t busMutex` in `Rs485Transport` |
-| `DeviceState` | `StateStore` | mutex + `shared_ptr<const>`-snapshot |
-| NVS-config | `ConfigurationStore` | mutex; schrijven alleen vanuit `loopTask` |
-| Diagnostics-tellers | `Diagnostics` | `std::atomic<uint32_t>` |
+| `DeviceState` | `StateStore` | mutex + `shared_ptr<const>` snapshot |
+| NVS config | `ConfigurationStore` | mutex; writes only from `loopTask` |
+| Diagnostics counters | `Diagnostics` | `std::atomic<uint32_t>` |
 
-Een snapshot is immutable: lezers krijgen een `shared_ptr<const DeviceState>` en houden die zo
-lang ze willen vast zonder de mutex. De schrijver bouwt een nieuwe `DeviceState` en wisselt de
-pointer om onder mutex. Geen kopieerkosten per lezer, geen tearing.
+A snapshot is immutable: readers get a `shared_ptr<const DeviceState>` and can hold onto it as
+long as they want without the mutex. The writer builds a new `DeviceState` and swaps the
+pointer under the mutex. No copy cost per reader, no tearing.
 
-**Outputmodules hebben geen enkel pad naar de UART.** Ze zien alleen `StateStore`.
+**Output modules have no path whatsoever to the UART.** They only see `StateStore`.
 
 ## Interfaces
 
@@ -130,7 +130,7 @@ public:
     virtual bool     configure(const SerialProfile& profile) = 0;
     virtual void     flushInput() = 0;
     virtual size_t   write(const uint8_t* data, size_t len) = 0;
-    // Leest tot `len` bytes of tot timeout. Frame-detectie is aan de driver.
+    // Reads up to `len` bytes or until timeout. Frame detection is up to the driver.
     virtual size_t   read(uint8_t* buf, size_t len, uint32_t timeoutMs) = 0;
     virtual bool     lock(uint32_t timeoutMs) = 0;
     virtual void     unlock() = 0;
@@ -138,15 +138,16 @@ public:
 };
 ```
 
-De transportlaag kent **geen** framing van EverSolar. Ze levert bytes en timeouts. De driver
-bepaalt wanneer een frame compleet is (voor EverSolar: header lezen → lengtebyte → rest lezen).
+The transport layer has **no** knowledge of EverSolar framing. It provides bytes and timeouts.
+The driver determines when a frame is complete (for EverSolar: read header → length byte →
+read the rest).
 
-`Rs485Transport::configure()` doet precies wat de Waveshare-demo bewijst:
+`Rs485Transport::configure()` does exactly what the Waveshare demo proves:
 
 ```cpp
 uart_.begin(profile.baudRate, toArduinoConfig(profile), board::kRs485Rx, board::kRs485Tx);
-uart_.setPins(-1, -1, -1, board::kRs485De);         // GPIO21 als RTS
-uart_.setMode(UART_MODE_RS485_HALF_DUPLEX);         // UART stuurt DE/RE zelf
+uart_.setPins(-1, -1, -1, board::kRs485De);         // GPIO21 as RTS
+uart_.setMode(UART_MODE_RS485_HALF_DUPLEX);         // UART drives DE/RE itself
 ```
 
 ### InverterDriver
@@ -165,17 +166,17 @@ public:
 };
 ```
 
-Conform de opdracht. `EversolarDriver::execute()` geeft **altijd**
-`CommandResult::Unsupported` — niet als tijdelijke MVP-beperking maar omdat control code
-`0x12` WRITE en `0x13` EXECUTE in de referentie leeg zijn: er is geen enkele bekende
-schrijfoperatie voor dit protocol.
+Per the project brief. `EversolarDriver::execute()` **always** returns
+`CommandResult::Unsupported` — not as a temporary MVP limitation but because control codes
+`0x12` WRITE and `0x13` EXECUTE are empty in the reference: there is no known write operation
+for this protocol at all.
 
 ```cpp
 enum class PollResult { Ok, Timeout, ChecksumError, InvalidFrame, NotRegistered, TransportError };
 ```
 
-`poll()` mag `state` **alleen** aanraken bij `Ok`. Bij elke andere uitkomst blijft de vorige
-state ongewijzigd — zo ontstaat nooit een half ingevulde meting.
+`poll()` may **only** touch `state` on `Ok`. On any other outcome the previous state remains
+unchanged — this way a half-filled measurement never occurs.
 
 ### DriverDescriptor
 
@@ -208,18 +209,18 @@ EverSolar:
   .manufacturer = "Ever-Solar",
   .protocol = "EverSolar PMU RS485",
   .supportedTransports = { TransportType::Rs485, TransportType::Mock },
-  .recommendedSerialProfiles = { { 9600, SerialParity::None, 8, 1, 1000, 3 } },  // enige bekende
-  .supportLevel = DriverSupportLevel::Experimental,   // → Beta na Fase 3, Stable na Fase 9
+  .recommendedSerialProfiles = { { 9600, SerialParity::None, 8, 1, 1000, 3 } },  // only one known
+  .supportLevel = DriverSupportLevel::Experimental,   // → Beta after Phase 3, Stable after Phase 9
   .probePriority = 10,
   .supportsAutoDetection = true,
-  .supportsMultipleDevices = true,    // protocol ondersteunt het; MVP staat 1 toe
+  .supportsMultipleDevices = true,    // protocol supports it; MVP allows 1
   .supportsRead = true,
-  .supportsWrite = false,             // 0x12/0x13 leeg in het protocol
+  .supportsWrite = false,             // 0x12/0x13 empty in the protocol
 }
 ```
 
-Slechts **één** serieel profiel: 9600 8N1 is in de referentie hardcoded. We proberen geen
-andere combinaties — dat zou blind brute-forcen zijn.
+Only **one** serial profile: 9600 8N1 is hardcoded in the reference. We do not try other
+combinations — that would be blind brute-forcing.
 
 ### DriverRegistry
 
@@ -234,7 +235,7 @@ public:
 };
 ```
 
-Registratie is compile-time-conditioneel:
+Registration is compile-time conditional:
 
 ```cpp
 void registerBuiltinDrivers(DriverRegistry& r) {
@@ -247,10 +248,10 @@ void registerBuiltinDrivers(DriverRegistry& r) {
 }
 ```
 
-Een nieuwe driver toevoegen = een map, een `descriptor.cpp`, een `#if`-blok, fixtures + tests.
-**Nul wijzigingen** in MQTT, REST, Modbus of web.
+Adding a new driver = a folder, a `descriptor.cpp`, an `#if` block, fixtures + tests.
+**Zero changes** in MQTT, REST, Modbus, or web.
 
-## Canoniek datamodel
+## Canonical data model
 
 ### Measurement
 
@@ -261,30 +262,30 @@ struct Measurement {
     MeasurementType type;
     Unit            unit;
     double          value;
-    bool            supported;     // driver kan dit veld überhaupt
-    bool            valid;         // laatste poll leverde een geldige waarde
-    bool            stale;         // waarde is te oud
-    bool            derived;       // berekend, niet gemeten (bv. dc.power.total)
+    bool            supported;     // whether the driver supports this field at all
+    bool            valid;         // last poll produced a valid value
+    bool            stale;         // value is too old
+    bool            derived;       // calculated, not measured (e.g. dc.power.total)
     uint64_t        timestampMs;
 };
 ```
 
-`derived` is een toevoeging op het model uit de opdracht. Reden: `dc.power.total` is bij
-EverSolar `VPV × IPV` en geen meting. Zonder die vlag zou een consument een precisie
-suggereren die er niet is.
+`derived` is an addition to the model from the project brief. Reason: with EverSolar,
+`dc.power.total` is `VPV × IPV` and not a measurement. Without that flag, a consumer would
+suggest a precision that isn't there.
 
-De drie vlaggen zijn strikt onderscheiden:
+The three flags are strictly distinct:
 
-| `supported` | `valid` | `stale` | Betekenis |
+| `supported` | `valid` | `stale` | Meaning |
 |---|---|---|---|
-| false | — | — | Driver levert dit veld nooit → **niet publiceren** |
-| true | false | — | Ondersteund, maar nog nooit/niet geldig gelezen → NaN/null |
-| true | true | true | Waarde bekend maar verouderd → publiceren mét stale-vlag |
-| true | true | false | Actuele meting |
+| false | — | — | Driver never provides this field → **do not publish** |
+| true | false | — | Supported, but never yet read validly → NaN/null |
+| true | true | true | Value known but outdated → publish with the stale flag |
+| true | true | false | Current measurement |
 
-### Meet-ID's die de EverSolar-driver vult
+### Measurement IDs filled by the EverSolar driver
 
-| ID | Bron |
+| ID | Source |
 |---|---|
 | `ac.power.total` | `PAC` |
 | `ac.phase_l1.voltage` | `VAC` |
@@ -293,15 +294,15 @@ De drie vlaggen zijn strikt onderscheiden:
 | `dc.mppt_1.voltage` | `VPV` |
 | `dc.mppt_1.current` | `IPV` |
 | `dc.mppt_1.power` | *derived* |
-| `dc.mppt_2.*` | alleen bij 32-byte payload |
+| `dc.mppt_2.*` | only with 32-byte payload |
 | `dc.power.total` | *derived* |
 | `energy.today` | `E_TODAY` ÷100 |
 | `energy.total` | uint32(`HI`,`LO`) ÷10 |
 | `inverter.temperature` | `TEMP`, **signed** |
 | `inverter.operating_hours` | `HOURS_UP` |
 
-Niet gevuld (`supported = false`): alle `ac.phase_l2/l3.*`, `battery.*`, `grid.*`,
-`ac.phase_l1.power`. Deze verschijnen **niet** in MQTT, niet in HA en zijn NaN in Modbus.
+Not filled (`supported = false`): all `ac.phase_l2/l3.*`, `battery.*`, `grid.*`,
+`ac.phase_l1.power`. These **do not** appear in MQTT, not in HA, and are NaN in Modbus.
 
 ### DeviceState
 
@@ -324,24 +325,24 @@ struct DeviceState {
 };
 ```
 
-### Stale- en offline-logica
+### Stale and offline logic
 
-Conform de opdracht:
+Per the project brief:
 
-| Gebeurtenis | Effect |
+| Event | Effect |
 |---|---|
-| 1 mislukte poll | Vorige data blijft geldig, `consecutiveFailures = 1` |
-| 3 mislukte polls | `dataStale = true`, waarden blijven zichtbaar |
-| 10 mislukte polls (± 100 s) | `inverterOnline = false`, `dataValid = false` |
-| Geldige poll | Alles herstelt, `consecutiveFailures = 0` |
+| 1 failed poll | Previous data remains valid, `consecutiveFailures = 1` |
+| 3 failed polls | `dataStale = true`, values remain visible |
+| 10 failed polls (± 100 s) | `inverterOnline = false`, `dataValid = false` |
+| Valid poll | Everything recovers, `consecutiveFailures = 0` |
 
-Back-off: 10 s → 20 s → 40 s → 60 s (max). Na `inverterOnline = false` blijft de driver elke
-60 s de registratieprocedure proberen. **Nooit** een reboot, nooit onbeperkte logging: een
-herhaalde fout wordt één keer op WARN gelogd en daarna op DEBUG geteld.
+Back-off: 10 s → 20 s → 40 s → 60 s (max). After `inverterOnline = false`, the driver keeps
+trying the registration procedure every 60 s. **Never** a reboot, never unbounded logging: a
+repeated error is logged once at WARN and then counted at DEBUG.
 
-Dit is precies het nachtscenario: de omvormer verdwijnt van de bus, de bridge blijft online,
-MQTT/REST/Modbus blijven antwoorden met `inverter_online: false`, en 's ochtends registreert de
-omvormer zich vanzelf weer.
+This is exactly the night scenario: the inverter disappears from the bus, the bridge stays
+online, MQTT/REST/Modbus keep responding with `inverter_online: false`, and in the morning the
+inverter registers itself again on its own.
 
 ### DeviceManager
 
@@ -355,12 +356,12 @@ public:
 };
 ```
 
-De MVP staat maximaal één actief fysiek device toe (`MAX_ACTIVE_DEVICES = 1`), maar geen enkele
-interface is singleton. `DeviceId` voor de MVP = `"<driverId>-<serienummer>"`, bijv.
-`eversolar_legacy-XH300060115506193600V610`. REST en MQTT gebruiken die ID al in hun paden, dus
-meerdere devices later vergt geen API-wijziging.
+The MVP allows a maximum of one active physical device (`MAX_ACTIVE_DEVICES = 1`), but no
+interface is a singleton. `DeviceId` for the MVP = `"<driverId>-<serialNumber>"`, e.g.
+`eversolar_legacy-XH300060115506193600V610`. REST and MQTT already use that ID in their paths,
+so adding more devices later requires no API change.
 
-## Capability-model
+## Capability model
 
 ```cpp
 enum class InverterCapability { ReadAcPower, /* ... */ SynchronizeTime };
@@ -377,42 +378,41 @@ struct InverterCapabilities {
     std::bitset<64> write;
     std::map<InverterCommandType, NumericCapability> numeric;
     uint8_t phaseCount;   // EverSolar: 1
-    uint8_t mpptCount;    // EverSolar: 1 of 2, uit framelengte
+    uint8_t mpptCount;    // EverSolar: 1 or 2, from frame length
     bool    hasBattery;   // EverSolar: false
 };
 ```
 
-EverSolar zet: `ReadAcPower, ReadAcVoltage, ReadAcCurrent, ReadGridFrequency, ReadDcVoltage,
+EverSolar sets: `ReadAcPower, ReadAcVoltage, ReadAcCurrent, ReadGridFrequency, ReadDcVoltage,
 ReadDcCurrent, ReadDcPower(derived), ReadEnergyToday, ReadEnergyTotal, ReadTemperature,
-ReadOperatingHours, ReadStatus`. `write` is leeg. `ReadErrors` staat **niet** aan.
+ReadOperatingHours, ReadStatus`. `write` is empty. `ReadErrors` is **not** set.
 
-Capabilities zijn de enige poort naar de outputs:
+Capabilities are the only gate to the outputs:
 
 ```
-capabilities.write.none()  →  geen HA-bedieningsentities
-                              geen schrijfbare Modbus-registers (FC6/16 → exception)
-                              geen REST control-endpoints
-                              geen MQTT command-topics
+capabilities.write.none()  →  no HA control entities
+                              no writable Modbus registers (FC6/16 → exception)
+                              no REST control endpoints
+                              no MQTT command topics
 ```
 
-Dat is geen `if (driverId == "eversolar")`-check maar volgt uit de bitset. Een toekomstige
-Growatt-driver zet write-bits en de bedieningsentities verschijnen vanzelf — zonder dat de
-outputmodules zijn aangeraakt.
+That is not an `if (driverId == "eversolar")` check but follows from the bitset. A future
+Growatt driver sets write bits and the control entities appear automatically — without the
+output modules being touched.
 
-## Commandmodel en dispatcher
+## Command model and dispatcher
 
-Volledig geïmplementeerd in de MVP, inclusief tests; alleen levert de EverSolar-driver
-`Unsupported`.
+Fully implemented in the MVP, including tests; only the EverSolar driver returns `Unsupported`.
 
 ```
 MQTT / REST / Modbus / HA
           │
           ▼
    CommandDispatcher
-     1. globale read-only-modus?        → Rejected(ReadOnlyMode)
-     2. capabilities.write[type]?       → Rejected(NotSupported)
-     3. bereik/step-validatie           → Rejected(OutOfRange)
-     4. rate limit (1/s, burst 3)       → Rejected(RateLimited)
+     1. global read-only mode?          → Rejected(ReadOnlyMode)
+     2. capabilities.write[type]?        → Rejected(NotSupported)
+     3. range/step validation            → Rejected(OutOfRange)
+     4. rate limit (1/s, burst 3)        → Rejected(RateLimited)
      5. driver->execute(command)
           │
           ▼
@@ -424,11 +424,11 @@ enum class CommandResult { Ok, Unsupported, Rejected, ReadOnlyMode,
                            OutOfRange, RateLimited, DriverError, Timeout };
 ```
 
-De dispatcher wordt in Fase 4 host-getest: elk commandotype tegen een read-only mock moet
-`ReadOnlyMode` geven, en tegen een write-capable mock met foute waarde `OutOfRange`. Zo is de
-read-only-garantie een testbaar contract in plaats van een belofte.
+The dispatcher is host-tested in Phase 4: every command type against a read-only mock must
+return `ReadOnlyMode`, and against a write-capable mock with an invalid value, `OutOfRange`.
+This makes the read-only guarantee a testable contract instead of a promise.
 
-## Discovery-model
+## Discovery model
 
 ```cpp
 struct ProbeResult {
@@ -443,68 +443,68 @@ struct ProbeResult {
 };
 ```
 
-### Veilige EverSolar-probe
+### Safe EverSolar probe
 
-De registratieprocedure is toevallig een uitstekende probe: hij is volledig read-only, en het
-enige dat hij "wijzigt" is een vluchtig busadres dat de omvormer bij spanningsverlies vergeet.
+The registration procedure happens to be an excellent probe: it is entirely read-only, and the
+only thing it "changes" is a volatile bus address that the inverter forgets on power loss.
 
-| Stap | Frame | Bewijs bij succes | Score |
+| Step | Frame | Evidence on success | Score |
 |---|---|---|---|
-| 1 | `10 04` re-register (broadcast) | — (geen response verwacht) | 0 |
-| 2 | `10 00` offline query | Respons met geldige checksum | +40 |
-| 3 | — | Payload is printbare ASCII (serienummer) | +25 |
+| 1 | `10 04` re-register (broadcast) | — (no response expected) | 0 |
+| 2 | `10 00` offline query | Response with valid checksum | +40 |
+| 3 | — | Payload is printable ASCII (serial number) | +25 |
 | 4 | `10 01` register address | ACK = exact `0x06` | +20 |
-| 5 | `11 03` query inverter ID | ASCII-identificatiestring | +10 |
-| 6 | `11 02` query normal info | Payload exact 28 of 32 bytes | +5 |
+| 5 | `11 03` query inverter ID | ASCII identification string | +10 |
+| 6 | `11 02` query normal info | Payload exactly 28 or 32 bytes | +5 |
 
-Maximaal 100. Een tweede identieke ronde is verplicht: wijken de resultaten af, dan wordt de
-score gehalveerd.
+Maximum 100. A second identical round is mandatory: if the results diverge, the score is
+halved.
 
-Automatisch selecteren mag alleen als **alle** voorwaarden gelden:
+Automatic selection is only allowed if **all** conditions hold:
 
-- precies één driver ≥ drempel (standaard **80**);
-- checksum geldig;
-- twee opeenvolgende probes gaven hetzelfde serienummer;
-- de op één na hoogste kandidaat scoort ≥ 20 punten lager.
+- exactly one driver ≥ threshold (default **80**);
+- checksum valid;
+- two consecutive probes gave the same serial number;
+- the second-highest candidate scores ≥ 20 points lower.
 
-Anders: kandidaten tonen in de webinterface, gebruiker bevestigt. In de MVP is de facto altijd
-maar één echte driver geregistreerd, dus de tweede voorwaarde is triviaal — maar de logica
-wordt met een mock-registry met twee concurrerende drivers wél getest.
+Otherwise: show candidates in the web interface, user confirms. In the MVP, de facto only ever
+one real driver is registered, so the second condition is trivial — but the logic is tested
+with a mock registry containing two competing drivers.
 
-### Verboden tijdens discovery — afgedwongen
+### Forbidden during discovery — enforced
 
-Schrijven, Modbus FC5/6/15/16, broadcast-writes, start/stop, vermogenslimieten, adreswijziging,
-tijd zetten, factory reset, firmware-update, brute-force.
+Writing, Modbus FC5/6/15/16, broadcast writes, start/stop, power limits, address changes,
+setting time, factory reset, firmware update, brute-forcing.
 
-Dit wordt niet alleen gedocumenteerd maar afgedwongen: de discovery-engine roept **uitsluitend**
-`driver->probe()` aan, nooit `execute()`. `probe()` krijgt een `ProbeContext` met een
-`readOnly`-transportwrapper die schrijfacties buiten de whitelist van de driver weigert.
+This is not only documented but enforced: the discovery engine calls **exclusively**
+`driver->probe()`, never `execute()`. `probe()` receives a `ProbeContext` with a `readOnly`
+transport wrapper that refuses write actions outside the driver's whitelist.
 
-Modi: **Quick** (alleen drivers met `supportsAutoDetection`, aanbevolen profiel, 1 ronde),
-**Extended** (alle profielen, meerdere rondes — alleen handmatig te starten), **Manual**.
+Modes: **Quick** (only drivers with `supportsAutoDetection`, recommended profile, 1 round),
+**Extended** (all profiles, multiple rounds — can only be started manually), **Manual**.
 
-Er wordt niet over Modbus-ID 1..247 gescand.
+There is no scanning across Modbus ID 1..247.
 
-## Mockdriver
+## Mock driver
 
-`mock_inverter` bewijst het acceptatiecriterium "de mockdriver werkt zonder wijziging van
-outputs".
+`mock_inverter` proves the acceptance criterion "the mock driver works without any change to
+the outputs".
 
-- Simuleert een 3-fasige hybride met 2 MPPT's en batterij — bewust **anders** dan EverSolar,
-  zodat zichtbaar wordt dat de outputs niets over EverSolar aannemen.
-- Genereert een dagcurve (sinus op basis van uptime), zodat de webinterface leeft.
-- Configureerbare faalmodi: `--fail-checksum`, `--timeout`, `--night` voor Fase 9.
-- Twee varianten: `mock_readonly` (write-bits leeg) en `mock_writable` (write-bits gezet) om de
-  dispatcher te testen.
-- Draait op `MockTransport`, dus ook in de `native` host-tests.
+- Simulates a 3-phase hybrid with 2 MPPTs and a battery — deliberately **different** from
+  EverSolar, so it's visible that the outputs assume nothing about EverSolar.
+- Generates a day curve (sine based on uptime), so the web interface feels alive.
+- Configurable failure modes: `--fail-checksum`, `--timeout`, `--night` for Phase 9.
+- Two variants: `mock_readonly` (write bits empty) and `mock_writable` (write bits set) to test
+  the dispatcher.
+- Runs on `MockTransport`, so also in the `native` host tests.
 
-## Driverspecifieke instellingen
+## Driver-specific settings
 
-Een driver mag géén eigen veld in `Configuration` krijgen. Zodra dat gebeurt (`eversolar_layout`)
-kost een tweede driver een wijziging in de config-struct, de validator, de serializer én het
-webformulier — precies de koppeling die de architectuur moet voorkomen.
+A driver must **not** get its own field in `Configuration`. The moment that happens
+(`eversolar_layout`), a second driver costs a change in the config struct, the validator, the
+serializer, and the web form — exactly the coupling the architecture is meant to prevent.
 
-In plaats daarvan declareert de driver zijn opties zelf:
+Instead, the driver declares its own options:
 
 ```cpp
 struct DriverOption {
@@ -512,90 +512,90 @@ struct DriverOption {
     std::string displayName;
     std::string description;
     std::string defaultValue;
-    std::vector<std::string> allowedValues;  // leeg = vrije tekst
+    std::vector<std::string> allowedValues;  // empty = free text
 };
 // in DriverDescriptor:
 std::vector<DriverOption> options;
 ```
 
-En de configuratie draagt ze ondoorzichtig mee:
+And the configuration carries them along opaquely:
 
 ```cpp
 struct DriverSettings {
-    std::string   id;       // leeg = hoogste probePriority die is meegecompileerd
+    std::string   id;       // empty = highest probePriority that was compiled in
     bool          autoDetect = false;
     DriverOptions options;  // std::map<std::string, std::string>
 };
 ```
 
-`validateDriverOptions(descriptor, values, error)` toetst tegen wat de driver declareert.
-Onbekende sleutels worden **afgewezen**, niet genegeerd: een stilzwijgend genegeerde instelling
-is erger dan een geweigerde, want de gebruiker denkt dat hij is toegepast.
+`validateDriverOptions(descriptor, values, error)` checks against what the driver declares.
+Unknown keys are **rejected**, not ignored: a silently ignored setting is worse than a refused
+one, because the user thinks it was applied.
 
-Bijkomend voordeel: de opties zijn zelfbeschrijvend, dus de webinterface kan ze generiek
-renderen. Een nieuwe driver verschijnt met zijn instellingen in de UI zonder één regel
-frontend-werk.
+Added benefit: the options are self-describing, so the web interface can render them
+generically. A new driver appears with its settings in the UI without a single line of
+frontend work.
 
-Ook `driver.id` heeft géén merknaam als default. Leeg betekent "de applicatie kiest": de
-registry is al gesorteerd op `probePriority`, dus `main.cpp` kan kiezen zonder te weten wát
-het kiest.
+Also, `driver.id` has **no** brand name as its default. Empty means "the application chooses":
+the registry is already sorted by `probePriority`, so `main.cpp` can choose without knowing
+*what* it's choosing.
 
-## Projectstructuur
+## Project structure
 
-De structuur uit de opdracht wordt overgenomen, met drie afwijkingen:
+The structure from the project brief is adopted, with three deviations:
 
-| Afwijking | Reden |
+| Deviation | Reason |
 |---|---|
-| `src/outputs/raw_tcp/` bevat in de MVP **alleen** `raw_serial_bridge.h` (interface, geen impl) | Conform §31: interfaces en buslocking vastleggen, implementatie uitstellen |
-| `docs/decisions.md` toegevoegd | Framework-/librarykeuze hoort vastgelegd |
-| `LICENSE-THIRD-PARTY.md` toegevoegd | MIT-verplichting eversolar-monitor + LGPL-componenten |
+| `src/outputs/raw_tcp/` contains **only** `raw_serial_bridge.h` in the MVP (interface, no impl) | Per §31: lock down interfaces and bus locking, defer implementation |
+| `docs/decisions.md` added | Framework/library choices belong recorded |
+| `LICENSE-THIRD-PARTY.md` added | MIT obligation for eversolar-monitor + LGPL components |
 
-De scheiding transport / drivers / state / commands / outputs / network / config / diagnostics
-blijft exact zoals gevraagd.
+The separation transport / drivers / state / commands / outputs / network / config /
+diagnostics remains exactly as requested.
 
-## Security-model (samenvatting)
+## Security model (summary)
 
-Uitgewerkt in `docs/security.md`. Kern:
+Elaborated in `docs/security.md`. Core:
 
-| Onderwerp | MVP |
+| Topic | MVP |
 |---|---|
-| Globale read-only-modus | **Aan**, niet uitschakelbaar (geen driver kan schrijven) |
-| Modbus schrijven | Uit; FC6/16 → exception 0x01 |
-| Raw TCP-bridge | Uit (niet geïmplementeerd) |
-| REST GET | Onbeveiligd (lokaal netwerk) |
-| REST PATCH/POST | HTTP Basic-auth verplicht |
-| Webconfiguratie | Zelfde auth |
-| OTA | Zelfde auth + firmware-magic-check |
-| MQTT | Optionele user/pass |
-| Secrets | Nooit in logs/REST/MQTT/web; wachtwoordvelden retourneren `"***"` of worden weggelaten |
-| Rate limiting | 1 req/s op `/actions/*`, body-limiet 4 KB |
+| Global read-only mode | **On**, cannot be disabled (no driver can write) |
+| Modbus writing | Off; FC6/16 → exception 0x01 |
+| Raw TCP bridge | Off (not implemented) |
+| REST GET | Unsecured (local network) |
+| REST PATCH/POST | HTTP Basic auth required |
+| Web configuration | Same auth |
+| OTA | Same auth + firmware magic check |
+| MQTT | Optional user/pass |
+| Secrets | Never in logs/REST/MQTT/web; password fields return `"***"` or are omitted |
+| Rate limiting | 1 req/s on `/actions/*`, body limit 4 KB |
 
-Modbus TCP heeft geen encryptie, geen authenticatie en geen autorisatie. Dat wordt in README en
-`docs/security.md` expliciet vermeld: alleen op een vertrouwd of gefilterd netwerk aanbieden.
+Modbus TCP has no encryption, no authentication, and no authorization. This is stated
+explicitly in the README and `docs/security.md`: only expose it on a trusted or filtered
+network.
 
-## Teststrategie
+## Test strategy
 
-`env:native` draait op de host, zonder ESP32. De protocolkern (`eversolar_protocol.cpp`,
-`eversolar_parser.cpp`), het meetmodel, de registermap en de dispatcher hebben **geen enkele**
-Arduino-include — dat is een harde ontwerpeis, geen bijvangst.
+`env:native` runs on the host, without an ESP32. The protocol core (`eversolar_protocol.cpp`,
+`eversolar_parser.cpp`), the measurement model, the register map, and the dispatcher have
+**no** Arduino include whatsoever — that is a hard design requirement, not a side effect.
 
-| Suite | Dekt |
+| Suite | Covers |
 |---|---|
-| `test_eversolar_checksum` | Som-checksum, all-zero-verwerping, overflow |
-| `test_eversolar_parser` | 28/32-byte-layouts, signed TEMP, uint32 energy.total, schaalfactoren, gedeeltelijke frames, te korte/lange frames, foute checksum, fout adres, fout functienummer |
-| `test_driver_registry` | Registratie, compile-time-uitsluiting, onbekende ID |
-| `test_discovery` | Confidence-scoring, gelijke scores → geen autoselectie, inconsistente probes |
-| `test_register_map` | float32-word-order, NaN-sentinels, validity bitmap |
-| `test_measurements` | supported/valid/stale-matrix, capability-filtering |
-| `test_commands` | Read-only-afwijzing per commandotype, bereikvalidatie, rate limiting |
+| `test_eversolar_checksum` | Sum checksum, all-zero rejection, overflow |
+| `test_eversolar_parser` | 28/32-byte layouts, signed TEMP, uint32 energy.total, scale factors, partial frames, too-short/too-long frames, wrong checksum, wrong address, wrong function number |
+| `test_driver_registry` | Registration, compile-time exclusion, unknown ID |
+| `test_discovery` | Confidence scoring, tied scores → no auto-selection, inconsistent probes |
+| `test_register_map` | float32 word order, NaN sentinels, validity bitmap |
+| `test_measurements` | supported/valid/stale matrix, capability filtering |
+| `test_commands` | Read-only rejection per command type, range validation, rate limiting |
 
-Fixtures: `test/fixtures/` met frames uit de referentie, in Fase 3 aangevuld met **echte
-opnames** van de TL3000-20, plus bewust beschadigde frames en een nachtscenario.
+Fixtures: `test/fixtures/` with frames from the reference, supplemented in Phase 3 with **real
+recordings** from the TL3000-20, plus deliberately corrupted frames and a night scenario.
 
-De `MockTransport` speelt opgenomen frames af, zodat een volledige pollcyclus zonder hardware
-draait.
+The `MockTransport` plays back recorded frames, so a full poll cycle runs without hardware.
 
-**Eerlijkheidsnotitie:** de fixtures die nu gemaakt kunnen worden zijn *geconstrueerd* volgens
-het protocol zoals uit de Perl-code afgeleid — ze bewijzen dat de parser doet wat wij denken
-dat het protocol is, niet dat dat het echte protocol is. Alleen Fase 3 (echte hardware) kan dat
-bewijzen. Dat onderscheid wordt in `test/fixtures/README.md` vastgelegd.
+**Honesty note:** the fixtures that can be created now are *constructed* according to the
+protocol as derived from the Perl code — they prove that the parser does what we think the
+protocol is, not that this is the real protocol. Only Phase 3 (real hardware) can prove that.
+That distinction is recorded in `test/fixtures/README.md`.

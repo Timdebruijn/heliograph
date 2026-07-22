@@ -1,51 +1,51 @@
-# Securitymodel
+# Security model
 
-Dit apparaat hoort op een vertrouwd lokaal netwerk. Het dreigingsmodel is "andere apparaten op
-hetzelfde LAN", niet "iemand met de printplaat in handen".
+This device belongs on a trusted local network. The threat model is "other devices on
+the same LAN", not "someone holding the PCB in their hands".
 
-## Wat is afgedwongen
+## What is enforced
 
-| Onderwerp | Stand |
+| Topic | Status |
 |---|---|
-| Globale read-onlymodus | Aan, en niet uit te zetten: geen enkele driver kan schrijven |
-| Modbus schrijven | Uit; FC6/FC16 → exception 0x01. `write_enabled=true` wordt door de config-validatie geweigerd |
-| Raw TCP-bridge | Niet geïmplementeerd |
-| REST GET | Onbeveiligd (lokaal netwerk) |
-| REST PATCH/POST | HTTP Basic verplicht; zonder ingesteld wachtwoord **geweigerd**, niet opengelaten |
-| OTA | Zelfde auth + firmware-magic-check (0xE9) vóór de eerste byte flash raakt |
-| Setup afronden | Weigert zonder adminwachtwoord |
-| Secrets in logs/REST/MQTT/Prometheus | Nooit. `serializeConfig()` laat wachtwoorden wég (niet gemaskeerd); `serializeConfigForStorage()` is de enige die ze schrijft |
-| Rate limiting | 1 req/s op `/actions/*` |
-| Request size | 4096 bytes, geweigerd met 413 |
-| Stringlengtes | Begrensd in `validate()`; SSID 32 en PSK 64 zijn de 802.11/WPA2-limieten |
-| Hardcoded credentials | Geen. Geverifieerd door de firmware-image op strings te scannen |
+| Global read-only mode | On, and cannot be turned off: no driver can write |
+| Modbus writes | Off; FC6/FC16 → exception 0x01. `write_enabled=true` is rejected by config validation |
+| Raw TCP bridge | Not implemented |
+| REST GET | Unsecured (local network) |
+| REST PATCH/POST | HTTP Basic required; **rejected** without a configured password, not left open |
+| OTA | Same auth + firmware magic check (0xE9) before the first byte hits flash |
+| Completing setup | Refuses without an admin password |
+| Secrets in logs/REST/MQTT/Prometheus | Never. `serializeConfig()` omits passwords (not masked); `serializeConfigForStorage()` is the only one that writes them |
+| Rate limiting | 1 req/s on `/actions/*` |
+| Request size | 4096 bytes, rejected with 413 |
+| String lengths | Bounded in `validate()`; SSID 32 and PSK 64 are the 802.11/WPA2 limits |
+| Hardcoded credentials | None. Verified by scanning the firmware image for strings |
 
-## Bekende beperkingen — expliciet
+## Known limitations — explicit
 
-**Modbus TCP heeft geen encryptie, geen authenticatie en geen autorisatie.** Dat is het
-protocol, niet onze implementatie. Bied het alleen aan op een vertrouwd of gefilterd netwerk.
+**Modbus TCP has no encryption, no authentication and no authorization.** That is the
+protocol, not our implementation. Only offer it on a trusted or filtered network.
 
-**HTTP Basic over onversleuteld HTTP.** Het adminwachtwoord gaat base64-gecodeerd (dus
-leesbaar) over het netwerk. TLS op een ESP32 met een async webserver is de complexiteit hier
-niet waard; wie dat wel wil, zet er een reverse proxy voor.
+**HTTP Basic over unencrypted HTTP.** The admin password travels base64-encoded (i.e.
+readable) over the network. TLS on an ESP32 with an async web server isn't worth the
+complexity here; anyone who wants it should put a reverse proxy in front.
 
-**NVS is niet versleuteld.** De opgeslagen configuratie bevat het wifi- en MQTT-wachtwoord in
-klare tekst. Wie de flash over USB kan uitlezen, leest ze. Flash-encryptie zou dit oplossen
-maar maakt OTA en herstel aanzienlijk complexer; gegeven het dreigingsmodel (LAN, geen fysieke
-toegang) is dat niet gedaan. Weet het.
+**NVS is not encrypted.** The stored configuration contains the wifi and MQTT password in
+plain text. Anyone who can read the flash over USB can read them. Flash encryption would solve
+this but makes OTA and recovery considerably more complex; given the threat model (LAN, no
+physical access) this has not been done. Be aware of it.
 
-**Het setup-AP is open.** Het venster is klein (tot
-de eerste succesvolle verbinding) maar het is een venster: iemand binnen wifi-bereik op dat
-moment kan de bridge configureren.
+**The setup AP is open.** The window is small (until
+the first successful connection) but it is a window: anyone within wifi range at that
+moment can configure the bridge.
 
-**Geen brute-force-bescherming op HTTP Basic.** Rate limiting zit op `/actions/*`, niet op de
-auth zelf.
+**No brute-force protection on HTTP Basic.** Rate limiting is on `/actions/*`, not on the
+auth itself.
 
-## Wat een aanvaller op het LAN kan
+## What an attacker on the LAN can do
 
-| Kan | Kan niet |
+| Can | Cannot |
 |---|---|
-| Alle metingen lezen (REST, Modbus, Prometheus) | De omvormer aansturen — geen enkele driver kan schrijven |
-| De configuratie lezen **zonder secrets** | Wachtwoorden uitlezen via de API |
-| Het toestel DoS'en met verkeer | De RS485-polling verstoren (aparte core, aparte taak) |
-| — | Instellingen wijzigen, OTA of reboot zonder adminwachtwoord |
+| Read all measurements (REST, Modbus, Prometheus) | Control the inverter — no driver can write |
+| Read the configuration **without secrets** | Read passwords via the API |
+| DoS the device with traffic | Disrupt the RS485 polling (separate core, separate task) |
+| — | Change settings, OTA, or reboot without the admin password |
