@@ -74,4 +74,51 @@ CommandResult RelayController::set(uint8_t index, bool energised) {
     return CommandResult::Ok;
 }
 
+CommandResult RelayController::applyPattern(const std::vector<bool>& pattern) {
+    if (readOnly_) {
+        return CommandResult::ReadOnlyMode;
+    }
+    if (!enabled_) {
+        return CommandResult::Rejected;
+    }
+    if (pattern.size() != static_cast<size_t>(count_)) {
+        return CommandResult::OutOfRange;
+    }
+    bool assertsAny = false;
+    for (uint8_t i = 0; i < count_; ++i) {
+        if (pattern[i]) {
+            assertsAny = true;
+            break;
+        }
+    }
+    // One token for the whole pattern, and only when it asserts anything: a release-only
+    // pattern is the safe direction and passes unconditionally, like set(index, false).
+    if (assertsAny) {
+        const uint64_t now = clock_ ? clock_() : 0;
+        if (!allowedByRateLimit(now)) {
+            return CommandResult::RateLimited;
+        }
+    }
+    // All gates passed: nothing below can refuse, so the pattern lands whole. OFFs first --
+    // when switching modes, releasing the old role's contacts must precede asserting the
+    // new one's.
+    for (uint8_t i = 0; i < count_; ++i) {
+        if (!pattern[i]) {
+            state_[i] = false;
+            if (apply_) {
+                apply_(i, false);
+            }
+        }
+    }
+    for (uint8_t i = 0; i < count_; ++i) {
+        if (pattern[i]) {
+            state_[i] = true;
+            if (apply_) {
+                apply_(i, true);
+            }
+        }
+    }
+    return CommandResult::Ok;
+}
+
 }  // namespace heliograph

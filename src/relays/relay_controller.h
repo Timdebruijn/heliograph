@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 #include "commands/command_dispatcher.h"  // RateLimitPolicy
 #include "device/clock.h"
@@ -48,6 +49,15 @@ public:
     /// rate limit -- only then does the apply hook run. Turning a relay OFF passes the
     /// rate limiter unconditionally: releasing curtailment must never be throttled.
     CommandResult set(uint8_t index, bool energised);
+
+    /// Applies a full relay pattern (a DRM mode) as ONE command: same gates as set(), but a
+    /// single rate-limit token for the whole pattern, however many relays it spans. Charging
+    /// per relay made any pattern wider than the burst impossible to assert -- the tail ONs
+    /// were refused by the throttle that exists to stop relay chatter, not an atomic mode
+    /// switch. Releases (OFF) are written before asserts (ON), and an all-off pattern is
+    /// never throttled, matching set()'s safe direction. `pattern` must be exactly count()
+    /// entries.
+    CommandResult applyPattern(const std::vector<bool>& pattern);
 
     /// Failsafe: everything de-energised, immediately, regardless of gates. For shutdown
     /// paths and for disabling the feature at runtime.
