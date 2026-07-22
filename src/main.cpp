@@ -356,6 +356,10 @@ void setup() {
     Serial.printf("\nHeliograph %s\nboard: %s\nreset reason: %d\n", kFirmwareVersion,
                   board::kName, static_cast<int>(esp_reset_reason()));
 
+    // From the very first log line: uptime stamps until the clock is valid, wall-clock the
+    // moment it is -- which on RTC boards is seconds from now, long before any network.
+    TimeManager::installLogTimestamps();
+
     const auto loaded = g_store.load(g_config);
     // Apply the stored level before anything else logs, or the first lines ignore it.
     log::setLevel(g_config.logLevel);

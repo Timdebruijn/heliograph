@@ -32,6 +32,15 @@ public:
     /// and nowhere else.
     void prepareDhcp(const Configuration& config);
 
+    /// Installs the log-timestamp provider, independent of SNTP. Call it as the first thing
+    /// in setup(): lines before a valid clock carry an uptime stamp ("+0.4s"), and from the
+    /// moment the clock is valid -- an RTC restore seconds later, or NTP much later -- every
+    /// line carries wall-clock. Without this, boot lines stayed stamp-less until WiFi came
+    /// up and begin() ran, which defeated the point of restoring the RTC before the network
+    /// (live, 2026-07-22: the "rtc: clock restored" line itself had no timestamp).
+    /// Idempotent; begin() installs the same provider again.
+    static void installLogTimestamps();
+
     /// Sets TZ, starts SNTP and installs the log-timestamp provider. Call once WiFi is up; the
     /// DHCP-provided NTP server is only known after the lease is in. Safe to call again after a
     /// config change: it restarts SNTP rather than stacking a second client (a changed

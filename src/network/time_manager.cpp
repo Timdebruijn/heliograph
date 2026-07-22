@@ -120,6 +120,8 @@ void TimeManager::prepareDhcp(const Configuration& config) {
     g_dhcpEnabled.store(enable);
 }
 
+void TimeManager::installLogTimestamps() { log::setTimestampProvider(&provideTimestamp); }
+
 void TimeManager::begin(const Configuration& config) {
     // TZ first, so the first stamped line is already local. setenv copies its value, so no
     // lifetime concern here (unlike the server name below).
@@ -128,7 +130,7 @@ void TimeManager::begin(const Configuration& config) {
 
     // Install the provider regardless of NTP: before sync it yields uptime, after sync
     // wall-clock. A user who disables NTP still gets a monotonic marker on every line.
-    log::setTimestampProvider(&provideTimestamp);
+    installLogTimestamps();
 
     if (!config.ntp.enabled) {
         log::info("ntp: disabled; logs carry uptime only");
@@ -175,6 +177,7 @@ TimeManager::SyncSource TimeManager::syncSource() const {
 namespace heliograph {
 
 void TimeManager::prepareDhcp(const Configuration&) {}
+void TimeManager::installLogTimestamps() {}
 void TimeManager::begin(const Configuration&) {}
 bool TimeManager::synced() const { return false; }
 time_t TimeManager::lastSyncEpoch() const { return 0; }
