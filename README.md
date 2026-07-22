@@ -32,7 +32,7 @@ enabled today (see `docs/device-profiles/schema.md` for how write support is sta
 |---|---|---|
 | Waveshare ESP32-S3-RS485-CAN | battery-backed RTC, CAN (unused) | **Production** — the reference board |
 | Waveshare ESP32-S3-Relay-1CH | 1 relay (DRM0 curtailment, planned), RTC | Builds; awaiting hardware validation |
-| Waveshare ESP32-S3-Relay-6CH | 6 relays (DRM modes, planned), 8 MB flash | Stub — RS485 direction pin unverified |
+| Waveshare ESP32-S3-Relay-6CH | 6 relays (DRM modes, planned), 8 MB flash | Builds; pins verified, awaiting hardware validation |
 
 One firmware image per board; the web installer asks which one you have. The relay
 boards are for **DRM demand-response curtailment** of inverters that cannot be limited

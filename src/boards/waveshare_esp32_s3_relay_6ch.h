@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 //
-// Waveshare ESP32-S3-Relay-6CH board definition. STATUS: STUB -- compiles, but this
-// firmware has not run on the physical board yet, and one pin is deliberately absent.
+// Waveshare ESP32-S3-Relay-6CH board definition. STATUS: pins verified from the official
+// schematic AND the official demo source; this firmware has not run on the physical board
+// yet (relay polarity check pending).
 //
-// Verified against the official schematic (ESP32-S3-Relay-6CH-Sch.pdf,
-// files.waveshare.com, read 2026-07-22), cross-checked against the community ESPHome
-// configuration (devices.esphome.io/devices/waveshare-6ch-relay) -- the two agree on
-// every pin below.
+// Sources (2026-07-22): official schematic (ESP32-S3-Relay-6CH-Sch.pdf), official demo
+// (ESP32-S3-Relay-6CH-Demo.zip, WS_GPIO.h/WS_Serial.cpp), community ESPHome configuration
+// (devices.esphome.io/devices/waveshare-6ch-relay) -- all three agree.
 //
 //   Wiki: https://www.waveshare.com/wiki/ESP32-S3-Relay-6CH
 //
@@ -23,16 +23,15 @@ namespace heliograph::board {
 inline constexpr const char* kName = "Waveshare ESP32-S3-Relay-6CH";
 
 // --- RS485 ---------------------------------------------------------------------------------
-// TX/RX per the product documentation and the community configuration (schematic module
-// rows agree). Transceiver is an SP485E behind an isolator.
+// WS_GPIO.h: TXD1 17, RXD1 18. Transceiver is an SP485E behind an isolator.
 inline constexpr int kRs485Tx = 17;
 inline constexpr int kRs485Rx = 18;
 
-// UNVERIFIED -- deliberately -1. The schematic shows a TXD1EN net to the transceiver's
-// DE/RE, but which GPIO drives it could not be extracted unambiguously, and GPIO21 (the
-// other boards' EN pin) is this board's buzzer. -1 makes the transport skip RTS
-// configuration entirely. MEASURE on the physical board before relying on RS485 here;
-// never ship a guessed pin.
+// No direction GPIO on this board -- VERIFIED, not unknown: the official demo transmits
+// and receives with a plain begin(9600, SERIAL_8N1, RXD1, TXD1), no setPins/RS485 mode,
+// so the schematic's TXDEN' net is driven by the board's own auto-direction circuit.
+// -1 makes the transport skip RTS configuration. (GPIO21, the other boards' EN pin, is
+// this board's buzzer.)
 inline constexpr int kRs485De = -1;
 
 /// UART peripheral used for RS485. UART0 is the USB-CDC console.
@@ -62,5 +61,7 @@ inline constexpr uint8_t kRtcI2cAddress = 0;
 // BOOT   : GPIO0 per the community configuration; unverified on hardware
 // Power  : USB-C, or 7-36 V DC terminal
 // Relays : 6x <=10 A 250 VAC / 30 VDC, optocoupler + digital isolation
+// I2C    : GPIO4 (SDA) / GPIO5 (SCL) are the Pico-HAT expansion I2C pins; the official
+//          demo drives an EXTERNAL DS3231 module there. No onboard RTC (schematic clean).
 
 }  // namespace heliograph::board

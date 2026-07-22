@@ -82,9 +82,11 @@ source — a deliberate decision for later, not an accident waiting in a header 
    (backlog). Measure on real hardware; ESP32-S3 convention (GPIO0) is convention, not
    evidence.
 2. **GPIO47** — no documented function on this board. The firmware no longer touches it.
-3. **Relay-6CH RS485 direction pin** — the schematic shows a `TXD1EN` net but the driving
-   GPIO could not be extracted unambiguously; the board header ships `-1` (transport skips
-   RTS) until measured on the physical board.
+3. **Relay-6CH relay polarity** — the community configuration drives HIGH to energise;
+   confirm on the physical board before the relays ever touch a DRM port. (The RS485
+   direction question is resolved: the official demo transmits and receives with a plain
+   `begin()`, so the board's `TXD1EN` net is driven by its own auto-direction circuit and
+   the header correctly declares no direction GPIO.)
 
 Component detail from the schematic, for reference: SP3485EN RS485 transceiver behind a
 π163E31 isolator, TJA1051T CAN transceiver, PCF85063AT RTC with 32.768 kHz crystal.
