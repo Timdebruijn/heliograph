@@ -22,15 +22,17 @@
 #include <vector>
 
 #include "app/discovery_runner.h"
-#include "boards/waveshare_esp32_s3_rs485_can.h"
+#include "boards/board.h"
 #include "config/configuration.h"
 #include "config/configuration_store.h"
 #include "config/nvs_backend.h"
 #include "device/device_context.h"
 #include "diagnostics/diagnostics.h"
+#include "diagnostics/log_timestamp.h"
 #include "diagnostics/logger.h"
 #include "ota/ota_manager.h"
 #include "drivers/driver_registry.h"
+#include "network/rtc_pcf85063.h"
 #include "network/time_manager.h"
 #include "network/wifi_manager.h"
 #include "outputs/modbus_tcp/modbus_tcp_server.h"
@@ -47,7 +49,7 @@ namespace {
 // image identifiable over the API. Without it two different builds both reported "0.1.0" and a
 // flash could not be told from the previous one -- exactly what bit the post-flash check on
 // 2026-07-21. Bumped to 0.2.0 for the Fase 9 review batch.
-constexpr const char* kFirmwareVersion = "0.5.2 (" __DATE__ " " __TIME__ ")";
+constexpr const char* kFirmwareVersion = "0.6.0 (" __DATE__ " " __TIME__ ")";
 
 Rs485Transport     g_transport;
 DriverRegistry     g_registry;
@@ -100,6 +102,7 @@ std::string selectedDriverId() {
 
 BridgeInfo bridgeInfo() {
     BridgeInfo info;
+    info.boardName        = board::kName;
     info.bridgeId         = g_wifi.bridgeId();
     {
         // bridgeInfo() runs on loop() and rs485Task; the AsyncTCP task can be replacing
@@ -363,6 +366,25 @@ void setup() {
         Serial.println("[config] falling back to defaults; the setup portal will start");
     }
 
+    // RTC restore, before anything else that logs at length: with a battery-backed
+    // PCF85063 (board::kHasRtc) the system clock is valid from here on, so every log line
+    // below carries a wall-clock timestamp even when the network never comes up -- which
+    // is exactly the boot you end up debugging. TZ first, so the timestamps render local.
+    setenv("TZ", g_config.ntp.timezone.c_str(), 1);
+    tzset();
+    if (rtc::begin()) {
+        time_t stored = 0;
+        if (rtc::readUtc(stored)) {
+            const timeval tv{stored, 0};
+            settimeofday(&tv, nullptr);
+            char buf[24];
+            log::formatIsoLocalTime(buf, sizeof(buf), stored);
+            log::info("rtc: clock restored: %s (awaiting ntp for drift correction)", buf);
+        } else {
+            log::warn("rtc: present but time not set (first boot or empty backup supply)");
+        }
+    }
+
     // A factory-fresh device gets a UNIQUE default hostname (heliograph-a1b2c3, from the
     // MAC) instead of the shared "heliograph": two bridges on one LAN -- configuring a
     // second unit at home before installing it elsewhere is the normal way to deploy one --
@@ -461,6 +483,18 @@ void loop() {
 
     g_wifi.loop(nowMs());
     startOutputs();  // no-op until there is a network, and only ever runs once
+
+    // After every NTP sync, put the corrected time into the battery-backed RTC (when the
+    // board has one), so the next boot restores an accurate clock. Runs on the loop task,
+    // not in the SNTP callback: I2C from lwip's thread is asking for trouble.
+    static time_t lastRtcSync = 0;
+    const time_t  ntpSync     = g_time.lastSyncEpoch();
+    if (ntpSync != 0 && ntpSync != lastRtcSync) {
+        lastRtcSync = ntpSync;
+        if (rtc::writeUtc(time(nullptr))) {
+            log::debug("rtc: updated from ntp");
+        }
+    }
 
     // modbus_client_connections_total was a dead counter: recordModbusClient() existed but
     // nothing ever called it, so the API reported 0 forever (found by the Fase 9 multi-client

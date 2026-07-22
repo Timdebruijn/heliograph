@@ -122,7 +122,7 @@ as applied.
 
 ## Bring-up procedure (first hardware session)
 
-1. Flash the standard `waveshare-eversolar` build (historic name — it carries every hardware
+1. Flash the build for your board (e.g. `waveshare-rs485-can` — every image carries all hardware
    driver, this one included), join it to WiFi via the setup wizard.
 2. **Settings → Logging → Level → `trace`** (applied immediately, no restart). The raw
    register dumps are TRACE-only; with the default `info` level the logs endpoint will show

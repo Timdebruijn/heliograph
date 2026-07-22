@@ -76,8 +76,12 @@ jobs:
         run: pio test -e native
 
   firmware:
-    name: Firmware builds
+    name: Firmware (${{ matrix.env }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [waveshare-rs485-can, waveshare-relay-1ch, waveshare-relay-6ch, mock]
     steps:
       - uses: actions/checkout@v7
 
@@ -96,17 +100,15 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
-      - name: Build waveshare-eversolar
-        run: pio run -e waveshare-eversolar
-
-      - name: Build mock
-        run: pio run -e mock
+      - name: Build ${{ matrix.env }}
+        run: pio run -e ${{ matrix.env }}
 
       - name: Upload firmware artifacts
+        if: matrix.env != 'mock'
         uses: actions/upload-artifact@v7
         with:
-          name: firmware-${{ github.sha }}
+          name: firmware-${{ matrix.env }}-${{ github.sha }}
           path: |
-            .pio/build/waveshare-eversolar/firmware.bin
-            .pio/build/waveshare-eversolar/firmware.factory.bin
+            .pio/build/${{ matrix.env }}/firmware.bin
+            .pio/build/${{ matrix.env }}/firmware.factory.bin
           retention-days: 14

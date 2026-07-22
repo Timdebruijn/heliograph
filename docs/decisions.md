@@ -154,7 +154,7 @@ library order and of filesystem case sensitivity. On Linux this specific collisi
 wouldn't occur, but the underlying order dependency would — so the fix is correct
 either way.
 
-Environments: `waveshare-eversolar` (MVP), `mock` (without RS485), `native` (host tests).
+Environments: one per board (`waveshare-rs485-can`, `waveshare-relay-1ch`, `waveshare-relay-6ch`), `mock` (without RS485), `native` (host tests).
 `waveshare-full` follows once there's a second real driver.
 
 The partition table gets **two app partitions** (`ota_0`/`ota_1`) plus `otadata`, which

@@ -1,11 +1,11 @@
 {
-  "name": "Heliograph",
+  "name": "Heliograph (__BOARD__)",
   "version": "__VERSION__",
   "new_install_prompt_erase": false,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
-      "parts": [{ "path": "heliograph-factory.bin", "offset": 0 }]
+      "parts": [{ "path": "heliograph-__BOARD__-factory.bin", "offset": 0 }]
     }
   ]
 }

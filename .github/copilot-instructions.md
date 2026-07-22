@@ -47,7 +47,7 @@ See `docs/adding-a-device.md` for the full workflow.
 | Environment | Command | Purpose |
 |---|---|---|
 | `native` | `pio test -e native` | 390+ host tests, no hardware needed |
-| `waveshare-eversolar` | `pio run -e waveshare-eversolar` | Production firmware (all drivers) |
+| `waveshare-rs485-can` etc. | `pio run -e waveshare-rs485-can` | Production firmware, one env per board (all drivers) |
 | `mock` | `pio run -e mock` | Full output stack with a simulated inverter |
 
 The `native` environment only compiles platform-independent sources. If a source file

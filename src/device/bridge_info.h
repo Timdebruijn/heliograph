@@ -49,6 +49,8 @@ struct BridgeInfo {
 
     /// The board this firmware is running on. Reported to Home Assistant as the bridge
     /// device's model.
+    /// Set by main from board::kName; the default only serves host tests, which have no
+    /// board header.
     std::string boardName = "Waveshare ESP32-S3-RS485-CAN";
 };
 

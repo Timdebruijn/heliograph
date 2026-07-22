@@ -26,6 +26,18 @@ enabled today (see `docs/device-profiles/schema.md` for how write support is sta
 **Adding a Modbus device is a data file, not C++** — see
 [docs/adding-a-device.md](docs/adding-a-device.md).
 
+## Supported boards
+
+| Board | Extras | Status |
+|---|---|---|
+| Waveshare ESP32-S3-RS485-CAN | battery-backed RTC, CAN (unused) | **Production** — the reference board |
+| Waveshare ESP32-S3-Relay-1CH | 1 relay (DRM0 curtailment, planned), RTC | Builds; awaiting hardware validation |
+| Waveshare ESP32-S3-Relay-6CH | 6 relays (DRM modes, planned), 8 MB flash | Stub — RS485 direction pin unverified |
+
+One firmware image per board; the web installer asks which one you have. The relay
+boards are for **DRM demand-response curtailment** of inverters that cannot be limited
+over RS485 — that control layer is under construction and ships disabled by default.
+
 ## Quickstart
 
 1. **Flash** the firmware — pick whichever suits you:
@@ -40,8 +52,8 @@ enabled today (see `docs/device-profiles/schema.md` for how write support is sta
      esptool.py --chip esp32s3 write_flash 0x0 heliograph-<version>-factory.bin
      ```
 
-   - **From source:** `pio run -e waveshare-eversolar`, then flash
-     `.pio/build/waveshare-eversolar/firmware.factory.bin` the same way.
+   - **From source:** `pio run -e waveshare-rs485-can` (or the env for your board), then flash
+     `.pio/build/waveshare-rs485-can/firmware.factory.bin` the same way.
 
    Already running Heliograph? Update over the air instead: *Settings → Firmware
    update* with the release's `heliograph-<version>.bin` — settings survive an OTA,
@@ -78,7 +90,7 @@ pio test -e native          # 390+ host tests, no hardware needed
 ./tools/check_layering.sh   # architectural invariants
 pio check -e native         # static analysis (cppcheck)
 ruff check tools/           # lint for the Python tooling
-pio run -e waveshare-eversolar
+pio run -e waveshare-rs485-can   # or -relay-1ch / -relay-6ch
 ```
 
 The `mock` environment runs the full output stack against a simulated inverter — useful

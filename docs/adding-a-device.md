@@ -125,7 +125,7 @@ registers against the **inverter's own display or app**:
 
 ## 4. Testing against the real device
 
-1. Build and flash (`pio run -e waveshare-eversolar` — the combined image contains all
+1. Build and flash (`pio run -e waveshare-rs485-can`, or the env for your board — the image contains all
    drivers), or OTA-upload the `.bin` if a bridge is already installed.
 2. Select the driver and, if not the default, your profile in the bridge web UI
    (driver option `profile = <your id>`).

@@ -48,15 +48,22 @@ jobs:
           python3 tools/check_web_js.py
           pio test -e native
 
-      - name: Build firmware
-        run: pio run -e waveshare-eversolar
+      - name: Build firmware (all boards)
+        run: |
+          pio run -e waveshare-rs485-can
+          pio run -e waveshare-relay-1ch
+          pio run -e waveshare-relay-6ch
 
       - name: Stage release assets
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          cp .pio/build/waveshare-eversolar/firmware.bin "dist/heliograph-${VERSION}.bin"
-          cp .pio/build/waveshare-eversolar/firmware.factory.bin "dist/heliograph-${VERSION}-factory.bin"
+          for board in rs485-can relay-1ch relay-6ch; do
+            cp ".pio/build/waveshare-${board}/firmware.bin" \
+               "dist/heliograph-${VERSION}-${board}.bin"
+            cp ".pio/build/waveshare-${board}/firmware.factory.bin" \
+               "dist/heliograph-${VERSION}-${board}-factory.bin"
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -70,8 +77,12 @@ jobs:
           mkdir -p site
           sed "s|__REPO_URL__|${{ github.server_url }}/${{ github.repository }}|" \
             flasher/index.html > site/index.html
-          cp .pio/build/waveshare-eversolar/firmware.factory.bin site/heliograph-factory.bin
-          sed "s/__VERSION__/${VERSION}/" flasher/manifest.json > site/manifest.json
+          for board in rs485-can relay-1ch relay-6ch; do
+            cp ".pio/build/waveshare-${board}/firmware.factory.bin" \
+               "site/heliograph-${board}-factory.bin"
+            sed -e "s/__VERSION__/${VERSION}/" -e "s/__BOARD__/${board}/" \
+              flasher/manifest.json > "site/manifest-${board}.json"
+          done
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

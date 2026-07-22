@@ -6,7 +6,7 @@
 
 #include <Arduino.h>
 
-#include "boards/waveshare_esp32_s3_rs485_can.h"
+#include "boards/board.h"
 #include "diagnostics/logger.h"
 
 namespace heliograph {
@@ -43,15 +43,21 @@ bool Rs485Transport::configure(const SerialProfile& profile) {
 
     uart_.begin(profile.baudRate, toSerialConfig(profile), board::kRs485Rx, board::kRs485Tx);
 
-    // The board has no passive auto-direction circuit; the SP3485EN's DE/RE sit on a GPIO.
-    // Handing that pin to the UART as RTS and switching to RS485 half-duplex makes the
-    // peripheral flip direction on the exact bit boundary. Verified against the official
-    // Waveshare demo (WS_RS485.cpp); see docs/hardware.md.
-    if (!uart_.setPins(-1, -1, -1, board::kRs485De)) {
-        return false;
-    }
-    if (!uart_.setMode(UART_MODE_RS485_HALF_DUPLEX)) {
-        return false;
+    // Boards with a direction pin (SP3485 DE/RE on a GPIO) hand it to the UART as RTS and
+    // switch to RS485 half-duplex, so the peripheral flips direction on the exact bit
+    // boundary -- a software toggle cannot race the last stop bit. Verified against the
+    // official Waveshare demo (WS_RS485.cpp); see docs/hardware.md.
+    //
+    // kRs485De < 0 means the board declares no (verified) direction pin; nothing is
+    // configured and the transceiver's own circuit has to handle direction. See the
+    // Relay-6CH board header for why shipping a guessed pin is worse than this.
+    if (board::kRs485De >= 0) {
+        if (!uart_.setPins(-1, -1, -1, board::kRs485De)) {
+            return false;
+        }
+        if (!uart_.setMode(UART_MODE_RS485_HALF_DUPLEX)) {
+            return false;
+        }
     }
 
     uart_.setTimeout(profile.responseTimeoutMs);

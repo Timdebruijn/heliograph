@@ -44,15 +44,28 @@ a{color:var(--accent)}
 
 <div class="card">
   <b>Install</b>
+  <label for="board" style="display:block;font-size:13px;color:var(--dim);margin:8px 0 4px">
+    Which board do you have? It is printed on the PCB.</label>
+  <select id="board" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;margin-bottom:12px">
+    <option value="rs485-can">Waveshare ESP32-S3-RS485-CAN</option>
+    <option value="relay-1ch">Waveshare ESP32-S3-Relay-1CH</option>
+    <option value="relay-6ch">Waveshare ESP32-S3-Relay-6CH (RS485 not validated yet)</option>
+  </select>
   <p class="hint">This writes a full factory image: a board that was already set up will lose
   its settings (WiFi, passwords) and start over at the setup portal. Updating an already
   configured bridge is easier over the air: open its web page and use Settings &rarr;
-  Firmware update with the <code>heliograph-*.bin</code> from the
+  Firmware update with the matching <code>heliograph-*-&lt;board&gt;.bin</code> from the
   <a href="__REPO_URL__/releases/latest">latest release</a>.</p>
-  <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+  <esp-web-install-button id="install" manifest="manifest-rs485-can.json"></esp-web-install-button>
   <p class="hint">After flashing: the device starts an access point named
   <b>Heliograph-Setup-XXXX</b>. Join it and the setup page opens by itself.</p>
 </div>
+
+<script>
+document.getElementById('board').addEventListener('change', e => {
+  document.getElementById('install').setAttribute('manifest', 'manifest-' + e.target.value + '.json');
+});
+</script>
 
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </div></body></html>

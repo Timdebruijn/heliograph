@@ -8,18 +8,25 @@ read of this board's schematic and are explicitly marked as such below.
 > **ESP32-S3-Relay-1CH**, the board named in the original project brief; the earlier
 > revision of this document verified that board's schematic in detail. The physical boards
 > turned out to be the RS485-CAN (spotted 2026-07-22). Nothing ever misbehaved because the
-> RS485 subsystem is pin-identical between the two designs. Consequences of the
+> RS485 subsystem is pin-identical between the two designs. Consequence of the
 > correction: there is **no relay** (the GPIO47 safety clamp was removed — the safest
-> state for a pin with no known function is untouched hi-Z) and **no RTC chip** (time
-> comes from NTP alone, which the firmware already treated as the primary source).
+> state for a pin with no known function is untouched hi-Z). A first revision of this
+> correction also claimed "no RTC chip" on the strength of an incomplete community
+> document — wrong: the official schematic shows a **PCF85063AT** with backup supply,
+> and the firmware now uses it (clock valid from boot, corrected after every NTP sync).
 
 ## Sources
 
 | Source | Location | Used for |
 |---|---|---|
 | Wiki | <https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN> | Board overview, interfaces, jumpers |
-| Community board doc | [Sleeper85/esphome-yambms](https://github.com/Sleeper85/esphome-yambms/blob/main/documents/README/Board_Waveshare_ESP32-S3-RS485-CAN.md) | Pin assignments cross-check |
+| Schematic (PDF) | <https://files.waveshare.com/wiki/ESP32-S3-RS485-CAN/ESP32-S3-RS485-CAN-Schematic.pdf> | GPIO matrix, RTC (PCF85063AT), transceivers |
+| Community board doc | [Sleeper85/esphome-yambms](https://github.com/Sleeper85/esphome-yambms/blob/main/documents/README/Board_Waveshare_ESP32-S3-RS485-CAN.md) | Pin assignments cross-check (note: it omits the RTC) |
 | Runtime | this project, production since 2026-07 | RS485 pins, flash size, USB-CDC behaviour |
+
+This is one of three supported boards; the board headers in `src/boards/` are the
+authoritative pin record for all of them (Relay-1CH: 1 relay + RTC; Relay-6CH: 6 relays,
+8 MB flash, RS485 direction pin still unverified — see the header).
 
 ## Pinout
 
@@ -30,6 +37,9 @@ read of this board's schematic and are explicitly marked as such below.
 | RS485 EN (direction) | **21** | verified (documentation + runtime) |
 | CAN TX | **15** | documented; unused by this firmware |
 | CAN RX | **16** | documented; unused by this firmware |
+| RTC SCL (PCF85063) | **38** | verified (official schematic GPIO matrix) |
+| RTC SDA (PCF85063) | **39** | verified (official schematic GPIO matrix) |
+| RTC INT | **40** | schematic; unused by this firmware |
 | BOOT button | — | present on the board; GPIO not measured yet, so not a constant |
 
 ## Board facts
@@ -71,6 +81,10 @@ source — a deliberate decision for later, not an accident waiting in a header 
 1. **BOOT button GPIO** — needed for the hold-BOOT-at-boot factory-reset recovery path
    (backlog). Measure on real hardware; ESP32-S3 convention (GPIO0) is convention, not
    evidence.
-2. **Transceiver and isolator part numbers** — read from this board's schematic when
-   component-level detail matters (so far it has not).
-3. **GPIO47** — no documented function on this board. The firmware no longer touches it.
+2. **GPIO47** — no documented function on this board. The firmware no longer touches it.
+3. **Relay-6CH RS485 direction pin** — the schematic shows a `TXD1EN` net but the driving
+   GPIO could not be extracted unambiguously; the board header ships `-1` (transport skips
+   RTS) until measured on the physical board.
+
+Component detail from the schematic, for reference: SP3485EN RS485 transceiver behind a
+π163E31 isolator, TJA1051T CAN transceiver, PCF85063AT RTC with 32.768 kHz crystal.
