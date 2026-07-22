@@ -4,7 +4,7 @@
 
 Heliograph is ESP32-S3 firmware that reads solar inverters over RS485 and republishes
 their data as MQTT + Home Assistant discovery, Modbus TCP, REST/JSON, and Prometheus.
-It targets the **Waveshare ESP32-S3-Relay-1CH** board and is built with **PlatformIO**
+It targets the **Waveshare ESP32-S3-RS485-CAN** board and is built with **PlatformIO**
 using the Arduino framework (pioarduino, Arduino core 3.x / ESP-IDF 5.5.x).
 
 ## The single most important rule
@@ -96,7 +96,7 @@ CI runs the same checks plus both firmware builds.
 
 ## Hardware notes
 
-- **Board**: Waveshare ESP32-S3-Relay-1CH (ESP32-S3-WROOM-1U, 16 MB flash, 8 MB octal PSRAM).
+- **Board**: Waveshare ESP32-S3-RS485-CAN (16 MB flash, 8 MB PSRAM; no relay, no RTC).
 - Use `pioarduino` platform URL, not `platform = espressif32` — the official registry
   still ships Arduino core 2.x. See `docs/decisions.md`.
 - OTA uses a dual-app partition scheme (`partitions_16mb_ota.csv`). A watchdog-backed
