@@ -616,11 +616,17 @@ async function renderConfig(){
     <div id="om" class="msg" style="display:none"></div>
     <div class="dim" style="font-size:12px;margin-top:8px">The image is verified before the
     boot partition switches; a rejected upload leaves the running firmware untouched.</div></div>
+  <div class="card" style="margin-top:20px">
+    <b>Restart</b>
+    <p class="dim">Reboots the bridge; all settings are kept. Polling resumes by itself and
+    the dashboard reconnects in ~30 seconds.</p>
+    <button onclick="rebootFromSettings()">Restart bridge</button>
+  </div>
   <div class="card" style="margin-top:20px;border-color:var(--bad)">
     <b>Factory reset</b>
     <p class="dim">Erases everything, including WiFi and passwords, and restarts into the setup
-    portal. This board has no reset button, so this is the way back from a bad configuration —
-    as long as you can still reach this page.</p>
+    portal. The board's physical RESET button only reboots — this page is the way back from a
+    bad configuration, as long as you can still reach it.</p>
     <button style="background:var(--bad)" onclick="factoryReset()">Erase and restart</button>
   </div>`;
 }
@@ -765,7 +771,9 @@ async function otaUpload(){
 }
 
 async function rebootFromSettings(){
-  const m=$('#cm');
+  // display:block explicitly: #cm starts hidden, and outside the save flow (the standalone
+  // Restart card) nothing else has unhidden it yet.
+  const m=$('#cm');m.style.display='block';
   const r=await authFetch('/api/v1/actions/reboot',{method:'POST'});
   if(!r.ok){m.className='msg err';m.textContent='Restart refused: '+httpWhy(r);return}
   m.className='msg ok';

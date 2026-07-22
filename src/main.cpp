@@ -49,7 +49,7 @@ namespace {
 // image identifiable over the API. Without it two different builds both reported "0.1.0" and a
 // flash could not be told from the previous one -- exactly what bit the post-flash check on
 // 2026-07-21. Bumped to 0.2.0 for the Fase 9 review batch.
-constexpr const char* kFirmwareVersion = "0.6.0 (" __DATE__ " " __TIME__ ")";
+constexpr const char* kFirmwareVersion = "0.6.1 (" __DATE__ " " __TIME__ ")";
 
 Rs485Transport     g_transport;
 DriverRegistry     g_registry;
