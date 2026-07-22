@@ -169,6 +169,28 @@ static void test_relays_enabled_defaults_off_and_round_trips() {
     TEST_ASSERT_TRUE(after.relays.enabled);
 }
 
+static void test_relay_roles_validate_and_round_trip() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    auto               c = provisionedConfig();
+    ConfigError        e;
+
+    // A bad role never lands: the patch is refused as a whole.
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"relays":{"roles":["drm9"]}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("relays.roles", e.field.c_str());
+    TEST_ASSERT_TRUE(c.relays.roles.empty());
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"relays":{"roles":["drm0","none"]}})", c, e));
+    TEST_ASSERT_TRUE(store.save(c));
+
+    ConfigurationStore reloaded(backend);
+    Configuration      after;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, reloaded.load(after));
+    TEST_ASSERT_EQUAL_UINT32(2, after.relays.roles.size());
+    TEST_ASSERT_EQUAL_STRING("drm0", after.relays.roles[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("none", after.relays.roles[1].c_str());
+}
+
 // --- ntp ----------------------------------------------------------------------------------
 
 static void test_ntp_settings_round_trip_through_storage() {
@@ -604,6 +626,7 @@ int main(int, char**) {
     RUN_TEST(test_first_boot_finds_nothing_and_keeps_defaults);
     RUN_TEST(test_save_then_load_round_trips_everything);
     RUN_TEST(test_relays_enabled_defaults_off_and_round_trips);
+    RUN_TEST(test_relay_roles_validate_and_round_trip);
     RUN_TEST(test_config_under_the_legacy_namespace_is_adopted);
     RUN_TEST(test_primary_config_wins_over_legacy);
     RUN_TEST(test_ntp_settings_round_trip_through_storage);

@@ -73,6 +73,10 @@ struct RestContext {
     /// same mutex the MQTT path uses. Unset (nullptr) on boards without relays -- the
     /// endpoint then answers 404, matching the absent-not-zero rule for hardware.
     std::function<CommandResult(uint8_t index, bool energised)> setRelay;
+    /// Applies a named DRM mode (see src/relays/drm.h): the role's relays energised,
+    /// everything else released, atomically behind the relay mutex. Returns the gate
+    /// verdict; OutOfRange doubles as "not a valid mode for the configured roles".
+    std::function<CommandResult(const std::string& mode)> setDrmMode;
 };
 
 class RestApi {

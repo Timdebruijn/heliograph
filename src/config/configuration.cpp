@@ -2,6 +2,8 @@
 
 #include "configuration.h"
 
+#include "relays/drm.h"
+
 #include <ArduinoJson.h>
 
 #include <cstring>
@@ -197,6 +199,16 @@ bool validate(const Configuration& config, ConfigError& error) {
     // driver.id may be empty: that means "pick the highest-priority driver compiled in".
     // Whether a non-empty id exists is the registry's business, not this validator's -- it
     // has no way to know which drivers were built into this firmware.
+    if (config.relays.roles.size() > 8) {
+        error = {"relays.roles", "at most 8 entries"};
+        return false;
+    }
+    for (const auto& role : config.relays.roles) {
+        if (!drm::isValidRole(role)) {
+            error = {"relays.roles", "each entry must be 'none' or 'drm0'..'drm8'"};
+            return false;
+        }
+    }
     if (config.security.adminUsername.empty()) {
         error = {"security.admin_username", "must not be empty"};
         return false;
@@ -271,6 +283,10 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     doc["polling"]["interval_seconds"] = config.polling.intervalSeconds;
 
     doc["relays"]["enabled"] = config.relays.enabled;
+    JsonArray relayRoles     = doc["relays"]["roles"].to<JsonArray>();
+    for (const auto& role : config.relays.roles) {
+        relayRoles.add(role);
+    }
 
     JsonObject driver           = doc["driver"].to<JsonObject>();
     driver["id"]                = config.driver.id;
@@ -362,6 +378,16 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
 
     if (JsonObjectConst relays = doc["relays"]; !relays.isNull()) {
         if (!patchBool(relays["enabled"], merged.relays.enabled, "relays.enabled", error)) return false;
+        if (JsonArrayConst roles = relays["roles"]; !roles.isNull()) {
+            merged.relays.roles.clear();
+            for (JsonVariantConst v : roles) {
+                if (!v.is<const char*>()) {
+                    error = {"relays.roles", "each entry must be a string"};
+                    return false;
+                }
+                merged.relays.roles.emplace_back(v.as<const char*>());
+            }
+        }
     }
 
     if (JsonObjectConst ntp = doc["ntp"]; !ntp.isNull()) {

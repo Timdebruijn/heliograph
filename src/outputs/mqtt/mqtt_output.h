@@ -69,6 +69,11 @@ public:
     using RelayCommandFn = std::function<CommandResult(uint8_t index, bool energised)>;
     void setRelayCommandHandler(RelayCommandFn handler) { relayCommand_ = std::move(handler); }
 
+    /// Handles a DRM mode command from <prefix>/drm/set. Same task/locking rules as the
+    /// relay handler; returns false for a mode that is not an option.
+    using DrmCommandFn = std::function<bool(const std::string& mode)>;
+    void setDrmCommandHandler(DrmCommandFn handler) { drmCommand_ = std::move(handler); }
+
 private:
     void onConnected(const DeviceState& state, const BridgeInfo& bridge);
     void publishDiscovery(const DeviceState& state, const BridgeInfo& bridge);
@@ -106,6 +111,8 @@ private:
     bool everConnected_ = false;
 
     RelayCommandFn relayCommand_;
+    DrmCommandFn   drmCommand_;
+    std::string    lastDrmMode_;  ///< last acked mode; republished on change
     uint8_t        relayCount_ = 0;  ///< copied at begin() for topic parsing in the callback
     /// Set by onMessage (MQTT task) on EVERY received relay command, consumed by loop().
     /// Without it a refused or no-op command changes no state, nothing gets published, and

@@ -4,6 +4,10 @@
 
 #include <ArduinoJson.h>
 
+#include <cctype>
+
+#include "relays/drm.h"
+
 namespace heliograph::mqtt {
 namespace {
 
@@ -346,9 +350,20 @@ std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
         }
         JsonDocument doc;
         JsonObject   e = doc.to<JsonObject>();
-        e["unique_id"]     = bridge.bridgeId + "_" + slug;
-        e["object_id"]     = bridge.bridgeId + "_" + slug;
-        e["name"]          = "Relay " + std::to_string(i + 1);
+        e["unique_id"] = bridge.bridgeId + "_" + slug;
+        e["object_id"] = bridge.bridgeId + "_" + slug;
+        // The configured DRM role lands in the entity name, so the HA UI says what the
+        // contact MEANS ("Relay 1 (DRM0)") instead of only where it is.
+        std::string name = "Relay " + std::to_string(i + 1);
+        if (i < bridge.relayRoles.size() && bridge.relayRoles[i] != "none" &&
+            !bridge.relayRoles[i].empty()) {
+            std::string role = bridge.relayRoles[i];
+            for (auto& ch : role) {
+                ch = static_cast<char>(toupper(ch));
+            }
+            name += " (" + role + ")";
+        }
+        e["name"]          = name;
         e["command_topic"] = topics.relaySet(i);
         e["state_topic"]   = topics.relayState(i);
         e["payload_on"]    = "ON";
@@ -360,6 +375,43 @@ std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
         addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true);
 
         entity.uniqueId = e["unique_id"].as<std::string>();
+        if (serialise(doc, entity.payload)) {
+            entities.push_back(std::move(entity));
+        }
+    }
+
+    // DRM mode select: one entity for "which demand-response mode is active", derived
+    // entirely from the configured roles. Removal payload when disabled or role-less, so
+    // reconfiguring never leaves a stale select behind.
+    if (bridge.relayCount > 0) {
+        std::vector<std::string> roles = bridge.relayRoles;
+        roles.resize(bridge.relayCount, "none");
+        const auto options = drm::optionsFor(roles);
+
+        DiscoveryEntity entity;
+        entity.uniqueId    = bridge.bridgeId + "_drm_mode";
+        entity.configTopic = discoveryPrefix + "/select/" + bridge.bridgeId + "/drm_mode/config";
+        if (!bridge.relaysEnabled || options.empty()) {
+            entity.payload.clear();
+            entities.push_back(std::move(entity));
+            return entities;
+        }
+        JsonDocument doc;
+        JsonObject   e = doc.to<JsonObject>();
+        e["unique_id"]     = entity.uniqueId;
+        e["object_id"]     = entity.uniqueId;
+        e["name"]          = "DRM Mode";
+        e["command_topic"] = topics.drmSet();
+        e["state_topic"]   = topics.drmState();
+        JsonArray opts     = e["options"].to<JsonArray>();
+        for (const auto& o : options) {
+            opts.add(o);
+        }
+        // "custom" is reportable state (hand-toggled switch combinations) but never a
+        // command; HA requires the state to be one of the options, so it is listed.
+        opts.add(drm::kModeCustom);
+        e["availability_topic"] = topics.availability();
+        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true);
         if (serialise(doc, entity.payload)) {
             entities.push_back(std::move(entity));
         }

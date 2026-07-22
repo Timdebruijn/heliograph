@@ -38,6 +38,7 @@
 #include "outputs/modbus_tcp/modbus_tcp_server.h"
 #include "outputs/mqtt/mqtt_output.h"
 #include "outputs/rest/rest_api.h"
+#include "relays/drm.h"
 #include "relays/relay_controller.h"
 #include "state/state_store.h"
 #include "transport/rs485_transport.h"
@@ -50,7 +51,7 @@ namespace {
 // image identifiable over the API. Without it two different builds both reported "0.1.0" and a
 // flash could not be told from the previous one -- exactly what bit the post-flash check on
 // 2026-07-21. Bumped to 0.2.0 for the Fase 9 review batch.
-constexpr const char* kFirmwareVersion = "0.7.0 (" __DATE__ " " __TIME__ ")";
+constexpr const char* kFirmwareVersion = "0.8.0 (" __DATE__ " " __TIME__ ")";
 
 Rs485Transport     g_transport;
 DriverRegistry     g_registry;
@@ -136,16 +137,57 @@ BridgeInfo bridgeInfo() {
     info.ntpFromDhcp      = ntpSource.fromDhcp;
     info.otaImageState    = ota::imageStateName();
     if (g_relays.count() > 0) {
-        std::lock_guard<std::mutex> lock(g_relayMutex);
-        info.relayCount    = g_relays.count();
-        info.relaysEnabled = g_relays.enabled();
-        for (uint8_t i = 0; i < g_relays.count(); ++i) {
-            if (g_relays.energised(i)) {
-                info.relayMask |= static_cast<uint8_t>(1u << i);
+        {
+            std::lock_guard<std::mutex> lock(g_relayMutex);
+            info.relayCount    = g_relays.count();
+            info.relaysEnabled = g_relays.enabled();
+            for (uint8_t i = 0; i < g_relays.count(); ++i) {
+                if (g_relays.energised(i)) {
+                    info.relayMask |= static_cast<uint8_t>(1u << i);
+                }
             }
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_configMutex);
+            info.relayRoles = g_config.relays.roles;
         }
     }
     return info;
+}
+
+/// Applies a named DRM mode: the role's relays energised, everything else released.
+/// OFFs first (never throttled), then the ONs; if any ON is refused mid-pattern the
+/// whole pattern is released again -- a half-asserted mode is worse than none.
+CommandResult applyDrmMode(const std::string& mode) {
+    std::vector<std::string> roles;
+    {
+        std::lock_guard<std::mutex> lock(g_configMutex);
+        roles = g_config.relays.roles;
+    }
+    roles.resize(g_relays.count(), "none");
+    std::vector<bool> pattern;
+    if (!drm::patternFor(roles, mode, pattern)) {
+        return CommandResult::OutOfRange;
+    }
+    std::lock_guard<std::mutex> lock(g_relayMutex);
+    for (uint8_t i = 0; i < g_relays.count(); ++i) {
+        if (!pattern[i]) {
+            const CommandResult r = g_relays.set(i, false);
+            if (r != CommandResult::Ok) {
+                return r;  // gate closed: nothing moved yet (OFF is never rate-limited)
+            }
+        }
+    }
+    for (uint8_t i = 0; i < g_relays.count(); ++i) {
+        if (pattern[i]) {
+            const CommandResult r = g_relays.set(i, true);
+            if (r != CommandResult::Ok) {
+                g_relays.allOff();
+                return r;
+            }
+        }
+    }
+    return CommandResult::Ok;
 }
 
 std::string scanNetworksJson() {
@@ -262,6 +304,8 @@ void startOutputs() {
                 std::lock_guard<std::mutex> lock(g_relayMutex);
                 return g_relays.set(index, on);
             });
+            g_mqtt->setDrmCommandHandler(
+                [](const std::string& mode) { return applyDrmMode(mode) == CommandResult::Ok; });
         }
         g_mqtt->begin(bridgeInfo());
         // The host is not a secret; the password must never reach a log.
@@ -336,6 +380,7 @@ void startRestApi() {
             std::lock_guard<std::mutex> lock(g_relayMutex);
             return g_relays.set(index, on);
         };
+        ctx.setDrmMode = applyDrmMode;
     }
 
     g_rest = std::make_unique<rest::RestApi>(ctx);

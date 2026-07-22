@@ -632,26 +632,57 @@ static void test_relay_entities_follow_count_and_enabled() {
     TEST_ASSERT_TRUE(buildRelayEntities(bridge, topics, kDefaultDiscoveryPrefix).empty());
 
     // Relays present but the feature disabled: EMPTY retained payloads on the config
-    // topics, so previously announced switches disappear from Home Assistant.
+    // topics (switches AND the select), so previously announced entities disappear.
     bridge.relayCount    = 2;
     bridge.relaysEnabled = false;
     auto removed = buildRelayEntities(bridge, topics, kDefaultDiscoveryPrefix);
-    TEST_ASSERT_EQUAL_UINT32(2, removed.size());
+    TEST_ASSERT_EQUAL_UINT32(3, removed.size());
     TEST_ASSERT_TRUE(removed[0].payload.empty());
+    TEST_ASSERT_TRUE(removed[2].payload.empty());
     TEST_ASSERT_EQUAL_STRING("homeassistant/switch/heliograph-a1b2c3/relay_1/config",
                              removed[0].configTopic.c_str());
+    TEST_ASSERT_EQUAL_STRING("homeassistant/select/heliograph-a1b2c3/drm_mode/config",
+                             removed[2].configTopic.c_str());
 
-    // Enabled: real switch configs, ack-based (not optimistic), on the bridge device.
+    // Enabled without roles: real switches, plain names, and a select REMOVAL (no roles =
+    // no modes to offer).
     bridge.relaysEnabled = true;
     bridge.relayMask     = 0b01;
     auto entities = buildRelayEntities(bridge, topics, kDefaultDiscoveryPrefix);
-    TEST_ASSERT_EQUAL_UINT32(2, entities.size());
+    TEST_ASSERT_EQUAL_UINT32(3, entities.size());
     auto doc = parse(entities[0].payload);
     TEST_ASSERT_EQUAL_STRING("Relay 1", doc["name"]);
     TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/relay/0/set", doc["command_topic"]);
     TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/relay/0/state", doc["state_topic"]);
     TEST_ASSERT_FALSE(doc["optimistic"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("heliograph-a1b2c3", doc["device"]["identifiers"][0]);
+    TEST_ASSERT_TRUE(entities[2].payload.empty());
+}
+
+static void test_drm_select_and_role_names_follow_the_roles() {
+    auto bridge          = makeBridge();
+    bridge.relayCount    = 2;
+    bridge.relaysEnabled = true;
+    bridge.relayRoles    = {"drm0", "none"};
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+
+    const auto entities = buildRelayEntities(bridge, topics, kDefaultDiscoveryPrefix);
+    TEST_ASSERT_EQUAL_UINT32(3, entities.size());
+
+    // The role lands in the switch name; the role-less relay keeps the plain name.
+    auto sw = parse(entities[0].payload);
+    TEST_ASSERT_EQUAL_STRING("Relay 1 (DRM0)", sw["name"]);
+    TEST_ASSERT_EQUAL_STRING("Relay 2", parse(entities[1].payload)["name"]);
+
+    // The select offers normal + the configured role, plus "custom" as reportable state.
+    auto sel = parse(entities[2].payload);
+    TEST_ASSERT_EQUAL_STRING("DRM Mode", sel["name"]);
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/drm/set", sel["command_topic"]);
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/drm/state", sel["state_topic"]);
+    TEST_ASSERT_EQUAL_UINT32(3, sel["options"].size());
+    TEST_ASSERT_EQUAL_STRING("normal", sel["options"][0]);
+    TEST_ASSERT_EQUAL_STRING("drm0", sel["options"][1]);
+    TEST_ASSERT_EQUAL_STRING("custom", sel["options"][2]);
 }
 
 static void test_sanitize_id() {
@@ -808,6 +839,7 @@ int main(int, char**) {
     RUN_TEST(test_the_mock_hybrid_gets_battery_and_phase_entities_for_free);
     RUN_TEST(test_bridge_diagnostic_entities);
     RUN_TEST(test_relay_entities_follow_count_and_enabled);
+    RUN_TEST(test_drm_select_and_role_names_follow_the_roles);
     RUN_TEST(test_sanitize_id);
     RUN_TEST(test_first_state_is_always_published);
     RUN_TEST(test_an_unchanged_state_is_not_republished);
