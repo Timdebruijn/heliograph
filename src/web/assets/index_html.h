@@ -510,6 +510,15 @@ async function renderConfig(){
   const c=await (await fetch('/api/v1/config')).json();
   cfgBefore=c;
   if(!cfgDrivers)cfgDrivers=await (await fetch('/api/v1/drivers')).json();
+  // The Relays card keys off the board's relay count, which normally arrives with the
+  // status refresh -- but this form renders once per session, and a fast click on the
+  // Settings tab can beat the first status response. Establish the count here rather
+  // than caching a card-less form for the whole session.
+  if(window.g_relayCount===undefined){
+    try{const s=await(await fetch('/api/v1/status')).json();
+      window.g_relayCount=(s.bridge.relays||[]).length}
+    catch(e){window.g_relayCount=0}
+  }
 
   // autocomplete=off on every plain settings field: a text input directly above a password
   // input (MQTT username + password) otherwise reads as a login form to password managers,

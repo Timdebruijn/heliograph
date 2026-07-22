@@ -286,14 +286,16 @@ void startRestApi() {
             std::lock_guard<std::mutex> lock(g_configMutex);
             g_config = c;
         }
-        // The relay gates follow the config immediately -- no restart. Disabling the
-        // feature also releases every relay: "off in the settings" must mean the contacts
-        // are open, not frozen in their last state.
+        // The relay gates follow the config immediately -- no restart. Closing EITHER
+        // gate also releases every relay: with the gate closed, no command -- not even
+        // OFF -- would get through, so an energised contact would otherwise stay frozen
+        // with DRM asserted and no way to release it. The failsafe direction (contacts
+        // open, inverter runs) is the only state a closed gate may leave behind.
         {
             std::lock_guard<std::mutex> lock(g_relayMutex);
             g_relays.setReadOnlyMode(c.security.readOnlyMode);
             g_relays.setEnabled(c.relays.enabled);
-            if (!c.relays.enabled) {
+            if (!c.relays.enabled || c.security.readOnlyMode) {
                 g_relays.allOff();
             }
         }
