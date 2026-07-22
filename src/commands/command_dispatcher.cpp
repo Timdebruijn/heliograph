@@ -21,15 +21,17 @@ CommandDispatcher::CommandDispatcher(ClockFn clock, RateLimitPolicy rateLimit)
     : clock_(std::move(clock)), rateLimit_(rateLimit) {}
 
 bool CommandDispatcher::allowedByRateLimit(uint64_t nowMs) {
-    if (lastAcceptedMs_ != 0 && nowMs - lastAcceptedMs_ >= rateLimit_.minIntervalMs) {
+    if (everAccepted_ && nowMs - lastAcceptedMs_ >= rateLimit_.minIntervalMs) {
         burstUsed_ = 0;  // quiet long enough, the allowance refills
     }
     if (burstUsed_ < rateLimit_.burst) {
         ++burstUsed_;
+        everAccepted_   = true;
         lastAcceptedMs_ = nowMs;
         return true;
     }
-    if (lastAcceptedMs_ == 0 || nowMs - lastAcceptedMs_ >= rateLimit_.minIntervalMs) {
+    if (!everAccepted_ || nowMs - lastAcceptedMs_ >= rateLimit_.minIntervalMs) {
+        everAccepted_   = true;
         lastAcceptedMs_ = nowMs;
         return true;
     }
