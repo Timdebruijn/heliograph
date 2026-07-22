@@ -34,7 +34,7 @@ jobs:
       - name: Check for outdated packages
         id: outdated
         run: |
-          pio pkg install -e waveshare-eversolar -e native >/dev/null
+          pio pkg install -e waveshare-rs485-can -e native >/dev/null
           OUT=$(pio pkg outdated 2>&1 | tee /dev/stderr)
           {
             echo "report<<EOF"
