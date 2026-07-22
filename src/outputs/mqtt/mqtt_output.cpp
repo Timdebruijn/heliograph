@@ -111,9 +111,13 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
             } else {
                 return;  // unknown payload: ignore rather than guess
             }
-            // Outcome is not published from here; loop() acks the real state on the next
-            // tick, so a refused command snaps the HA switch back.
+            // Outcome is not published from here (wrong task); the flag makes loop() ack
+            // the real state on its next tick REGARDLESS of whether the state changed --
+            // a refused or no-op command otherwise changes no mask bit, nothing would be
+            // published, and the HA switch would hang in "switching" instead of snapping
+            // back.
             relayCommand_(static_cast<uint8_t>(idx), on);
+            relayAckRequested_ = true;
         });
     }
 
@@ -233,7 +237,8 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
             discoveryPublished_ = false;
             relayStateForced_   = true;
         }
-        if (relayStateForced_ || bridge.relayMask != lastRelayMask_) {
+        if (relayStateForced_ || relayAckRequested_.exchange(false) ||
+            bridge.relayMask != lastRelayMask_) {
             for (uint8_t i = 0; i < bridge.relayCount; ++i) {
                 const bool on = (bridge.relayMask >> i) & 1;
                 g_client.publish(topics_.relayState(i).c_str(), 1, true,

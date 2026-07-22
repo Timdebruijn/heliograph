@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <string>
 
+#include <atomic>
 #include <functional>
 
 #include "device/bridge_info.h"
@@ -106,6 +107,11 @@ private:
 
     RelayCommandFn relayCommand_;
     uint8_t        relayCount_ = 0;  ///< copied at begin() for topic parsing in the callback
+    /// Set by onMessage (MQTT task) on EVERY received relay command, consumed by loop().
+    /// Without it a refused or no-op command changes no state, nothing gets published, and
+    /// the Home Assistant switch stays stuck "switching" instead of snapping back
+    /// (Copilot review on PR #2). Atomic: two tasks touch it.
+    std::atomic<bool> relayAckRequested_{false};
     /// Relay ack-state tracking: force a publish on connect and on every mask/enabled
     /// change. `lastRelaysEnabled_` also triggers a discovery re-announce, because
     /// enabling/disabling adds or removes the switch entities themselves.
