@@ -2,9 +2,14 @@
 # Same layout philosophy as the 16 MB table: a failed OTA leaves the previous image
 # intact and bootable. App slots sized to the current image (~1.4 MB) with headroom.
 # Name,     Type, SubType,  Offset,   Size,     Flags
+#
+# 'storage' is reserved space, mounted by nothing today. Subtype spiffs (0x82) is what
+# FS tooling keys on; the NAME must not be 'littlefs', which esptool now knows as a
+# subtype keyword and flags as a name/subtype mismatch on every build. Any future
+# mount passes the partition label explicitly anyway.
 nvs,        data, nvs,      0x9000,   0x5000,
 otadata,    data, ota,      0xE000,   0x2000,
 app0,       app,  ota_0,    0x10000,  0x330000,
 app1,       app,  ota_1,    0x340000, 0x330000,
-littlefs,   data, spiffs,   0x670000, 0x180000,
+storage,    data, spiffs,   0x670000, 0x180000,
 coredump,   data, coredump, 0x7F0000, 0x10000,
