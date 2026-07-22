@@ -27,7 +27,7 @@ Physical  → Transport → Driver → State (DeviceContext/DeviceState) → Out
 |---|---|---|
 | Transport | `src/transport/` | Physical only |
 | Driver | `src/drivers/<driver>/` | Transport, protocols, device model |
-| State | `src/state/` | Device model only |
+| State | `src/device/`, `src/state/` | Device model only |
 | Outputs | `src/outputs/` | State snapshots only (read-only) |
 | Protocols | `src/protocols/` | Nothing above Transport |
 
@@ -82,6 +82,7 @@ CI runs the same checks plus both firmware builds.
 | `src/drivers/driver_registry.cpp` | Registers every driver |
 | `src/drivers/discovery_engine.cpp` | Auto-detects the connected inverter |
 | `src/protocols/` | Protocol parsers (PMU AA55, Modbus RTU) |
+| `src/device/` | `DeviceContext`, `DeviceState`, and measurement models |
 | `src/state/` | Thread-safe state store; immutable snapshots |
 | `src/outputs/` | MQTT, Modbus TCP, REST, Prometheus adapters |
 | `src/transport/` | RS485 / UART abstraction |
