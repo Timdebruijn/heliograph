@@ -66,6 +66,16 @@ bool RestApi::collectBody(AsyncWebServerRequest* request, const uint8_t* data, s
         bodyOwner_ = request;
         bodyBuffer_.clear();
         bodyBuffer_.reserve(total);
+        // A client that vanishes mid-body (WiFi drop on the setup AP is the realistic case)
+        // never reaches the request handler, so nothing would release the buffer: every later
+        // body-carrying request then answered 409 "busy" until a reboot. Same lesson the OTA
+        // route already learned. After a normal completion the handler has already released
+        // and the owner check makes this a no-op.
+        request->onDisconnect([this, request] {
+            if (bodyOwner_ == request) {
+                releaseBody();
+            }
+        });
     }
     if (bodyOwner_ != request) {
         return false;
