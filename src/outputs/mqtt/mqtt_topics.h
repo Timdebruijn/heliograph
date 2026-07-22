@@ -34,6 +34,10 @@ public:
     }
     std::string relaySetWildcard() const { return prefix_ + "/relay/+/set"; }
 
+    /// DRM mode select (relay boards with configured roles). Mode name in, mode name out.
+    std::string drmSet() const { return prefix_ + "/drm/set"; }
+    std::string drmState() const { return prefix_ + "/drm/state"; }
+
     const std::string& prefix() const { return prefix_; }
 
 private:

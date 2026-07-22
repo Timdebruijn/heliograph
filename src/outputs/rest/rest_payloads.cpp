@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 
 #include "outputs/json_util.h"
+#include "relays/drm.h"
 #include "outputs/mqtt/mqtt_payloads.h"  // capabilityName, shared vocabulary
 
 namespace heliograph::rest {
@@ -72,6 +73,12 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
         JsonArray relays    = b["relays"].to<JsonArray>();
         for (uint8_t i = 0; i < bridge.relayCount; ++i) {
             relays.add(((bridge.relayMask >> i) & 1) != 0);
+        }
+        // Derived DRM mode, only when roles make one meaningful.
+        std::vector<std::string> roles = bridge.relayRoles;
+        roles.resize(bridge.relayCount, "none");
+        if (!drm::optionsFor(roles).empty()) {
+            b["drm_mode"] = drm::modeFrom(roles, bridge.relayMask);
         }
     }
 

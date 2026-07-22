@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace heliograph {
 
@@ -60,6 +61,9 @@ struct BridgeInfo {
     uint8_t relayCount    = 0;
     uint8_t relayMask     = 0;
     bool    relaysEnabled = false;
+    /// Per-relay DRM role from the configuration (index-aligned; may be shorter than
+    /// relayCount, missing = "none"). Drives switch names and the DRM mode select.
+    std::vector<std::string> relayRoles;
 };
 
 }  // namespace heliograph

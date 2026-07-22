@@ -613,10 +613,15 @@ async function renderConfig(){
   </div>
   ${window.g_relayCount>0?`<div class="card"><b>Relays</b> <span class="tag" style="font-weight:400">applied immediately</span>
     ${chk('c_rle','Enabled',(c.relays||{}).enabled)}
+    ${Array.from({length:window.g_relayCount},(_, i)=>`
+      <label for="c_rlr${i}">Relay ${i+1} role</label>
+      <select id="c_rlr${i}" data-role="${i}">${['none','drm0','drm1','drm2','drm3','drm4','drm5','drm6','drm7','drm8'].map(r=>
+        `<option ${r===(((c.relays||{}).roles||[])[i]||'none')?'selected':''}>${r}</option>`).join('')}</select>`).join('')}
     <div class="dim" style="font-size:12px;margin-top:8px">DRM curtailment contacts. Two
     locks must open before a relay can move: this switch AND read-only mode being off.
-    Disabling releases every relay. Control lives in Home Assistant (switches appear via
-    discovery) or POST /api/v1/relays/&lt;n&gt;/set.</div></div>`:''}
+    Disabling releases every relay. Roles name the switches in Home Assistant and build
+    the DRM Mode select; see docs/drm.md for the wiring rules (failsafe: a dead bridge
+    must leave the inverter running).</div></div>`:''}
   <div class="card"><b>Security</b> <span class="tag" style="font-weight:400">applied immediately</span>${txt('c_au','Admin username',c.security.admin_username)}
     ${pw('c_ap','Admin password',c.security.password_set)}</div>
   <div class="card"><b>Logging</b> <span class="tag" style="font-weight:400">applied immediately</span>
@@ -651,7 +656,8 @@ async function renderConfig(){
 async function saveConfig(){
   const v=id=>$(id).value, n=id=>Number($(id).value), b=id=>$(id).checked;
   const body={bridge_name:v('c_name'),
-    ...(window.g_relayCount>0?{relays:{enabled:b('c_rle')}}:{}),
+    ...(window.g_relayCount>0?{relays:{enabled:b('c_rle'),
+      roles:Array.from({length:window.g_relayCount},(_,i)=>v('c_rlr'+i))}}:{}),
     wifi:{ssid:v('c_ssid'),hostname:v('c_host')},
     mqtt:{enabled:b('c_mqe'),host:v('c_mqh'),port:n('c_mqp'),username:v('c_mqu'),
           base_topic:v('c_mqt'),discovery_enabled:b('c_mqd')},
@@ -679,6 +685,14 @@ async function saveConfig(){
   // Passwords are exempt: they are only in the body when typed, and GET never returns them.
   const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   if(same(body.bridge_name,cfgBefore.bridge_name))delete body.bridge_name;
+  // Roles render as 'none' for entries the stored config never had -- comparing the
+  // rendered defaults against the shorter stored array would mark every save as a roles
+  // change (same class as the driver-options default bug, 2026-07-22). Compare against
+  // the stored array padded with the same defaults.
+  if(body.relays){
+    const before=Array.from({length:window.g_relayCount},(_,i)=>(((cfgBefore.relays||{}).roles||[])[i]||'none'));
+    if(same(body.relays.roles,before))delete body.relays.roles;
+  }
   // Driver options travel only when the driver card was touched; an untouched card must not
   // re-assert its rendered options either. Compare per rendered key, not whole objects: the
   // stored map may carry stale keys from a previously active driver (the pre-fix stacking bug),

@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "drivers/driver_descriptor.h"
 
@@ -96,6 +97,11 @@ struct RelaySettings {
     /// this entirely. Note the double gate: security.readOnlyMode must ALSO be off before
     /// a relay moves -- enabling relays alone is not enough, by design.
     bool enabled = false;
+    /// Per-relay DRM role ("none", or "drm0".."drm8"), index-aligned with the board's
+    /// relays. Entries beyond the board's relay count are ignored; missing entries mean
+    /// "none". Roles drive the Home Assistant switch names and the DRM mode select --
+    /// see src/relays/drm.h.
+    std::vector<std::string> roles;
 };
 
 struct SecuritySettings {

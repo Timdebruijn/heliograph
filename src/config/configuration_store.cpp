@@ -100,6 +100,10 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out) {
 
     doc["polling"]["interval_seconds"] = config.polling.intervalSeconds;
     doc["relays"]["enabled"]           = config.relays.enabled;
+    JsonArray storedRoles              = doc["relays"]["roles"].to<JsonArray>();
+    for (const auto& role : config.relays.roles) {
+        storedRoles.add(role);
+    }
 
     JsonObject driver     = doc["driver"].to<JsonObject>();
     driver["id"]          = config.driver.id;
@@ -227,6 +231,11 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
     }
     if (JsonObjectConst relays = doc["relays"]; !relays.isNull()) {
         if (relays["enabled"].is<bool>()) parsed.relays.enabled = relays["enabled"].as<bool>();
+        if (JsonArrayConst roles = relays["roles"]; !roles.isNull()) {
+            for (JsonVariantConst v : roles) {
+                if (v.is<const char*>()) parsed.relays.roles.emplace_back(v.as<const char*>());
+            }
+        }
     }
     if (JsonObjectConst driver = doc["driver"]; !driver.isNull()) {
         if (driver["id"].is<const char*>())    parsed.driver.id = driver["id"].as<const char*>();

@@ -488,6 +488,54 @@ bool RestApi::begin() {
         });
     }
 
+    // DRM mode: assert one named demand-response mode, release everything else. The mode
+    // vocabulary comes from the configured relay roles (src/relays/drm.h).
+    g_server->on("/api/v1/drm/set", HTTP_POST,
+                 [this, authorised, rateLimited](AsyncWebServerRequest* request) {
+        if (!authorised(request) || rateLimited(request)) {
+            return;
+        }
+        if (!context_.setDrmMode) {
+            sendError(request, {404, "no_relays", "this board has no relays"});
+            return;
+        }
+        if (!request->hasParam("mode")) {
+            sendError(request, {400, "missing_parameter", "expected ?mode=<name>"});
+            return;
+        }
+        // Same bound as the MQTT path: mode names are short ("normal", "drm0".."drm8"),
+        // so anything empty or oversized is rejected before it is copied around.
+        const String& raw = request->getParam("mode")->value();
+        if (raw.length() == 0 || raw.length() > 16) {
+            sendError(request, {400, "invalid_mode", "mode names are short strings"});
+            return;
+        }
+        const std::string mode = raw.c_str();
+        switch (context_.setDrmMode(mode)) {
+            case CommandResult::Ok:
+                request->send(200, kJson, "{\"status\":\"ok\"}");
+                return;
+            case CommandResult::ReadOnlyMode:
+                sendError(request, {403, "read_only_mode",
+                                    "security.read_only_mode is on; relays cannot move"});
+                return;
+            case CommandResult::Rejected:
+                sendError(request, {403, "relays_disabled",
+                                    "relays.enabled is off in the configuration"});
+                return;
+            case CommandResult::OutOfRange:
+                sendError(request, {400, "invalid_mode",
+                                    "not a mode for the configured relay roles"});
+                return;
+            case CommandResult::RateLimited:
+                sendError(request, {429, "rate_limited", "too many relay commands"});
+                return;
+            default:
+                sendError(request, {500, "relay_error", "drm command failed"});
+                return;
+        }
+    });
+
     g_server->on("/api/v1/actions/discover", HTTP_POST,
                  [this, authorised, rateLimited](AsyncWebServerRequest* request) {
         if (!authorised(request) || rateLimited(request)) {

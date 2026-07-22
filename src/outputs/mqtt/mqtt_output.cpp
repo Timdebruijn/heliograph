@@ -7,6 +7,7 @@
 
 #include "home_assistant_discovery.h"
 #include "mqtt_payloads.h"
+#include "relays/drm.h"
 
 #include <cstring>
 
@@ -80,12 +81,22 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
         g_client.onMessage([this](const espMqttClientTypes::MessageProperties&,
                                   const char* topic, const uint8_t* payload, size_t len,
                                   size_t index, size_t total) {
-            if (relayCommand_ == nullptr || topic == nullptr || index != 0 || len != total) {
-                return;  // no handler, or a fragmented message (never valid for ON/OFF)
+            if (topic == nullptr || index != 0 || len != total) {
+                return;  // fragmented messages are never valid for these short payloads
             }
             const std::string t(topic);
+            if (t == topics_.drmSet()) {
+                if (drmCommand_ == nullptr || len == 0 || len > 16) {
+                    return;  // mode names are short; anything longer is not one
+                }
+                std::string mode(reinterpret_cast<const char*>(payload), len);
+                drmCommand_(mode);
+                relayAckRequested_ = true;  // ack states + mode, accepted or not
+                return;
+            }
             const std::string prefix = topics_.prefix() + "/relay/";
-            if (t.rfind(prefix, 0) != 0 || t.size() <= prefix.size()) {
+            if (relayCommand_ == nullptr || t.rfind(prefix, 0) != 0 ||
+                t.size() <= prefix.size()) {
                 return;
             }
             const size_t slash = t.find('/', prefix.size());
@@ -165,6 +176,7 @@ void MqttOutput::onConnected(const DeviceState& state, const BridgeInfo& bridge)
     // and get no command topic -- that follows from the capabilities, not a decision here.
     if (relayCount_ > 0) {
         g_client.subscribe(topics_.relaySetWildcard().c_str(), 1);
+        g_client.subscribe(topics_.drmSet().c_str(), 1);
         relayStateForced_ = true;  // fresh session: ack the current states once
     }
 }
@@ -231,9 +243,16 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
 
     if (bridge.relayCount > 0) {
         // Enabling/disabling the feature adds or removes the switch entities themselves,
-        // so it forces a discovery re-announce; a mask change just acks the states.
-        if (bridge.relaysEnabled != lastRelaysEnabled_) {
+        // and a ROLE change renames switches, rebuilds the select options and changes the
+        // derived mode -- both force a discovery re-announce; a mask change just acks.
+        std::string rolesSig;
+        for (const auto& role : bridge.relayRoles) {
+            rolesSig += role;
+            rolesSig += '\n';
+        }
+        if (bridge.relaysEnabled != lastRelaysEnabled_ || rolesSig != lastRelayRolesSig_) {
             lastRelaysEnabled_  = bridge.relaysEnabled;
+            lastRelayRolesSig_  = rolesSig;
             discoveryPublished_ = false;
             relayStateForced_   = true;
         }
@@ -243,6 +262,14 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
                 const bool on = (bridge.relayMask >> i) & 1;
                 g_client.publish(topics_.relayState(i).c_str(), 1, true,
                                  on ? "ON" : "OFF");
+            }
+            // The DRM mode is derived state over the same mask; ack it in the same breath
+            // so the HA select and the switches can never disagree for long.
+            std::vector<std::string> roles = bridge.relayRoles;
+            roles.resize(bridge.relayCount, "none");
+            if (!drm::optionsFor(roles).empty()) {
+                const std::string mode = drm::modeFrom(roles, bridge.relayMask);
+                g_client.publish(topics_.drmState().c_str(), 1, true, mode.c_str());
             }
             lastRelayMask_    = bridge.relayMask;
             relayStateForced_ = false;
