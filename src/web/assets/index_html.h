@@ -685,6 +685,14 @@ async function saveConfig(){
   // Passwords are exempt: they are only in the body when typed, and GET never returns them.
   const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   if(same(body.bridge_name,cfgBefore.bridge_name))delete body.bridge_name;
+  // Roles render as 'none' for entries the stored config never had -- comparing the
+  // rendered defaults against the shorter stored array would mark every save as a roles
+  // change (same class as the driver-options default bug, 2026-07-22). Compare against
+  // the stored array padded with the same defaults.
+  if(body.relays){
+    const before=Array.from({length:window.g_relayCount},(_,i)=>(((cfgBefore.relays||{}).roles||[])[i]||'none'));
+    if(same(body.relays.roles,before))delete body.relays.roles;
+  }
   // Driver options travel only when the driver card was touched; an untouched card must not
   // re-assert its rendered options either. Compare per rendered key, not whole objects: the
   // stored map may carry stale keys from a previously active driver (the pre-fix stacking bug),

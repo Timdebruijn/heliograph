@@ -81,8 +81,8 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
         g_client.onMessage([this](const espMqttClientTypes::MessageProperties&,
                                   const char* topic, const uint8_t* payload, size_t len,
                                   size_t index, size_t total) {
-            if (relayCommand_ == nullptr || topic == nullptr || index != 0 || len != total) {
-                return;  // no handler, or a fragmented message (never valid for ON/OFF)
+            if (topic == nullptr || index != 0 || len != total) {
+                return;  // fragmented messages are never valid for these short payloads
             }
             const std::string t(topic);
             if (t == topics_.drmSet()) {
@@ -95,7 +95,8 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
                 return;
             }
             const std::string prefix = topics_.prefix() + "/relay/";
-            if (t.rfind(prefix, 0) != 0 || t.size() <= prefix.size()) {
+            if (relayCommand_ == nullptr || t.rfind(prefix, 0) != 0 ||
+                t.size() <= prefix.size()) {
                 return;
             }
             const size_t slash = t.find('/', prefix.size());
