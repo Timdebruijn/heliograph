@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: MIT
+#
+# Growatt SPH (3-6 kW) hybrid — Modbus RTU register profile.
+#
+# STATUS: transcribed from community sources (8none1/growatt_sph_nodered, hardware-tested
+# Node-RED for SPH), NOT yet confirmed against a real SPH6000 by this project. Scaling and
+# the PV/AC register numbers are the least certain — community maps disagree. That is
+# exactly why the driver TRACE-dumps the raw register blocks: the first hardware session
+# reads them against the inverter display and corrects this one file.
+#
+# Deliberately conservative: only rows with at least medium confidence are published as
+# measurements. Anything shakier is left to the raw-block TRACE dump, so a wrong guess
+# never surfaces as an authoritative-looking value (the "never invent a reading" rule).
+#
+# Sources and the open register-generation question: docs/growatt-sph-protocol.md.
+
+[profile]
+driver = "growatt_modbus"
+id = "sph"
+display_name = "Growatt SPH (3-6 kW)"
+default = true      # profile used when the `profile` driver option is not set
+phases = 1
+mppts = 2
+battery = true
+
+# Read blocks. Three, to settle the open question the moment the hardware is on the bus:
+# which register generation this SPH6000 speaks. The base map (0-124) is common to all; the
+# 1000-series is the older SPH "second group" (this is where the registers below point); the
+# 3000-series is the newer "TL-X/TL-XH" generation, where the official V1.39 protocol puts
+# battery SOC (3002), power (3005/6) and control (3036-3049). Whichever the device populates
+# tells us the generation. A block the device rejects is skipped (poll() handles it), so
+# probing a range that does not exist on this firmware is harmless — it just does not appear
+# in the raw dump. The whole base block is read, not just mapped registers, so the dump
+# shows every register for correcting the uncertain rows against the inverter display.
+
+[[block]]
+space = "input"
+start = 0
+count = 125
+
+[[block]]
+space = "input"
+start = 1000
+count = 45
+
+[[block]]
+space = "input"
+start = 3000
+count = 32
+
+# --- battery (the point of an SPH) ---
+
+[[register]]                    # high confidence
+measurement = "battery.soc"
+display_name = "Battery SoC"
+space = "input"
+address = 1014
+type = "u16"
+scale = 1.0
+unit = "%"
+
+[[register]]                    # medium confidence
+measurement = "battery.voltage"
+display_name = "Battery Voltage"
+space = "input"
+address = 1013
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # medium confidence
+measurement = "battery.temperature"
+display_name = "Battery Temperature"
+space = "input"
+address = 1040
+type = "s16"
+scale = 0.1
+unit = "°C"
+
+# Battery power: labelled "discharge power" in the source. Sign convention to confirm —
+# our canonical convention is positive = charging, so this may need negating once seen.
+[[register]]                    # medium confidence, sign TBD
+measurement = "battery.power"
+display_name = "Battery Power"
+space = "input"
+address = 1009
+type = "s32"
+scale = 0.1
+unit = "W"
+
+# --- PV / AC ---
+
+[[register]]                    # medium confidence
+measurement = "dc.power.total"
+display_name = "PV Power"
+space = "input"
+address = 116
+type = "u32"
+scale = 0.1
+unit = "W"
+
+[[register]]                    # low confidence — meaning/sign unclear, first to verify
+measurement = "ac.power.total"
+display_name = "AC Power"
+space = "input"
+address = 40
+type = "s32"
+scale = 0.1
+unit = "W"

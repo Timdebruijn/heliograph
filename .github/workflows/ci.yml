@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: MIT
+#
+# The same verification ritual that runs locally before every release:
+# native tests, the layering invariants, embedded-JS syntax, profile schema
+# validation, and both firmware builds. A PR that adds a device profile gets
+# its TOML validated here without a maintainer lifting a finger.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Native tests + checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Validate device profiles
+        run: python3 tools/gen_profiles.py --check
+
+      - name: Layering invariants
+        run: bash tools/check_layering.sh
+
+      - name: Embedded JS syntax
+        run: python3 tools/check_web_js.py
+
+      - name: Native test suite
+        run: pio test -e native
+
+  firmware:
+    name: Firmware builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-fw-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build waveshare-eversolar
+        run: pio run -e waveshare-eversolar
+
+      - name: Build mock
+        run: pio run -e mock
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            .pio/build/waveshare-eversolar/firmware.bin
+            .pio/build/waveshare-eversolar/firmware.factory.bin
+          retention-days: 14

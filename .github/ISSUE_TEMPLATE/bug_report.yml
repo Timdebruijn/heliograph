@@ -1,0 +1,39 @@
+name: Bug report
+description: Something on the bridge does not work as documented.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: Shown in the top-right of the web interface, or in GET /api/v1/status.
+      placeholder: "0.5.0"
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Board and inverter
+      placeholder: "Waveshare ESP32-S3-Relay-1CH + EverSolar TL3000"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics output
+      description: >
+        Paste the JSON from http://<bridge>/api/v1/diagnostics. It contains no
+        credentials. If the problem involves polling or the RS485 bus, also paste
+        recent lines from the Logs tab (set the log level to debug or trace first).
+      render: json
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Network setup, what changed recently, does it survive a reboot, ...

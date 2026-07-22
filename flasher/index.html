@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: MIT -->
+<!--
+  Browser flasher, deployed to GitHub Pages by the release workflow together with
+  manifest.json and the latest factory image. ESP Web Tools does the actual work
+  over WebSerial (Chrome/Edge). The factory image is a full-flash merged image,
+  which also means: flashing here ERASES a previously provisioned configuration.
+  That is said on the page rather than discovered afterwards.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Heliograph — web installer</title>
+<style>
+:root{--bg:#0f1115;--card:#181b22;--fg:#e6e8ec;--dim:#8b93a3;--line:#262b36;--accent:#2f81f7}
+@media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d23;--dim:#5b6472;--line:#e3e6ea}}
+*{box-sizing:border-box}
+body{margin:0;padding:24px;font:15px/1.55 system-ui,-apple-system,sans-serif;
+background:var(--bg);color:var(--fg);display:flex;justify-content:center}
+.w{max-width:520px;width:100%}
+h1{font-size:20px;margin:0 0 4px}
+p.sub{color:var(--dim);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+ol{margin:8px 0 0;padding-left:20px;color:var(--dim)}
+li{margin-bottom:6px}
+esp-web-install-button{--esp-tools-button-color:var(--accent);--esp-tools-button-text-color:#fff}
+a{color:var(--accent)}
+.hint{font-size:13px;color:var(--dim);margin-top:10px}
+</style>
+</head>
+<body><div class="w">
+<h1>Heliograph — web installer</h1>
+<p class="sub">Flash the latest firmware straight from your browser. No tools to install.</p>
+
+<div class="card">
+  <b>Before you start</b>
+  <ol>
+    <li>Use Chrome or Edge on a computer (WebSerial does not work in Firefox/Safari, or on phones).</li>
+    <li>Connect the ESP32-S3 board to this computer over USB.</li>
+    <li>Click Connect below and pick the serial port that appears.</li>
+  </ol>
+</div>
+
+<div class="card">
+  <b>Install</b>
+  <p class="hint">This writes a full factory image: a board that was already set up will lose
+  its settings (WiFi, passwords) and start over at the setup portal. Updating an already
+  configured bridge is easier over the air: open its web page and use Settings &rarr;
+  Firmware update with the <code>heliograph-*.bin</code> from the
+  <a href="__REPO_URL__/releases/latest">latest release</a>.</p>
+  <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+  <p class="hint">After flashing: the device starts an access point named
+  <b>Heliograph-Setup-XXXX</b>. Join it and the setup page opens by itself.</p>
+</div>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</div></body></html>

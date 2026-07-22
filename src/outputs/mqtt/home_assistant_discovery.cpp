@@ -1,0 +1,328 @@
+// SPDX-License-Identifier: MIT
+
+#include "home_assistant_discovery.h"
+
+#include <ArduinoJson.h>
+
+namespace heliograph::mqtt {
+namespace {
+
+/// Used when a driver reports neither a model nor a manufacturer.
+const std::string kUnknownInverterName = "Inverter";
+
+/// MeasurementType -> Home Assistant device_class. The entire brand-agnostic mapping.
+const char* deviceClassFor(MeasurementType type) {
+    switch (type) {
+        case MeasurementType::Power:          return "power";
+        case MeasurementType::Voltage:        return "voltage";
+        case MeasurementType::Current:        return "current";
+        case MeasurementType::Frequency:      return "frequency";
+        case MeasurementType::Temperature:    return "temperature";
+        case MeasurementType::Energy:         return "energy";
+        case MeasurementType::Duration:       return "duration";
+        case MeasurementType::SignalStrength: return "signal_strength";
+        case MeasurementType::Ratio:          return "battery";  // SoC-style percentages
+        case MeasurementType::Generic:        break;
+    }
+    return nullptr;
+}
+
+/// Cumulative counters get total_increasing so Home Assistant's energy dashboard treats them
+/// as meters; everything else is an instantaneous measurement.
+const char* stateClassFor(MeasurementType type) {
+    switch (type) {
+        case MeasurementType::Energy:
+        case MeasurementType::Duration:
+            return "total_increasing";
+        case MeasurementType::Power:
+        case MeasurementType::Voltage:
+        case MeasurementType::Current:
+        case MeasurementType::Frequency:
+        case MeasurementType::Temperature:
+        case MeasurementType::Ratio:
+        case MeasurementType::SignalStrength:
+            return "measurement";
+        case MeasurementType::Generic:
+            break;
+    }
+    return nullptr;
+}
+
+/// Display precision, in decimals, or -1 for "let Home Assistant decide".
+///
+/// Home Assistant assigns a per-device-class default to most sensors -- power 0, voltage 0,
+/// current 2, energy 2, temperature 1 -- but NOT to the battery device_class, so a raw
+/// 74.54152672 % went straight to the dashboard while every other tile was already rounded.
+/// This closes that gap and, by stating the intent for every type, stops the appearance from
+/// depending on which Home Assistant version happens to be running.
+///
+/// This is display only. Home Assistant keeps the full-resolution value for history and the
+/// energy dashboard; nothing here rounds what the bridge actually measured.
+int displayPrecisionFor(MeasurementType type) {
+    switch (type) {
+        case MeasurementType::Power:          return 0;
+        case MeasurementType::Frequency:      return 0;
+        case MeasurementType::Voltage:        return 0;
+        case MeasurementType::SignalStrength: return 0;
+        case MeasurementType::Ratio:          return 0;  // battery SoC and the like: whole %
+        case MeasurementType::Current:        return 2;
+        case MeasurementType::Energy:         return 2;
+        case MeasurementType::Temperature:    return 1;
+        case MeasurementType::Duration:       return 0;
+        case MeasurementType::Generic:        break;
+    }
+    return -1;
+}
+
+/// Turns "ac.phase_l1.voltage" into "AC Phase L1 Voltage" when the driver gave no name.
+std::string humanise(const std::string& id) {
+    std::string out;
+    bool        upper = true;
+    for (const char c : id) {
+        if (c == '.' || c == '_') {
+            out.push_back(' ');
+            upper = true;
+            continue;
+        }
+        out.push_back(upper ? static_cast<char>(::toupper(c)) : c);
+        upper = false;
+    }
+    return out;
+}
+
+void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIdentity& identity,
+                    bool isBridgeEntity) {
+    JsonObject device = entity["device"].to<JsonObject>();
+    if (isBridgeEntity) {
+        device["identifiers"].to<JsonArray>().add(bridge.bridgeId);
+        device["name"]         = bridge.name;
+        device["manufacturer"] = "Heliograph open-source project";
+        device["model"]        = bridge.boardName;
+        device["sw_version"]   = bridge.firmwareVersion;
+        return;
+    }
+
+    // The inverter is modelled as its own device behind the bridge, so that a second inverter
+    // later simply appears alongside it rather than merging into one confused device.
+    device["identifiers"].to<JsonArray>().add(bridge.bridgeId + "_inverter");
+    // Model, not manufacturer: the manufacturer is already its own field, and repeating it here
+    // produced names like "Heliograph - Heliograph open-source project". The model is what
+    // distinguishes one inverter from the next, which is the whole point of the name.
+    const std::string& descriptor = !identity.model.empty()          ? identity.model
+                                    : !identity.manufacturer.empty() ? identity.manufacturer
+                                                                     : kUnknownInverterName;
+    device["name"] = bridge.name.empty() ? descriptor : bridge.name + " - " + descriptor;
+    if (!identity.manufacturer.empty()) {
+        device["manufacturer"] = identity.manufacturer;
+    }
+    if (!identity.model.empty()) {
+        device["model"] = identity.model;
+    }
+    if (!identity.serialNumber.empty()) {
+        device["serial_number"] = identity.serialNumber;
+    }
+    if (!identity.firmwareVersion.empty()) {
+        device["sw_version"] = identity.firmwareVersion;
+    }
+    device["via_device"] = bridge.bridgeId;
+}
+
+bool serialise(const JsonDocument& doc, std::string& out) {
+    if (doc.overflowed()) {
+        return false;
+    }
+    const size_t needed = measureJson(doc);
+    std::string  buffer;
+    buffer.resize(needed + 1);
+    buffer.resize(serializeJson(doc, buffer.data(), buffer.size()));
+    out = std::move(buffer);
+    return true;
+}
+
+}  // namespace
+
+std::string sanitizeId(const std::string& measurementId) {
+    std::string out;
+    out.reserve(measurementId.size());
+    for (const char c : measurementId) {
+        out.push_back((c == '.' || c == '-') ? '_' : c);
+    }
+    return out;
+}
+
+std::string discoverySignature(const DeviceState& state) {
+    // Only supported channels count: unsupported ones produce no entity (see below), so a
+    // change in them must not trigger a republish.
+    std::string sig;
+    for (const auto& m : state.measurements.all()) {
+        if (!m.supported) {
+            continue;
+        }
+        sig += m.id;
+        sig += '\n';
+    }
+    return sig;
+}
+
+std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
+                                                    const BridgeInfo&  bridge,
+                                                    const MqttTopics&  topics,
+                                                    const std::string& discoveryPrefix) {
+    std::vector<DiscoveryEntity> entities;
+
+    for (const auto& m : state.measurements.all()) {
+        // Unsupported channels produce no entity. Not a disabled entity, not an entity
+        // reporting zero: nothing. Home Assistant should only ever show what exists.
+        if (!m.supported) {
+            continue;
+        }
+
+        const std::string slug = sanitizeId(m.id);
+        JsonDocument      doc;
+        JsonObject        e = doc.to<JsonObject>();
+
+        e["unique_id"] = bridge.bridgeId + "_" + slug;
+        e["object_id"] = bridge.bridgeId + "_" + slug;
+        const bool noName = m.displayName == nullptr || m.displayName[0] == '\0';
+        e["name"]      = noName ? humanise(m.id) : std::string(m.displayName);
+        e["state_topic"] = topics.state();
+        // Yields None for a null value, which Home Assistant records as "unknown" rather
+        // than as a reading of 0.
+        e["value_template"] =
+            std::string("{{ value_json.measurements['") + m.id + "'].value }}";
+        e["availability_topic"]  = topics.availability();
+        e["payload_available"]   = kPayloadOnline;
+        e["payload_not_available"] = kPayloadOffline;
+
+        if (const char* dc = deviceClassFor(m.type)) {
+            e["device_class"] = dc;
+        }
+        if (const char* sc = stateClassFor(m.type)) {
+            e["state_class"] = sc;
+        }
+        const char* unit = unitSymbol(m.unit);
+        if (unit[0] != '\0') {
+            e["unit_of_measurement"] = unit;
+        }
+        if (const int precision = displayPrecisionFor(m.type); precision >= 0) {
+            e["suggested_display_precision"] = precision;
+        }
+        addDeviceBlock(e, bridge, state.identity, /*isBridgeEntity=*/false);
+
+        DiscoveryEntity entity;
+        entity.uniqueId    = e["unique_id"].as<std::string>();
+        entity.configTopic = discoveryPrefix + "/sensor/" + bridge.bridgeId + "/" + slug + "/config";
+        if (serialise(doc, entity.payload)) {
+            entities.push_back(std::move(entity));
+        }
+    }
+
+    // Status text, only when the driver actually reports status.
+    if (state.capabilities.has(InverterCapability::ReadStatus)) {
+        JsonDocument doc;
+        JsonObject   e = doc.to<JsonObject>();
+        e["unique_id"]      = bridge.bridgeId + "_status";
+        e["object_id"]      = bridge.bridgeId + "_status";
+        e["name"]           = "Status";
+        e["state_topic"]    = topics.state();
+        e["value_template"] = "{{ value_json.status_text }}";
+        e["availability_topic"] = topics.availability();
+        e["icon"]           = "mdi:information-outline";
+        addDeviceBlock(e, bridge, state.identity, false);
+
+        DiscoveryEntity entity;
+        entity.uniqueId    = e["unique_id"].as<std::string>();
+        entity.configTopic = discoveryPrefix + "/sensor/" + bridge.bridgeId + "/status/config";
+        if (serialise(doc, entity.payload)) {
+            entities.push_back(std::move(entity));
+        }
+    }
+
+    // Inverter liveness as a binary_sensor, so a dashboard can show it without a template.
+    {
+        JsonDocument doc;
+        JsonObject   e = doc.to<JsonObject>();
+        e["unique_id"]      = bridge.bridgeId + "_inverter_online";
+        e["object_id"]      = bridge.bridgeId + "_inverter_online";
+        e["name"]           = "Inverter Online";
+        e["state_topic"]    = topics.state();
+        e["value_template"] = "{{ 'ON' if value_json.inverter_online else 'OFF' }}";
+        e["availability_topic"] = topics.availability();
+        e["device_class"]   = "connectivity";
+        e["entity_category"] = "diagnostic";
+        addDeviceBlock(e, bridge, state.identity, false);
+
+        DiscoveryEntity entity;
+        entity.uniqueId = e["unique_id"].as<std::string>();
+        entity.configTopic =
+            discoveryPrefix + "/binary_sensor/" + bridge.bridgeId + "/inverter_online/config";
+        if (serialise(doc, entity.payload)) {
+            entities.push_back(std::move(entity));
+        }
+    }
+
+    // No control entities. Not an omission: the loop that would create them is gated on the
+    // write bitset, which is empty for every driver in this build.
+    if (!state.capabilities.isReadOnly()) {
+        // Deliberately not implemented yet -- the MVP has no writable driver, so writing this
+        // now would mean shipping untestable code that can move an inverter. Phase: future.
+    }
+
+    return entities;
+}
+
+std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  bridge,
+                                                           const MqttTopics&  topics,
+                                                           const std::string& discoveryPrefix) {
+    struct Spec {
+        const char* slug;
+        const char* name;
+        const char* jsonKey;
+        const char* deviceClass;
+        const char* stateClass;
+        const char* unit;
+    };
+    static const Spec kSpecs[] = {
+        {"wifi_rssi", "WiFi Signal", "wifi_rssi_dbm", "signal_strength", "measurement", "dBm"},
+        {"uptime", "Uptime", "uptime_seconds", "duration", "total_increasing", "s"},
+        {"free_heap", "Free Heap", "free_heap_bytes", "data_size", "measurement", "B"},
+        {"poll_success", "Polls Succeeded", "poll_success_total", nullptr, "total_increasing", nullptr},
+        {"poll_failure", "Polls Failed", "poll_failure_total", nullptr, "total_increasing", nullptr},
+        {"checksum_errors", "Checksum Errors", "checksum_error_total", nullptr, "total_increasing", nullptr},
+        {"rs485_timeouts", "RS485 Timeouts", "rs485_timeout_total", nullptr, "total_increasing", nullptr},
+    };
+
+    std::vector<DiscoveryEntity> entities;
+    for (const auto& spec : kSpecs) {
+        JsonDocument doc;
+        JsonObject   e = doc.to<JsonObject>();
+        e["unique_id"]      = bridge.bridgeId + "_" + spec.slug;
+        e["object_id"]      = bridge.bridgeId + "_" + spec.slug;
+        e["name"]           = spec.name;
+        e["state_topic"]    = topics.diagnostics();
+        e["value_template"] = std::string("{{ value_json.") + spec.jsonKey + " }}";
+        e["availability_topic"] = topics.availability();
+        e["entity_category"]    = "diagnostic";
+        if (spec.deviceClass) {
+            e["device_class"] = spec.deviceClass;
+        }
+        if (spec.stateClass) {
+            e["state_class"] = spec.stateClass;
+        }
+        if (spec.unit) {
+            e["unit_of_measurement"] = spec.unit;
+        }
+        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true);
+
+        DiscoveryEntity entity;
+        entity.uniqueId = e["unique_id"].as<std::string>();
+        entity.configTopic =
+            discoveryPrefix + "/sensor/" + bridge.bridgeId + "/" + spec.slug + "/config";
+        if (serialise(doc, entity.payload)) {
+            entities.push_back(std::move(entity));
+        }
+    }
+    return entities;
+}
+
+}  // namespace heliograph::mqtt

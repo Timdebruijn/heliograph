@@ -1,0 +1,95 @@
+# Device profile template — copy this file to profiles/<family>/<your_device>.toml.
+#
+# A profile teaches the bridge how to read one device family over a register-map protocol
+# (Modbus RTU today). It is pure data: the build generates C++ tables from it, validates
+# every field, and fails with a clear message when something is off. You never touch C++.
+#
+# Full field reference: docs/device-profiles/schema.md
+# How to find these values for your device: docs/adding-a-device.md
+# Allowed `measurement` ids: docs/device-profiles/canonical-measurements.md
+#   (or: python3 tools/gen_profiles.py --list-measurements)
+#
+# Keep the comments in your profile! Note your source (vendor PDF revision, community map,
+# your own bench measurements) and your confidence per register. The next person debugging
+# a wrong reading needs to know which rows were verified on hardware and which were copied
+# from a forum post.
+
+[profile]
+driver = "growatt_modbus"      # which driver consumes this profile (see schema.md)
+id = "my_device"               # stable lowercase id; users select it via the `profile` option
+display_name = "Vendor Model (power range)"
+default = false                # exactly ONE profile per driver has `default = true`
+phases = 1                     # AC phases: 1 or 3
+mppts = 2                      # MPPT/string inputs: 0-8
+battery = false                # true for hybrids with an attached battery
+transports = ["rtu"]           # optional; "tcp" may be declared for future TCP transport
+
+# Optional: the line settings this family actually ships with. Omit when unsure — the
+# driver's generic candidates are used instead.
+#[serial]
+#baud = 9600                   # standard rates only
+#parity = "none"               # none | even | odd
+#stop_bits = 1                 # 1 | 2
+
+# ------------------------------------------------------------------------------------------
+# Read blocks: the contiguous register ranges polled each cycle, one Modbus transaction
+# each. At most 8 blocks of at most 125 registers (the Modbus read limit). Every register
+# you map below MUST fall inside one of these blocks — the build checks this.
+#
+# Tip for bring-up: read a generous block around your registers, not just the exact
+# addresses. The driver TRACE-dumps every raw block, so a wide dump is how you verify and
+# correct the map against the device display. Narrow the blocks once the map is confirmed.
+# A block the device refuses (Modbus exception) is skipped harmlessly.
+# ------------------------------------------------------------------------------------------
+
+[[block]]
+space = "input"                # "input" (function 04) or "holding" (function 03)
+start = 0
+count = 125
+
+# ------------------------------------------------------------------------------------------
+# Register mappings: raw register -> canonical measurement.  value = raw * scale
+#
+#   measurement   canonical id — must exist in the vocabulary (build-enforced)
+#   display_name  human name shown in Home Assistant etc.
+#   space         "input" or "holding" — must match a declared block
+#   address       first register (a u32/s32 also reads address+1; high word first)
+#   type          u16 | s16 | u32 | s32   (s* = two's-complement signed)
+#   scale         multiplier applied to the raw integer (e.g. 0.1 when the device
+#                 reports tenths). Must not be 0.
+#   unit          W V A Hz °C kWh h % dBm s — must match the measurement's physics
+# ------------------------------------------------------------------------------------------
+
+[[register]]                   # <- note your source + confidence here
+measurement = "ac.power.total"
+display_name = "AC Power"
+space = "input"
+address = 35
+type = "u32"
+scale = 0.1
+unit = "W"
+
+# ------------------------------------------------------------------------------------------
+# OPTIONAL: writable setpoint registers. Read-only is the default — a register is writable
+# only when declared here, with mandatory bounds. Declaring one does NOT enable writing:
+# the row stays dormant until `verified = true` (confirmed on real hardware) AND the driver
+# has a write path. Record your write-register research here; nothing will act on it.
+#
+#   command   canonical setpoint id (python3 tools/gen_profiles.py --list-commands)
+#   function  optional: write_single (FC06, 1 word) | write_multiple (FC16); default derived
+#   minimum/maximum/step  bounds in canonical units — REQUIRED, enforced centrally
+#   verified  leave false until the row is confirmed against the device on the bench
+# ------------------------------------------------------------------------------------------
+
+#[[write]]                     # source + how you verified it goes here
+#command = "set_export_limit_watts"
+#display_name = "Export limit"
+#space = "holding"
+#address = 122
+#type = "u16"
+#scale = 1.0
+#unit = "W"
+#minimum = 0
+#maximum = 6000
+#step = 1
+#verified = false

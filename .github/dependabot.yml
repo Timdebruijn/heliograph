@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Keeps the actions/* majors current so workflows never rot on a deprecated
+  # runtime. PlatformIO and its platforms are intentionally not managed here:
+  # an embedded toolchain bump must be a deliberate, hardware-tested change.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

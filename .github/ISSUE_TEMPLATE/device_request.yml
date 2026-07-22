@@ -1,0 +1,45 @@
+name: Device support request
+description: Ask for (or offer to help with) support for an inverter or battery.
+labels: ["new-device"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Modbus devices can often be added as a data file, without writing any C++ —
+        see [docs/adding-a-device.md](../blob/main/docs/adding-a-device.md). If you
+        can test on real hardware, say so: that is the single most useful thing,
+        because register maps transcribed from documents are never trusted until a
+        real device confirms them.
+  - type: input
+    id: device
+    attributes:
+      label: Manufacturer and model
+      placeholder: "Growatt SPH6000"
+    validations:
+      required: true
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Protocol, if known
+      options:
+        - Modbus RTU (RS485)
+        - Modbus TCP
+        - Something else / unknown
+    validations:
+      required: true
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Can you test on real hardware?
+      options:
+        - "Yes — I own this device and can flash test builds"
+        - "No — request only"
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation
+      description: >
+        Links to protocol PDFs, register maps, or existing open-source
+        implementations (ESPHome configs, Home Assistant integrations, ...).

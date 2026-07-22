@@ -1,0 +1,9 @@
+# Heliograph — 16 MB flash (W25Q128JVSI), dual app partitions for OTA rollback.
+# A failed OTA leaves the previous image intact and bootable; see docs/implementation-plan.md.
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xE000,   0x2000,
+app0,       app,  ota_0,    0x10000,  0x640000,
+app1,       app,  ota_1,    0x650000, 0x640000,
+littlefs,   data, spiffs,   0xC90000, 0x360000,
+coredump,   data, coredump, 0xFF0000, 0x10000,

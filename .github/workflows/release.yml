@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MIT
+#
+# Push a tag `v*` and this builds the firmware, attaches both images to a
+# GitHub Release, and redeploys the browser flasher on GitHub Pages so
+# "flash the latest release" needs nothing but a USB cable and Chrome/Edge.
+#
+# The flasher bin is served from Pages, not from the release asset: release
+# downloads redirect to a host that sends no CORS headers, and ESP Web Tools
+# fetches the image with fetch(), which that would break.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  release:
+    name: Build + publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-fw-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Verify before shipping
+        run: |
+          python3 tools/gen_profiles.py --check
+          bash tools/check_layering.sh
+          python3 tools/check_web_js.py
+          pio test -e native
+
+      - name: Build firmware
+        run: pio run -e waveshare-eversolar
+
+      - name: Stage release assets
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          cp .pio/build/waveshare-eversolar/firmware.bin "dist/heliograph-${VERSION}.bin"
+          cp .pio/build/waveshare-eversolar/firmware.factory.bin "dist/heliograph-${VERSION}-factory.bin"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+      - name: Build flasher site
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p site
+          sed "s|__REPO_URL__|${{ github.server_url }}/${{ github.repository }}|" \
+            flasher/index.html > site/index.html
+          cp .pio/build/waveshare-eversolar/firmware.factory.bin site/heliograph-factory.bin
+          sed "s/__VERSION__/${VERSION}/" flasher/manifest.json > site/manifest.json
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v5
