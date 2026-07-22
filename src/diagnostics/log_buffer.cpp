@@ -37,7 +37,13 @@ struct Guard {
     }
 };
 #else
-struct Guard {};  // host tests are single-threaded
+// Host tests are single-threaded, so this guards nothing -- but it keeps the RAII shape
+// identical to the ESP32 build. The user-provided ctor/dtor pair is what stops the
+// compiler from flagging every `Guard guard;` as an unused variable.
+struct Guard {
+    Guard() {}
+    ~Guard() {}
+};
 #endif
 
 }  // namespace

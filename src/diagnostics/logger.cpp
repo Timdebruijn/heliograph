@@ -40,11 +40,19 @@ void emit(LogLevel level, const char* fmt, va_list args) {
     // Assembled once, then both printed and retained: the serial console and the REST log
     // must show the same line, or chasing a bug over the network means chasing a different
     // rendering of it.
+    //
+    // The explicit %s precisions keep that true under truncation too -- console and ring
+    // clip at the same point -- and let GCC prove the line fits instead of warning
+    // -Wformat-truncation on every firmware build. Budget: kLogLineChars (256) minus NUL
+    // and the worst-case prefix -- a 31-char timestamp, the 1-char tag() level letter and
+    // 4 separator chars -- leaves 219; without a timestamp, 251. The longest real message
+    // (a traceHex dump, ~210 chars) fits either way, so nothing legitimate is ever clipped.
+    static_assert(kLogLineChars == 256, "revisit the %s precisions below");
     char line[kLogLineChars];
     if (tn > 0) {
-        snprintf(line, sizeof(line), "%s [%s] %s", ts, tag(level), buf);
+        snprintf(line, sizeof(line), "%s [%s] %.219s", ts, tag(level), buf);
     } else {
-        snprintf(line, sizeof(line), "[%s] %s", tag(level), buf);
+        snprintf(line, sizeof(line), "[%s] %.251s", tag(level), buf);
     }
 
 #if defined(ESP32)
