@@ -156,8 +156,10 @@ BridgeInfo bridgeInfo() {
 }
 
 /// Applies a named DRM mode: the role's relays energised, everything else released.
-/// OFFs first (never throttled), then the ONs; if any ON is refused mid-pattern the
-/// whole pattern is released again -- a half-asserted mode is worse than none.
+/// The controller applies the pattern atomically behind its gates, charging ONE rate-limit
+/// token for the whole mode switch. Charging per relay (the previous shape) made any role
+/// spanning more relays than the burst impossible to assert, ever: the tail ONs always hit
+/// the throttle and the rollback released the mode again.
 CommandResult applyDrmMode(const std::string& mode) {
     std::vector<std::string> roles;
     {
@@ -170,24 +172,7 @@ CommandResult applyDrmMode(const std::string& mode) {
         return CommandResult::OutOfRange;
     }
     std::lock_guard<std::mutex> lock(g_relayMutex);
-    for (uint8_t i = 0; i < g_relays.count(); ++i) {
-        if (!pattern[i]) {
-            const CommandResult r = g_relays.set(i, false);
-            if (r != CommandResult::Ok) {
-                return r;  // gate closed: nothing moved yet (OFF is never rate-limited)
-            }
-        }
-    }
-    for (uint8_t i = 0; i < g_relays.count(); ++i) {
-        if (pattern[i]) {
-            const CommandResult r = g_relays.set(i, true);
-            if (r != CommandResult::Ok) {
-                g_relays.allOff();
-                return r;
-            }
-        }
-    }
-    return CommandResult::Ok;
+    return g_relays.applyPattern(pattern);
 }
 
 std::string scanNetworksJson() {

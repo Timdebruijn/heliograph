@@ -66,31 +66,53 @@ itself in terms of one driver ("the EverSolar doesn't have this field"), the rul
                │ snapshot()          ← only readers
      ┌─────────┼─────────┬─────────────┬────────────┐
      ▼         ▼         ▼             ▼            ▼
-  mqttTask  AsyncTCP  AsyncTCP     loopTask     eModbus
-  core 0    (REST)    (web/SSE)    core 1       (Modbus TCP)
-  pr 3      pr 3      pr 3         pr 1         pr 3
+  rs485Task AsyncTCP  AsyncTCP     loopTask     eModbus
+  (MQTT     (REST)    (web/SSE)    core 1       (Modbus TCP)
+  publish*) pr 3      pr 3         pr 1         pr 3
 ```
+
+\* MQTT publishing runs on `rs485Task` itself: `MqttOutput::loop()` builds the payloads and
+`publish()` only enqueues into espMqttClient's outbox. The library's own `mqttclient` task
+drives the socket. See "MQTT task model" below.
 
 ### Tasks
 
 | Task | Core | Prio | Stack | Responsible for | WDT |
 |---|---|---|---|---|---|
-| `rs485Task` | 1 | 5 | 8192 | UART1, active driver, poll cycle, discovery. 8192 since the stack-canary crash of 2026-07-19 (TRACE path through newlib vsnprintf); see main.cpp | ✔ |
-| `mqttTask` | 0 | 3 | 4096 | espMqttClient, publishing, HA discovery | ✔ |
+| `rs485Task` | 1 | 5 | 8192 | UART1, active driver, poll cycle, discovery, and pushing snapshots to the outputs (`MqttOutput::loop()`, Modbus refresh, SSE notify). 8192 since the stack-canary crash of 2026-07-19 (TRACE path through newlib vsnprintf); see main.cpp | ✔ |
+| `mqttclient` (library) | 1 | 1 | 5120 | espMqttClient's internal task: socket TX/RX, keepalive, draining the outbox, and running the `onMessage`/`onDisconnect` callbacks | ✖ |
 | `loopTask` (Arduino) | 1 | 1 | 8192 | Wifi supervision, mDNS, diagnostics, relay safety | ✔ |
 | `async_tcp` (library) | 0 | 3 | 8192 | REST, web, SSE — managed by AsyncTCP | ✖ |
 | `eModbus server` (library) | 0 | 3 | 4096 | Modbus TCP clients | ✖ |
 
-Three of our own tasks, two library tasks. Deliberately minimal.
+Two of our own tasks, three library tasks. Deliberately minimal.
 
 Rationale for the core split: wifi/lwIP runs on core 0 by default. By pinning `rs485Task` to
-core 1, network load cannot disturb RS485 timing — exactly the acceptance criterion
-"Modbus client errors do not interrupt inverter polling". Conversely, `mqttTask` sits with the
-network on core 0.
+core 1 **at priority 5**, network load cannot disturb RS485 timing — exactly the acceptance
+criterion "Modbus client errors do not interrupt inverter polling". The `mqttclient` task also
+lives on core 1 (the library's default constructor pins it there at priority 1), but it cannot
+preempt the higher-priority `rs485Task`; the MQTT payload building that runs on `rs485Task`
+itself is microseconds of pure CPU against a protocol with second-scale timeouts.
 
-Watchdog: `esp_task_wdt` with a 30 s timeout; `rs485Task`, `mqttTask` and `loopTask` register
-with it. `rs485Task` calls `esp_task_wdt_reset()` every cycle, even when the poll fails — an
-unreachable inverter must never cause a reset.
+Watchdog: `esp_task_wdt` with a 120 s timeout (an extended discovery scan legitimately runs
+many back-to-back 3 s transactions between feeds); `rs485Task` and `loopTask` register with
+it, the library tasks do not. `rs485Task` calls `esp_task_wdt_reset()` every cycle, even when
+the poll fails — an unreachable inverter must never cause a reset.
+
+### MQTT task model and thread safety
+
+VERIFIED 2026-07-22 against the vendored espMqttClient 1.7.x sources (not the online docs,
+which are silent on this): on ESP32 every `publish()`/`subscribe()` takes a FreeRTOS mutex
+around the outbox (`EMC_SEMAPHORE_TAKE` in `MqttClient.h`/`.cpp`) and the connection state is
+`std::atomic`. Calling `publish()` from a different task than the library's own is therefore
+safe by design — the library exists to be used exactly this way: its `mqttclient` task pumps
+the socket while the application enqueues from wherever it runs.
+
+The flip side: the `onMessage`/`onDisconnect` callbacks run on the `mqttclient` task, so
+anything they touch is cross-task state. `MqttOutput` keeps those callbacks down to atomics
+(`relayAckRequested_`, `resyncRequested_`, `lastDisconnectReason_`) and the mutex-guarded
+`Diagnostics::setLastError()`; the state owned by `loop()` (throttle, discovery bookkeeping)
+is only ever mutated on the task that calls `loop()`.
 
 ### Shared resources and locking
 

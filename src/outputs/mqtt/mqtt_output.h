@@ -102,8 +102,14 @@ private:
     uint64_t nextReconnectMs_    = 0;
     /// Exponential back-off, capped. An unreachable broker must not turn into a busy loop.
     uint32_t reconnectDelayMs_ = 1000;
-    /// espMqttClientTypes::DisconnectReason of the last drop, for diagnostics.
-    uint8_t lastDisconnectReason_ = 0;
+    /// espMqttClientTypes::DisconnectReason of the last drop, for diagnostics. Atomic:
+    /// written by onDisconnect on the library's task, read from the caller's task.
+    std::atomic<uint8_t> lastDisconnectReason_{0};
+    /// Set by onDisconnect (library task), consumed by loop() (caller's task): forces a
+    /// throttle reset and a discovery republish after a reconnect, because retained
+    /// messages may not have survived the broker outage. The disconnect callback itself
+    /// must not touch throttle_/discoveryPublished_ -- those belong to loop()'s task.
+    std::atomic<bool> resyncRequested_{false};
     /// Edge detection for the reconnect counter. `wasConnected_` tracks the previous loop's
     /// link state so a false→true transition is counted once; `everConnected_` makes the
     /// FIRST connect at boot not count as a reconnect. See loop().

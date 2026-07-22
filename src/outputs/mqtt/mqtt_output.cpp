@@ -52,9 +52,11 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
     g_client.setWill(willTopic_.c_str(), 1, true, kPayloadOffline);
 
     g_client.onDisconnect([this](espMqttClientTypes::DisconnectReason reason) {
-        // Retained messages may not survive; force a full republish once back.
-        throttle_.reset();
-        discoveryPublished_ = false;
+        // Runs on the library's 'mqttclient' task while loop() runs on the caller's task, so
+        // only atomics and the mutex-guarded diagnostics may be touched here. The actual
+        // resync (throttle reset + discovery republish) happens in loop(), which owns that
+        // state -- same pattern as relayAckRequested_.
+        resyncRequested_ = true;
         // NOTE: the reconnect counter is NOT bumped here. espMqttClient fires onDisconnect
         // on every failed connect *attempt* too, so counting here inflated the total with
         // each back-off retry during an outage and, worse, never ticked on the actual
@@ -217,6 +219,15 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
             diagnostics_->recordMqttReconnect();
         }
         everConnected_ = true;
+    }
+
+    // Retained messages may not have survived the broker outage; force a full republish.
+    // Consumed here rather than done in onDisconnect: nothing publishes while disconnected
+    // anyway, and this way throttle_ and discoveryPublished_ are only ever touched on the
+    // task that runs loop().
+    if (resyncRequested_.exchange(false)) {
+        throttle_.reset();
+        discoveryPublished_ = false;
     }
 
     // Re-announce when the measurement model has grown since the last discovery publish.
