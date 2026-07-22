@@ -325,4 +325,46 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
     return entities;
 }
 
+std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
+                                                const MqttTopics&  topics,
+                                                const std::string& discoveryPrefix) {
+    // Switches are announced only when the relays can actually act (board has them AND the
+    // config flag is on). For a board that HAS relays but keeps them disabled, empty
+    // retained payloads are published instead, so previously announced switches disappear
+    // from Home Assistant rather than lingering as controls that silently reject.
+    std::vector<DiscoveryEntity> entities;
+    for (uint8_t i = 0; i < bridge.relayCount; ++i) {
+        const std::string slug = "relay_" + std::to_string(i + 1);
+        DiscoveryEntity   entity;
+        entity.configTopic =
+            discoveryPrefix + "/switch/" + bridge.bridgeId + "/" + slug + "/config";
+        if (!bridge.relaysEnabled) {
+            entity.uniqueId = bridge.bridgeId + "_" + slug;
+            entity.payload.clear();  // empty retained payload = HA removes the entity
+            entities.push_back(std::move(entity));
+            continue;
+        }
+        JsonDocument doc;
+        JsonObject   e = doc.to<JsonObject>();
+        e["unique_id"]     = bridge.bridgeId + "_" + slug;
+        e["object_id"]     = bridge.bridgeId + "_" + slug;
+        e["name"]          = "Relay " + std::to_string(i + 1);
+        e["command_topic"] = topics.relaySet(i);
+        e["state_topic"]   = topics.relayState(i);
+        e["payload_on"]    = "ON";
+        e["payload_off"]   = "OFF";
+        // Not optimistic: the switch shows the ACK'd state, so a command refused by the
+        // gates (read-only mode flipped back on, rate limit) visibly snaps back in HA.
+        e["optimistic"]         = false;
+        e["availability_topic"] = topics.availability();
+        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true);
+
+        entity.uniqueId = e["unique_id"].as<std::string>();
+        if (serialise(doc, entity.payload)) {
+            entities.push_back(std::move(entity));
+        }
+    }
+    return entities;
+}
+
 }  // namespace heliograph::mqtt

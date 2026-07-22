@@ -65,6 +65,16 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     json_util::addClockFields(b, bridge);
     b["free_heap_bytes"]   = bridge.freeHeapBytes;
 
+    // Only on boards that have relays: absent, not an empty list, per the house rule that
+    // hardware which does not exist is never reported as a zero-ish value.
+    if (bridge.relayCount > 0) {
+        b["relays_enabled"] = bridge.relaysEnabled;
+        JsonArray relays    = b["relays"].to<JsonArray>();
+        for (uint8_t i = 0; i < bridge.relayCount; ++i) {
+            relays.add(((bridge.relayMask >> i) & 1) != 0);
+        }
+    }
+
     JsonObject d = doc["device"].to<JsonObject>();
     d["id"]      = deviceId;  // the registered id, not identity.deviceId() -- see the header
     addOptional(d, "driver_id", state.identity.driverId);

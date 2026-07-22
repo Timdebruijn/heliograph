@@ -194,6 +194,8 @@ function render(s){
     (d.data_stale?' <span class="tag">stale</span>':'')+
     (d.data_valid?'':' <span class="tag">no data</span>');
   $('#ver').textContent='v'+b.firmware_version;
+  // Boards without relays never send the field; the settings card keys off this.
+  window.g_relayCount=(b.relays||[]).length;
   const g=id=>m[id]?m[id].value:null;
   if(tab==='dash'){
     $('#tiles').innerHTML=
@@ -600,6 +602,12 @@ async function renderConfig(){
       `<option value="${esc(d.id)}" ${d.id===c.driver.id?'selected':''}>${esc(d.display_name)} (${esc(d.support_level)})</option>`).join('')}</select>
     ${driverOpts}
   </div>
+  ${window.g_relayCount>0?`<div class="card"><b>Relays</b> <span class="tag" style="font-weight:400">applied immediately</span>
+    ${chk('c_rle','Enabled',(c.relays||{}).enabled)}
+    <div class="dim" style="font-size:12px;margin-top:8px">DRM curtailment contacts. Two
+    locks must open before a relay can move: this switch AND read-only mode being off.
+    Disabling releases every relay. Control lives in Home Assistant (switches appear via
+    discovery) or POST /api/v1/relays/&lt;n&gt;/set.</div></div>`:''}
   <div class="card"><b>Security</b> <span class="tag" style="font-weight:400">applied immediately</span>${txt('c_au','Admin username',c.security.admin_username)}
     ${pw('c_ap','Admin password',c.security.password_set)}</div>
   <div class="card"><b>Logging</b> <span class="tag" style="font-weight:400">applied immediately</span>
@@ -634,6 +642,7 @@ async function renderConfig(){
 async function saveConfig(){
   const v=id=>$(id).value, n=id=>Number($(id).value), b=id=>$(id).checked;
   const body={bridge_name:v('c_name'),
+    ...(window.g_relayCount>0?{relays:{enabled:b('c_rle')}}:{}),
     wifi:{ssid:v('c_ssid'),hostname:v('c_host')},
     mqtt:{enabled:b('c_mqe'),host:v('c_mqh'),port:n('c_mqp'),username:v('c_mqu'),
           base_topic:v('c_mqt'),discovery_enabled:b('c_mqd')},

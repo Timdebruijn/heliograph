@@ -193,6 +193,8 @@ there is no possible confusion with a valid value.
 | 816 | 2 | uint32 | REST requests |
 | 818 | 2 | uint32 | Invalid frames |
 | 820 | 3 | uint16[3] | Firmware version major/minor/patch |
+| 850 | 1 | uint16 | Relay count — `0xFFFF` = no relay hardware on this board |
+| 851 | 1 | uint16 | Relay state bitmask (bit *i* = relay *i* energised); `0xFFFF` without hardware |
 
 ## Examples
 
@@ -339,3 +341,7 @@ consumer would treat it as current. Unknown is therefore the more honest answer 
   depends on the inverter's behavior — to be determined in Phase 9.
 - The eModbus server wiring (`modbus_tcp_server.cpp`) has **not been compiled yet**; only the
   register map has been tested.
+
+Registers 850-851 are **read-only observation** of the bridge relays (DRM contacts).
+Relay control never goes through Modbus: the unauthenticated Modbus surface only
+observes, and commands go through the admin-gated REST/MQTT paths and their gates.

@@ -20,7 +20,10 @@
 #include <cstdint>
 #include <string>
 
+#include <functional>
+
 #include "device/bridge_info.h"
+#include "device/command.h"
 #include "device/device_state.h"
 #include "diagnostics/diagnostics.h"
 #include "mqtt_topics.h"
@@ -58,6 +61,13 @@ public:
 
     void setDiagnostics(Diagnostics* diagnostics) { diagnostics_ = diagnostics; }
 
+    /// Handles a relay command arriving on <prefix>/relay/<n>/set. Wired by main to the
+    /// RelayController behind a mutex: this callback runs on the MQTT task while REST
+    /// commands arrive on the AsyncTCP task. The switch state in Home Assistant follows
+    /// the ACK on the state topic, so a refused command visibly snaps back.
+    using RelayCommandFn = std::function<CommandResult(uint8_t index, bool energised)>;
+    void setRelayCommandHandler(RelayCommandFn handler) { relayCommand_ = std::move(handler); }
+
 private:
     void onConnected(const DeviceState& state, const BridgeInfo& bridge);
     void publishDiscovery(const DeviceState& state, const BridgeInfo& bridge);
@@ -93,6 +103,15 @@ private:
     /// FIRST connect at boot not count as a reconnect. See loop().
     bool wasConnected_  = false;
     bool everConnected_ = false;
+
+    RelayCommandFn relayCommand_;
+    uint8_t        relayCount_ = 0;  ///< copied at begin() for topic parsing in the callback
+    /// Relay ack-state tracking: force a publish on connect and on every mask/enabled
+    /// change. `lastRelaysEnabled_` also triggers a discovery re-announce, because
+    /// enabling/disabling adds or removes the switch entities themselves.
+    bool    relayStateForced_  = true;
+    uint8_t lastRelayMask_     = 0;
+    bool    lastRelaysEnabled_ = false;
 
 public:
     uint8_t lastDisconnectReason() const { return lastDisconnectReason_; }

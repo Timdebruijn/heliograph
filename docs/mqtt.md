@@ -17,6 +17,8 @@ Configurable; defaults to being derived from the MAC so that two bridges never c
 | `heliograph/<bridge_id>/diagnostics` | ✔ | 0 | Bridge diagnostics (JSON) |
 | `heliograph/<bridge_id>/identity` | ✔ | 1 | Device identity (JSON) |
 | `heliograph/<bridge_id>/capabilities` | ✔ | 1 | Capabilities (JSON) |
+| `heliograph/<bridge_id>/relay/<n>/state` | ✔ | 1 | `ON` / `OFF` — relay boards only |
+| `heliograph/<bridge_id>/relay/<n>/set` | — | 1 | Command topic (subscribed) — relay boards only |
 
 **Last Will and Testament:** topic `availability`, payload `offline`, retained, QoS 1. On a
 clean shutdown, the bridge publishes `offline` itself.
@@ -26,8 +28,12 @@ inverter that's off at night doesn't make the bridge offline — that would make
 entities `unavailable` in Home Assistant and ruin the history. The inverter status lives in
 `state` as `inverter_online`.
 
-There are **no command topics.** The active driver has no write capabilities, so the
-bridge doesn't subscribe to anything. That is not a configuration choice but a consequence of
+The `relay/<n>/set` topics (relay boards only) are the single subscription this firmware
+has. Commands pass the RelayController's gates — `security.read_only_mode` off AND
+`relays.enabled` on — and the acknowledged state follows on `relay/<n>/state`, so a
+refused command visibly snaps the Home Assistant switch back. There are **no command
+topics for the inverter.** The active driver has no write capabilities, so the
+bridge subscribes to nothing else. That is not a configuration choice but a consequence of
 `capabilities.write.none()`.
 
 ## Publishing strategy

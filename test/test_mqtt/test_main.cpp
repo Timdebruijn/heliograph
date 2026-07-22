@@ -623,6 +623,37 @@ static void test_bridge_diagnostic_entities() {
     TEST_ASSERT_EQUAL_STRING("Waveshare ESP32-S3-RS485-CAN", doc["device"]["model"]);
 }
 
+static void test_relay_entities_follow_count_and_enabled() {
+    auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+
+    // No relay hardware: nothing at all -- not even removal payloads.
+    bridge.relayCount = 0;
+    TEST_ASSERT_TRUE(buildRelayEntities(bridge, topics, kDefaultDiscoveryPrefix).empty());
+
+    // Relays present but the feature disabled: EMPTY retained payloads on the config
+    // topics, so previously announced switches disappear from Home Assistant.
+    bridge.relayCount    = 2;
+    bridge.relaysEnabled = false;
+    auto removed = buildRelayEntities(bridge, topics, kDefaultDiscoveryPrefix);
+    TEST_ASSERT_EQUAL_UINT32(2, removed.size());
+    TEST_ASSERT_TRUE(removed[0].payload.empty());
+    TEST_ASSERT_EQUAL_STRING("homeassistant/switch/heliograph-a1b2c3/relay_1/config",
+                             removed[0].configTopic.c_str());
+
+    // Enabled: real switch configs, ack-based (not optimistic), on the bridge device.
+    bridge.relaysEnabled = true;
+    bridge.relayMask     = 0b01;
+    auto entities = buildRelayEntities(bridge, topics, kDefaultDiscoveryPrefix);
+    TEST_ASSERT_EQUAL_UINT32(2, entities.size());
+    auto doc = parse(entities[0].payload);
+    TEST_ASSERT_EQUAL_STRING("Relay 1", doc["name"]);
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/relay/0/set", doc["command_topic"]);
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/relay/0/state", doc["state_topic"]);
+    TEST_ASSERT_FALSE(doc["optimistic"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("heliograph-a1b2c3", doc["device"]["identifiers"][0]);
+}
+
 static void test_sanitize_id() {
     TEST_ASSERT_EQUAL_STRING("ac_power_total", sanitizeId("ac.power.total").c_str());
     TEST_ASSERT_EQUAL_STRING("dc_mppt_1_voltage", sanitizeId("dc.mppt_1.voltage").c_str());
@@ -776,6 +807,7 @@ int main(int, char**) {
     RUN_TEST(test_config_topics_are_well_formed);
     RUN_TEST(test_the_mock_hybrid_gets_battery_and_phase_entities_for_free);
     RUN_TEST(test_bridge_diagnostic_entities);
+    RUN_TEST(test_relay_entities_follow_count_and_enabled);
     RUN_TEST(test_sanitize_id);
     RUN_TEST(test_first_state_is_always_published);
     RUN_TEST(test_an_unchanged_state_is_not_republished);

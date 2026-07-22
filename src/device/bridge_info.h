@@ -52,6 +52,14 @@ struct BridgeInfo {
     /// Set by main from board::kName; the default only serves host tests, which have no
     /// board header.
     std::string boardName = "Waveshare ESP32-S3-RS485-CAN";
+
+    /// Bridge-local relays (DRM curtailment contacts on relay boards). Count 0 = the board
+    /// has none, and every output omits the topic/field entirely -- absent, not zero, per
+    /// the house rule. `relayMask` bit i = relay i energised; `relaysEnabled` mirrors the
+    /// config flag so outputs can announce switches only when they can actually act.
+    uint8_t relayCount    = 0;
+    uint8_t relayMask     = 0;
+    bool    relaysEnabled = false;
 };
 
 }  // namespace heliograph

@@ -29,6 +29,7 @@ class AsyncWebServerRequest;
 
 #include "config/configuration.h"
 #include "device/bridge_info.h"
+#include "device/command.h"
 #include "device/device_state.h"
 #include "diagnostics/diagnostics.h"
 #include "app/discovery_runner.h"
@@ -68,6 +69,10 @@ struct RestContext {
     std::function<bool()> portalActive;
     /// Scans for networks; returns a JSON body. Portal only.
     std::function<std::string()> scanNetworks;
+    /// Sets a bridge relay (DRM contact). Wired by main to the RelayController behind the
+    /// same mutex the MQTT path uses. Unset (nullptr) on boards without relays -- the
+    /// endpoint then answers 404, matching the absent-not-zero rule for hardware.
+    std::function<CommandResult(uint8_t index, bool energised)> setRelay;
 };
 
 class RestApi {
