@@ -13,6 +13,35 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    name: Lint + static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install tools
+        run: pip install platformio ruff
+
+      - name: Ruff (Python tools)
+        run: |
+          ruff check tools/
+          ruff format --check tools/
+
+      - name: Static analysis (cppcheck via pio check)
+        run: pio check -e native --severity=high --fail-on-defect=high
+
   test:
     name: Native tests + checks
     runs-on: ubuntu-latest

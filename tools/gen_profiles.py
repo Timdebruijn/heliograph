@@ -28,11 +28,14 @@ import sys
 from pathlib import Path
 
 if sys.version_info < (3, 11):
-    sys.stderr.write("gen_profiles.py needs Python >= 3.11 (tomllib); found %s\n" %
-                     sys.version.split()[0])
+    sys.stderr.write(
+        "gen_profiles.py needs Python >= 3.11 (tomllib); found %s\n"
+        % sys.version.split()[0]
+    )
     sys.exit(1)
 
 import tomllib
+
 
 def set_root(root: Path) -> None:
     """Project root and everything derived from it. Not simply `__file__`: under
@@ -61,17 +64,17 @@ MAX_BLOCK_COUNT = 125
 # Must stay in sync with unitSymbol() in src/device/measurement.cpp. The measurement type
 # is derived from the unit so contributors never touch internal enums.
 UNITS: dict[str, tuple[str, str]] = {
-    "W":   ("Watt",         "Power"),
-    "V":   ("Volt",         "Voltage"),
-    "A":   ("Ampere",       "Current"),
-    "Hz":  ("Hertz",        "Frequency"),
-    "°C":  ("Celsius",      "Temperature"),
-    "C":   ("Celsius",      "Temperature"),  # ASCII convenience alias
+    "W": ("Watt", "Power"),
+    "V": ("Volt", "Voltage"),
+    "A": ("Ampere", "Current"),
+    "Hz": ("Hertz", "Frequency"),
+    "°C": ("Celsius", "Temperature"),
+    "C": ("Celsius", "Temperature"),  # ASCII convenience alias
     "kWh": ("KilowattHour", "Energy"),
-    "h":   ("Hour",         "Duration"),
-    "%":   ("Percent",      "Ratio"),
-    "dBm": ("Decibel",      "SignalStrength"),
-    "s":   ("Second",       "Duration"),
+    "h": ("Hour", "Duration"),
+    "%": ("Percent", "Ratio"),
+    "dBm": ("Decibel", "SignalStrength"),
+    "s": ("Second", "Duration"),
 }
 
 # Register data type -> (words, signed). 32-bit values are high word first (the Modbus
@@ -105,8 +108,9 @@ def load_vocabulary() -> dict[str, str]:
     block = re.search(r"namespace measurement_id \{(.*?)\}", text, re.DOTALL)
     if not block:
         raise SystemExit(f"could not find namespace measurement_id in {MEASUREMENT_H}")
-    pairs = re.findall(r'inline constexpr const char\*\s+(k\w+)\s*=\s*"([^"]+)"',
-                       block.group(1))
+    pairs = re.findall(
+        r'inline constexpr const char\*\s+(k\w+)\s*=\s*"([^"]+)"', block.group(1)
+    )
     if not pairs:
         raise SystemExit(f"no measurement ids parsed from {MEASUREMENT_H}")
     return {mid: name for name, mid in pairs}
@@ -120,8 +124,11 @@ def load_command_vocabulary() -> dict[str, str]:
     pairs = re.findall(r'case InverterCommandType::(\w+):\s*return "([^"]+)";', text)
     if not pairs:
         raise SystemExit(f"no command names parsed from {COMMAND_CPP}")
-    return {name: enum for enum, name in pairs
-            if name not in NON_NUMERIC_COMMANDS and enum != "_Count"}
+    return {
+        name: enum
+        for enum, name in pairs
+        if name not in NON_NUMERIC_COMMANDS and enum != "_Count"
+    }
 
 
 class ProfileError(Exception):
@@ -136,13 +143,15 @@ def _require(table: dict, key: str, kind: type, where: str):
     if kind is int and isinstance(value, bool):
         raise ProfileError(f"{where}: '{key}' must be an integer, got a boolean")
     if not isinstance(value, kind):
-        raise ProfileError(f"{where}: '{key}' must be {kind.__name__}, "
-                           f"got {type(value).__name__}")
+        raise ProfileError(
+            f"{where}: '{key}' must be {kind.__name__}, got {type(value).__name__}"
+        )
     return value
 
 
-def parse_profile(path: Path, vocabulary: dict[str, str],
-                  commands: dict[str, str]) -> dict:
+def parse_profile(
+    path: Path, vocabulary: dict[str, str], commands: dict[str, str]
+) -> dict:
     with path.open("rb") as f:
         data = tomllib.load(f)
     where = path.relative_to(ROOT)
@@ -150,8 +159,10 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
     meta = _require(data, "profile", dict, f"{where}")
     driver = _require(meta, "driver", str, f"{where} [profile]")
     if driver != "growatt_modbus":
-        raise ProfileError(f"{where}: unknown driver '{driver}' "
-                           f"(only 'growatt_modbus' is table-driven today)")
+        raise ProfileError(
+            f"{where}: unknown driver '{driver}' "
+            f"(only 'growatt_modbus' is table-driven today)"
+        )
 
     pid = _require(meta, "id", str, f"{where} [profile]")
     if not ID_RE.match(pid):
@@ -169,10 +180,14 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
     default = bool(meta.get("default", False))
 
     transports = meta.get("transports", ["rtu"])
-    if (not isinstance(transports, list) or not transports
-            or any(t not in ("rtu", "tcp") for t in transports)):
-        raise ProfileError(f"{where}: transports must be a non-empty list drawn from "
-                           f"['rtu', 'tcp']")
+    if (
+        not isinstance(transports, list)
+        or not transports
+        or any(t not in ("rtu", "tcp") for t in transports)
+    ):
+        raise ProfileError(
+            f"{where}: transports must be a non-empty list drawn from ['rtu', 'tcp']"
+        )
 
     serial = data.get("serial")
     parsed_serial = None
@@ -195,8 +210,11 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
         if "tcp" not in transports:
             raise ProfileError(f"{where}: [tcp] section without 'tcp' in transports")
         tcp_port = tcp.get("port", 502)
-        if isinstance(tcp_port, bool) or not isinstance(tcp_port, int) \
-                or not 1 <= tcp_port <= 65535:
+        if (
+            isinstance(tcp_port, bool)
+            or not isinstance(tcp_port, int)
+            or not 1 <= tcp_port <= 65535
+        ):
             raise ProfileError(f"{where} [tcp]: port must be 1-65535")
     elif "tcp" in transports:
         tcp_port = 502  # Modbus TCP default
@@ -205,8 +223,9 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
     if not blocks:
         raise ProfileError(f"{where}: at least one [[block]] is required")
     if len(blocks) > MAX_BLOCKS:
-        raise ProfileError(f"{where}: {len(blocks)} blocks, driver supports at most "
-                           f"{MAX_BLOCKS}")
+        raise ProfileError(
+            f"{where}: {len(blocks)} blocks, driver supports at most {MAX_BLOCKS}"
+        )
     parsed_blocks = []
     for i, b in enumerate(blocks):
         bw = f"{where} [[block]] #{i + 1}"
@@ -218,15 +237,18 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
         if not 0 <= start <= 0xFFFF:
             raise ProfileError(f"{bw}: start must be 0-65535")
         if not 1 <= count <= MAX_BLOCK_COUNT:
-            raise ProfileError(f"{bw}: count must be 1-{MAX_BLOCK_COUNT} "
-                               f"(Modbus read limit)")
+            raise ProfileError(
+                f"{bw}: count must be 1-{MAX_BLOCK_COUNT} (Modbus read limit)"
+            )
         if start + count > 0x10000:
             raise ProfileError(f"{bw}: start+count exceeds the register address space")
         parsed_blocks.append({"space": space, "start": start, "count": count})
 
     def covered(space: str, address: int) -> bool:
-        return any(b["space"] == space and b["start"] <= address < b["start"] + b["count"]
-                   for b in parsed_blocks)
+        return any(
+            b["space"] == space and b["start"] <= address < b["start"] + b["count"]
+            for b in parsed_blocks
+        )
 
     registers = data.get("register", [])
     if not registers:
@@ -238,9 +260,11 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
         mid = _require(r, "measurement", str, rw)
         if mid not in vocabulary:
             known = ", ".join(sorted(vocabulary))
-            raise ProfileError(f"{rw}: unknown measurement '{mid}'.\n"
-                               f"  Canonical ids: {known}\n"
-                               f"  (see docs/device-profiles/canonical-measurements.md)")
+            raise ProfileError(
+                f"{rw}: unknown measurement '{mid}'.\n"
+                f"  Canonical ids: {known}\n"
+                f"  (see docs/device-profiles/canonical-measurements.md)"
+            )
         if mid in seen_measurements:
             raise ProfileError(f"{rw}: measurement '{mid}' mapped twice")
         seen_measurements.add(mid)
@@ -260,7 +284,8 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
                 raise ProfileError(
                     f"{rw}: register {a} ({space}) is not inside any declared [[block]] "
                     f"-- the driver would never read it (a {rtype} needs {words} "
-                    f"consecutive registers)")
+                    f"consecutive registers)"
+                )
         scale = r.get("scale", 1.0)
         if isinstance(scale, bool) or not isinstance(scale, (int, float)):
             raise ProfileError(f"{rw}: scale must be a number")
@@ -269,10 +294,17 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
         unit = _require(r, "unit", str, rw)
         if unit not in UNITS:
             raise ProfileError(f"{rw}: unknown unit '{unit}'; known: {sorted(UNITS)}")
-        parsed_regs.append({
-            "measurement": mid, "display_name": name, "space": space,
-            "address": address, "type": rtype, "scale": float(scale), "unit": unit,
-        })
+        parsed_regs.append(
+            {
+                "measurement": mid,
+                "display_name": name,
+                "space": space,
+                "address": address,
+                "type": rtype,
+                "scale": float(scale),
+                "unit": unit,
+            }
+        )
 
     # [[write]] rows: read-only is the default — a register is writable only when declared
     # here, and even then it stays dormant (see WriteMapping in growatt_registers.h).
@@ -283,8 +315,10 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
         ww = f"{where} [[write]] #{i + 1}"
         cmd = _require(wr, "command", str, ww)
         if cmd not in commands:
-            raise ProfileError(f"{ww}: unknown command '{cmd}'.\n"
-                               f"  Numeric setpoint commands: {', '.join(sorted(commands))}")
+            raise ProfileError(
+                f"{ww}: unknown command '{cmd}'.\n"
+                f"  Numeric setpoint commands: {', '.join(sorted(commands))}"
+            )
         if cmd in seen_commands:
             raise ProfileError(f"{ww}: command '{cmd}' mapped twice")
         seen_commands.add(cmd)
@@ -293,8 +327,10 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
             raise ProfileError(f"{ww}: display_name must not be empty")
         space = _require(wr, "space", str, ww)
         if space != "holding":
-            raise ProfileError(f"{ww}: writes go to holding registers; space must be "
-                               f"'holding' (input registers are read-only by definition)")
+            raise ProfileError(
+                f"{ww}: writes go to holding registers; space must be "
+                f"'holding' (input registers are read-only by definition)"
+            )
         address = _require(wr, "address", int, ww)
         if not 0 <= address <= 0xFFFF:
             raise ProfileError(f"{ww}: address must be 0-65535")
@@ -302,13 +338,16 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
         if rtype not in TYPES:
             raise ProfileError(f"{ww}: type must be one of {sorted(TYPES)}")
         words, _signed = TYPES[rtype]
-        function = wr.get("function",
-                          "write_single" if words == 1 else "write_multiple")
+        function = wr.get(
+            "function", "write_single" if words == 1 else "write_multiple"
+        )
         if function not in ("write_single", "write_multiple"):
             raise ProfileError(f"{ww}: function must be write_single or write_multiple")
         if function == "write_single" and words != 1:
-            raise ProfileError(f"{ww}: a {rtype} spans 2 registers and needs "
-                               f"function = \"write_multiple\" (FC 0x10)")
+            raise ProfileError(
+                f"{ww}: a {rtype} spans 2 registers and needs "
+                f'function = "write_multiple" (FC 0x10)'
+            )
         scale = wr.get("scale", 1.0)
         if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale == 0:
             raise ProfileError(f"{ww}: scale must be a non-zero number")
@@ -319,8 +358,10 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
         maximum = wr.get("maximum")
         for key, val in (("minimum", minimum), ("maximum", maximum)):
             if val is None:
-                raise ProfileError(f"{ww}: '{key}' is required for a write register -- "
-                                   f"the dispatcher refuses unbounded writes")
+                raise ProfileError(
+                    f"{ww}: '{key}' is required for a write register -- "
+                    f"the dispatcher refuses unbounded writes"
+                )
             if isinstance(val, bool) or not isinstance(val, (int, float)):
                 raise ProfileError(f"{ww}: '{key}' must be a number")
         if not minimum < maximum:
@@ -331,18 +372,36 @@ def parse_profile(path: Path, vocabulary: dict[str, str],
         verified = wr.get("verified", False)
         if not isinstance(verified, bool):
             raise ProfileError(f"{ww}: verified must be a boolean")
-        parsed_writes.append({
-            "command": cmd, "display_name": name, "address": address, "type": rtype,
-            "function": function, "scale": float(scale), "unit": unit,
-            "minimum": float(minimum), "maximum": float(maximum), "step": float(step),
-            "verified": verified,
-        })
+        parsed_writes.append(
+            {
+                "command": cmd,
+                "display_name": name,
+                "address": address,
+                "type": rtype,
+                "function": function,
+                "scale": float(scale),
+                "unit": unit,
+                "minimum": float(minimum),
+                "maximum": float(maximum),
+                "step": float(step),
+                "verified": verified,
+            }
+        )
 
     return {
-        "path": where, "id": pid, "display_name": display, "default": default,
-        "phases": phases, "mppts": mppts, "battery": battery,
-        "transports": transports, "serial": parsed_serial, "tcp_port": tcp_port,
-        "blocks": parsed_blocks, "registers": parsed_regs, "writes": parsed_writes,
+        "path": where,
+        "id": pid,
+        "display_name": display,
+        "default": default,
+        "phases": phases,
+        "mppts": mppts,
+        "battery": battery,
+        "transports": transports,
+        "serial": parsed_serial,
+        "tcp_port": tcp_port,
+        "blocks": parsed_blocks,
+        "registers": parsed_regs,
+        "writes": parsed_writes,
     }
 
 
@@ -359,8 +418,9 @@ def cpp_float(x: float) -> str:
     return text if ("." in text or "e" in text or "inf" in text) else text + ".0"
 
 
-def generate(profiles: list[dict], vocabulary: dict[str, str],
-             commands: dict[str, str]) -> str:
+def generate(
+    profiles: list[dict], vocabulary: dict[str, str], commands: dict[str, str]
+) -> str:
     lines: list[str] = []
     w = lines.append
     w("// SPDX-License-Identifier: MIT")
@@ -370,7 +430,7 @@ def generate(profiles: list[dict], vocabulary: dict[str, str],
     w("// register map, edit the TOML and rebuild; this file is regenerated pre-build")
     w("// and is not committed. See docs/adding-a-device.md.")
     w("")
-    w('#include <cstring>')
+    w("#include <cstring>")
     w("")
     w('#include "drivers/growatt_modbus/growatt_registers.h"')
     w("")
@@ -385,10 +445,14 @@ def generate(profiles: list[dict], vocabulary: dict[str, str],
             words, signed = TYPES[r["type"]]
             unit_enum, mtype = UNITS[r["unit"]]
             const = vocabulary[r["measurement"]]
-            w(f"    {{measurement_id::{const}, MeasurementType::{mtype}, "
-              f"Unit::{unit_enum}, {cpp_string(r['display_name'])},")
-            w(f"     RegSpace::{SPACES[r['space']]}, {r['address']}, {words}, "
-              f"{cpp_float(r['scale'])}, {'true' if signed else 'false'}}},")
+            w(
+                f"    {{measurement_id::{const}, MeasurementType::{mtype}, "
+                f"Unit::{unit_enum}, {cpp_string(r['display_name'])},"
+            )
+            w(
+                f"     RegSpace::{SPACES[r['space']]}, {r['address']}, {words}, "
+                f"{cpp_float(r['scale'])}, {'true' if signed else 'false'}}},"
+            )
         w("};")
         w(f"constexpr RegBlock k{sym}Blocks[] = {{")
         for b in p["blocks"]:
@@ -400,20 +464,28 @@ def generate(profiles: list[dict], vocabulary: dict[str, str],
                 words, _signed = TYPES[wr["type"]]
                 unit_enum, _mtype = UNITS[wr["unit"]]
                 multiple = "true" if wr["function"] == "write_multiple" else "false"
-                w(f"    {{InverterCommandType::{commands[wr['command']]}, "
-                  f"{cpp_string(wr['display_name'])},")
-                w(f"     RegSpace::Holding, {wr['address']}, {words}, {multiple}, "
-                  f"{cpp_float(wr['scale'])},")
-                w(f"     {cpp_float(wr['minimum'])}, {cpp_float(wr['maximum'])}, "
-                  f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
-                  f"{'true' if wr['verified'] else 'false'}}},")
+                w(
+                    f"    {{InverterCommandType::{commands[wr['command']]}, "
+                    f"{cpp_string(wr['display_name'])},"
+                )
+                w(
+                    f"     RegSpace::Holding, {wr['address']}, {words}, {multiple}, "
+                    f"{cpp_float(wr['scale'])},"
+                )
+                w(
+                    f"     {cpp_float(wr['minimum'])}, {cpp_float(wr['maximum'])}, "
+                    f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
+                    f"{'true' if wr['verified'] else 'false'}}},"
+                )
             w("};")
     w("")
     w("constexpr GrowattProfile kProfiles[] = {")
     for p in profiles:
         sym = cpp_symbol(p["id"])
-        w(f"    {{{cpp_string(p['id'])}, {cpp_string(p['display_name'])}, "
-          f"{'true' if p['battery'] else 'false'}, {p['phases']}, {p['mppts']},")
+        w(
+            f"    {{{cpp_string(p['id'])}, {cpp_string(p['display_name'])}, "
+            f"{'true' if p['battery'] else 'false'}, {p['phases']}, {p['mppts']},"
+        )
         w(f"     k{sym}Blocks, sizeof(k{sym}Blocks) / sizeof(k{sym}Blocks[0]),")
         w(f"     k{sym}Mappings, sizeof(k{sym}Mappings) / sizeof(k{sym}Mappings[0]),")
         if p["writes"]:
@@ -422,13 +494,17 @@ def generate(profiles: list[dict], vocabulary: dict[str, str],
             w("     nullptr, 0,")
         rtu = "true" if "rtu" in p["transports"] else "false"
         tcp = "true" if "tcp" in p["transports"] else "false"
-        w(f"     /*supportsRtu=*/{rtu}, /*supportsTcp=*/{tcp}, "
-          f"/*tcpPort=*/{p['tcp_port']},")
+        w(
+            f"     /*supportsRtu=*/{rtu}, /*supportsTcp=*/{tcp}, "
+            f"/*tcpPort=*/{p['tcp_port']},"
+        )
         if p["serial"]:
             s = p["serial"]
-            w(f"     /*hasSerial=*/true,")
-            w(f"     SerialProfile{{{s['baud']}, SerialParity::{PARITIES[s['parity']]}, "
-              f"8, {s['stop_bits']}, 1000, 3}}}},")
+            w("     /*hasSerial=*/true,")
+            w(
+                f"     SerialProfile{{{s['baud']}, SerialParity::{PARITIES[s['parity']]}, "
+                f"8, {s['stop_bits']}, 1000, 3}}}},"
+            )
         else:
             w("     /*hasSerial=*/false, SerialProfile{}},")
     w("};")
@@ -449,7 +525,9 @@ def generate(profiles: list[dict], vocabulary: dict[str, str],
     w("")
     default_index = next(i for i, p in enumerate(profiles) if p["default"])
     w(f"// [profile] default = true in {profiles[default_index]['path']}.")
-    w(f"const GrowattProfile& defaultProfile() {{ return kProfiles[{default_index}]; }}")
+    w(
+        f"const GrowattProfile& defaultProfile() {{ return kProfiles[{default_index}]; }}"
+    )
     w("")
     w("}  // namespace heliograph::growatt")
     w("")
@@ -459,8 +537,9 @@ def generate(profiles: list[dict], vocabulary: dict[str, str],
 def run(check_only: bool = False) -> int:
     vocabulary = load_vocabulary()
     commands = load_command_vocabulary()
-    paths = sorted(p for p in PROFILES_DIR.rglob("*.toml")
-                   if not p.name.startswith("_"))
+    paths = sorted(
+        p for p in PROFILES_DIR.rglob("*.toml") if not p.name.startswith("_")
+    )
     profiles: list[dict] = []
     errors: list[str] = []
     for path in paths:
@@ -477,12 +556,15 @@ def run(check_only: bool = False) -> int:
             errors.append(f"profile id '{dup}' is defined in more than one file")
         defaults = [p for p in profiles if p["default"]]
         if not profiles:
-            errors.append(f"no profiles found under {PROFILES_DIR.relative_to(ROOT)}/ "
-                          f"-- the growatt driver needs at least one")
+            errors.append(
+                f"no profiles found under {PROFILES_DIR.relative_to(ROOT)}/ "
+                f"-- the growatt driver needs at least one"
+            )
         elif len(defaults) != 1:
             errors.append(
                 f"exactly one profile must set `default = true`; found {len(defaults)} "
-                f"({', '.join(p['id'] for p in defaults) or 'none'})")
+                f"({', '.join(p['id'] for p in defaults) or 'none'})"
+            )
 
     if errors:
         sys.stderr.write("gen_profiles.py: device profile validation FAILED\n\n")
@@ -493,15 +575,19 @@ def run(check_only: bool = False) -> int:
 
     content = generate(profiles, vocabulary, commands)
     if check_only:
-        print(f"gen_profiles.py: {len(profiles)} profile(s) valid: "
-              + ", ".join(p["id"] for p in profiles))
+        print(
+            f"gen_profiles.py: {len(profiles)} profile(s) valid: "
+            + ", ".join(p["id"] for p in profiles)
+        )
         return 0
     # Write only on change so an untouched profile never dirties mtimes and triggers
     # a needless rebuild of the driver.
     if not OUTPUT.exists() or OUTPUT.read_text(encoding="utf-8") != content:
         OUTPUT.write_text(content, encoding="utf-8")
-        print(f"gen_profiles.py: wrote {OUTPUT.relative_to(ROOT)} "
-              f"({len(profiles)} profile(s): {', '.join(p['id'] for p in profiles)})")
+        print(
+            f"gen_profiles.py: wrote {OUTPUT.relative_to(ROOT)} "
+            f"({len(profiles)} profile(s): {', '.join(p['id'] for p in profiles)})"
+        )
     return 0
 
 

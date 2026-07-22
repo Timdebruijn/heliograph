@@ -32,7 +32,9 @@ def main() -> int:
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
             handle.write("\n".join(scripts))
             path = handle.name
-        result = subprocess.run(["node", "--check", path], capture_output=True, text=True)
+        result = subprocess.run(
+            ["node", "--check", path], capture_output=True, text=True
+        )
         print(f"{name}: {'OK' if result.returncode == 0 else 'FAIL'}")
         if result.returncode != 0:
             print(result.stderr)

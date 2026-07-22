@@ -37,8 +37,12 @@ FLOATS = [
     ("energy.today", 40, "kWh", 8),
     ("energy.total", 42, "kWh", 9),
 ]
-STRINGS = [("manufacturer", 700, 16), ("model", 716, 16), ("serial", 732, 16),
-           ("driver", 756, 8)]
+STRINGS = [
+    ("manufacturer", 700, 16),
+    ("model", 716, 16),
+    ("serial", 732, 16),
+    ("driver", 756, 8),
+]
 
 
 def u16(regs: list[int], base: int, addr: int) -> int:
@@ -51,7 +55,9 @@ def u32(regs: list[int], base: int, addr: int) -> int:
 
 
 def f32(regs: list[int], base: int, addr: int) -> float:
-    return struct.unpack(">f", struct.pack(">HH", regs[addr - base], regs[addr - base + 1]))[0]
+    return struct.unpack(
+        ">f", struct.pack(">HH", regs[addr - base], regs[addr - base + 1])
+    )[0]
 
 
 def text(regs: list[int], base: int, addr: int, count: int) -> str:
@@ -73,11 +79,17 @@ def main() -> int:
     # pymodbus renamed the unit-id argument from `slave` to `device_id` (3.9+), so try the
     # current name and fall back. Verified against pymodbus 3.14.
     import inspect
-    unit_kw = ("device_id" if "device_id" in
-               inspect.signature(client.read_input_registers).parameters else "slave")
+
+    unit_kw = (
+        "device_id"
+        if "device_id" in inspect.signature(client.read_input_registers).parameters
+        else "slave"
+    )
 
     def read(addr: int, count: int) -> list[int]:
-        rr = client.read_input_registers(address=addr, count=count, **{unit_kw: args.unit})
+        rr = client.read_input_registers(
+            address=addr, count=count, **{unit_kw: args.unit}
+        )
         if rr.isError():
             raise SystemExit(f"modbus error reading {addr}+{count}: {rr}")
         return rr.registers
@@ -85,7 +97,9 @@ def main() -> int:
     core = read(0, 64)
     version = u32(core, 0, 0)
     if version != SCHEMA_VERSION:
-        print(f"WARNING: register map schema is v{version}, this script knows v{SCHEMA_VERSION}.")
+        print(
+            f"WARNING: register map schema is v{version}, this script knows v{SCHEMA_VERSION}."
+        )
         print("Field positions may have moved; not guessing.")
         return 1
 
@@ -133,7 +147,9 @@ def main() -> int:
     print(f"status code     : {u16(core, 0, 6) if status_valid else 'unknown'}")
     err = u16(core, 0, 7)
     # 0xFFFF means the driver has no error code field at all -- not "no fault".
-    print(f"error code      : {'not reported by this protocol' if err == 0xFFFF else err}")
+    print(
+        f"error code      : {'not reported by this protocol' if err == 0xFFFF else err}"
+    )
 
     client.close()
     return 0

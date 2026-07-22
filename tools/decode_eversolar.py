@@ -29,7 +29,9 @@ import sys
 # --- Frame constants — keep in step with eversolar_protocol.h ----------------------------
 
 HEADER = (0xAA, 0x55)
-FRAME_OVERHEAD = 11  # 2 header + 2 src + 2 dst + 1 control + 1 function + 1 length + 2 checksum
+FRAME_OVERHEAD = (
+    11  # 2 header + 2 src + 2 dst + 1 control + 1 function + 1 length + 2 checksum
+)
 OFF_SOURCE = 2
 OFF_DESTINATION = 4
 OFF_CONTROL = 6
@@ -74,9 +76,14 @@ def parse_hex(text: str) -> bytes:
     # Drop a leading "RS485 TX"/"RX" (or bare "TX"/"RX") prefix if present.
     for prefix in ("RS485 TX", "RS485 RX", "TX", "RX"):
         if cleaned.upper().startswith(prefix):
-            cleaned = cleaned[len(prefix):]
+            cleaned = cleaned[len(prefix) :]
             break
-    cleaned = cleaned.replace("0x", " ").replace("0X", " ").replace(",", " ").replace(":", " ")
+    cleaned = (
+        cleaned.replace("0x", " ")
+        .replace("0X", " ")
+        .replace(",", " ")
+        .replace(":", " ")
+    )
     tokens = cleaned.split()
     try:
         return bytes(int(t, 16) for t in tokens)
@@ -131,30 +138,36 @@ def decode_frame(data: bytes, layout: str) -> int:
     length = data[OFF_LENGTH]
 
     expected_total = FRAME_OVERHEAD + length
-    payload = data[OFF_DATA:OFF_DATA + length]
+    payload = data[OFF_DATA : OFF_DATA + length]
 
     is_response = bool(function & 0x80)
     base_function = function & 0x7F
     name = COMMANDS.get((control, base_function), "UNKNOWN command")
 
-    print(f"header        AA 55  OK")
+    print("header        AA 55  OK")
     print(f"source        {source[0]:02X} {source[1]:02X}  ({addr_name(source)})")
-    print(f"destination   {destination[0]:02X} {destination[1]:02X}  ({addr_name(destination)})")
-    print(f"control/func  {control:02X} {function:02X}  "
-          f"{'RESPONSE' if is_response else 'REQUEST'}: {name}")
+    print(
+        f"destination   {destination[0]:02X} {destination[1]:02X}  ({addr_name(destination)})"
+    )
+    print(
+        f"control/func  {control:02X} {function:02X}  "
+        f"{'RESPONSE' if is_response else 'REQUEST'}: {name}"
+    )
     print(f"data length   {length} (0x{length:02X})")
 
     # Length sanity against the actual byte count.
     if n != expected_total:
-        print(f"length        MISMATCH: length byte implies {expected_total} bytes total, "
-              f"buffer is {n} "
-              f"({'frame split across reads — capture the whole line' if n < expected_total else 'trailing bytes'})")
+        print(
+            f"length        MISMATCH: length byte implies {expected_total} bytes total, "
+            f"buffer is {n} "
+            f"({'frame split across reads — capture the whole line' if n < expected_total else 'trailing bytes'})"
+        )
     else:
         print(f"length        OK: {expected_total} bytes total")
 
     # Checksum: sum over everything except the trailing 2 checksum bytes, big-endian.
     if n >= expected_total and length >= 0:
-        body = data[:OFF_DATA + length]
+        body = data[: OFF_DATA + length]
         calc = checksum(body)
         stated = (data[OFF_DATA + length] << 8) | data[OFF_DATA + length + 1]
         ok = "OK" if calc == stated else "MISMATCH"
@@ -197,24 +210,32 @@ def decode_normal_info(payload: bytes, layout: str) -> None:
         elif n in (NORMAL_INFO_DUAL_BYTES, NORMAL_INFO_DUAL_EXTENDED_BYTES):
             use_dual = True
         else:
-            print(f"  layout      UnknownLayout: payload is {n} bytes, expected 28/44 "
-                  f"(single) or 32/50 (dual). Firmware would reject this frame (no data "
-                  f"published). Force with --layout single|dual if this device really uses "
-                  f"another length.")
+            print(
+                f"  layout      UnknownLayout: payload is {n} bytes, expected 28/44 "
+                f"(single) or 32/50 (dual). Firmware would reject this frame (no data "
+                f"published). Force with --layout single|dual if this device really uses "
+                f"another length."
+            )
             return
     elif layout == "single":
         if n < NORMAL_INFO_SINGLE_BYTES:
-            print(f"  layout      LayoutMismatch: forced single needs >= 28 bytes, got {n}")
+            print(
+                f"  layout      LayoutMismatch: forced single needs >= 28 bytes, got {n}"
+            )
             return
         use_dual = False
     else:  # dual
         if n < NORMAL_INFO_DUAL_BYTES:
-            print(f"  layout      LayoutMismatch: forced dual needs >= 32 bytes, got {n}")
+            print(
+                f"  layout      LayoutMismatch: forced dual needs >= 32 bytes, got {n}"
+            )
             return
         use_dual = True
 
-    print(f"  layout      {'dual-string (16 words)' if use_dual else 'single-string (14 words)'}"
-          f"{'' if layout == 'auto' else ' [forced]'}")
+    print(
+        f"  layout      {'dual-string (16 words)' if use_dual else 'single-string (14 words)'}"
+        f"{'' if layout == 'auto' else ' [forced]'}"
+    )
 
     if use_dual:
         _print_measurements(payload, dual=True)
@@ -286,18 +307,25 @@ def _print_measurements(p: bytes, dual: bool) -> None:
         row("PAC", "ac.power.total", f"{pac} W")
         row("E_TOTAL", "energy.total", f"{e_total:.1f} kWh")
         row("HOURS_UP", "inverter.operating_hours", f"{hours} h")
-        _print_unknowns(op_mode, impedance=None,
-                        na={"NA_0 (word 10)": na_0, "NA_2 (word 13)": na_2})
+        _print_unknowns(
+            op_mode, impedance=None, na={"NA_0 (word 10)": na_0, "NA_2 (word 13)": na_2}
+        )
         _print_e_total_note(e_total_hi)
 
 
 def _print_unknowns(op_mode: int, impedance: int | None, na: dict[str, int]) -> None:
-    print("  unknown fields (logged raw, never mapped to text — see docs/eversolar-protocol.md):")
-    print(f"    OP_MODE    status_code = {op_mode} (0x{op_mode:04X})  -> status_text "
-          f'"Unknown ({op_mode})"')
+    print(
+        "  unknown fields (logged raw, never mapped to text — see docs/eversolar-protocol.md):"
+    )
+    print(
+        f"    OP_MODE    status_code = {op_mode} (0x{op_mode:04X})  -> status_text "
+        f'"Unknown ({op_mode})"'
+    )
     if impedance is not None:
-        print(f"    IMPEDANCE  raw = {impedance} (0x{impedance:04X})  unit/scale unknown, "
-              f"not published")
+        print(
+            f"    IMPEDANCE  raw = {impedance} (0x{impedance:04X})  unit/scale unknown, "
+            f"not published"
+        )
     for label, value in na.items():
         print(f"    {label:<10} raw = {value} (0x{value:04X})  unknown, not published")
 
@@ -305,18 +333,26 @@ def _print_unknowns(op_mode: int, impedance: int | None, na: dict[str, int]) -> 
 def _print_e_total_note(e_total_hi: int) -> None:
     if e_total_hi:
         delta = e_total_hi * 0.1
-        print(f"  note        E_TOTAL_HI = {e_total_hi}; our uint32 value is +{delta:.1f} kWh "
-              f"vs eversolar-monitor (its /65535 bug). Expected, not an error.")
+        print(
+            f"  note        E_TOTAL_HI = {e_total_hi}; our uint32 value is +{delta:.1f} kWh "
+            f"vs eversolar-monitor (its /65535 bug). Expected, not an error."
+        )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("frame", nargs="?",
-                        help="hex bytes of one frame (default: read from stdin)")
-    parser.add_argument("--layout", choices=("auto", "single", "dual"), default="auto",
-                        help="payload layout for QUERY_NORMAL_INFO; auto derives it from length "
-                             "(default), single/dual force it")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "frame", nargs="?", help="hex bytes of one frame (default: read from stdin)"
+    )
+    parser.add_argument(
+        "--layout",
+        choices=("auto", "single", "dual"),
+        default="auto",
+        help="payload layout for QUERY_NORMAL_INFO; auto derives it from length "
+        "(default), single/dual force it",
+    )
     args = parser.parse_args()
 
     text = args.frame if args.frame is not None else sys.stdin.read()

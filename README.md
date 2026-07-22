@@ -28,12 +28,24 @@ enabled today (see `docs/device-profiles/schema.md` for how write support is sta
 
 ## Quickstart
 
-1. **Flash** the factory image onto the board (USB-C, no drivers needed on macOS/Linux):
+1. **Flash** the firmware — pick whichever suits you:
 
-   ```bash
-   pio run -e waveshare-eversolar
-   esptool.py --chip esp32s3 write_flash 0x0 .pio/build/waveshare-eversolar/firmware.factory.bin
-   ```
+   - **Browser (easiest):** open the
+     [web installer](https://timdebruijn.github.io/heliograph/) in Chrome or Edge,
+     plug the board in over USB-C, click Connect. Nothing to install.
+   - **esptool:** download `heliograph-<version>-factory.bin` from the
+     [latest release](https://github.com/Timdebruijn/heliograph/releases/latest) and:
+
+     ```bash
+     esptool.py --chip esp32s3 write_flash 0x0 heliograph-<version>-factory.bin
+     ```
+
+   - **From source:** `pio run -e waveshare-eversolar`, then flash
+     `.pio/build/waveshare-eversolar/firmware.factory.bin` the same way.
+
+   Already running Heliograph? Update over the air instead: *Settings → Firmware
+   update* with the release's `heliograph-<version>.bin` — settings survive an OTA,
+   a factory flash erases them.
 
 2. **Join the setup network** `Heliograph-Setup-XXXX` that the board broadcasts on first
    boot. The setup page opens by itself (captive portal); pick your WiFi, set an admin
@@ -64,6 +76,8 @@ Details: [docs/architecture.md](docs/architecture.md).
 ```bash
 pio test -e native          # 390+ host tests, no hardware needed
 ./tools/check_layering.sh   # architectural invariants
+pio check -e native         # static analysis (cppcheck)
+ruff check tools/           # lint for the Python tooling
 pio run -e waveshare-eversolar
 ```
 
