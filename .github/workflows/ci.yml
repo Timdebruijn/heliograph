@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 #
-# The same verification ritual that runs locally before every release:
-# native tests, the layering invariants, embedded-JS syntax, profile schema
-# validation, and both firmware builds. A PR that adds a device profile gets
-# its TOML validated here without a maintainer lifting a finger.
+# The same verification ritual that runs locally before every release: native tests, the
+# layering invariants, embedded-JS syntax, and profile schema validation -- on every push to
+# main and every pull request. The firmware itself (one build per supported board) is compiled
+# only on pull requests that touch build inputs; see the `changes` and `firmware` jobs for why.
+# A PR that adds a device profile gets its TOML validated here without a maintainer lifting a
+# finger.
 
 name: CI
 
@@ -11,6 +13,15 @@ on:
   push:
     branches: [main]
   pull_request:
+
+# Cancel superseded PR runs, never a main-branch run. head_ref is set only on
+# pull_request events, so PR pushes share a group and the older run is cancelled the
+# moment a newer push lands; a push to main falls back to the unique run_id, so every
+# trunk commit is still verified end to end. Before this, six pushes to one PR meant six
+# full firmware matrices stacked in parallel.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -79,9 +90,58 @@ jobs:
       - name: Native test suite
         run: pio test -e native
 
+  # Does this PR touch anything the firmware is built from? A docs-only change (Markdown,
+  # docs/, licences) cannot alter a single byte of the image, so compiling four boards to
+  # prove it is pure waste. This gate answers that once; the firmware job keys off it.
+  #
+  # The filter lives in a JOB with a job-level `if`, deliberately NOT in a workflow-level
+  # `on.*.paths` filter. A path-filtered-out workflow posts no check run at all, so a required
+  # status check would sit in "Pending" forever and block the merge (documented GitHub
+  # behaviour). A skipped job still reports its check, so this stays safe if the firmware
+  # builds are ever made required. PR-only: firmware never runs on push, so neither must this.
+  changes:
+    name: Detect build-affecting changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    # dorny/paths-filter lists the PR's changed files through the API (no checkout). Spelling
+    # the scopes out keeps this working if the repo's default token permissions are ever
+    # tightened; contents:read covers the compare call, pull-requests:read the file listing.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      firmware: ${{ steps.filter.outputs.firmware }}
+    steps:
+      # No checkout: on a pull_request dorny/paths-filter reads the changed-file list from the
+      # API, which is cheaper and needs no working tree.
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          # Positive list = default-deny: a change matching none of these (docs, README,
+          # LICENSE, the flasher site) leaves `firmware` false and skips the build. Keep this
+          # in step with what `pio run` actually consumes -- err towards listing a path, since
+          # a wrongly-skipped build ships nothing but a wrongly-run one only costs minutes.
+          filters: |
+            firmware:
+              - 'src/**'
+              - 'profiles/**'
+              - 'platformio.ini'
+              - 'partitions_*.csv'
+              - 'tools/gen_profiles.py'
+              - '.github/workflows/ci.yml'
+
   firmware:
     name: Firmware (${{ matrix.env }})
     runs-on: ubuntu-latest
+    # PR-only, and only when the PR touches build inputs. The firmware compile is the gate that
+    # must pass BEFORE code reaches main, so it belongs on the pull_request event. A push to
+    # main is the same tree the PR already built; rebuilding it proved nothing and, on a release
+    # tag's bump commit, ran a second full matrix next to release.yml's own build. lint + test
+    # still run on main as the trunk gate; the release workflow re-verifies and builds the
+    # shipping images before publishing. (Direct pushes to main bypass this compile check --
+    # acceptable because all changes land via PR.)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.firmware == 'true'
     strategy:
       fail-fast: false
       matrix:
