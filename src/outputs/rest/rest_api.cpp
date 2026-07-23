@@ -116,6 +116,12 @@ bool RestApi::begin() {
     }
     g_server = new AsyncWebServer(port_);
     g_events = new AsyncEventSource("/api/v1/events");
+    // Enforce the client bound instead of merely declaring it: every SSE client holds a TCP
+    // socket and a send queue for as long as the tab lives, and a device that is up for
+    // months meets a lot of abandoned tabs. Refused clients fall back to polling /status --
+    // SSE is an optimisation, not a contract (see notifyState).
+    g_events->authorizeConnect(
+        [](AsyncWebServerRequest*) { return g_events->count() < kMaxSseClients; });
 
     // Authentication for every mutating endpoint. Without a configured password these are
     // refused outright rather than left open -- an unprovisioned device must not be
