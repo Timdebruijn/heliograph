@@ -58,9 +58,11 @@ namespace {
 //
 // Keep in lockstep with the git tag: the release workflow builds from the tag, so a stale
 // value ships a firmware that misreports its own version -- exactly what bit the post-flash
-// check on 2026-07-21. 0.9.0 covers the stability + observability + config-transparency batch.
+// check on 2026-07-21. 0.9.0 covered the stability + observability + config-transparency
+// batch; 0.10.0 adds the BOOT-hold factory reset and the Relay-6CH status LED, both verified
+// on hardware.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 9
+#define HELIOGRAPH_VERSION_MINOR 10
 #define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
