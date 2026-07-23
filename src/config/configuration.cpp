@@ -251,7 +251,8 @@ bool validate(const Configuration& config, ConfigError& error) {
     return true;
 }
 
-bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes) {
+bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes,
+                     const bool* rebootRequired) {
     JsonDocument doc;
     doc["version"]     = config.version;
     doc["bridge_name"] = config.bridgeName;
@@ -266,7 +267,10 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     mqtt["enabled"]        = config.mqtt.enabled;
     mqtt["host"]           = config.mqtt.host;
     mqtt["port"]           = config.mqtt.port;
-    mqtt["username"]       = config.mqtt.username;
+    // The username is half of a credential pair -- omitted like the password, with only a
+    // *_set flag. It is not needed to identify the broker (host/topic do that) and handing
+    // an unauthenticated LAN reader half the login is a leak worth closing.
+    mqtt["username_set"]   = !config.mqtt.username.empty();
     mqtt["password_set"]   = !config.mqtt.password.empty();
     mqtt["base_topic"]     = config.mqtt.baseTopic;
     mqtt["discovery_prefix"]  = config.mqtt.discoveryPrefix;
@@ -310,7 +314,39 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     security["read_only_mode"]  = config.security.readOnlyMode;
 
     doc["logging"]["level"] = logLevelName(config.logLevel);
+
+    // PATCH response only: tells a non-UI client whether the change it just made is waiting
+    // on a restart. Absent from GET (nothing was changed there).
+    if (rebootRequired != nullptr) {
+        doc["reboot_required"] = *rebootRequired;
+    }
     return finish(doc, out, maxBytes);
+}
+
+bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) {
+    // Everything the firmware reads exactly once -- WiFi.begin at setup(), the MQTT client
+    // and Modbus server built in startOutputs(), the poll interval baked into PollPolicy, the
+    // driver created at setup(), and the clock configured by TimeManager::begin(). Changing
+    // any of these via PATCH updates NVS but not the running object, so it needs a restart.
+    //
+    // Deliberately NOT here (applied live by ctx.applyConfig): bridge_name (read fresh on
+    // every status), relays.* (gates re-applied immediately), security.* (read per request),
+    // logging.level (setLevel called from applyConfig). timezone_name and write_enabled carry
+    // no runtime effect. This set mirrors RESTART_NEEDED in the web UI.
+    return a.wifi.ssid != b.wifi.ssid || a.wifi.password != b.wifi.password ||
+           a.wifi.hostname != b.wifi.hostname || a.mqtt.enabled != b.mqtt.enabled ||
+           a.mqtt.host != b.mqtt.host || a.mqtt.port != b.mqtt.port ||
+           a.mqtt.username != b.mqtt.username || a.mqtt.password != b.mqtt.password ||
+           a.mqtt.baseTopic != b.mqtt.baseTopic ||
+           a.mqtt.discoveryPrefix != b.mqtt.discoveryPrefix ||
+           a.mqtt.discoveryEnabled != b.mqtt.discoveryEnabled || a.mqtt.qos != b.mqtt.qos ||
+           a.modbus.enabled != b.modbus.enabled || a.modbus.port != b.modbus.port ||
+           a.modbus.unitId != b.modbus.unitId ||
+           a.modbus.diagnosticsUnitId != b.modbus.diagnosticsUnitId ||
+           a.polling.intervalSeconds != b.polling.intervalSeconds ||
+           a.driver.id != b.driver.id || a.driver.options != b.driver.options ||
+           a.ntp.enabled != b.ntp.enabled || a.ntp.useDhcp != b.ntp.useDhcp ||
+           a.ntp.server != b.ntp.server || a.ntp.timezone != b.ntp.timezone;
 }
 
 bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error) {

@@ -14,7 +14,7 @@ the same LAN", not "someone holding the PCB in their hands".
 | REST PATCH/POST | HTTP Basic required; **rejected** without a configured password, not left open |
 | OTA | Same auth + firmware magic check (0xE9) before the first byte hits flash |
 | Completing setup | Refuses without an admin password |
-| Secrets in logs/REST/MQTT/Prometheus | Never. `serializeConfig()` omits passwords (not masked); `serializeConfigForStorage()` is the only one that writes them |
+| Secrets in logs/REST/MQTT/Prometheus | Never. `serializeConfig()` omits every password **and the MQTT username** (not masked, absent); `serializeConfigForStorage()` is the only one that writes them |
 | Rate limiting | 1 req/s on `/actions/*` |
 | Request size | 4096 bytes, rejected with 413 |
 | String lengths | Bounded in `validate()`; SSID 32 and PSK 64 are the 802.11/WPA2 limits |
@@ -40,6 +40,15 @@ moment can configure the bridge.
 
 **No brute-force protection on HTTP Basic.** Rate limiting is on `/actions/*`, not on the
 auth itself.
+
+**OTA images are not cryptographically signed.** The upload is gated by the admin password
+and checked for the ESP32 image magic (`0xE9`) before any byte reaches flash, and a bad image
+is rolled back by the bootloader — but the magic check only rejects a wrong *file* (a
+filesystem image, an HTML error page a proxy substituted), not a malicious *firmware*. Anyone
+with the admin password can flash anything that boots. Signed OTA (secure boot v2 + a signed
+app) is the mitigation; it is not enabled because it complicates key management, recovery and
+the open-source build, and the threat model is a trusted LAN with no physical access. Keep the
+admin password strong and the network trusted.
 
 ## What an attacker on the LAN can do
 

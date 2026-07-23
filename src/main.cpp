@@ -324,6 +324,11 @@ void startRestApi() {
             std::lock_guard<std::mutex> lock(g_configMutex);
             g_config = c;
         }
+        // Log level is live, not boot-only: the logger is a global whose level is a plain
+        // setter. Without this a level change reported "Saved and applied" in the UI but did
+        // nothing until a reboot -- and configChangeRequiresReboot() correctly omits it only
+        // because this line makes the claim true.
+        log::setLevel(c.logLevel);
         // The relay gates follow the config immediately -- no restart. Closing EITHER
         // gate also releases every relay: with the gate closed, no command -- not even
         // OFF -- would get through, so an energised contact would otherwise stay frozen

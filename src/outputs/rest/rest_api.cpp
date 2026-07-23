@@ -413,9 +413,12 @@ bool RestApi::begin() {
                 return;
             }
 
-            Configuration updated = *context_.config;
-            ConfigError   error;
-            const bool    parsed = applyConfigPatch(bodyBuffer_, updated, error);
+            // Snapshot before merging: reboot_required in the response is computed against
+            // this, and applyConfig() below overwrites what context_.config points at.
+            const Configuration before  = *context_.config;
+            Configuration       updated = before;
+            ConfigError         error;
+            const bool          parsed  = applyConfigPatch(bodyBuffer_, updated, error);
             releaseBody();
             if (!parsed) {
                 sendError(request, {400, "invalid_config",
@@ -428,8 +431,9 @@ bool RestApi::begin() {
                 return;
             }
             context_.applyConfig(updated);  // lock-guarded publish; see RestContext
+            const bool  rebootRequired = configChangeRequiresReboot(before, updated);
             std::string body;
-            serializeConfig(updated, body);
+            serializeConfig(updated, body, 4096, &rebootRequired);
             request->send(200, kJson, body.c_str());
         },
         nullptr,
