@@ -56,12 +56,13 @@ inline constexpr int kCanTx = 15;
 inline constexpr int kCanRx = 16;
 
 // --- BOOT button / status LED / buzzer -----------------------------------------------------
-// BOOT and RESET buttons are present, but the BOOT GPIO was never measured on this board and
-// GPIO38, which is the status LED on the 6CH, is the RTC SCL here. Nothing is declared until
-// it is measured -- the hold-BOOT-to-factory-reset path stays disabled rather than guessing a
-// pin and wiping config off the wrong line. Measure BOOT on hardware to enable it (backlog).
-inline constexpr bool kHasBootButton = false;
-inline constexpr int  kBootPin       = -1;
+// BOOT on GPIO0 (confirmed against the schematic by Tim 2026-07-23), so the hold-to-factory-
+// reset recovery works on the production board too. No status LED or buzzer: GPIO38/39 are the
+// RTC I2C here and GPIO21 is the RS485 direction line, so a factory reset is silent -- the
+// reboot is its only signal. Runtime read still to be confirmed on hardware at a convenient
+// flash (this board runs the EverSolar soak; no need to disturb it just for that).
+inline constexpr bool kHasBootButton = true;
+inline constexpr int  kBootPin       = 0;
 inline constexpr bool kHasStatusLed  = false;
 inline constexpr int  kStatusLedPin  = -1;
 inline constexpr bool kHasBuzzer     = false;
