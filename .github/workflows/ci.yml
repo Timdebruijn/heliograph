@@ -32,7 +32,11 @@ jobs:
           key: pio-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
       - name: Install tools
-        run: pip install platformio ruff
+        # ruff is PINNED on purpose. Left unpinned it floats to the latest release, whose
+        # default rule set drifts -- a new ruff enabling RUF100/EXE001 failed an unrelated
+        # feature PR on pre-existing tools/ files (2026-07-23). Bumping ruff is now a
+        # deliberate change (raise the pin, fix what it finds) instead of a random red build.
+        run: pip install platformio "ruff==0.15.18"
 
       - name: Ruff (Python tools)
         run: |

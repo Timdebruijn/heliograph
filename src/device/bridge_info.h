@@ -68,6 +68,16 @@ struct BridgeInfo {
     /// Per-relay DRM role from the configuration (index-aligned; may be shorter than
     /// relayCount, missing = "none"). Drives switch names and the DRM mode select.
     std::vector<std::string> relayRoles;
+
+    /// Onboard indicators, present only on boards that have them (board::kHasBootButton /
+    /// kHasStatusLed). `bootButtonPressed` makes the hold-to-factory-reset input observable
+    /// over REST -- the way its wiring gets verified without a scope. `statusLedColor` is the
+    /// colour the policy last chose (green/amber/red/blue/off), so the LED is checkable in the
+    /// API too. Absent from the payload when the board has neither, per the house rule.
+    bool        hasBootButton    = false;
+    bool        bootButtonPressed = false;
+    bool        hasStatusLed     = false;
+    std::string statusLedColor;
 };
 
 }  // namespace heliograph

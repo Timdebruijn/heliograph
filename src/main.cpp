@@ -41,6 +41,8 @@
 #include "outputs/rest/rest_api.h"
 #include "relays/drm.h"
 #include "relays/relay_controller.h"
+#include "status/boot_button.h"
+#include "status/status_led.h"
 #include "state/state_store.h"
 #include "transport/rs485_transport.h"
 
@@ -119,6 +121,14 @@ uint64_t nowMs() { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
 RelayController g_relays{nowMs};
 std::mutex      g_relayMutex;
 
+/// BOOT-hold factory reset and the status LED, on boards that carry them (board::kHasBootButton
+/// / kHasStatusLed). Both are sampled from loop() only, so no locking: g_bootPressed and
+/// g_statusLedColor are atomics purely so bridgeInfo() (loop + rs485Task) can read them for the
+/// REST payload. 5 s hold, long enough that a factory reset is never one accidental brush.
+status::HoldDetector        g_bootHold{5000};
+std::atomic<bool>           g_bootPressed{false};
+std::atomic<status::LedColor> g_statusLedColor{status::LedColor::Off};
+
 /// Owns discovery runs. The web handler requests; rs485Task runs, because it owns the bus.
 DiscoveryRunner g_discovery{g_registry, nowMs};
 
@@ -178,6 +188,12 @@ BridgeInfo bridgeInfo() {
             std::lock_guard<std::mutex> lock(g_configMutex);
             info.relayRoles = g_config.relays.roles;
         }
+    }
+    info.hasBootButton     = board::kHasBootButton;
+    info.bootButtonPressed = g_bootPressed.load();
+    info.hasStatusLed      = board::kHasStatusLed;
+    if (board::kHasStatusLed) {
+        info.statusLedColor = status::colorName(g_statusLedColor.load());
     }
     return info;
 }
@@ -264,6 +280,111 @@ std::string scanNetworksJson() {
     out += "]}";
     WiFi.scanDelete();
     return out;
+}
+
+// --- Onboard indicators (BOOT-hold factory reset, status LED, buzzer) ----------------------
+// All guarded by the board flags: on a board without them (the RS485-CAN, the 1CH) these are
+// dead code the compiler drops, and no pin is touched. Sampled from loop() only.
+
+void initOnboardIndicators() {
+    if (board::kHasBootButton) {
+        pinMode(board::kBootPin, INPUT_PULLUP);  // pressed reads LOW
+    }
+    if (board::kHasBuzzer) {
+        pinMode(board::kBuzzerPin, OUTPUT);
+        digitalWrite(board::kBuzzerPin, LOW);
+    }
+    if (board::kHasStatusLed) {
+        neopixelWrite(board::kStatusLedPin, 0, 0, 0);  // dark until the first health reading
+    }
+}
+
+void beep(uint32_t ms) {
+    if (!board::kHasBuzzer) {
+        return;
+    }
+    // Active-high, transistor-driven. Blocking is fine: the only caller is the factory-reset
+    // path, which reboots immediately afterwards.
+    digitalWrite(board::kBuzzerPin, HIGH);
+    delay(ms);
+    digitalWrite(board::kBuzzerPin, LOW);
+}
+
+void driveStatusLed(const status::LedIndication& ind) {
+    // Report the logical colour (steady, not the blink phase) so the REST payload reads
+    // "red" throughout a factory-reset hold rather than flickering to "off".
+    g_statusLedColor = ind.color;
+
+    status::LedColor shown = ind.color;
+    if (ind.blink && ((millis() / 300) % 2 == 0)) {
+        shown = status::LedColor::Off;
+    }
+    // Only touch the RMT peripheral when the shown colour actually changes.
+    static status::LedColor lastShown = status::LedColor::Off;
+    static bool             everWrote = false;
+    if (everWrote && shown == lastShown) {
+        return;
+    }
+    everWrote = true;
+    lastShown = shown;
+
+    uint8_t r = 0, g = 0, b = 0;
+    switch (shown) {
+        case status::LedColor::Green: g = 40; break;
+        case status::LedColor::Amber: r = 40; g = 18; break;  // warm amber, not yellow-green
+        case status::LedColor::Red:   r = 40; break;
+        case status::LedColor::Blue:  b = 40; break;
+        case status::LedColor::Off:   break;
+    }
+    // Channel order: this WS2812 lights the RED element from neopixelWrite's SECOND argument,
+    // not the first -- a plain "green" (0,40,0) came out red on the first 6CH hardware run
+    // (2026-07-23). So swap red and green here; blue is unaffected. neopixelWrite's own GRB
+    // timing conversion is fine, it is the element mapping on this board that is transposed.
+    neopixelWrite(board::kStatusLedPin, g, r, b);
+}
+
+/// One call per loop pass: sample BOOT, act on a completed hold, and refresh the LED.
+void serviceOnboard() {
+    bool holding = false;
+    if (board::kHasBootButton) {
+        const bool pressed = digitalRead(board::kBootPin) == LOW;
+        g_bootPressed      = pressed;
+        switch (g_bootHold.update(pressed, nowMs())) {
+            case status::HoldDetector::Event::Holding:
+                holding = true;
+                break;
+            case status::HoldDetector::Event::Triggered:
+                log::warn("boot: BOOT held; factory reset requested");
+                beep(400);  // audible confirmation before the wipe
+                g_store.factoryReset();
+                Serial.flush();
+                ESP.restart();
+                return;  // unreachable
+            case status::HoldDetector::Event::Idle:
+                break;
+        }
+    }
+    if (board::kHasStatusLed) {
+        status::LedInputs in;
+        {
+            std::lock_guard<std::mutex> lock(g_configMutex);
+            in.provisioned   = g_config.provisioned();
+            in.mqttEnabled   = g_config.mqtt.enabled;
+            in.modbusEnabled = g_config.modbus.enabled;
+        }
+        in.factoryResetHolding = holding;
+        in.wifiConnected       = g_wifi.connected();
+        in.inverterExpected    = g_driver != nullptr;
+        in.mqttConnected       = g_mqtt && g_mqtt->connected();
+        in.modbusListening      = g_modbus.running();
+        if (g_state) {
+            const auto s      = g_state->snapshot();
+            in.inverterOnline = s->inverterOnline;
+            in.dataValid      = s->dataValid;
+            in.dataStale      = s->dataStale;
+        }
+        driveStatusLed(status::decide(in));
+    }
 }
 
 void startOutputs() {
@@ -530,6 +651,9 @@ void setup() {
     g_relays.setReadOnlyMode(g_config.security.readOnlyMode);
     g_relays.setEnabled(g_config.relays.enabled);
 
+    // BOOT button, status LED and buzzer on boards that have them (6CH). No-op elsewhere.
+    initOnboardIndicators();
+
     // A factory-fresh device gets a UNIQUE default hostname (heliograph-a1b2c3, from the
     // MAC) instead of the shared "heliograph": two bridges on one LAN -- configuring a
     // second unit at home before installing it elsewhere is the normal way to deploy one --
@@ -628,6 +752,7 @@ void loop() {
 
     g_wifi.loop(nowMs());
     startOutputs();  // no-op until there is a network, and only ever runs once
+    serviceOnboard();  // BOOT-hold factory reset + status LED (no-op on boards without them)
 
     // After every NTP sync, put the corrected time into the battery-backed RTC (when the
     // board has one), so the next boot restores an accurate clock. Runs on the loop task,

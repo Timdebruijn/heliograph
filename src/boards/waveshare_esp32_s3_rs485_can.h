@@ -55,13 +55,24 @@ inline constexpr uint8_t kRtcI2cAddress = 0x51;
 inline constexpr int kCanTx = 15;
 inline constexpr int kCanRx = 16;
 
+// --- BOOT button / status LED / buzzer -----------------------------------------------------
+// BOOT on GPIO0 (confirmed against the schematic by Tim 2026-07-23), so the hold-to-factory-
+// reset recovery works on the production board too. No status LED or buzzer: GPIO38/39 are the
+// RTC I2C here and GPIO21 is the RS485 direction line, so a factory reset is silent -- the
+// reboot is its only signal. Runtime read still to be confirmed on hardware at a convenient
+// flash (this is the production board running a multi-day soak; no need to disturb it for it).
+inline constexpr bool kHasBootButton = true;
+inline constexpr int  kBootPin       = 0;
+inline constexpr bool kHasStatusLed  = false;
+inline constexpr int  kStatusLedPin  = -1;
+inline constexpr bool kHasBuzzer     = false;
+inline constexpr int  kBuzzerPin     = -1;
+
 // --- Notes that are not pins ---------------------------------------------------------------
 // Flash    : 16 MB (matches partitions_16mb_ota.csv; factory-flashed many times)
 // PSRAM    : 8 MB (ESP32-S3R8)
 // USB      : native USB-C (no CH340) -> ARDUINO_USB_CDC_ON_BOOT=1
 // Power    : USB-C, or 7-36 V DC terminal via onboard regulator
 // Isolation: power + optocoupler isolation on both RS485 and CAN -- SGND is NOT GND
-// Buttons  : BOOT and RESET present. BOOT GPIO not recorded -- measure before building
-//            the hold-BOOT-to-factory-reset recovery path (backlog); never guess a pin.
 
 }  // namespace heliograph::board

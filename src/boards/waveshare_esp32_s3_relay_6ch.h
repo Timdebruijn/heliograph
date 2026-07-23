@@ -66,11 +66,25 @@ inline constexpr int     kRtcScl        = -1;
 inline constexpr int     kRtcSda        = -1;
 inline constexpr uint8_t kRtcI2cAddress = 0;
 
+// --- BOOT button / status LED / buzzer -----------------------------------------------------
+// BOOT on GPIO0 -- VERIFIED ON HARDWARE 2026-07-23: pressing it flips boot_button_pressed in
+// the API and drives the status LED to the blinking-red hold indication, released cleanly with
+// no reset under the 5 s threshold. The SoC download strapping pin, high through its pull-up
+// and low when pressed. Held ~5 s it factory-resets, the one recovery path on a headless board.
+inline constexpr bool kHasBootButton = true;
+inline constexpr int  kBootPin       = 0;
+// WS2812 status LED on GPIO38 and a transistor-driven buzzer on GPIO21 (documentation +
+// official demo). On the RTC boards these very pins are the RTC I2C (38/39) and the RS485
+// direction line (21) -- which is exactly why this is declared per board, never family-wide.
+// LED verified lit 2026-07-23; its red/green elements are transposed vs neopixelWrite's
+// argument order (see driveStatusLed in main.cpp), found and corrected on that first run.
+inline constexpr bool kHasStatusLed = true;
+inline constexpr int  kStatusLedPin = 38;
+inline constexpr bool kHasBuzzer    = true;
+inline constexpr int  kBuzzerPin    = 21;
+
 // --- Notes that are not pins ---------------------------------------------------------------
 // Flash  : 8 MB -> uses partitions_8mb_ota.csv, NOT the 16 MB table
-// Buzzer : GPIO21 (transistor-driven; unused by this firmware)
-// RGB LED: GPIO38 (WS2812; unused by this firmware)
-// BOOT   : GPIO0 per the community configuration; unverified on hardware
 // Power  : USB-C, or 7-36 V DC terminal
 // Relays : 6x <=10 A 250 VAC / 30 VDC, optocoupler + digital isolation
 // I2C    : GPIO4 (SDA) / GPIO5 (SCL) are the Pico-HAT expansion I2C pins; the official

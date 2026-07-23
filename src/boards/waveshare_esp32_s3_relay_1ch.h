@@ -47,12 +47,23 @@ inline constexpr int     kRtcScl        = 38;
 inline constexpr int     kRtcSda        = 39;
 inline constexpr uint8_t kRtcI2cAddress = 0x51;
 
+// --- BOOT button / status LED / buzzer -----------------------------------------------------
+// BOOT on GPIO0 (Waveshare documentation, confirmed by Tim 2026-07-23) -- the SoC download
+// strapping pin, so the hold-to-factory-reset recovery works here too. There is NO status LED
+// or buzzer: GPIO38/39 are the RTC I2C, GPIO21 is unassigned here, so a factory reset on this
+// board is silent -- the reboot is its only signal. Runtime read still awaits a 1CH in hand.
+inline constexpr bool kHasBootButton = true;
+inline constexpr int  kBootPin       = 0;
+inline constexpr bool kHasStatusLed  = false;
+inline constexpr int  kStatusLedPin  = -1;
+inline constexpr bool kHasBuzzer     = false;
+inline constexpr int  kBuzzerPin     = -1;
+
 // --- Notes that are not pins ---------------------------------------------------------------
 // Module   : ESP32-S3-WROOM-1U (ESP32-S3R8 -> 8 MB octal PSRAM)
 // Flash    : W25Q128JVSI -> 16 MB
 // USB      : native (D_N/D_P straight to the SoC, no CH340) -> ARDUINO_USB_CDC_ON_BOOT=1
 // Isolation: B0505S-1WR3 + pi131M31; SGND is NOT GND. Do not bridge them.
 // Termination: 120R (R23) on header H1. Fit the jumper only at a physical end of the bus.
-// NOT DEFINED: the BOOT button GPIO -- not pinned down unambiguously; measure first.
 
 }  // namespace heliograph::board
