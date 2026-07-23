@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,15 @@ std::string sanitizeId(const std::string& measurementId);
 /// Fingerprint of the discovery-relevant measurement model: the ordered ids of supported
 /// measurements. The MQTT output republishes discovery when this changes; comparing a bare
 /// count would miss a same-size swap of one channel for another.
-std::string discoverySignature(const DeviceState& state);
+///
+/// A 64-bit FNV-1a hash rather than a concatenated string: the MQTT loop evaluates this
+/// every pass (~4 Hz), and a std::string here meant a heap allocation per pass, forever --
+/// ~350k/day of steady churn on a months-uptime device for a value that only ever gets
+/// compared. Collisions are theoretical at the scale of "a few dozen short ids".
+uint64_t discoverySignature(const DeviceState& state);
+
+/// Same idea for an ordered list of strings (the configured relay roles): order-sensitive,
+/// allocation-free change detection.
+uint64_t stringListFingerprint(const std::vector<std::string>& items);
 
 }  // namespace heliograph::mqtt

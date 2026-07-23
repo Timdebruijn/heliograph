@@ -154,16 +154,42 @@ std::string sanitizeId(const std::string& measurementId) {
     return out;
 }
 
-std::string discoverySignature(const DeviceState& state) {
+namespace {
+
+// FNV-1a, 64-bit. The '\n' fed between items keeps the hash order- and boundary-sensitive:
+// {"ab","c"} and {"a","bc"} must not collide by construction.
+constexpr uint64_t kFnvOffset = 14695981039346656037ull;
+constexpr uint64_t kFnvPrime  = 1099511628211ull;
+
+uint64_t fnv1aAppend(uint64_t hash, const char* s) {
+    for (; *s != '\0'; ++s) {
+        hash ^= static_cast<uint8_t>(*s);
+        hash *= kFnvPrime;
+    }
+    hash ^= static_cast<uint8_t>('\n');
+    hash *= kFnvPrime;
+    return hash;
+}
+
+}  // namespace
+
+uint64_t discoverySignature(const DeviceState& state) {
     // Only supported channels count: unsupported ones produce no entity (see below), so a
     // change in them must not trigger a republish.
-    std::string sig;
+    uint64_t sig = kFnvOffset;
     for (const auto& m : state.measurements.all()) {
         if (!m.supported) {
             continue;
         }
-        sig += m.id;
-        sig += '\n';
+        sig = fnv1aAppend(sig, m.id);
+    }
+    return sig;
+}
+
+uint64_t stringListFingerprint(const std::vector<std::string>& items) {
+    uint64_t sig = kFnvOffset;
+    for (const auto& item : items) {
+        sig = fnv1aAppend(sig, item.c_str());
     }
     return sig;
 }

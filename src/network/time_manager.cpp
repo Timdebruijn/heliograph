@@ -10,6 +10,7 @@
 
 #include <Arduino.h>
 #include <esp_sntp.h>
+#include <esp_timer.h>
 
 #include <atomic>
 #include <ctime>
@@ -28,7 +29,10 @@ constexpr time_t kSaneEpoch = 1704067200;
 
 size_t provideTimestamp(char* buf, size_t n) {
     const time_t now = time(nullptr);
-    return log::formatLogTimestamp(buf, n, now > kSaneEpoch, now, millis());
+    // esp_timer, not millis(): the uptime stamp on a never-synced clock must keep counting
+    // past 49.7 days instead of restarting at zero. See the note at main.cpp's nowMs().
+    return log::formatLogTimestamp(buf, n, now > kSaneEpoch, now,
+                                   static_cast<uint64_t>(esp_timer_get_time() / 1000));
 }
 
 // Written from the SNTP task via the notification callback, read from the main loop and

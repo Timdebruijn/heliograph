@@ -15,6 +15,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
+#include <esp_timer.h>
 
 #include <atomic>
 #include <memory>
@@ -88,7 +89,14 @@ std::atomic<uint64_t> g_rebootAtMs{0};
 /// only ever asks. See the note at ctx.requestPoll.
 std::atomic<bool> g_manualPollRequested{false};
 
-uint64_t nowMs() { return static_cast<uint64_t>(millis()); }
+/// esp_timer, NOT millis(): millis() is uint32 and wraps every 49.7 days, and casting the
+/// wrapped value to uint64 does not un-wrap it. Every `now < deadline` comparison downstream
+/// (MQTT reconnect back-off, WiFi retry schedule, poll due-time, relay rate limiter) would
+/// see time jump backwards once per wrap and could stall until the next one — on a device
+/// that is up for months, that is a scheduled outage. esp_timer_get_time() is a true 64-bit
+/// microsecond counter: monotonic for ~292k years. Same fix in Rs485Transport::nowMs() and
+/// the log-timestamp provider.
+uint64_t nowMs() { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
 
 /// The bridge's DRM relays (empty on boards without them). Commands arrive on two tasks
 /// (REST via AsyncTCP, MQTT via the client's task); g_relayMutex serialises them and the
@@ -119,7 +127,7 @@ BridgeInfo bridgeInfo() {
         info.name = g_config.bridgeName;
     }
     info.bridgeOnline     = true;
-    info.uptimeSeconds    = static_cast<uint32_t>(millis() / 1000);
+    info.uptimeSeconds    = static_cast<uint32_t>(nowMs() / 1000);  // good for 136 years
     info.freeHeapBytes    = ESP.getFreeHeap();
     info.minFreeHeapBytes = ESP.getMinFreeHeap();
     info.resetReason      = static_cast<uint16_t>(esp_reset_reason());
@@ -351,7 +359,7 @@ void startRestApi() {
         // blocking delay() in this callback stalls the whole web server.
         //
         // Hand it to loop() instead, with enough time for the socket to flush.
-        g_rebootAtMs = static_cast<uint64_t>(millis()) + 1500;
+        g_rebootAtMs = nowMs() + 1500;
     };
     ctx.requestDiscovery    = [](bool extended) { return g_discovery.request(extended); };
     ctx.discoveryReport     = [] { return g_discovery.report(); };
@@ -428,6 +436,11 @@ void setup() {
     while (!Serial && millis() < serialDeadline) {
         delay(10);
     }
+    // Headless operation is the normal state: no USB host for months. HWCDC's default TX
+    // timeout is 100 ms PER WRITE once the 256-byte ring fills with nobody draining it, and
+    // the logger runs on rs485Task too -- every log line would then stall polling for up to
+    // that timeout. Zero means drop-when-full: the REST log ring keeps every line anyway.
+    Serial.setTxTimeoutMs(0);
 
     Serial.printf("\nHeliograph %s\nboard: %s\nreset reason: %d\n", kFirmwareVersion,
                   board::kName, static_cast<int>(esp_reset_reason()));

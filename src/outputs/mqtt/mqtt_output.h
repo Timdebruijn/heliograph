@@ -97,7 +97,8 @@ private:
     /// discoverySignature() at the last discovery publish. Discovery re-announces when the
     /// model changes: the first MQTT connect often beats the first successful poll of a real
     /// inverter. A signature rather than a count, so a same-size swap of channels is caught.
-    std::string discoveredSignature_;
+    /// 0 = never published; the FNV offset basis makes a real signature never 0 in practice.
+    uint64_t discoveredSignature_ = 0;
     uint64_t lastDiagnosticsMs_  = 0;
     uint64_t nextReconnectMs_    = 0;
     /// Exponential back-off, capped. An unreachable broker must not turn into a busy loop.
@@ -130,11 +131,11 @@ private:
     bool    relayStateForced_  = true;
     uint8_t lastRelayMask_     = 0;
     bool    lastRelaysEnabled_ = false;
-    /// Signature of the configured roles at the last publish. Roles rename the switches,
+    /// Fingerprint of the configured roles at the last publish. Roles rename the switches,
     /// rebuild the select options AND change the derived mode, so a role change must
     /// re-announce discovery and re-ack state -- "applied immediately" would otherwise
     /// only be true after the next reconnect (self-review of PR #3).
-    std::string lastRelayRolesSig_;
+    uint64_t lastRelayRolesSig_ = 0;
 
 public:
     uint8_t lastDisconnectReason() const { return lastDisconnectReason_; }
