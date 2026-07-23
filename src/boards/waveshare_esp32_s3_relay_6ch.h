@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 //
 // Waveshare ESP32-S3-Relay-6CH board definition. STATUS: pins verified from the official
-// schematic AND the official demo source; this firmware has not run on the physical board
-// yet (relay polarity check pending).
+// schematic AND the official demo source, and CONFIRMED ON HARDWARE 2026-07-23 -- all six
+// relays actuate, and the active-high polarity below was measured, not assumed.
 //
 // Sources (2026-07-22): official schematic (ESP32-S3-Relay-6CH-Sch.pdf), official demo
 // (ESP32-S3-Relay-6CH-Demo.zip, WS_GPIO.h/WS_Serial.cpp), community ESPHome configuration
@@ -13,6 +13,12 @@
 // The six relays are the multi-mode DRM actuators (DRM0-8 combinations) for inverters
 // that cannot be curtailed over RS485. Failsafe by wiring: de-energised = DRM not
 // asserted -- a dead bridge never blocks production.
+//
+// The failsafe is MEASURED, not merely designed (2026-07-23): with a relay energised,
+// cutting power released the contact immediately, and the board came back up with all six
+// de-energised. That second half matters as much as the first -- begin() drives every
+// relay off and no relay state is persisted anywhere on purpose, so a reboot can never
+// restore a curtailment nobody just asked for.
 
 #pragma once
 
@@ -40,8 +46,14 @@ inline constexpr int kRs485UartNum = 1;
 // --- Relays --------------------------------------------------------------------------------
 // Schematic nets CH1..CH6 -> GPIO1, GPIO2, GPIO41, GPIO42, GPIO45, GPIO46 (45/46 are
 // strapping pins; they only matter at reset, and the relays are driven afterwards).
-// Community configuration drives HIGH to energise; treat active-high as unconfirmed
-// polarity until the first hardware session.
+// Order CONFIRMED ON HARDWARE 2026-07-23: relay index 0..5 drives CH1..CH6 one-to-one.
+// Worth checking rather than assuming -- a shifted mapping would silently switch the
+// wrong DRM line on an inverter.
+// Active-high VERIFIED ON HARDWARE 2026-07-23, multimeter on the changeover contacts:
+// driving the GPIO high energises the coil, closing COM-NO and opening COM-NC. So a
+// de-energised relay leaves NO open and NC closed -- which is what makes the failsafe a
+// wiring choice rather than a firmware one (docs/drm.md): whichever sense an inverter's
+// DRM input needs, one of the two contacts keeps "bridge dead = inverter runs" true.
 inline constexpr int  kRelayCount      = 6;
 inline constexpr int  kRelayPins[6]    = {1, 2, 41, 42, 45, 46};
 inline constexpr bool kRelayActiveHigh = true;
