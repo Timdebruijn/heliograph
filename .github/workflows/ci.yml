@@ -12,6 +12,15 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel superseded PR runs, never a main-branch run. head_ref is set only on
+# pull_request events, so PR pushes share a group and the older run is cancelled the
+# moment a newer push lands; a push to main falls back to the unique run_id, so every
+# trunk commit is still verified end to end. Before this, six pushes to one PR meant six
+# full firmware matrices stacked in parallel.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint + static analysis
@@ -82,6 +91,13 @@ jobs:
   firmware:
     name: Firmware (${{ matrix.env }})
     runs-on: ubuntu-latest
+    # PR-only: the firmware compile is the gate that must pass BEFORE code reaches main, so it
+    # belongs on the pull_request event. A push to main is the same tree the PR already built;
+    # rebuilding it proved nothing and, on a release tag's bump commit, ran a second full matrix
+    # next to release.yml's own build. lint + test still run on main as the trunk gate; the
+    # release workflow re-verifies and builds the shipping images before publishing. (Direct
+    # pushes to main bypass this compile check -- acceptable because all changes land via PR.)
+    if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
