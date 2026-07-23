@@ -10,6 +10,9 @@
 //   kRs485UartNum
 //   kRelayCount, kRelayPins[], kRelayActiveHigh
 //   kHasRtc (+ kRtcScl/kRtcSda/kRtcI2cAddress when true)
+//   kHasBootButton (+ kBootPin when true)   -- hold-to-factory-reset recovery
+//   kHasStatusLed  (+ kStatusLedPin when true) -- single WS2812 health indicator
+//   kHasBuzzer     (+ kBuzzerPin when true)    -- audible confirmation
 //
 // House rule applies here more than anywhere: no pin is ever guessed. A pin that could
 // not be verified is absent or marked unverified in the board header itself.

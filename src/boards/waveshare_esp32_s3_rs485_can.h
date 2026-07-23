@@ -55,13 +55,23 @@ inline constexpr uint8_t kRtcI2cAddress = 0x51;
 inline constexpr int kCanTx = 15;
 inline constexpr int kCanRx = 16;
 
+// --- BOOT button / status LED / buzzer -----------------------------------------------------
+// BOOT and RESET buttons are present, but the BOOT GPIO was never measured on this board and
+// GPIO38, which is the status LED on the 6CH, is the RTC SCL here. Nothing is declared until
+// it is measured -- the hold-BOOT-to-factory-reset path stays disabled rather than guessing a
+// pin and wiping config off the wrong line. Measure BOOT on hardware to enable it (backlog).
+inline constexpr bool kHasBootButton = false;
+inline constexpr int  kBootPin       = -1;
+inline constexpr bool kHasStatusLed  = false;
+inline constexpr int  kStatusLedPin  = -1;
+inline constexpr bool kHasBuzzer     = false;
+inline constexpr int  kBuzzerPin     = -1;
+
 // --- Notes that are not pins ---------------------------------------------------------------
 // Flash    : 16 MB (matches partitions_16mb_ota.csv; factory-flashed many times)
 // PSRAM    : 8 MB (ESP32-S3R8)
 // USB      : native USB-C (no CH340) -> ARDUINO_USB_CDC_ON_BOOT=1
 // Power    : USB-C, or 7-36 V DC terminal via onboard regulator
 // Isolation: power + optocoupler isolation on both RS485 and CAN -- SGND is NOT GND
-// Buttons  : BOOT and RESET present. BOOT GPIO not recorded -- measure before building
-//            the hold-BOOT-to-factory-reset recovery path (backlog); never guess a pin.
 
 }  // namespace heliograph::board

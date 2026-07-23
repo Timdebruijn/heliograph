@@ -82,6 +82,15 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
         }
     }
 
+    // Onboard indicators, only on boards that carry them (house rule: absent, not a
+    // false-ish default, when the hardware is not there).
+    if (bridge.hasBootButton) {
+        b["boot_button_pressed"] = bridge.bootButtonPressed;
+    }
+    if (bridge.hasStatusLed) {
+        b["status_led"] = bridge.statusLedColor;
+    }
+
     JsonObject d = doc["device"].to<JsonObject>();
     d["id"]      = deviceId;  // the registered id, not identity.deviceId() -- see the header
     addOptional(d, "driver_id", state.identity.driverId);
