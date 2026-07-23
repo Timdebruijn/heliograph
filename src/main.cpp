@@ -436,6 +436,11 @@ void setup() {
     while (!Serial && millis() < serialDeadline) {
         delay(10);
     }
+    // Headless operation is the normal state: no USB host for months. HWCDC's default TX
+    // timeout is 100 ms PER WRITE once the 256-byte ring fills with nobody draining it, and
+    // the logger runs on rs485Task too -- every log line would then stall polling for up to
+    // that timeout. Zero means drop-when-full: the REST log ring keeps every line anyway.
+    Serial.setTxTimeoutMs(0);
 
     Serial.printf("\nHeliograph %s\nboard: %s\nreset reason: %d\n", kFirmwareVersion,
                   board::kName, static_cast<int>(esp_reset_reason()));
