@@ -128,8 +128,8 @@ BridgeInfo bridgeInfo() {
     }
     info.bridgeOnline     = true;
     info.uptimeSeconds    = static_cast<uint32_t>(nowMs() / 1000);  // good for 136 years
-    info.freeHeapBytes     = ESP.getFreeHeap();
-    info.minFreeHeapBytes  = ESP.getMinFreeHeap();
+    info.freeHeapBytes    = ESP.getFreeHeap();
+    info.minFreeHeapBytes = ESP.getMinFreeHeap();
     info.maxAllocHeapBytes = ESP.getMaxAllocHeap();
     info.resetReason      = static_cast<uint16_t>(esp_reset_reason());
     info.wifiConnected    = g_wifi.connected();
