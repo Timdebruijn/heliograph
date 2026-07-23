@@ -48,11 +48,12 @@ inline constexpr int     kRtcSda        = 39;
 inline constexpr uint8_t kRtcI2cAddress = 0x51;
 
 // --- BOOT button / status LED / buzzer -----------------------------------------------------
-// The BOOT GPIO was never pinned down unambiguously on this board, and there is no status LED
-// or buzzer to speak of. All three stay disabled -- guessing GPIO0 to enable a config-wiping
-// hold is exactly the kind of thing the no-guessing rule exists to stop. Measure BOOT first.
-inline constexpr bool kHasBootButton = false;
-inline constexpr int  kBootPin       = -1;
+// BOOT on GPIO0 (Waveshare documentation, confirmed by Tim 2026-07-23) -- the SoC download
+// strapping pin, so the hold-to-factory-reset recovery works here too. There is NO status LED
+// or buzzer: GPIO38/39 are the RTC I2C, GPIO21 is unassigned here, so a factory reset on this
+// board is silent -- the reboot is its only signal. Runtime read still awaits a 1CH in hand.
+inline constexpr bool kHasBootButton = true;
+inline constexpr int  kBootPin       = 0;
 inline constexpr bool kHasStatusLed  = false;
 inline constexpr int  kStatusLedPin  = -1;
 inline constexpr bool kHasBuzzer     = false;
