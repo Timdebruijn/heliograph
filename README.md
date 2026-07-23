@@ -3,7 +3,7 @@
 > A heliograph signalled messages with sunlight. This one translates what your solar
 > inverter is saying into languages the rest of your network speaks.
 
-Firmware for the **Waveshare ESP32-S3-RS485-CAN** that reads solar inverters and hybrid
+Firmware for **Waveshare ESP32-S3 boards** that reads solar inverters and hybrid
 systems over RS485 and republishes everything in the formats your tooling already speaks:
 **MQTT + Home Assistant discovery, Modbus TCP, REST/JSON, Prometheus**. One box next to
 the inverter, every integration for free.
@@ -17,7 +17,7 @@ Built for devices whose vendor tooling is dead, cloud-bound or closed — starti
 |---|---|---|
 | EverSolar / Zeversolar legacy (TL series) | PMU (AA55) over RS485 | **Beta** — running in production, multi-day soak toward Stable |
 | Growatt SPH hybrid (3–6 kW) | Modbus RTU | Experimental — register map transcribed, hardware validation in progress |
-| SolaX X1 series (X1 Mini G1/G2/G3) | PMU (AA55) over RS485 | Experimental — awaiting first hardware session |
+| SolaX X1 series (X1 Mini G1/G2/G3) | PMU (AA55) over RS485 | Experimental — first hardware attempt (X1-Mini-G1) returned no data; see [docs/solax-x1-protocol.md](docs/solax-x1-protocol.md) before wiring |
 
 All drivers are **read-only**. Writing setpoints to somebody's inverter requires a
 hardware-verified register map and a deliberate driver-level write path; neither is
@@ -31,12 +31,21 @@ enabled today (see `docs/device-profiles/schema.md` for how write support is sta
 | Board | Extras | Status |
 |---|---|---|
 | Waveshare ESP32-S3-RS485-CAN | battery-backed RTC, CAN (unused) | **Production** — the reference board |
-| Waveshare ESP32-S3-Relay-1CH | 1 relay (DRM0 curtailment, planned), RTC | Builds; awaiting hardware validation |
-| Waveshare ESP32-S3-Relay-6CH | 6 relays (DRM modes, planned), 8 MB flash | Builds; pins verified, awaiting hardware validation |
+| Waveshare ESP32-S3-Relay-1CH | 1 relay (DRM0 curtailment), RTC | Builds; awaiting hardware validation |
+| Waveshare ESP32-S3-Relay-6CH | 6 relays (DRM modes), 8 MB flash | **Hardware-verified** — relays, polarity and failsafe measured 2026-07-23; RS485 on this board not yet exercised |
 
 One firmware image per board; the web installer asks which one you have. The relay
 boards are for **DRM demand-response curtailment** of inverters that cannot be limited
-over RS485 — that control layer is under construction and ships disabled by default.
+over RS485 — useful precisely where a driver is read-only, which is all of them today.
+
+The relay layer ships **inert**: it needs two independent gates opened (`relays.enabled`
+*and* `security.read_only_mode` off) before a coil can move. On the 6CH this has been
+measured rather than assumed — channel order maps one-to-one, driving a GPIO high closes
+COM-NO, cutting power releases the contact immediately, and the board boots with every
+relay de-energised. No relay state is persisted anywhere, deliberately: a reboot must
+never restore a curtailment nobody just asked for. Because a de-energised relay leaves NO
+open *and* NC closed, "bridge dead means the inverter keeps producing" stays a wiring
+choice rather than a firmware flag — see [docs/drm.md](docs/drm.md).
 
 ## Quickstart
 
