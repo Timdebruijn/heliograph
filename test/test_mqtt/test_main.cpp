@@ -332,6 +332,26 @@ static void test_rssi_is_null_when_wifi_is_down() {
     TEST_ASSERT_TRUE(parse(json)["wifi_rssi_dbm"].isNull());
 }
 
+static void test_diagnostics_report_stack_marks_and_fragmentation() {
+    Rig r;
+    r.diagnostics.recordRs485StackFree(2500);
+    r.diagnostics.recordLoopStackFree(4100);
+    auto bridge              = makeBridge();
+    bridge.maxAllocHeapBytes = 65536;
+    std::string json;
+    TEST_ASSERT_TRUE(buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(2500, doc["rs485_stack_free_bytes"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(4100, doc["loop_stack_free_bytes"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(65536, doc["max_alloc_heap_bytes"].as<uint32_t>());
+
+    // Before the first sample the honest answer is "unknown", not an alarming 0.
+    buildDiagnosticsPayload(DiagnosticsSnapshot{}, bridge, json);
+    doc = parse(json);
+    TEST_ASSERT_TRUE(doc["rs485_stack_free_bytes"].isNull());
+    TEST_ASSERT_TRUE(doc["loop_stack_free_bytes"].isNull());
+}
+
 static void test_diagnostics_never_contain_a_secret() {
     // The last_error string is fed only from pollResultName() and friends.
     Rig r;
@@ -822,6 +842,7 @@ int main(int, char**) {
     RUN_TEST(test_the_mock_hybrid_payload_also_fits);
     RUN_TEST(test_diagnostics_payload);
     RUN_TEST(test_rssi_is_null_when_wifi_is_down);
+    RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);
     RUN_TEST(test_diagnostics_never_contain_a_secret);
     RUN_TEST(test_identity_omits_unknown_fields);
     RUN_TEST(test_capabilities_payload_reports_read_only);

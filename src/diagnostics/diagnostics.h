@@ -24,6 +24,12 @@ struct DiagnosticsSnapshot {
     uint32_t modbusClientConnections   = 0;
     uint32_t restRequestTotal          = 0;
     uint64_t lastSuccessfulPollMs      = 0;
+    /// Lowest-ever free stack per application task, in bytes (ESP-IDF's xtensa port defines
+    /// StackType_t as uint8_t, so uxTaskGetStackHighWaterMark already returns bytes). Each
+    /// task samples its own; 0 = not sampled yet, and outputs publish null for it -- a
+    /// monitoring rule on "stack headroom == 0" must not fire at boot.
+    uint32_t rs485StackFreeBytes       = 0;
+    uint32_t loopStackFreeBytes        = 0;
     std::string lastError;
 };
 
@@ -45,6 +51,15 @@ public:
     void recordMqttReconnect() { mqttReconnectTotal_.fetch_add(1, std::memory_order_relaxed); }
     void recordModbusClient() { modbusClientConnections_.fetch_add(1, std::memory_order_relaxed); }
     void recordRestRequest() { restRequestTotal_.fetch_add(1, std::memory_order_relaxed); }
+
+    /// Stack high-water marks, in bytes. Each task reports its OWN mark
+    /// (uxTaskGetStackHighWaterMark(nullptr)) so no task handle ever crosses a boundary.
+    void recordRs485StackFree(uint32_t bytes) {
+        rs485StackFreeBytes_.store(bytes, std::memory_order_relaxed);
+    }
+    void recordLoopStackFree(uint32_t bytes) {
+        loopStackFreeBytes_.store(bytes, std::memory_order_relaxed);
+    }
 
     /// Cheap atomic read for hot-path callers (the boot-confirm check runs every loop()
     /// iteration; a full snapshot() would copy a std::string each time).
@@ -70,6 +85,8 @@ private:
     std::atomic<uint32_t> modbusClientConnections_{0};
     std::atomic<uint32_t> restRequestTotal_{0};
     std::atomic<uint64_t> lastSuccessfulPollMs_{0};
+    std::atomic<uint32_t> rs485StackFreeBytes_{0};
+    std::atomic<uint32_t> loopStackFreeBytes_{0};
 
     mutable std::mutex errorMutex_;
     std::string        lastError_;

@@ -506,6 +506,32 @@ static void test_diagnostics_payload_has_no_secrets() {
     TEST_ASSERT_EQUAL_STRING("Waveshare ESP32-S3-RS485-CAN", doc["board"]);
 }
 
+static void test_diagnostics_report_stack_marks_and_fragmentation() {
+    Rig r;
+    r.diagnostics.recordRs485StackFree(2500);
+    r.diagnostics.recordLoopStackFree(4100);
+    auto bridge              = makeBridge();
+    bridge.maxAllocHeapBytes = 65536;
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(2500, doc["rs485_stack_free_bytes"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(4100, doc["loop_stack_free_bytes"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(65536, doc["max_alloc_heap_bytes"].as<uint32_t>());
+}
+
+static void test_stack_marks_are_null_before_the_first_sample() {
+    // 0 would read as an exhausted stack to any alerting rule; before the tasks have
+    // sampled themselves the honest answer is "unknown".
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(DiagnosticsSnapshot{}, makeBridge(), json));
+    TEST_ASSERT_TRUE(json.find("rs485_stack_free_bytes") != std::string::npos);
+    TEST_ASSERT_TRUE(json.find("loop_stack_free_bytes") != std::string::npos);
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["rs485_stack_free_bytes"].isNull());
+    TEST_ASSERT_TRUE(doc["loop_stack_free_bytes"].isNull());
+}
+
 static void test_oversized_response_is_refused() {
     Rig        r;
     const auto state = r.poll();
@@ -516,6 +542,24 @@ static void test_oversized_response_is_refused() {
 }
 
 // --- Prometheus ------------------------------------------------------------------------------
+
+static void test_prometheus_stack_and_fragmentation_gauges() {
+    Rig        r;
+    const auto state = r.poll();
+    // Unsampled stack marks: the gauges are omitted entirely, like the RSSI gauge.
+    auto text = prometheus::buildMetrics(state, makeBridge(), r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("rs485_stack_free_bytes") == std::string::npos);
+    TEST_ASSERT_TRUE(text.find("loop_stack_free_bytes") == std::string::npos);
+
+    r.diagnostics.recordRs485StackFree(2500);
+    r.diagnostics.recordLoopStackFree(4100);
+    auto bridge              = makeBridge();
+    bridge.maxAllocHeapBytes = 65536;
+    text = prometheus::buildMetrics(state, bridge, r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_rs485_stack_free_bytes 2500\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_loop_stack_free_bytes 4100\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_max_alloc_heap_bytes 65536\n") != std::string::npos);
+}
 
 static void test_prometheus_exports_current_readings() {
     Rig        r;
@@ -634,7 +678,10 @@ int main(int, char**) {
     RUN_TEST(test_capabilities_payload);
     RUN_TEST(test_drivers_payload_drives_the_wizard);
     RUN_TEST(test_diagnostics_payload_has_no_secrets);
+    RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);
+    RUN_TEST(test_stack_marks_are_null_before_the_first_sample);
     RUN_TEST(test_oversized_response_is_refused);
+    RUN_TEST(test_prometheus_stack_and_fragmentation_gauges);
     RUN_TEST(test_prometheus_exports_current_readings);
     RUN_TEST(test_prometheus_omits_unknown_rather_than_exporting_zero);
     RUN_TEST(test_prometheus_has_no_high_cardinality_labels);
