@@ -5,6 +5,7 @@
 #if defined(ESP32)
 
 #include <Arduino.h>
+#include <esp_timer.h>
 
 #include "boards/board.h"
 #include "diagnostics/logger.h"
@@ -128,7 +129,10 @@ bool Rs485Transport::lock(uint32_t timeoutMs) {
 
 void Rs485Transport::unlock() { busMutex_.unlock(); }
 
-uint64_t Rs485Transport::nowMs() const { return static_cast<uint64_t>(millis()); }
+// esp_timer, not millis(): the drivers build absolute transaction deadlines from this
+// (`nowMs() + 3000`), and a wrapped uint32 source would let a deadline armed just before
+// the 49.7-day mark never fire. See the note at main.cpp's nowMs().
+uint64_t Rs485Transport::nowMs() const { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
 
 }  // namespace heliograph
 
