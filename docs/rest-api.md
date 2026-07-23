@@ -92,25 +92,41 @@ Never an HTTP 200 with an error message in the body.
 
 ## Secrets
 
-`GET /api/v1/config` **never** returns passwords. Not masked-but-present, but
-omitted, with a boolean indicator:
+`GET /api/v1/config` **never** returns credential material. Not masked-but-present, but
+omitted, with a boolean indicator. This covers every password **and the MQTT username** —
+the username is half of a login pair, so it is treated like the password it accompanies.
+Non-credential config (SSID, broker host, topics) stays readable; the UI needs it and it is
+not a secret.
 
 ```json
 {
   "wifi":  { "ssid": "thuis", "password_set": true },
-  "mqtt":  { "host": "10.0.0.5", "port": 1883, "username": "solar", "password_set": true },
+  "mqtt":  { "host": "10.0.0.5", "port": 1883, "username_set": true, "password_set": true },
   "modbus": { "enabled": true, "port": 502, "unit_id": 1, "write_enabled": false },
   "polling": { "interval_seconds": 10 },
   "driver": { "id": "eversolar_legacy", "auto_detect": false },
-  "rs485": { "baud_rate": 9600, "parity": "none", "data_bits": 8, "stop_bits": 1 },
   "logging": { "level": "info" }
 }
 ```
 
-`PATCH` accepts `"password": "..."` to set it and `"password": null` to clear it. An
-omitted field stays unchanged.
+`PATCH` accepts `"password": "..."` / `"username": "..."` to set either, and `null` to clear
+it. An omitted field stays unchanged. Passwords and the username never appear in logs, in
+SSE, in MQTT, or in Prometheus.
 
-Passwords never appear in logs, in SSE, in MQTT, or in Prometheus.
+## Applying changes: `reboot_required`
+
+Most settings — WiFi, MQTT, Modbus, the polling interval, the driver, NTP — are read once at
+boot, so a `PATCH` stores them but they take effect only after a restart. A few
+(`bridge_name`, `relays.*`, `security.*`, `logging.level`) are applied live.
+
+The `PATCH /api/v1/config` response therefore carries a top-level `reboot_required` boolean so
+a client knows whether to call `POST /api/v1/actions/reboot`:
+
+```json
+{ "version": 1, "wifi": { ... }, ..., "reboot_required": true }
+```
+
+`GET` does not include the field (nothing was changed).
 
 ## Auth
 

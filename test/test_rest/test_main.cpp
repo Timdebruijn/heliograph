@@ -107,19 +107,77 @@ static void test_config_reports_whether_a_secret_is_set() {
     TEST_ASSERT_TRUE(doc["wifi"]["password_set"].as<bool>());
     TEST_ASSERT_TRUE(doc["mqtt"]["password_set"].as<bool>());
     TEST_ASSERT_TRUE(doc["security"]["password_set"].as<bool>());
+    // The MQTT username is credential material: reported as a flag, never as the value.
+    TEST_ASSERT_TRUE(doc["mqtt"]["username_set"].as<bool>());
+    TEST_ASSERT_TRUE(doc["mqtt"]["username"].isNull());
+    TEST_ASSERT_TRUE(json.find("solar") == std::string::npos);
     // Non-secret fields are readable, which is what makes the UI usable.
     TEST_ASSERT_EQUAL_STRING("thuisnetwerk", doc["wifi"]["ssid"]);
     TEST_ASSERT_EQUAL_STRING("10.0.0.5", doc["mqtt"]["host"]);
-    TEST_ASSERT_EQUAL_STRING("solar", doc["mqtt"]["username"]);
 
     c.wifi.password.clear();
     c.mqtt.password.clear();
+    c.mqtt.username.clear();
     c.security.adminPassword.clear();
     serializeConfig(c, json);
     doc = parse(json);
     TEST_ASSERT_FALSE(doc["wifi"]["password_set"].as<bool>());
     TEST_ASSERT_FALSE(doc["mqtt"]["password_set"].as<bool>());
+    TEST_ASSERT_FALSE(doc["mqtt"]["username_set"].as<bool>());
     TEST_ASSERT_FALSE(doc["security"]["password_set"].as<bool>());
+}
+
+static void test_reboot_required_flag_is_patch_only() {
+    auto        c = configWithSecrets();
+    std::string json;
+    // GET path: no flag emitted.
+    serializeConfig(c, json);
+    TEST_ASSERT_TRUE(parse(json)["reboot_required"].isNull());
+    // PATCH path: the caller's computed value is echoed verbatim.
+    bool needed = true;
+    serializeConfig(c, json, 4096, &needed);
+    TEST_ASSERT_TRUE(parse(json)["reboot_required"].as<bool>());
+    needed = false;
+    serializeConfig(c, json, 4096, &needed);
+    TEST_ASSERT_FALSE(parse(json)["reboot_required"].as<bool>());
+}
+
+static void test_reboot_required_only_for_boot_time_settings() {
+    const Configuration base;
+
+    // No change -> no reboot.
+    TEST_ASSERT_FALSE(configChangeRequiresReboot(base, base));
+
+    // Each boot-time domain forces a reboot.
+    auto wifi = base;   wifi.wifi.ssid = "other";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, wifi));
+    auto mqttHost = base; mqttHost.mqtt.host = "10.0.0.9";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, mqttHost));
+    auto mqttUser = base; mqttUser.mqtt.username = "u";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, mqttUser));
+    auto qos = base;    qos.mqtt.qos = 1;  // editable only via the API, still boot-only
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, qos));
+    auto diag = base;   diag.modbus.diagnosticsUnitId = 200;
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, diag));
+    auto poll = base;   poll.polling.intervalSeconds = 30;
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, poll));
+    auto drv = base;    drv.driver.options["layout"] = "dual";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, drv));
+    auto ntp = base;    ntp.ntp.timezone = "UTC0";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, ntp));
+
+    // Live-applied settings never demand one.
+    auto name = base;   name.bridgeName = "Zonnebrug";
+    TEST_ASSERT_FALSE(configChangeRequiresReboot(base, name));
+    auto sec = base;    sec.security.readOnlyMode = !base.security.readOnlyMode;
+    TEST_ASSERT_FALSE(configChangeRequiresReboot(base, sec));
+    auto log = base;    log.logLevel = LogLevel::Debug;
+    TEST_ASSERT_FALSE(configChangeRequiresReboot(base, log));
+    auto rel = base;    rel.relays.enabled = !base.relays.enabled;
+    TEST_ASSERT_FALSE(configChangeRequiresReboot(base, rel));
+    // timezone_name is display metadata with no runtime effect.
+    auto tzn = base;    tzn.ntp.timezoneName = "Europe/Berlin";
+    TEST_ASSERT_FALSE(configChangeRequiresReboot(base, tzn));
 }
 
 // --- config patching -------------------------------------------------------------------------
@@ -650,6 +708,8 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_config_response_contains_no_secret_anywhere);
     RUN_TEST(test_config_reports_whether_a_secret_is_set);
+    RUN_TEST(test_reboot_required_flag_is_patch_only);
+    RUN_TEST(test_reboot_required_only_for_boot_time_settings);
     RUN_TEST(test_patch_leaves_absent_fields_alone);
     RUN_TEST(test_patch_sets_a_password);
     RUN_TEST(test_explicit_null_clears_a_password);

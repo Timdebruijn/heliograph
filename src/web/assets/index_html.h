@@ -535,6 +535,13 @@ async function renderConfig(){
   const pw=(id,label,isSet)=>`<label for="${id}">${label}</label>
     <input id="${id}" type="password" placeholder="${isSet?'(unchanged)':'(not set)'}" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')">
     <div class="dim" style="font-size:12px">Leave blank to keep. The current value is never sent to this page.</div>`;
+  // Credential-like text field (the MQTT username): never returned by GET, so never
+  // pre-filled -- blank means keep, typing changes it, exactly like the password fields.
+  // Visible text, not dots (a username is not secret to its owner), autocomplete=off for the
+  // same login-form reason as the other settings fields.
+  const credtxt=(id,label,isSet,hint)=>`<label for="${id}">${label}</label>
+    <input id="${id}" autocomplete="off" placeholder="${isSet?'(unchanged)':'(not set)'}">
+    <div class="dim" style="font-size:12px">${hint}</div>`;
   const num=(id,label,val)=>`<label for="${id}">${label}</label><input id="${id}" type="number" value="${val}">`;
   const chk=(id,label,val)=>`<label style="display:flex;gap:8px;align-items:center;margin-top:12px">
     <input id="${id}" type="checkbox" ${val?'checked':''} style="width:auto"> ${label}</label>`;
@@ -585,7 +592,7 @@ async function renderConfig(){
     ${pw('c_wpw','Password',c.wifi.password_set)}</div>
   <div class="card"><b>MQTT</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_mqe','Enabled',c.mqtt.enabled)}
     ${txt('c_mqh','Broker host',c.mqtt.host)}${num('c_mqp','Port',c.mqtt.port)}
-    ${txt('c_mqu','Username',c.mqtt.username)}${pw('c_mqpw','Password',c.mqtt.password_set)}
+    ${credtxt('c_mqu','Username',c.mqtt.username_set,'Leave blank to keep. Not shown here; the API accepts null to clear it.')}${pw('c_mqpw','Password',c.mqtt.password_set)}
     ${txt('c_mqt','Base topic',c.mqtt.base_topic)}
     ${chk('c_mqd','Home Assistant discovery',c.mqtt.discovery_enabled)}</div>
   <div class="card"><b>Modbus TCP</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_mbe','Enabled',c.modbus.enabled)}
@@ -659,7 +666,7 @@ async function saveConfig(){
     ...(window.g_relayCount>0?{relays:{enabled:b('c_rle'),
       roles:Array.from({length:window.g_relayCount},(_,i)=>v('c_rlr'+i))}}:{}),
     wifi:{ssid:v('c_ssid'),hostname:v('c_host')},
-    mqtt:{enabled:b('c_mqe'),host:v('c_mqh'),port:n('c_mqp'),username:v('c_mqu'),
+    mqtt:{enabled:b('c_mqe'),host:v('c_mqh'),port:n('c_mqp'),
           base_topic:v('c_mqt'),discovery_enabled:b('c_mqd')},
     modbus:{enabled:b('c_mbe'),port:n('c_mbp'),unit_id:n('c_mbu')},
     polling:{interval_seconds:n('c_pi')},
@@ -675,6 +682,9 @@ async function saveConfig(){
   // A blank password field means "keep": sending "" would clear it, which is never what an
   // untouched field means.
   if(v('c_wpw'))body.wifi.password=v('c_wpw');
+  // The MQTT username is credential-like (never returned by GET), so like the passwords it
+  // travels only when typed -- a blank field means keep.
+  if(v('c_mqu'))body.mqtt.username=v('c_mqu');
   if(v('c_mqpw'))body.mqtt.password=v('c_mqpw');
   if(v('c_ap'))body.security.admin_password=v('c_ap');
   document.querySelectorAll('[data-opt]').forEach(e=>body.driver.options[e.dataset.opt]=e.value);
@@ -709,7 +719,11 @@ async function saveConfig(){
   for(const sect of Object.keys(body)){
     if(typeof body[sect]!=='object')continue;
     for(const k of Object.keys(body[sect])){
-      if(k.includes('password')||k==='options')continue;
+      // Credential-like keys (passwords, the MQTT username) and driver options are only in
+      // the body when the user acted; GET never returns them, so there is nothing to diff
+      // against and they must not be dropped. Exact match on 'username' so 'admin_username'
+      // -- which IS returned and must be diffed -- is not caught.
+      if(k.includes('password')||k==='username'||k==='options')continue;
       if(same(body[sect][k],(cfgBefore[sect]||{})[k]))delete body[sect][k];
     }
     if(!Object.keys(body[sect]).length)delete body[sect];
@@ -745,12 +759,17 @@ async function saveConfig(){
   }
   cfgBefore=d;
 
+  // The server is authoritative on whether a restart is needed (reboot_required); `pending`
+  // only supplies the nice per-field labels. They agree for anything editable on this form;
+  // the generic wording covers a reboot-only field changed through the API directly.
   m.className='msg ok';
-  if(!pending.length){
+  if(!d.reboot_required){
     m.innerHTML='Saved and applied.';
   }else{
-    m.innerHTML='Saved. These take effect after a restart: <b>'+
-      pending.map(esc).join(', ')+'</b>.<br>'+
+    const which=pending.length
+      ? 'These take effect after a restart: <b>'+pending.map(esc).join(', ')+'</b>.'
+      : 'Some changes take effect after a restart.';
+    m.innerHTML='Saved. '+which+'<br>'+
       '<button style="margin-top:10px" onclick="rebootFromSettings()">Restart now</button>'+
       '<span class="dim" style="font-size:12px"> — or later; the bridge keeps running on the '+
       'old values until you do.</span>';

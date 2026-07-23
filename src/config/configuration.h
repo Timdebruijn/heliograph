@@ -136,12 +136,27 @@ struct ConfigError {
 /// Checks ranges and enum values. Returns false and fills `error` on the first problem.
 bool validate(const Configuration& config, ConfigError& error);
 
-/// Serialises for `GET /api/v1/config`.
+/// Serialises for `GET /api/v1/config` and the `PATCH` response.
 ///
-/// Passwords are NOT included -- not masked, omitted. A `*_set` boolean says whether one
-/// exists. Masking with "***" still tells an attacker the length class and invites a client
-/// to round-trip the mask back in as a literal password.
-bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes = 4096);
+/// Credential material is NOT included -- not masked, omitted. Passwords and the MQTT
+/// username each get a `*_set` boolean saying whether one exists. Masking with "***" still
+/// tells an attacker the length class and invites a client to round-trip the mask back in as
+/// a literal secret. The MQTT username is half of a credential pair, so it is treated like
+/// the password it accompanies; non-credential config (SSID, broker host, topics) stays
+/// readable because the UI needs it and it is not a secret.
+///
+/// When `rebootRequired` is non-null its value is emitted as a top-level `reboot_required`
+/// boolean -- the PATCH handler passes the result of configChangeRequiresReboot(); GET passes
+/// nullptr and the field is absent.
+bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes = 4096,
+                     const bool* rebootRequired = nullptr);
+
+/// True when moving from `before` to `after` changes any setting the firmware reads only at
+/// boot (WiFi, MQTT, Modbus, polling interval, driver, NTP), so the change is stored but does
+/// not take effect until a restart. The complement -- bridge_name, relays, security,
+/// logging level -- is applied live by the REST layer and returns false. Kept in lockstep
+/// with the RESTART_NEEDED map in the web UI.
+bool configChangeRequiresReboot(const Configuration& before, const Configuration& after);
 
 /// Applies a `PATCH /api/v1/config` body.
 ///
