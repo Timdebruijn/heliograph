@@ -336,7 +336,11 @@ void driveStatusLed(const status::LedIndication& ind) {
         case status::LedColor::Blue:  b = 40; break;
         case status::LedColor::Off:   break;
     }
-    neopixelWrite(board::kStatusLedPin, r, g, b);
+    // Channel order: this WS2812 lights the RED element from neopixelWrite's SECOND argument,
+    // not the first -- a plain "green" (0,40,0) came out red on the first 6CH hardware run
+    // (2026-07-23). So swap red and green here; blue is unaffected. neopixelWrite's own GRB
+    // timing conversion is fine, it is the element mapping on this board that is transposed.
+    neopixelWrite(board::kStatusLedPin, g, r, b);
 }
 
 /// One call per loop pass: sample BOOT, act on a completed hold, and refresh the LED.

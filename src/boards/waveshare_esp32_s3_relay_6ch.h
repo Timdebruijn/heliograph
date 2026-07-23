@@ -67,14 +67,17 @@ inline constexpr int     kRtcSda        = -1;
 inline constexpr uint8_t kRtcI2cAddress = 0;
 
 // --- BOOT button / status LED / buzzer -----------------------------------------------------
-// BOOT on GPIO0 (Waveshare documentation, confirmed by Tim 2026-07-23) -- the SoC download
-// strapping pin, reads high through its pull-up and low when pressed. Held ~5 s it factory-
-// resets, the one recovery path on a headless board with no reset button exposed to the user.
+// BOOT on GPIO0 -- VERIFIED ON HARDWARE 2026-07-23: pressing it flips boot_button_pressed in
+// the API and drives the status LED to the blinking-red hold indication, released cleanly with
+// no reset under the 5 s threshold. The SoC download strapping pin, high through its pull-up
+// and low when pressed. Held ~5 s it factory-resets, the one recovery path on a headless board.
 inline constexpr bool kHasBootButton = true;
 inline constexpr int  kBootPin       = 0;
 // WS2812 status LED on GPIO38 and a transistor-driven buzzer on GPIO21 (documentation +
 // official demo). On the RTC boards these very pins are the RTC I2C (38/39) and the RS485
 // direction line (21) -- which is exactly why this is declared per board, never family-wide.
+// LED verified lit 2026-07-23; its red/green elements are transposed vs neopixelWrite's
+// argument order (see driveStatusLed in main.cpp), found and corrected on that first run.
 inline constexpr bool kHasStatusLed = true;
 inline constexpr int  kStatusLedPin = 38;
 inline constexpr bool kHasBuzzer    = true;
