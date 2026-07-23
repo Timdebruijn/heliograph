@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 #
-# The same verification ritual that runs locally before every release:
-# native tests, the layering invariants, embedded-JS syntax, profile schema
-# validation, and both firmware builds. A PR that adds a device profile gets
-# its TOML validated here without a maintainer lifting a finger.
+# The same verification ritual that runs locally before every release: native tests, the
+# layering invariants, embedded-JS syntax, and profile schema validation -- on every push to
+# main and every pull request. The firmware itself (one build per supported board) is compiled
+# only on pull requests that touch build inputs; see the `changes` and `firmware` jobs for why.
+# A PR that adds a device profile gets its TOML validated here without a maintainer lifting a
+# finger.
 
 name: CI
 
@@ -101,6 +103,12 @@ jobs:
     name: Detect build-affecting changes
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    # dorny/paths-filter lists the PR's changed files through the API (no checkout). Spelling
+    # the scopes out keeps this working if the repo's default token permissions are ever
+    # tightened; contents:read covers the compare call, pull-requests:read the file listing.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       firmware: ${{ steps.filter.outputs.firmware }}
     steps:
