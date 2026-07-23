@@ -22,6 +22,8 @@ DiagnosticsSnapshot Diagnostics::snapshot() const {
     s.modbusClientConnections = modbusClientConnections_.load(std::memory_order_relaxed);
     s.restRequestTotal        = restRequestTotal_.load(std::memory_order_relaxed);
     s.lastSuccessfulPollMs    = lastSuccessfulPollMs_.load(std::memory_order_relaxed);
+    s.rs485StackFreeBytes     = rs485StackFreeBytes_.load(std::memory_order_relaxed);
+    s.loopStackFreeBytes      = loopStackFreeBytes_.load(std::memory_order_relaxed);
     {
         std::lock_guard<std::mutex> lock(errorMutex_);
         s.lastError = lastError_;
@@ -41,6 +43,8 @@ void Diagnostics::reset() {
     modbusClientConnections_.store(0);
     restRequestTotal_.store(0);
     lastSuccessfulPollMs_.store(0);
+    rs485StackFreeBytes_.store(0);
+    loopStackFreeBytes_.store(0);
     std::lock_guard<std::mutex> lock(errorMutex_);
     lastError_.clear();
 }

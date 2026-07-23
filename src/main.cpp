@@ -130,6 +130,7 @@ BridgeInfo bridgeInfo() {
     info.uptimeSeconds    = static_cast<uint32_t>(nowMs() / 1000);  // good for 136 years
     info.freeHeapBytes    = ESP.getFreeHeap();
     info.minFreeHeapBytes = ESP.getMinFreeHeap();
+    info.maxAllocHeapBytes = ESP.getMaxAllocHeap();
     info.resetReason      = static_cast<uint16_t>(esp_reset_reason());
     info.wifiConnected    = g_wifi.connected();
     info.wifiRssiDbm      = g_wifi.rssi();
@@ -385,6 +386,12 @@ void rs485Task(void* /*arg*/) {
         // One feed per iteration; the 120 s budget covers the longest legitimate iteration
         // (an extended discovery run). See the watchdog setup in setup().
         esp_task_wdt_reset();
+        // Own stack headroom into diagnostics: the 8192 sizing rests on one measured crash
+        // (2026-07-19); this keeps creeping growth visible in the API instead of leaving
+        // the canary as the only witness. ESP-IDF returns BYTES (StackType_t is uint8_t
+        // on xtensa); the scan only walks the unused region -- microseconds.
+        g_diagnostics.recordRs485StackFree(
+            static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr)));
         // Discovery first, and instead of polling this cycle: probing re-registers every
         // inverter on the bus, so the two must never interleave. This task owns the bus, which
         // is why the web handler only ever *requests* a run.
@@ -628,6 +635,9 @@ void loop() {
     static uint32_t lastReport = 0;
     if (millis() - lastReport > 10000) {
         lastReport = millis();
+        // Same per-task self-report as rs485Task; see the note there.
+        g_diagnostics.recordLoopStackFree(
+            static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr)));
         if (g_state) {
             const auto  s = g_state->snapshot();
             const auto* p = s->measurements.find(measurement_id::kAcPowerTotal);

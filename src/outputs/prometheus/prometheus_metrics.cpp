@@ -130,6 +130,24 @@ std::string buildMetrics(const DeviceState& state, const BridgeInfo& bridge,
     appendValue(out, "heliograph_uptime_seconds", static_cast<unsigned long>(bridge.uptimeSeconds));
     appendHelp(out, "heliograph_free_heap_bytes", "Free heap", "gauge");
     appendValue(out, "heliograph_free_heap_bytes", static_cast<unsigned long>(bridge.freeHeapBytes));
+    appendHelp(out, "heliograph_max_alloc_heap_bytes",
+               "Largest allocatable heap block (fragmentation signal)", "gauge");
+    appendValue(out, "heliograph_max_alloc_heap_bytes",
+                static_cast<unsigned long>(bridge.maxAllocHeapBytes));
+    // Omitted until the first sample, like the RSSI gauge above: 0 would read as an
+    // exhausted stack to any alerting rule.
+    if (d.rs485StackFreeBytes > 0) {
+        appendHelp(out, "heliograph_rs485_stack_free_bytes",
+                   "rs485Task stack low-water mark", "gauge");
+        appendValue(out, "heliograph_rs485_stack_free_bytes",
+                    static_cast<unsigned long>(d.rs485StackFreeBytes));
+    }
+    if (d.loopStackFreeBytes > 0) {
+        appendHelp(out, "heliograph_loop_stack_free_bytes",
+                   "loopTask stack low-water mark", "gauge");
+        appendValue(out, "heliograph_loop_stack_free_bytes",
+                    static_cast<unsigned long>(d.loopStackFreeBytes));
+    }
 
     return out;
 }

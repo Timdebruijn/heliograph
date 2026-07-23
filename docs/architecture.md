@@ -99,6 +99,12 @@ many back-to-back 3 s transactions between feeds); `rs485Task` and `loopTask` re
 it, the library tasks do not. `rs485Task` calls `esp_task_wdt_reset()` every cycle, even when
 the poll fails — an unreachable inverter must never cause a reset.
 
+Known trade-off: during an OTA upload, every flash write briefly disables the flash cache,
+which stalls any task executing code from flash — on both cores, core pinning does not help.
+`rs485Task` can therefore miss UART timing mid-upload and lose a poll or two. Accepted:
+uploads are rare, take seconds, and a missed poll is one `consecutiveFailures` tick that the
+next successful poll clears.
+
 ### MQTT task model and thread safety
 
 VERIFIED 2026-07-22 against the vendored espMqttClient 1.7.x sources (not the online docs,

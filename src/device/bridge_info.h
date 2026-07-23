@@ -21,7 +21,11 @@ struct BridgeInfo {
     uint32_t uptimeSeconds    = 0;
     uint32_t freeHeapBytes    = 0;
     uint32_t minFreeHeapBytes = 0;
-    uint16_t resetReason      = 0;
+    /// Largest single allocatable block. THE fragmentation signal: free heap can look
+    /// healthy while no allocation of consequence fits anymore, which is exactly the
+    /// failure mode a months-uptime device grows into.
+    uint32_t maxAllocHeapBytes = 0;
+    uint16_t resetReason       = 0;
 
     bool    wifiConnected  = false;
     int16_t wifiRssiDbm    = 0;

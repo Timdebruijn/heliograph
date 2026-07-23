@@ -137,6 +137,14 @@ void WifiManager::begin(const Configuration& config) {
     WiFi.persistent(false);  // we own the credentials; the SDK must not cache its own copy
     WiFi.setAutoReconnect(false);  // reconnection is this class's job, with bounded back-off
 
+    // Modem power save OFF. The core's default on this chip is WIFI_PS_MIN_MODEM
+    // (WiFiGeneric.cpp): the radio sleeps between DTIM beacons and the AP buffers inbound
+    // packets until the next wake-up. That is right for battery devices and wrong for this
+    // one -- a mains-powered bridge that SERVES Modbus TCP, REST and mDNS, where every
+    // inbound request would eat tens to hundreds of ms of wake-up latency and mDNS gets
+    // flaky. Costs ~50-80 mA, which mains power does not care about.
+    WiFi.setSleep(false);
+
     // All channels, strongest AP. The default WIFI_FAST_SCAN associates with the FIRST BSSID
     // that matches the SSID, in channel-scan order -- on a network with several APs that
     // regularly means a far, weak one, and the device then clings to it until the link dies

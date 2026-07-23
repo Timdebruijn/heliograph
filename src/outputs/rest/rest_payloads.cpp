@@ -236,6 +236,7 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
     doc["board"]                   = bridge.boardName;
     doc["free_heap_bytes"]         = bridge.freeHeapBytes;
     doc["minimum_free_heap_bytes"] = bridge.minFreeHeapBytes;
+    doc["max_alloc_heap_bytes"]    = bridge.maxAllocHeapBytes;
     doc["reset_reason"]            = bridge.resetReason;
     doc["ota_image_state"]         = bridge.otaImageState;
     doc["wifi_connected"]          = bridge.wifiConnected;
@@ -257,6 +258,18 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
     doc["modbus_client_connections_total"] = d.modbusClientConnections;
     doc["rest_requests_total"]             = d.restRequestTotal;
     doc["last_successful_poll_ms"]         = d.lastSuccessfulPollMs;
+    // Null until the first sample, not 0: a monitoring rule on "stack headroom == 0" must
+    // not fire during the first seconds after boot.
+    if (d.rs485StackFreeBytes > 0) {
+        doc["rs485_stack_free_bytes"] = d.rs485StackFreeBytes;
+    } else {
+        doc["rs485_stack_free_bytes"] = nullptr;
+    }
+    if (d.loopStackFreeBytes > 0) {
+        doc["loop_stack_free_bytes"] = d.loopStackFreeBytes;
+    } else {
+        doc["loop_stack_free_bytes"] = nullptr;
+    }
     doc["last_error"]                      = d.lastError;
     return finish(doc, out, maxBytes);
 }
