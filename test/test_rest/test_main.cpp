@@ -206,6 +206,40 @@ static void test_explicit_null_clears_a_password() {
     TEST_ASSERT_TRUE(c.mqtt.password.empty());
 }
 
+// The settings page renders its Read-only checkbox from this field and diffs the saved value
+// against it, so both halves are a contract, not an implementation detail. If GET stopped
+// emitting it the box would render from an absent value; if PATCH stopped accepting it the
+// switch would be unreachable from the UI again -- which is the hole this pair closes.
+static void test_read_only_mode_survives_a_get_patch_round_trip() {
+    auto        c = configWithSecrets();
+    std::string json;
+    TEST_ASSERT_TRUE(serializeConfig(c, json));
+    TEST_ASSERT_TRUE(parse(json)["security"]["read_only_mode"].as<bool>());
+
+    ConfigError e;
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"security":{"read_only_mode":false}})", c, e));
+    TEST_ASSERT_FALSE(c.security.readOnlyMode);
+    TEST_ASSERT_TRUE(serializeConfig(c, json));
+    TEST_ASSERT_FALSE(parse(json)["security"]["read_only_mode"].as<bool>());
+
+    // And back on: the kill switch must be re-armable over the same path it was opened.
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"security":{"read_only_mode":true}})", c, e));
+    TEST_ASSERT_TRUE(c.security.readOnlyMode);
+}
+
+static void test_read_only_mode_is_untouched_by_an_unrelated_patch() {
+    // The UI omits unchanged fields; a patch that never mentions the gate must leave it alone.
+    auto c = configWithSecrets();
+    c.security.readOnlyMode = false;
+    ConfigError e;
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"logging":{"level":"debug"}})", c, e));
+    TEST_ASSERT_FALSE(c.security.readOnlyMode);
+
+    c.security.readOnlyMode = true;
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"security":{"admin_username":"tim"}})", c, e));
+    TEST_ASSERT_TRUE(c.security.readOnlyMode);
+}
+
 static void test_a_rejected_patch_changes_nothing() {
     // The merge-then-validate rule: a bad field must not leave earlier fields applied.
     auto        c = configWithSecrets();
@@ -712,6 +746,8 @@ int main(int, char**) {
     RUN_TEST(test_reboot_required_only_for_boot_time_settings);
     RUN_TEST(test_patch_leaves_absent_fields_alone);
     RUN_TEST(test_patch_sets_a_password);
+    RUN_TEST(test_read_only_mode_survives_a_get_patch_round_trip);
+    RUN_TEST(test_read_only_mode_is_untouched_by_an_unrelated_patch);
     RUN_TEST(test_explicit_null_clears_a_password);
     RUN_TEST(test_a_rejected_patch_changes_nothing);
     RUN_TEST(test_invalid_json_is_refused);

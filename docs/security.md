@@ -7,7 +7,7 @@ the same LAN", not "someone holding the PCB in their hands".
 
 | Topic | Status |
 |---|---|
-| Global read-only mode | On, and cannot be turned off: no driver can write |
+| Global read-only mode | On by default; a deliberate opt-out in *Settings → Security*. While on, every inverter command and every relay move is refused. Turning it off unlocks the relay/DRM contacts — no driver in this build can write to an inverter, so nothing reaches the inverter either way |
 | Modbus writes | Off; FC6/FC16 → exception 0x01. `write_enabled=true` is rejected by config validation |
 | Raw TCP bridge | Not implemented |
 | REST GET | Unsecured (local network) |
