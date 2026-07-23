@@ -48,11 +48,26 @@ using namespace heliograph;
 
 namespace {
 
-// The build stamp (adjacent string-literal concatenation, resolved at compile time) makes each
-// image identifiable over the API. Without it two different builds both reported "0.1.0" and a
-// flash could not be told from the previous one -- exactly what bit the post-flash check on
-// 2026-07-21. Bumped to 0.2.0 for the Fase 9 review batch.
-constexpr const char* kFirmwareVersion = "0.8.0 (" __DATE__ " " __TIME__ ")";
+// Single source of truth for the firmware version. The three numbers feed the Modbus
+// diagnostic registers (820-822); the string -- built from the same numbers plus a
+// compile-time build stamp -- feeds the REST/MQTT API and the boot banner. Deriving the
+// string from the numbers means they can never drift, which they had: bridgeInfo() only ever
+// set the string, so the Modbus registers reported the 0.1.0 struct default for every release.
+//
+// Keep in lockstep with the git tag: the release workflow builds from the tag, so a stale
+// value ships a firmware that misreports its own version -- exactly what bit the post-flash
+// check on 2026-07-21. 0.9.0 covers the stability + observability + config-transparency batch.
+#define HELIOGRAPH_VERSION_MAJOR 0
+#define HELIOGRAPH_VERSION_MINOR 9
+#define HELIOGRAPH_VERSION_PATCH 0
+#define HELIOGRAPH_STRINGIFY_(x) #x
+#define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
+constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
+constexpr uint16_t kFirmwareMinor = HELIOGRAPH_VERSION_MINOR;
+constexpr uint16_t kFirmwarePatch = HELIOGRAPH_VERSION_PATCH;
+constexpr const char* kFirmwareVersion =
+    HELIOGRAPH_STRINGIFY(HELIOGRAPH_VERSION_MAJOR) "." HELIOGRAPH_STRINGIFY(HELIOGRAPH_VERSION_MINOR)
+    "." HELIOGRAPH_STRINGIFY(HELIOGRAPH_VERSION_PATCH) " (" __DATE__ " " __TIME__ ")";
 
 Rs485Transport     g_transport;
 DriverRegistry     g_registry;
@@ -138,6 +153,9 @@ BridgeInfo bridgeInfo() {
     info.modbusListening  = g_modbus.running();
     info.modbusClients    = g_modbus.activeClients();
     info.firmwareVersion  = kFirmwareVersion;
+    info.firmwareMajor    = kFirmwareMajor;
+    info.firmwareMinor    = kFirmwareMinor;
+    info.firmwarePatch    = kFirmwarePatch;
     info.timeSynced       = g_time.synced();
     info.currentEpoch     = static_cast<int64_t>(time(nullptr));
     info.lastNtpSyncEpoch = static_cast<int64_t>(g_time.lastSyncEpoch());

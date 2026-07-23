@@ -97,6 +97,24 @@ static void test_relay_registers_use_the_sentinel_without_hardware() {
     TEST_ASSERT_EQUAL_UINT16(0b100101, v);
 }
 
+static void test_firmware_version_registers_report_the_running_version() {
+    // Regression: bridgeInfo() populated only the version STRING, never these numeric fields,
+    // so registers 820-822 shipped the 0.1.0 struct default for every release. Distinct
+    // 1.2.3 here proves the real values flow through rather than coinciding with a default.
+    EversolarRig r;
+    r.bridge.firmwareMajor = 1;
+    r.bridge.firmwareMinor = 2;
+    r.bridge.firmwarePatch = 3;
+    r.pollAndRender();
+    uint16_t v = 0;
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagFirmwareMajor, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(1, v);
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagFirmwareMinor, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(2, v);
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagFirmwarePatch, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(3, v);
+}
+
 // --- schema and framing --------------------------------------------------------------------
 
 static void test_schema_version_is_published() {
@@ -496,5 +514,6 @@ int main(int, char**) {
     RUN_TEST(test_validity_bitmap_and_nan_always_agree);
     RUN_TEST(test_validity_bits_fit_the_reserved_space);
     RUN_TEST(test_relay_registers_use_the_sentinel_without_hardware);
+    RUN_TEST(test_firmware_version_registers_report_the_running_version);
     return UNITY_END();
 }
