@@ -620,17 +620,32 @@ async function renderConfig(){
   </div>
   ${window.g_relayCount>0?`<div class="card"><b>Relays</b> <span class="tag" style="font-weight:400">applied immediately</span>
     ${chk('c_rle','Enabled',(c.relays||{}).enabled)}
+    <!-- The second gate, named where it bites. Enabling relays while read-only mode is still
+         on is a silent dead end: the card looks configured, the switches appear in Home
+         Assistant, and nothing ever actuates (live, first Relay-6CH bring-up 2026-07-23).
+         Shown/hidden from the live checkboxes below, not from the saved config. -->
+    <div id="rlgate" class="msg err" style="display:none;font-size:13px">Relays are enabled, but
+      read-only mode is still on — no relay will move. Turn off
+      <a href="#" onclick="return focusReadOnly()">Read-only mode</a> under Security below and save.</div>
     ${Array.from({length:window.g_relayCount},(_, i)=>`
       <label for="c_rlr${i}">Relay ${i+1} role</label>
       <select id="c_rlr${i}" data-role="${i}">${['none','drm0','drm1','drm2','drm3','drm4','drm5','drm6','drm7','drm8'].map(r=>
         `<option ${r===(((c.relays||{}).roles||[])[i]||'none')?'selected':''}>${r}</option>`).join('')}</select>`).join('')}
     <div class="dim" style="font-size:12px;margin-top:8px">DRM curtailment contacts. Two
-    locks must open before a relay can move: this switch AND read-only mode being off.
+    locks must open before a relay can move: this switch AND read-only mode (under Security,
+    below) being off.
     Disabling releases every relay. Roles name the switches in Home Assistant and build
     the DRM Mode select; see docs/drm.md for the wiring rules (failsafe: a dead bridge
     must leave the inverter running).</div></div>`:''}
   <div class="card"><b>Security</b> <span class="tag" style="font-weight:400">applied immediately</span>${txt('c_au','Admin username',c.security.admin_username)}
-    ${pw('c_ap','Admin password',c.security.password_set)}</div>
+    ${pw('c_ap','Admin password',c.security.password_set)}
+    ${chk('c_ro','Read-only mode',c.security.read_only_mode)}
+    <div class="dim" style="font-size:12px;margin-top:4px">The global write kill switch, on by
+    default, and the outermost gate on everything this bridge can change. While it is on the
+    bridge only observes: every inverter command is refused and no relay moves, whatever the
+    Relays card says. <b>Turning it off permits writes to the inverter and to the relay
+    outputs.</b> No driver in this build can write to an inverter, so today this unlocks the
+    relay/DRM contacts — leave it on unless you are deliberately using them.</div></div>
   <div class="card"><b>Logging</b> <span class="tag" style="font-weight:400">applied immediately</span>
     <label for="c_lg">Level</label><select id="c_lg">${['error','warn','info','debug','trace'].map(l=>
       `<option ${l===c.logging.level?'selected':''}>${l}</option>`).join('')}</select></div>
@@ -658,6 +673,23 @@ async function renderConfig(){
     bad configuration, as long as you can still reach it.</p>
     <button style="background:var(--bad)" onclick="factoryReset()">Erase and restart</button>
   </div>`;
+
+  // Keep the Relays card's gate warning in step with both checkboxes as they are clicked --
+  // the user is told the combination is dead before saving it, not after wondering why the
+  // relays are silent.
+  if(window.g_relayCount>0){
+    const upd=()=>{$('#rlgate').style.display=($('#c_rle').checked&&$('#c_ro').checked)?'block':'none'};
+    $('#c_rle').onchange=upd;$('#c_ro').onchange=upd;upd();
+  }
+}
+
+// The Relays card's link to the switch that is actually blocking it. Focus as well as scroll:
+// on a long settings page a jump alone leaves the user hunting for which control was meant.
+function focusReadOnly(){
+  const e=$('#c_ro');
+  e.scrollIntoView({block:'center',behavior:'smooth'});
+  e.focus();
+  return false;
 }
 
 async function saveConfig(){
@@ -677,7 +709,9 @@ async function saveConfig(){
              ?{timezone:v('c_ntptzc'),timezone_name:''}
              :{timezone:TZBYNAME[v('c_ntptz')],timezone_name:v('c_ntptz')})},
     driver:{id:v('c_drv'),options:{}},
-    security:{admin_username:v('c_au')},
+    // read_only_mode is rendered from the stored value, so the generic per-key diff below is
+    // enough: no rendered default to mistake for a change (unlike driver options / relay roles).
+    security:{admin_username:v('c_au'),read_only_mode:b('c_ro')},
     logging:{level:v('c_lg')}};
   // A blank password field means "keep": sending "" would clear it, which is never what an
   // untouched field means.

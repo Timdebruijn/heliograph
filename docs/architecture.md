@@ -587,7 +587,7 @@ Elaborated in `docs/security.md`. Core:
 
 | Topic | MVP |
 |---|---|
-| Global read-only mode | **On**, cannot be disabled (no driver can write) |
+| Global read-only mode | **On** by default; opt-out in *Settings → Security*, which unlocks the relay/DRM outputs (no driver can write to an inverter) |
 | Modbus writing | Off; FC6/16 → exception 0x01 |
 | Raw TCP bridge | Off (not implemented) |
 | REST GET | Unsecured (local network) |

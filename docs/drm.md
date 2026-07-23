@@ -19,9 +19,11 @@ for an inverter that cannot be curtailed over RS485.
 
 Three layers, all of which must agree before a contact moves:
 
-1. `security.read_only_mode` — the global kill switch, on by default.
+1. `security.read_only_mode` — the global kill switch, on by default. Turn it off in
+   *Settings → Security* (or `{"security":{"read_only_mode":false}}` over the API).
 2. `relays.enabled` — the feature flag, off by default. A relay board with factory
-   settings is inert.
+   settings is inert. *Settings → Relays* warns while this one is open and the first
+   is still closed; enabling relays alone actuates nothing.
 3. The rate limiter — asserting is throttled; **releasing is never throttled**.
 
 Closing either gate (read-only on, or relays off) releases every relay immediately: a
@@ -78,7 +80,8 @@ a half-asserted mode is worse than none.
 
 ## Before first use on a real inverter
 
-1. Flash the board, enable relays, and click the switches with **nothing connected**:
+1. Flash the board, turn off read-only mode, enable relays, and click the switches with
+   **nothing connected**:
    you should hear the coils and see the states follow in Home Assistant.
 2. Confirm polarity with a multimeter across NO/COM: de-energised must read open.
 3. Pull the bridge's power mid-assertion: every contact must return to its de-energised
