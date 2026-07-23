@@ -40,7 +40,7 @@ authoritative pin record for all of them (Relay-1CH: 1 relay + RTC; Relay-6CH: 6
 | RTC SCL (PCF85063) | **38** | verified (official schematic GPIO matrix) |
 | RTC SDA (PCF85063) | **39** | verified (official schematic GPIO matrix) |
 | RTC INT | **40** | schematic; unused by this firmware |
-| BOOT button | — | present on the board; GPIO not measured yet, so not a constant |
+| BOOT button | GPIO0 | schematic-confirmed; held ~5 s while running, factory-resets (see Recovery) |
 
 ## Board facts
 
@@ -52,7 +52,7 @@ authoritative pin record for all of them (Relay-1CH: 1 relay + RTC; Relay-6CH: 6
 | Power | USB-C or 7–36 V DC terminal | The DC terminal allows powering from the inverter side of the room |
 | Isolation | power + optocoupler, RS485 **and** CAN | `SGND` is NOT `GND` — never bridge them |
 | Termination | 120 Ω jumper per bus | Fit only when the bridge is physically at the end of the RS485 bus |
-| Buttons | BOOT + RESET | RESET reboots; BOOT is the future hold-to-factory-reset candidate (backlog) |
+| Buttons | BOOT + RESET | RESET reboots. BOOT held ~5 s **while running** factory-resets; held **at power-on** it enters USB download mode instead (GPIO0 strapping) — see Recovery |
 
 ## RS485 direction control
 
@@ -76,17 +76,23 @@ peripheral). No driver uses it today. It is recorded because battery BMS protoco
 commonly speak CAN, which makes this board a natural fit for a future battery-side
 source — a deliberate decision for later, not an accident waiting in a header file.
 
+## Recovery — hold BOOT to factory-reset
+
+Holding **BOOT for ~5 seconds while the firmware is running** erases the stored
+configuration and reboots into the setup portal. It is the only recovery path on a headless
+board: a config wrong enough to lock you out of the web UI (a bad hostname, a wrong static
+setup) is otherwise unreachable without USB. The hold is deliberately long so it is never one
+accidental brush.
+
+**Not to be confused with download mode.** BOOT is GPIO0, the SoC's download strapping pin,
+so holding it *at power-on or during RESET* drops the board into the USB firmware-download
+mode instead — the factory reset only happens when BOOT is held during normal operation. On
+boards with a status LED (the Relay-6CH) the LED blinks red while the reset counts down and a
+buzzer confirms the wipe; the RS485-CAN has neither, so there the reboot is the only signal.
+
 ## Open / to be verified on hardware or schematic
 
-1. **BOOT button GPIO** — needed for the hold-BOOT-at-boot factory-reset recovery path
-   (backlog). Measure on real hardware; ESP32-S3 convention (GPIO0) is convention, not
-   evidence.
-2. **GPIO47** — no documented function on this board. The firmware no longer touches it.
-3. **Relay-6CH relay polarity** — the community configuration drives HIGH to energise;
-   confirm on the physical board before the relays ever touch a DRM port. (The RS485
-   direction question is resolved: the official demo transmits and receives with a plain
-   `begin()`, so the board's `TXD1EN` net is driven by its own auto-direction circuit and
-   the header correctly declares no direction GPIO.)
+1. **GPIO47** — no documented function on this board. The firmware no longer touches it.
 
 Component detail from the schematic, for reference: SP3485EN RS485 transceiver behind a
 π163E31 isolator, TJA1051T CAN transceiver, PCF85063AT RTC with 32.768 kHz crystal.
