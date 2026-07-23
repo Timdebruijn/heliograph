@@ -256,11 +256,7 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
         // Enabling/disabling the feature adds or removes the switch entities themselves,
         // and a ROLE change renames switches, rebuilds the select options and changes the
         // derived mode -- both force a discovery re-announce; a mask change just acks.
-        std::string rolesSig;
-        for (const auto& role : bridge.relayRoles) {
-            rolesSig += role;
-            rolesSig += '\n';
-        }
+        const uint64_t rolesSig = stringListFingerprint(bridge.relayRoles);
         if (bridge.relaysEnabled != lastRelaysEnabled_ || rolesSig != lastRelayRolesSig_) {
             lastRelaysEnabled_  = bridge.relaysEnabled;
             lastRelayRolesSig_  = rolesSig;
