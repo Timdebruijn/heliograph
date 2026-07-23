@@ -60,7 +60,7 @@ inline constexpr int kCanRx = 16;
 // reset recovery works on the production board too. No status LED or buzzer: GPIO38/39 are the
 // RTC I2C here and GPIO21 is the RS485 direction line, so a factory reset is silent -- the
 // reboot is its only signal. Runtime read still to be confirmed on hardware at a convenient
-// flash (this board runs the EverSolar soak; no need to disturb it just for that).
+// flash (this is the production board running a multi-day soak; no need to disturb it for it).
 inline constexpr bool kHasBootButton = true;
 inline constexpr int  kBootPin       = 0;
 inline constexpr bool kHasStatusLed  = false;
