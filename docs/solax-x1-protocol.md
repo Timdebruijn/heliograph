@@ -147,18 +147,43 @@ Eliminated, in order:
   onwards.
 
 **Remaining hypothesis: on the G1 the PMU serial line runs to the USB dongle port, and the
-RJ45 pins 4/5 are not on that bus.** The Pocket WiFi demonstrably speaks PMU to the
-inverter (it reports to SolaX Cloud), yet a listener on pins 4/5 hears neither the dongle's
-polling nor any reply. The reference project lists Mini G1 as supported over RJ45, so this
-may be revision-specific — unconfirmed either way.
+RJ45 pins 4/5 are not on that bus.** A listener on pins 4/5 hears neither our own polling
+nor any reply. The reference project lists Mini G1 as supported over RJ45, so this may be
+revision-specific — unconfirmed either way. (Note: this session did **not** establish that
+the dongle is actively polling the inverter. It was found in AP mode, i.e. not joined to
+any WiFi, so "it reports to SolaX Cloud" was never verified — only that it is powered.)
 
 Two tests would settle it, both with a scope on pins 4/5: (a) with the dongle removed and
 the bridge polling, do our own differential bursts appear? (confirms the board drives the
-bus — this board is a second, hardware-unproven unit); (b) with the dongle inserted and
-actively polling, does *its* traffic appear on pins 4/5? If it does not, the RJ45 is
-provably not the PMU bus on this unit, and the way in is to tap the USB dongle line
-instead (reference: xdubx/Solax-Pocket-USB-reverse-engineering) — the payload decoder in
-this driver stays valid, only the physical tap changes.
+bus — this board is a second, hardware-unproven unit); (b) with the dongle inserted, does
+*its* traffic appear on pins 4/5? If it does not, the RJ45 is provably not the PMU bus on
+this unit.
+
+## Reading the Pocket WiFi dongle over the network instead (preferred over any hardware tap)
+
+For a G1 whose RS485 stays silent there is a far less invasive path than tapping a serial
+line: the SolaX Pocket WiFi/LAN dongle exposes a **local HTTP REST API**. It is reachable on
+the dongle's own broadcast SSID (`WiFi_SW<serial>`, open network) at the fixed address
+**`http://5.8.8.8/`**. Newer dongle firmware serves this API *only* on that own SSID and no
+longer over the LAN it joins; older firmware also answers on the LAN address.
+
+Two request shapes exist depending on firmware age:
+
+- older: `GET http://5.8.8.8/api/realTimeData.htm`
+- newer: `POST http://5.8.8.8/` with `optType=ReadRealTimeData&pwd=<dongle serial>`
+  (the password is the dongle's "Backup password", visible in SolaX Cloud under the WiFi
+  dongle)
+
+Known limits: the local API refreshes roughly every 5 minutes — fine for energy totals,
+useless for anything wanting live power. Reference implementation: squishykid/solax, which
+is what the built-in Home Assistant "SolaX Power" integration uses.
+
+**Architectural caveat for this bridge:** an ESP32 has a single station radio, so a bridge
+that must join the dongle's own AP cannot simultaneously stay on the house WiFi that serves
+MQTT/REST/Modbus TCP. That makes an HTTP-polling SolaX driver viable only where the dongle
+still answers on the LAN. Where it does not, the honest answer is that this bridge adds
+nothing over polling the dongle directly from Home Assistant — the same reasoning applied
+to SolarEdge units that already speak SunSpec Modbus TCP locally.
 
 ## Export control (future, separate mode — not this driver)
 
