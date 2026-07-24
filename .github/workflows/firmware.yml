@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: MIT
+#
+# Firmware compile gate. Split out from ci.yml deliberately: this workflow triggers ONLY on
+# pull_request, so a push to main -- a merge, a release bump -- runs nothing here and posts no
+# firmware check. The tree was already built on the PR, and release.yml builds the shipping
+# images. Keeping firmware a separate workflow, rather than a push-skipped job inside ci.yml,
+# is what stops a "Firmware (${{ matrix.env }}) — skipped" check appearing on every main commit:
+# a matrix job skipped by a job-level `if` reports one check with its name un-interpolated, but
+# a workflow that does not trigger on an event contributes no check for that event at all.
+#
+# The board list is computed, not static. `changes` emits the full list only when the PR touches
+# something the image is built from, and an empty list otherwise; fromJSON turns it into the
+# build matrix. An empty array expands to zero matrix jobs, so a docs-only PR compiles nothing
+# and shows no build check -- without a job-level `if`, which is precisely the skip that would
+# render `${{ matrix.env }}` as a check name.
+
+name: Firmware
+
+on:
+  pull_request:
+
+concurrency:
+  group: firmware-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect build-affecting changes
+    runs-on: ubuntu-latest
+    # dorny/paths-filter lists the PR's changed files through the API (no checkout). Spelling the
+    # scopes out keeps this working if the repo's default token permissions are ever tightened;
+    # contents:read covers the compare call, pull-requests:read the file listing.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      # A JSON array the build job reads as its matrix: every board when a build input changed,
+      # [] otherwise. [] is valid JSON and expands to zero jobs.
+      envs: ${{ steps.envs.outputs.envs }}
+    steps:
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          # Positive list = default-deny: a change matching none of these (docs, README, LICENSE,
+          # the flasher site) leaves the list empty and builds nothing. Keep this in step with
+          # what `pio run` actually consumes -- err towards listing a path, since a wrongly-skipped
+          # build ships nothing but a wrongly-run one only costs minutes.
+          filters: |
+            firmware:
+              - 'src/**'
+              - 'profiles/**'
+              - 'platformio.ini'
+              - 'partitions_*.csv'
+              - 'tools/gen_profiles.py'
+              - '.github/workflows/firmware.yml'
+      - id: envs
+        env:
+          AFFECTED: ${{ steps.filter.outputs.firmware }}
+        run: |
+          if [ "$AFFECTED" = "true" ]; then
+            echo 'envs=["waveshare-rs485-can","waveshare-relay-1ch","waveshare-relay-6ch","mock"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'envs=[]' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build (${{ matrix.env }})
+    needs: changes
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJSON(needs.changes.outputs.envs) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-fw-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build ${{ matrix.env }}
+        run: pio run -e ${{ matrix.env }}
+
+      - name: Upload firmware artifacts
+        if: matrix.env != 'mock'
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ matrix.env }}-${{ github.sha }}
+          path: |
+            .pio/build/${{ matrix.env }}/firmware.bin
+            .pio/build/${{ matrix.env }}/firmware.factory.bin
+          retention-days: 14
