@@ -206,6 +206,23 @@ PollResult SunspecDriver::poll(DeviceState& state) {
 
     auto&          m  = state.measurements;
     const uint64_t ts = transport_->nowMs();
+
+    // Declare before setting: set() ignores an id that was never declared, which is what stops
+    // a driver inventing a channel. Declared on every poll rather than once at begin() because
+    // WHICH points a SunSpec device implements is only known after reading it -- and a device
+    // that publishes nothing for a point still gets the channel, left without a reading, so
+    // outputs can say "supported but no value" instead of staying silent about it.
+    m.declare(measurement_id::kAcPowerTotal, MeasurementType::Power, Unit::Watt, "AC Power");
+    m.declare(measurement_id::kAcL1Voltage, MeasurementType::Voltage, Unit::Volt, "AC Voltage");
+    m.declare(measurement_id::kAcL1Current, MeasurementType::Current, Unit::Ampere, "AC Current");
+    m.declare(measurement_id::kAcFrequency, MeasurementType::Frequency, Unit::Hertz,
+              "Grid Frequency");
+    m.declare(measurement_id::kEnergyTotal, MeasurementType::Energy, Unit::KilowattHour,
+              "Total Energy");
+    m.declare(measurement_id::kDcPowerTotal, MeasurementType::Power, Unit::Watt, "DC Power");
+    m.declare(measurement_id::kTemperature, MeasurementType::Temperature, Unit::Celsius,
+              "Temperature");
+
     if (r.hasAcPower) {
         m.set(measurement_id::kAcPowerTotal, r.acPowerW, ts);
     }
