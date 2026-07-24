@@ -251,12 +251,17 @@ bool RestApi::begin() {
             // one hand-rolled payload in the firmware, and the value lands in the setup page's
             // innerHTML, so any future relaxation of that validation turned a string splice
             // into a broken payload. Now escaped by the same builder path as everything else.
+            //
+            // The reboot happens either way. By this point the configuration is already saved
+            // AND applied, so provisioning has succeeded; failing to render the courtesy body
+            // must not leave the device sitting in the portal on a config it already accepted.
+            // The fallback carries no interpolated value, so it cannot fail in turn.
             std::string body;
-            if (!buildProvisionPayload(updated.wifi.hostname, body)) {
-                sendError(request, {500, "encode_failed", "could not build the response"});
-                return;
+            if (buildProvisionPayload(updated.wifi.hostname, body)) {
+                request->send(200, kJson, body.c_str());
+            } else {
+                request->send(200, kJson, "{\"status\":\"saved\",\"rebooting\":true}");
             }
-            request->send(200, kJson, body.c_str());
             context_.requestReboot();
         },
         nullptr,
