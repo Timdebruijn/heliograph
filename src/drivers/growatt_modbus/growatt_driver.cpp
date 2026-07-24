@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "diagnostics/logger.h"
+#include "protocols/modbus/modbus_client.h"
 #include "protocols/modbus/modbus_rtu.h"
 
 namespace heliograph::growatt {
@@ -97,53 +98,29 @@ GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t star
     const uint8_t fn = space == RegSpace::Input ? modbus::kReadInputRegisters
                                                 : modbus::kReadHoldingRegisters;
 
-    uint8_t req[8];
-    size_t  reqLen = 0;
-    if (modbus::buildReadRequest(options_.unitId, fn, start, count, req, sizeof(req), reqLen) !=
-        modbus::BuildResult::Ok) {
-        return ReadResult::Protocol;
-    }
+    // The exchange itself is protocol-generic and lives in protocols/modbus/modbus_client:
+    // SunSpec needs the identical transaction against a completely different register map.
+    // What stays here is the part that is Growatt's business -- which register space a block
+    // means, and the TRACE dump the bring-up procedure depends on.
+    const modbus::ReadTiming timing{kTransactionDeadlineMs, kResponseTimeoutMs};
+    const auto outcome =
+        modbus::readRegisters(*transport_, options_.unitId, fn, start, count, out, count, timing);
 
-    transport_->flushInput();
-    if (transport_->write(req, reqLen) != reqLen) {
-        return ReadResult::TransportError;
-    }
-
-    uint8_t rx[modbus::kMaxAdu];
-    size_t  have = 0;
-    const uint64_t deadline = transport_->nowMs() + kTransactionDeadlineMs;
-    for (;;) {
-        // Wall-clock bound on the whole block read: each read() renews its own timeout, so a
-        // slow trickle could otherwise hold the bus lock for many seconds without ever
-        // completing a frame (review, 2026-07-20).
-        if (transport_->nowMs() >= deadline) {
+    switch (outcome.status) {
+        case modbus::ReadStatus::Ok:
+            traceBlock(space, start, count, out);
+            return ReadResult::Ok;
+        case modbus::ReadStatus::Exception:
+            lastException_ = outcome.exceptionCode;
+            return ReadResult::Exception;
+        case modbus::ReadStatus::Timeout:
             return ReadResult::Timeout;
-        }
-        modbus::ReadResponse resp;
-        const auto parsed =
-            modbus::parseReadResponse(rx, have, options_.unitId, fn, out, count, resp);
-        switch (parsed) {
-            case modbus::ParseResult::Ok:
-                traceBlock(space, start, count, out);
-                return ReadResult::Ok;
-            case modbus::ParseResult::Exception:
-                lastException_ = resp.exceptionCode;
-                return ReadResult::Exception;
-            case modbus::ParseResult::Incomplete:
-                break;  // read more below
-            default:
-                return ReadResult::Protocol;  // BadCrc / WrongUnit / WrongFunction / Malformed
-        }
-
-        if (have >= sizeof(rx)) {
-            return ReadResult::Protocol;
-        }
-        const size_t n = transport_->read(rx + have, sizeof(rx) - have, kResponseTimeoutMs);
-        if (n == 0) {
-            return ReadResult::Timeout;
-        }
-        have += n;
+        case modbus::ReadStatus::TransportError:
+            return ReadResult::TransportError;
+        case modbus::ReadStatus::Protocol:
+            break;
     }
+    return ReadResult::Protocol;
 }
 
 PollResult GrowattDriver::poll(DeviceState& state) {
