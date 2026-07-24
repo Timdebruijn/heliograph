@@ -100,6 +100,15 @@ const GrowattProfile* findProfile(const char* id);
 /// option is not set. Implemented in profiles_generated.cpp.
 const GrowattProfile& defaultProfile();
 
+/// Enumerates the compiled-in profiles, so the descriptor can offer them as the option's
+/// allowed values instead of accepting free-form text. With more than one profile in the
+/// build, a typo that falls back to the default silently applies ANOTHER family's register
+/// map — readings that look plausible and are wrong. Rejecting the value at configuration
+/// time is the only point where that is still visible to the user.
+/// Both implemented in profiles_generated.cpp.
+size_t                profileCount();
+const GrowattProfile& profileAt(size_t index);
+
 /// Raw register data read back from the device, one entry per block.
 struct BlockData {
     RegSpace space;

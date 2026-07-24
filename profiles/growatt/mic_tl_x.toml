@@ -1,0 +1,235 @@
+# SPDX-License-Identifier: MIT
+#
+# Growatt MIC TL-X (600-3300 W, single phase) — Modbus RTU register profile.
+#
+# STATUS: transcribed from two independent sources that agree, NOT yet confirmed against
+# real hardware by this project. See docs/growatt-mic-tl-x-protocol.md for the reasoning
+# and the bring-up checklist.
+#
+# One profile for the whole MIC TL-X range. A profile describes a REGISTER LAYOUT, not a
+# model number: a MIC 600TL-X and a MIC 3300TL-X differ only in power rating, which appears
+# nowhere in the map. Holding register 44 additionally reports the actual tracker and phase
+# count, so a variant that ever deviates is visible rather than silently mis-decoded.
+#
+# The generation question that docs/growatt-sph-protocol.md flags as "resolve this FIRST"
+# is settled for this family WITHOUT hardware: the 3000-series input registers belong to
+# the TL-XH hybrid, not to the plain TL-X string inverter. Both sources below keep the two
+# maps strictly apart, and this one is the 0-124 "first group".
+#
+# Sources:
+#   - Growatt Inverter Modbus RTU Protocol II, machine-readable register CSV
+#     (0xAHA/Growatt_ModbusTCP, growatt_modbus_rtu_v139_registers.csv): "First group"
+#     input registers 0-124.
+#   - WouterTuinstra/Homeassistant-Growatt-Local-Modbus, a widely deployed and therefore
+#     hardware-exercised integration: custom_components/growatt_local/API/device_type/
+#     inverter_120.py. Its INPUT_REGISTERS_120 (0-124) is this map; its separate
+#     INPUT_REGISTERS_120_TL_XH (3000+) is the hybrid and is deliberately NOT used here.
+#
+# Conservative on purpose: only rows both sources agree on are published as measurements.
+# Anything ambiguous is left to the driver's raw-block TRACE dump rather than surfacing as
+# an authoritative-looking value.
+
+[profile]
+driver = "growatt_modbus"
+id = "mic_tl_x"
+display_name = "Growatt MIC TL-X (0.6-3.3 kW)"
+default = false        # sph.toml holds the driver default
+phases = 1
+mppts = 1
+battery = false
+transports = ["rtu"]
+
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# ------------------------------------------------------------------------------------------
+# Read blocks.
+#
+# The whole first group is read, not just the mapped registers: the driver TRACE-dumps every
+# raw block, and a wide dump is what lets the first bring-up session check this map against
+# the inverter's own app/display and correct it in one pass.
+#
+# The holding block covers the identity area (firmware 9-14, serial 23-27, model 28-29,
+# device type code 43, trackers/phases 44) plus register 3, the output power limit declared
+# at the bottom of this file. Reading it means its CURRENT value is visible in the dump
+# before anything ever considers writing to it.
+# ------------------------------------------------------------------------------------------
+
+[[block]]
+space = "input"
+start = 0
+count = 125
+
+[[block]]
+space = "holding"
+start = 0
+count = 45
+
+# --- DC / PV side -------------------------------------------------------------------------
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.power.total"
+display_name = "PV Power"
+space = "input"
+address = 1
+type = "u32"
+scale = 0.1
+unit = "W"
+
+[[register]]                    # high confidence
+measurement = "dc.mppt_1.voltage"
+display_name = "PV Voltage"
+space = "input"
+address = 3
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence
+measurement = "dc.mppt_1.current"
+display_name = "PV Current"
+space = "input"
+address = 4
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # high confidence
+measurement = "dc.mppt_1.power"
+display_name = "PV String Power"
+space = "input"
+address = 5
+type = "u32"
+scale = 0.1
+unit = "W"
+
+# MPPT 2 (registers 7-10) exists in the layout but not on this hardware: the MIC TL-X range
+# is single-tracker. Mapping it would publish a permanent zero, which is exactly the "never
+# invent a reading" rule. It stays visible in the raw dump for anyone whose register 44 says
+# otherwise.
+
+# --- AC side ------------------------------------------------------------------------------
+
+[[register]]                    # high confidence
+measurement = "ac.power.total"
+display_name = "AC Power"
+space = "input"
+address = 35
+type = "u32"
+scale = 0.1
+unit = "W"
+
+[[register]]                    # high confidence — note the /100 scale, unlike everything else
+measurement = "ac.frequency"
+display_name = "Grid Frequency"
+space = "input"
+address = 37
+type = "u16"
+scale = 0.01
+unit = "Hz"
+
+[[register]]                    # high confidence
+measurement = "ac.phase_l1.voltage"
+display_name = "Grid Voltage"
+space = "input"
+address = 38
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence
+measurement = "ac.phase_l1.current"
+display_name = "Grid Current"
+space = "input"
+address = 39
+type = "u16"
+scale = 0.1
+unit = "A"
+
+# Pac1 (40-41) is deliberately NOT mapped. On a single-phase inverter it duplicates
+# ac.power.total, and the protocol revisions disagree on whether it is real power (W) or
+# apparent power (VA). A second power entity in Home Assistant that might silently be VA is
+# worse than no entity; the raw dump settles it on the bench if anyone wants it.
+
+# --- Energy and runtime -------------------------------------------------------------------
+
+[[register]]                    # high confidence
+measurement = "energy.today"
+display_name = "Energy Today"
+space = "input"
+address = 53
+type = "u32"
+scale = 0.1
+unit = "kWh"
+
+[[register]]                    # high confidence
+measurement = "energy.total"
+display_name = "Energy Total"
+space = "input"
+address = 55
+type = "u32"
+scale = 0.1
+unit = "kWh"
+
+# Work time total counts in half-seconds, so hours = raw / 7200. Both sources use exactly
+# this divisor.
+[[register]]                    # high confidence
+measurement = "inverter.operating_hours"
+display_name = "Operating Hours"
+space = "input"
+address = 57
+type = "u32"
+scale = 0.00013888888888888889
+unit = "h"
+
+# --- Temperature --------------------------------------------------------------------------
+
+# Declared signed although the protocol table calls it unsigned: for every physically
+# possible reading the two decode identically, and s16 additionally survives a sub-zero
+# winter morning on an outdoor unit instead of reporting 6553 °C.
+[[register]]                    # high confidence
+measurement = "inverter.temperature"
+display_name = "Inverter Temperature"
+space = "input"
+address = 93
+type = "s16"
+scale = 0.1
+unit = "°C"
+
+# IPM temperature (94) and boost temperature (95) are real but redundant for monitoring, and
+# there is one canonical inverter.temperature. They stay in the raw dump.
+
+# ------------------------------------------------------------------------------------------
+# Writable setpoint.
+#
+# Holding register 3 is the inverter's active-power limit as a percentage. It is the safest
+# write this project has found on any device so far: a single 16-bit holding register (FC06),
+# trivially reversed by writing 100, and it touches no grid-protection setting. It is the
+# natural way to curtail a MIC TL-X from Home Assistant when prices go negative -- no DRM
+# wiring and no relay board involved.
+#
+# Declaring it here does NOT enable anything. The row stays dormant until `verified = true`,
+# which requires a bench session: write a limit, read register 3 back, and confirm against
+# the inverter's own reported output that the limit actually took effect. Until then this is
+# documented research, not a control surface.
+#
+# Note for that session: some protocol revisions describe 255 as "limit disabled". The bound
+# below stops at 100 rather than allowing 255, because a percentage that silently means
+# "off" is a footgun; if the bench confirms 255 is needed, it gets its own explicit handling.
+# ------------------------------------------------------------------------------------------
+
+[[write]]
+command = "set_active_power_limit_percent"
+display_name = "Active Power Limit"
+space = "holding"
+address = 3
+type = "u16"
+function = "write_single"
+scale = 1.0
+unit = "%"
+minimum = 0
+maximum = 100
+step = 1
+verified = false
