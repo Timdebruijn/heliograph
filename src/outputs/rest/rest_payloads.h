@@ -29,6 +29,14 @@ struct ApiError {
 /// Uniform error body. Every failure looks the same, and a failure is never a 200.
 bool buildErrorPayload(const ApiError& error, const std::string& requestId, std::string& out);
 
+/// Response to a completed setup-portal provision. Echoes the hostname because the AP is gone
+/// after the reboot and the user needs a concrete address; the setup page turns it into a link.
+/// A builder rather than a hand-spliced string: the hostname is operator-supplied, and the page
+/// puts it straight into innerHTML, so it must be escaped by the same path as every other
+/// payload no matter how strict today's validation happens to be.
+bool buildProvisionPayload(const std::string& hostname, std::string& out,
+                           size_t maxBytes = kMaxResponseBytes);
+
 /// `deviceId` is the id the device is REGISTERED under -- the key in /api/v1/devices and the
 /// per-device routes. Not identity.deviceId(): that one changes when a late-arriving serial
 /// number completes the identity (the store key was minted at begin(), before registration on

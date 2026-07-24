@@ -262,6 +262,12 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
     writeU32(reg::kRs485Timeouts, diagnostics.rs485TimeoutTotal);
     // Never 0 on wifi-down: 0 dBm reads as a perfect connection. Sentinel instead, exactly as
     // kSecondsSincePoll above -- a client must be able to tell "unknown" from a real reading.
+    //
+    // Known, accepted ambiguity: the all-ones sentinel is bit-identical to a signed -1, so a
+    // CONNECTED reading of exactly -1 dBm would be indistinguishable from "no wifi". Left as
+    // is on purpose -- -1 dBm is not a physically reachable RSSI (real values run -30..-100),
+    // and moving the sentinel would break every existing Modbus client that already tests for
+    // 0xFFFF. JSON outputs have no such ambiguity; they publish null.
     writeI32(reg::kWifiRssi,
              bridge.wifiConnected ? bridge.wifiRssiDbm : static_cast<int32_t>(kInvalidU32));
     writeU32(reg::kBridgeUptime, bridge.uptimeSeconds);

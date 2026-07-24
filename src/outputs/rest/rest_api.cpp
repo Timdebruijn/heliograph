@@ -245,8 +245,17 @@ bool RestApi::begin() {
             context_.applyConfig(updated);  // lock-guarded publish; see RestContext
             // Echo the hostname: after the reboot this AP is gone and the user needs a
             // concrete address to go to. The setup page turns this into a clickable link.
-            const std::string body = "{\"status\":\"saved\",\"rebooting\":true,\"hostname\":\"" +
-                                     updated.wifi.hostname + "\"}";
+            //
+            // Built, not concatenated. hostname is validated down to [A-Za-z0-9-] before it
+            // reaches here, so the previous hand-spliced JSON was safe today -- but it was the
+            // one hand-rolled payload in the firmware, and the value lands in the setup page's
+            // innerHTML, so any future relaxation of that validation turned a string splice
+            // into a broken payload. Now escaped by the same builder path as everything else.
+            std::string body;
+            if (!buildProvisionPayload(updated.wifi.hostname, body)) {
+                sendError(request, {500, "encode_failed", "could not build the response"});
+                return;
+            }
             request->send(200, kJson, body.c_str());
             context_.requestReboot();
         },

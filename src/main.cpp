@@ -623,9 +623,13 @@ void setup() {
         if (rtc::readUtc(stored)) {
             const timeval tv{stored, 0};
             settimeofday(&tv, nullptr);
-            char buf[24];
-            log::formatIsoLocalTime(buf, sizeof(buf), stored);
-            log::info("rtc: clock restored: %s (awaiting ntp for drift correction)", buf);
+            char         buf[24];
+            const size_t n = log::formatIsoLocalTime(buf, sizeof(buf), stored);
+            // formatIsoLocalTime leaves buf untouched when localtime_r rejects the epoch or
+            // strftime does not fit, so printing it unconditionally would read uninitialised
+            // stack. Same guard as the NTP-sync line in time_manager.cpp.
+            log::info("rtc: clock restored: %s (awaiting ntp for drift correction)",
+                      n > 0 ? buf : "?");
         } else {
             log::warn("rtc: present but time not set (first boot or empty backup supply)");
         }
