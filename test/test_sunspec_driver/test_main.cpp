@@ -225,6 +225,56 @@ static void test_a_chain_without_an_inverter_model_is_reported_honestly() {
     TEST_ASSERT_NOT_EQUAL(PollResult::Ok, d.poll(state));
 }
 
+// begin() must configure the line. Without it, a bridge that boots straight into this driver
+// -- every reboot once it is the selected driver -- polls an unconfigured UART and hears
+// nothing forever, while a discovery run masks the bug by configuring the transport itself.
+// The sibling Modbus driver carries a comment about exactly this; the trap is easy to re-enter.
+static void test_begin_configures_the_serial_line() {
+    Rig r;
+    buildTypical(r.device);
+    r.arm();
+    auto d = r.makeDriver();  // calls begin()
+
+    TEST_ASSERT_TRUE(r.transport.configureCalls > 0);
+}
+
+// A driver chosen by hand is never probed, so identity has to come from the chain walk. Without
+// it the device stays nameless in the UI and in Home Assistant for the whole session, even
+// though the information was one read away.
+static void test_identity_is_available_without_probing() {
+    Rig r;
+    buildTypical(r.device);
+    r.arm();
+    auto d = r.makeDriver();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(state));  // poll only, never probe()
+
+    TEST_ASSERT_EQUAL_STRING("Acme Solar", d.identity().manufacturer.c_str());
+    TEST_ASSERT_EQUAL_STRING("SN12345", d.identity().serialNumber.c_str());
+}
+
+// A device with no readable model must not be reported as a CORRUPTED one. InvalidFrame feeds
+// the counter that means "bytes arrived damaged", which drives the alert telling someone to go
+// check their ground and termination -- and nothing is wrong with this bus.
+static void test_an_unreadable_device_is_not_reported_as_line_corruption() {
+    Rig      r;
+    uint16_t at = r.device.placeMarker();
+    at = r.device.addModel(at, sunspec::kModelCommon,
+                           FakeSunspecDevice::commonPayload("Acme", "Battery", "9"));
+    at = r.device.addModel(at, 802, std::vector<uint16_t>(62, 0));
+    r.device.terminate(at);
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    const auto  result = d.poll(state);
+
+    TEST_ASSERT_NOT_EQUAL(PollResult::Ok, result);
+    TEST_ASSERT_NOT_EQUAL(PollResult::InvalidFrame, result);
+    TEST_ASSERT_NOT_EQUAL(PollResult::ChecksumError, result);
+}
+
 static void test_a_silent_device_does_not_poll() {
     Rig r;
     buildTypical(r.device);
@@ -258,6 +308,9 @@ int main(int, char**) {
     RUN_TEST(test_an_endless_chain_is_bounded);
     RUN_TEST(test_a_non_default_base_address_is_honoured);
     RUN_TEST(test_a_chain_without_an_inverter_model_is_reported_honestly);
+    RUN_TEST(test_begin_configures_the_serial_line);
+    RUN_TEST(test_identity_is_available_without_probing);
+    RUN_TEST(test_an_unreadable_device_is_not_reported_as_line_corruption);
     RUN_TEST(test_a_silent_device_does_not_poll);
     RUN_TEST(test_the_driver_is_read_only);
     return UNITY_END();

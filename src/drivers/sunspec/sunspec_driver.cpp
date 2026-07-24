@@ -62,13 +62,9 @@ bool SunspecDriver::walkChain() {
         entry.length  = header[1];
         entry.address = cursor;
         chain_.push_back(entry);
-
-        if (commonEntry_ == nullptr && entry.modelId == kModelCommon) {
-            commonEntry_ = &chain_.back();
-        }
-        if (inverterEntry_ == nullptr && isInverterModel(entry.modelId)) {
-            inverterEntry_ = &chain_.back();
-        }
+        // No pointers taken here on purpose: every push_back can reallocate, so anything
+        // captured mid-walk is dangling by the next iteration. They are resolved once below,
+        // after the vector has stopped growing.
 
         const uint32_t next =
             static_cast<uint32_t>(cursor) + kHeaderRegisters + static_cast<uint32_t>(entry.length);
@@ -81,15 +77,27 @@ bool SunspecDriver::walkChain() {
     if (chain_.empty()) {
         return false;
     }
-    // Pointers above were taken into a vector that has since grown; re-resolve them by index.
-    inverterEntry_ = nullptr;
-    commonEntry_   = nullptr;
+    // Resolved now that the vector is final and cannot reallocate under these pointers.
     for (const auto& e : chain_) {
         if (commonEntry_ == nullptr && e.modelId == kModelCommon) {
             commonEntry_ = &e;
         }
         if (inverterEntry_ == nullptr && isInverterModel(e.modelId)) {
             inverterEntry_ = &e;
+        }
+    }
+
+    // Identity is read here rather than only in probe(): a driver selected by hand never gets
+    // probed, and the device would then stay nameless in the UI and in Home Assistant for the
+    // whole session even though the information was one read away.
+    if (commonEntry_ != nullptr) {
+        std::vector<uint16_t> regs;
+        CommonIdentity        id;
+        if (readModel(*commonEntry_, regs) && decodeCommon(regs.data(), regs.size(), id)) {
+            identity_.manufacturer    = id.manufacturer;
+            identity_.model           = id.model;
+            identity_.serialNumber    = id.serial;
+            identity_.firmwareVersion = id.version;
         }
     }
 
@@ -129,11 +137,19 @@ const DriverDescriptor& SunspecDriver::descriptor() const { return sunspec::desc
 bool SunspecDriver::begin(Transport& transport) {
     transport_ = &transport;
     chain_.clear();
-    walked_ = false;
-    identity_ = DeviceIdentity{};
+    walked_                = false;
+    identity_              = DeviceIdentity{};
     identity_.driverId     = descriptor().id;
     identity_.protocolName = descriptor().protocol;
-    return true;
+
+    // Configure the line, exactly as the sibling Modbus driver does and for the reason its
+    // comment records: without this, a boot that goes straight into this driver -- every
+    // reboot once it is the selected driver -- polls an unconfigured UART and hears silence
+    // forever. Discovery hides the bug, because probing happens to configure the transport.
+    // SunSpec mandates no line speed, so the descriptor's first recommendation is the default
+    // and the owner can pick the other from the settings page.
+    const auto& profiles = descriptor().recommendedSerialProfiles;
+    return !profiles.empty() && transport.configure(profiles.front());
 }
 
 ProbeResult SunspecDriver::probe() {
@@ -149,20 +165,14 @@ ProbeResult SunspecDriver::probe() {
                   options_.baseAddress, static_cast<unsigned>(chain_.size()));
     result.evidence.emplace_back(note);
 
-    if (commonEntry_ != nullptr) {
-        std::vector<uint16_t> regs;
-        CommonIdentity        id;
-        if (readModel(*commonEntry_, regs) && decodeCommon(regs.data(), regs.size(), id)) {
-            result.detectedManufacturer = id.manufacturer;
-            result.detectedModel        = id.model;
-            result.serialNumber         = id.serial;
-            result.firmwareVersion      = id.version;
-            identity_.manufacturer      = id.manufacturer;
-            identity_.model             = id.model;
-            identity_.serialNumber      = id.serial;
-            identity_.firmwareVersion   = id.version;
-            result.evidence.emplace_back("common model (1) identified the device");
-        }
+    // walkChain() already read the common model into identity_; reuse it rather than spending
+    // a second round trip on the same registers.
+    if (!identity_.manufacturer.empty() || !identity_.serialNumber.empty()) {
+        result.detectedManufacturer = identity_.manufacturer;
+        result.detectedModel        = identity_.model;
+        result.serialNumber         = identity_.serialNumber;
+        result.firmwareVersion      = identity_.firmwareVersion;
+        result.evidence.emplace_back("common model (1) identified the device");
     }
 
     if (inverterEntry_ != nullptr) {
@@ -188,7 +198,11 @@ PollResult SunspecDriver::poll(DeviceState& state) {
         return PollResult::Timeout;
     }
     if (inverterEntry_ == nullptr) {
-        return PollResult::InvalidFrame;  // mapped, but nothing this driver can read
+        // Mapped fine, but carries no model this driver reads -- a battery-only device, say.
+        // Deliberately NOT InvalidFrame: that counter means "bytes arrived corrupted" and
+        // feeds the alerting rule that tells someone to go check their ground and
+        // termination. Nothing is wrong with this bus, so it must not say so.
+        return PollResult::NotRegistered;
     }
 
     std::vector<uint16_t> regs;
