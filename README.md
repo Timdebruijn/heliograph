@@ -44,7 +44,7 @@ common set of measurements, and republishes that:
 | **MQTT** | Any broker, your own topics |
 | **Modbus TCP** | Port 502, for building/industrial tooling |
 | **REST / JSON** | `/api/v1/` — see [docs/rest-api.md](docs/rest-api.md) |
-| **Prometheus** | `/metrics`, also readable by Zabbix and Checkmk |
+| **Prometheus** | `/metrics` — see [docs/prometheus.md](docs/prometheus.md); also readable by Zabbix and Checkmk |
 | **Web dashboard** | Built into the device; works with no internet at all |
 
 ### And it can turn your inverter down

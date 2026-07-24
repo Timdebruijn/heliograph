@@ -705,6 +705,106 @@ static void test_prometheus_omits_unknown_rather_than_exporting_zero() {
     TEST_ASSERT_TRUE(text.find("heliograph_poll_failure_total 10\n") != std::string::npos);
 }
 
+// A board without relays must not export relay series at all -- the same absent-not-zero rule
+// the measurements follow. A permanent "heliograph_relay_energised 0" on a monitoring-only
+// bridge would invite a dashboard panel for hardware that is not there.
+static void test_prometheus_omits_relays_on_a_board_without_them() {
+    Rig r;
+    DeviceContext ctx(r.driver, r.store, r.diagnostics, clockFn);
+    ctx.pollOnce();
+    BridgeInfo b = makeBridge();  // relayCount stays 0
+    const auto text = prometheus::buildMetrics(*r.store.snapshot(), b, r.diagnostics.snapshot());
+
+    TEST_ASSERT_TRUE(text.find("heliograph_relay_energised") == std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_relays_enabled") == std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_drm_mode") == std::string::npos);
+}
+
+static void test_prometheus_exports_relay_and_drm_state() {
+    Rig r;
+    DeviceContext ctx(r.driver, r.store, r.diagnostics, clockFn);
+    ctx.pollOnce();
+    BridgeInfo b   = makeBridge();
+    b.relayCount   = 3;
+    b.relaysEnabled = true;
+    b.relayMask    = 0b010;  // only relay index 1 energised
+    b.relayRoles   = {"drm0", "drm5", "none"};
+    const auto text = prometheus::buildMetrics(*r.store.snapshot(), b, r.diagnostics.snapshot());
+
+    TEST_ASSERT_TRUE(text.find("heliograph_relays_enabled 1\n") != std::string::npos);
+    // Labels carry the SAME 0-based index as the MQTT topic and the REST route.
+    TEST_ASSERT_TRUE(text.find("heliograph_relay_energised{relay=\"0\"} 0\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_relay_energised{relay=\"1\"} 1\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_relay_energised{relay=\"2\"} 0\n") != std::string::npos);
+    // Exactly relay 1 is on, and relay 1 carries the drm5 role, so that is the active mode.
+    TEST_ASSERT_TRUE(text.find("heliograph_drm_mode{mode=\"drm5\"} 1\n") != std::string::npos);
+}
+
+// A metric family with labels carries exactly ONE HELP and ONE TYPE line, however many series
+// it has. Repeating them per series is a parse error in strict Prometheus parsers, and it is
+// the natural mistake to make when a later edit moves the header inside the loop -- at which
+// point scraping breaks in the field while every other test here still passes.
+static void test_prometheus_labelled_family_declares_help_once() {
+    Rig r;
+    DeviceContext ctx(r.driver, r.store, r.diagnostics, clockFn);
+    ctx.pollOnce();
+    BridgeInfo b = makeBridge();
+    b.relayCount = 6;
+    b.relayMask  = 0b101010;
+    const auto text = prometheus::buildMetrics(*r.store.snapshot(), b, r.diagnostics.snapshot());
+
+    auto count = [&text](const std::string& needle) {
+        size_t n = 0;
+        for (size_t at = text.find(needle); at != std::string::npos;
+             at        = text.find(needle, at + needle.size())) {
+            ++n;
+        }
+        return n;
+    };
+    TEST_ASSERT_EQUAL_size_t(1, count("# HELP heliograph_relay_energised"));
+    TEST_ASSERT_EQUAL_size_t(1, count("# TYPE heliograph_relay_energised"));
+    TEST_ASSERT_EQUAL_size_t(6, count("heliograph_relay_energised{relay="));
+}
+
+// Relays present but no DRM roles configured: the switches are reportable, the mode is not.
+// Inventing "normal" would claim a curtailment model the operator never set up.
+static void test_prometheus_omits_drm_mode_without_roles() {
+    Rig r;
+    DeviceContext ctx(r.driver, r.store, r.diagnostics, clockFn);
+    ctx.pollOnce();
+    BridgeInfo b = makeBridge();
+    b.relayCount = 2;
+    b.relayRoles = {"none", "none"};
+    const auto text = prometheus::buildMetrics(*r.store.snapshot(), b, r.diagnostics.snapshot());
+
+    TEST_ASSERT_TRUE(text.find("heliograph_relay_energised{relay=\"0\"}") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_drm_mode") == std::string::npos);
+}
+
+// A clock that has never synced must not export a 1970 timestamp: any "last sync was long ago"
+// rule would then fire forever on a device that simply has no clock yet.
+static void test_prometheus_omits_ntp_timestamp_until_synced() {
+    Rig r;
+    DeviceContext ctx(r.driver, r.store, r.diagnostics, clockFn);
+    ctx.pollOnce();
+
+    BridgeInfo unsynced = makeBridge();
+    const auto before =
+        prometheus::buildMetrics(*r.store.snapshot(), unsynced, r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(before.find("heliograph_time_synced 0\n") != std::string::npos);
+    TEST_ASSERT_TRUE(before.find("heliograph_ntp_last_sync_timestamp_seconds") ==
+                     std::string::npos);
+
+    BridgeInfo synced      = makeBridge();
+    synced.timeSynced      = true;
+    synced.lastNtpSyncEpoch = 1753000000;
+    const auto after =
+        prometheus::buildMetrics(*r.store.snapshot(), synced, r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(after.find("heliograph_time_synced 1\n") != std::string::npos);
+    TEST_ASSERT_TRUE(after.find("heliograph_ntp_last_sync_timestamp_seconds 1753000000\n") !=
+                     std::string::npos);
+}
+
 static void test_prometheus_has_no_high_cardinality_labels() {
     Rig        r;
     const auto state = r.poll();
@@ -800,6 +900,11 @@ int main(int, char**) {
     RUN_TEST(test_prometheus_stack_and_fragmentation_gauges);
     RUN_TEST(test_prometheus_exports_current_readings);
     RUN_TEST(test_prometheus_omits_unknown_rather_than_exporting_zero);
+    RUN_TEST(test_prometheus_omits_relays_on_a_board_without_them);
+    RUN_TEST(test_prometheus_exports_relay_and_drm_state);
+    RUN_TEST(test_prometheus_labelled_family_declares_help_once);
+    RUN_TEST(test_prometheus_omits_drm_mode_without_roles);
+    RUN_TEST(test_prometheus_omits_ntp_timestamp_until_synced);
     RUN_TEST(test_prometheus_has_no_high_cardinality_labels);
     RUN_TEST(test_prometheus_naming_conventions);
     RUN_TEST(test_prometheus_build_info_carries_the_version);
