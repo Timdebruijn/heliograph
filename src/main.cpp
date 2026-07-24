@@ -60,10 +60,11 @@ namespace {
 // value ships a firmware that misreports its own version -- exactly what bit the post-flash
 // check on 2026-07-21. 0.9.0 covered the stability + observability + config-transparency
 // batch; 0.10.0 added the BOOT-hold factory reset and the Relay-6CH status LED, both verified
-// on hardware; 0.10.1 was defect-fixes from the full-codebase review; 0.11.0 adds the generic
-// SunSpec Modbus driver and the shared Modbus transaction it runs on.
+// on hardware; 0.10.1 was defect-fixes from the full-codebase review; 0.11.0 added the generic
+// SunSpec Modbus driver and the shared Modbus transaction it runs on; 0.12.0 adds a second
+// vendor register-map profile and makes driver options validated rather than free-form.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 11
+#define HELIOGRAPH_VERSION_MINOR 12
 #define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
