@@ -65,7 +65,10 @@ private:
     /// binary, poll()'s frame with this array on the stack plus the TRACE logging chain peaked
     /// at ~5.2 KB (64%) -- too close to a second stack-canary boot loop. The driver lives on
     /// the heap and rs485Task owns the bus exclusively, so a member is safe.
-    BlockData blocks_[kMaxBlocks];
+    /// Value-initialised on purpose: readBlock() fills only what the device actually returned,
+    /// so anything it does not reach must be a defined 0 rather than indeterminate memory that
+    /// could be decoded and published as a reading.
+    BlockData blocks_[kMaxBlocks]{};
 };
 
 }  // namespace heliograph::growatt

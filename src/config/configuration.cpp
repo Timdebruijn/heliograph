@@ -397,8 +397,21 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
     }
 
     if (JsonObjectConst driver = doc["driver"]; !driver.isNull()) {
+        const std::string previousDriverId = merged.driver.id;
         if (!patchString(driver["id"], merged.driver.id, "driver.id", error)) return false;
         if (!patchBool(driver["auto_detect"], merged.driver.autoDetect, "driver.auto_detect", error)) return false;
+        // Options are scoped to the driver that declares them: `layout` means something to one
+        // driver and nothing to the next. The merge below has no way to remove a key, so a
+        // stale option used to survive a driver change -- harmless until the REST layer began
+        // validating options against the descriptor, at which point the orphan made every
+        // subsequent PATCH fail with "unknown option for driver X" and switching drivers became
+        // impossible without a factory reset (which also wipes WiFi and the admin password).
+        // Dropping them on the transition is the narrow fix: within one driver, partial patches
+        // still merge exactly as before (regression shipped in 0.12.0, found in review
+        // 2026-07-25).
+        if (merged.driver.id != previousDriverId) {
+            merged.driver.options.clear();
+        }
         if (JsonObjectConst options = driver["options"]; !options.isNull()) {
             for (JsonPairConst kv : options) {
                 if (!kv.value().is<const char*>()) {

@@ -41,6 +41,19 @@ ReadOutcome readRegisters(Transport& transport, uint8_t unitId, uint8_t function
         ReadResponse resp;
         switch (parseReadResponse(rx, have, unitId, functionCode, out, count, resp)) {
             case ParseResult::Ok:
+                // A reply that decodes cleanly but carries FEWER registers than were asked for
+                // is not success. The codec only checks the byte count against the caller's
+                // buffer capacity, so a short frame leaves the tail of `out` untouched -- while
+                // callers record the block as covering the full count they requested. Whatever
+                // that tail happens to hold is then decoded and published as genuine readings
+                // on a poll reporting Ok: uninitialised scratch in one driver, zeros in another
+                // (and a zero scale factor is legal, so zeros read as a real 0 W). Either way
+                // it defeats the never-fabricate-a-reading rule one layer below where that rule
+                // is enforced (review, 2026-07-25).
+                if (resp.registerCount != count) {
+                    outcome.status = ReadStatus::Protocol;
+                    return outcome;
+                }
                 outcome.status = ReadStatus::Ok;
                 return outcome;
             case ParseResult::Exception:

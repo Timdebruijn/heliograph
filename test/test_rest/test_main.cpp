@@ -297,6 +297,46 @@ static void test_driver_options_are_opaque_to_the_config_model() {
     TEST_ASSERT_EQUAL_STRING("dual", parse(json)["driver"]["options"]["layout"]);
 }
 
+// Options belong to the driver that declares them, so switching drivers must not carry them
+// over. The merge has no delete, so a stale key used to survive forever -- and once the REST
+// layer started validating options against the descriptor (0.12.0), that orphan failed every
+// later PATCH with "unknown option" and made switching drivers impossible short of a factory
+// reset. Regression found in review 2026-07-25.
+static void test_changing_the_driver_drops_the_previous_driver_s_options() {
+    Configuration c;
+    ConfigError   e;
+    c.driver.id                = "eversolar_legacy";
+    c.driver.options["layout"] = "dual";
+
+    TEST_ASSERT_TRUE(applyConfigPatch(
+        R"({"driver":{"id":"solax_x1","options":{"address":"10"}}})", c, e));
+
+    TEST_ASSERT_EQUAL_STRING("solax_x1", c.driver.id.c_str());
+    TEST_ASSERT_EQUAL_STRING("10", c.driver.options["address"].c_str());
+    // The orphan is gone -- this is what unblocks validateDriverOptions on the new driver.
+    TEST_ASSERT_TRUE(c.driver.options.find("layout") == c.driver.options.end());
+    TEST_ASSERT_EQUAL_UINT32(1, c.driver.options.size());
+}
+
+// The flip side: within one driver a partial patch must still MERGE, or setting one option
+// would silently erase the others.
+static void test_patching_one_option_keeps_the_others_on_the_same_driver() {
+    Configuration c;
+    ConfigError   e;
+    c.driver.id                 = "growatt_modbus";
+    c.driver.options["profile"] = "mic_tl_x";
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"driver":{"options":{"unit_id":"3"}}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("mic_tl_x", c.driver.options["profile"].c_str());
+    TEST_ASSERT_EQUAL_STRING("3", c.driver.options["unit_id"].c_str());
+
+    // Re-stating the same id is not a change either.
+    TEST_ASSERT_TRUE(applyConfigPatch(
+        R"({"driver":{"id":"growatt_modbus","options":{"unit_id":"4"}}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("mic_tl_x", c.driver.options["profile"].c_str());
+    TEST_ASSERT_EQUAL_STRING("4", c.driver.options["unit_id"].c_str());
+}
+
 static void test_driver_options_are_validated_against_the_driver() {
     // Validation lives with the driver that declares the option, not in the config validator
     // -- which has no way to know what a "layout" is.
@@ -874,6 +914,8 @@ int main(int, char**) {
     RUN_TEST(test_modbus_write_cannot_be_enabled);
     RUN_TEST(test_diagnostics_unit_id_must_differ_from_the_inverter);
     RUN_TEST(test_driver_options_are_opaque_to_the_config_model);
+    RUN_TEST(test_changing_the_driver_drops_the_previous_driver_s_options);
+    RUN_TEST(test_patching_one_option_keeps_the_others_on_the_same_driver);
     RUN_TEST(test_driver_options_are_validated_against_the_driver);
     RUN_TEST(test_an_unset_option_falls_back_to_the_declared_default);
     RUN_TEST(test_driver_options_reach_the_driver);

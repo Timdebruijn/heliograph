@@ -34,9 +34,20 @@ plain text. Anyone who can read the flash over USB can read them. Flash encrypti
 this but makes OTA and recovery considerably more complex; given the threat model (LAN, no
 physical access) this has not been done. Be aware of it.
 
-**The setup AP is open.** The window is small (until
-the first successful connection) but it is a window: anyone within wifi range at that
-moment can configure the bridge.
+**The setup AP is open**, and it is not limited to first boot: the bridge raises it again on
+an already-configured device after repeated WiFi failures (a router reboot reaches that in
+about two minutes), because without a reset button that portal is the only way back in.
+
+Provisioning over it is therefore gated on whether a credential exists yet, not on whether
+the portal happens to be up. On a factory-fresh device `/api/v1/provision` is open — there is
+nothing to protect and no password to present. Once an admin password is set, the same
+endpoint requires it even while the portal is running. It was previously open in both cases,
+which meant anyone in radio range of a bridge whose WiFi had dropped could overwrite its
+configuration, including the admin password and the relay gates.
+
+`/api/v1/wifi/scan` carries the same gate. What the open AP still exposes on a configured
+device is the setup page itself and the fact that the bridge exists; joining it grants no
+control and no data.
 
 **No brute-force protection on HTTP Basic.** Rate limiting is on `/actions/*`, not on the
 auth itself.
