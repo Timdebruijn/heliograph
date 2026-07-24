@@ -18,31 +18,41 @@ Holding register **44** reports the actual tracker and phase count of the connec
 a variant that ever deviates from "1 tracker, 1 phase" is visible in the raw dump rather than
 being silently mis-decoded.
 
-## The generation question, settled without hardware
+## The generation question is still open
 
-`docs/growatt-sph-protocol.md` flags a genuine trap: Protocol II describes two register
-generations, and reading the wrong one gets you nothing (or worse, plausible nonsense). For
-the SPH that question is still open and can only be closed on the bench.
+`docs/growatt-sph-protocol.md` flags a genuine trap: Protocol II describes more than one
+register generation, and reading the wrong one gets you nothing — or worse, plausible
+nonsense. An earlier draft of this document claimed the question was closed for the MIC
+without hardware. It is not, and the claim did not survive review. Here is what is actually
+known.
 
-For the MIC TL-X it is closed already. The 3000-series input registers belong to the
-**TL-XH**, the hybrid variant with a battery. The plain **TL-X** string inverter lives in the
-"first group" at input registers **0–124**. Two independent sources keep the two maps
-strictly apart and agree on which is which:
+**The map below follows the hardware-exercised source.**
+[WouterTuinstra/Homeassistant-Growatt-Local-Modbus](https://github.com/WouterTuinstra/Homeassistant-Growatt-Local-Modbus)
+is a widely deployed Home Assistant integration, which means its tables have been run against
+a great many real inverters. It defines `INPUT_REGISTERS_120` (input 0–124) for a plain
+Protocol II inverter and a separate `INPUT_REGISTERS_120_TL_XH` (3000+) for the hybrid, in
+`custom_components/growatt_local/API/device_type/inverter_120.py`. A MIC TL-X is a plain
+string inverter, so this profile uses the first table. Every mapped row matches it exactly.
 
-- The machine-readable Protocol II register CSV
-  ([0xAHA/Growatt_ModbusTCP](https://github.com/0xAHA/Growatt_ModbusTCP/tree/main/Protocols),
-  `growatt_modbus_rtu_v139_registers.csv`) defines the "First group" input registers 0–124
-  with exactly this layout.
-- [WouterTuinstra/Homeassistant-Growatt-Local-Modbus](https://github.com/WouterTuinstra/Homeassistant-Growatt-Local-Modbus),
-  a widely deployed and therefore heavily hardware-exercised Home Assistant integration,
-  defines `INPUT_REGISTERS_120` (0–124) and `INPUT_REGISTERS_120_TL_XH` (3000+) as two
-  separate tables in
-  `custom_components/growatt_local/API/device_type/inverter_120.py`.
+**The vendor CSV corroborates far less than it appears to.** The machine-readable register CSV
+([0xAHA/Growatt_ModbusTCP](https://github.com/0xAHA/Growatt_ModbusTCP/tree/main/Protocols))
+agrees on registers 0–10 and then diverges: its "First group" puts AC power at 11, frequency
+at 13 and temperature at 34, which is an older generation than the one used here. The file
+also describes itself as "a representative sample" rather than the complete protocol. It is
+supporting evidence for the PV portion of the map and no more.
 
-That two sources of different kinds — a vendor spec and a working implementation — agree
-register for register is the strongest evidence available short of the inverter itself. It is
-still not the inverter itself, which is why the driver stays Experimental until someone
-confirms it.
+**The 3000-series is not hybrid-only.** That same CSV marks the whole 3000 range — holding and
+input — with the group label `Use for TL-X and TL-XH`. So the vendor considers those registers
+applicable to the plain TL-X as well. Splitting them off into a hybrid-only table is the HA
+integration's implementation choice, not a statement by Growatt.
+
+**Therefore the profile probes both.** Alongside the mapped 0–124 block it reads 40 registers
+at 3000, mapping nothing from them. The only purpose is that the first bring-up dump answers
+the question directly: does this unit populate 0–124, 3000+, or both? A block the device
+refuses is skipped harmlessly, so probing a range that does not exist costs a timeout and
+nothing else. This is the same tactic `sph.toml` uses for its own open generation question.
+
+The driver stays **Experimental** until someone confirms the map against a physical unit.
 
 ## Read map (input registers, function 04)
 
@@ -75,18 +85,20 @@ channel that is absent:
 
 - **PV2 (7–10)** exists in the layout but not on this hardware. Mapping it would publish a
   permanent zero, and this project does not publish unknowns as zero.
-- **Pac1 (40–41)** duplicates `ac.power.total` on a single-phase inverter, and protocol
-  revisions disagree on whether it is real power (W) or apparent power (VA). A second power
-  entity that might silently be VA is a trap.
+- **Pac1 (40–41)** duplicates `ac.power.total` on a single-phase inverter, and neither source
+  says whether it is real power (W) or apparent power (VA) — both just call it "output
+  power". A second power entity that might silently be VA is a trap. On the bench it should
+  track registers 35–36 closely; a persistent offset means VA.
 - **IPM and boost temperature** are real, but there is one canonical
   `inverter.temperature` and the inverter temperature is the useful one.
 
 Everything omitted still appears in the driver's raw TRACE dump, so any of it can be promoted
 later from bench evidence rather than from a forum post.
 
-Register 93 is declared **signed** although the protocol table calls it unsigned. For every
-physically possible reading the two decode identically, and signed additionally survives a
-sub-zero winter morning on an outdoor unit instead of reporting 6553 °C.
+Register 93 is declared **signed**, which is a choice rather than a transcription — neither
+source states this register's signedness. For every physically possible reading the two decode
+identically, and signed additionally survives a sub-zero winter morning on an outdoor unit
+instead of reporting 6553 °C. If the device turns out to be unsigned, nothing breaks.
 
 ## Identity (holding registers, function 03)
 
@@ -133,12 +145,42 @@ One note for whoever does the bench session: some protocol revisions describe **
 percentage value that silently means "off" is a footgun. If the bench confirms 255 is needed,
 it gets its own explicit handling rather than a widened range.
 
+## Giving each inverter an address
+
+Every MIC TL-X ships as Modbus address **1**. Two of them on one bus will both answer every
+request and their replies collide into garbage, so the addresses have to be set before the
+units are chained together. 1, 2, 3 in the order they hang on the wire is as good a scheme as
+any.
+
+There are two ways to do it. Neither needs this bridge.
+
+**On the inverter's touch control.** The MIC has a touch-sensitive display with a `Set
+Comaddr` menu. The gestures are unusual enough to be worth writing down:
+
+| Gesture | Effect |
+|---|---|
+| Single touch | Next value / next item |
+| Double touch | Enter or confirm |
+| Triple touch | Back to the previous menu |
+| Hold ~5 s | Confirm the setting (or restore defaults) |
+
+**Or over Modbus itself.** Holding register **30** is `Com Address`, writable, range 1–254,
+factory default 1 (Growatt Protocol II). Connect one inverter at a time — while they are all
+still on address 1 you cannot address them individually — write the new address, then move to
+the next unit and chain them once each has its own.
+
+Heliograph has no write path, so this route needs a generic Modbus tool for the one-time
+write (`mbpoll` or similar). `tools/read_modbus.py` in this repo reads only.
+
+Whichever route you take, verify before chaining: with a single inverter on the bus, poll each
+address in turn and confirm exactly one answers, at the address you expect.
+
 ## Bring-up checklist
 
-1. **Give each inverter a unique Modbus address.** All units ship as address 1, so two on one
-   bus collide. Set this via ShineBus (or the manufacturer's app) before wiring anything to a
+1. **Give each inverter a unique Modbus address**, as above, before wiring anything to a
    shared bus.
-2. Wire A/B/GND to the RS485 port. 9600 8N1 is what the profile declares.
+2. Wire A/B/GND to the RS485 port — see [rs485-bus.md](rs485-bus.md) for topology, ground and
+   the 120 Ω termination rule. 9600 8N1 is what the profile declares.
 3. Configure the driver: `growatt_modbus`, profile `mic_tl_x`, `unit_id` as set in step 1.
 4. Set log level to `trace` and read `/api/v1/logs`. The `GROWATT in <addr>: ...` lines are
    the raw block dump.
@@ -146,7 +188,12 @@ it gets its own explicit handling rather than a widened range.
    total energy. All four should match without any arithmetic on your part.
 6. Confirm the two odd scales specifically — frequency should read ~50.0 Hz (not 5.0 or
    500.0), and operating hours should be plausible for the age of the unit.
-7. Report the result on the issue tracker either way. A confirmation promotes this driver out
+7. **Settle the generation question.** Look at what the 3000-block dump did. Three outcomes,
+   each actionable: the device refused it (only 0–124 exists — drop the probe block), it
+   answered with real values too (both exist — drop the probe block, the map is right
+   either way), or 0–124 was refused and 3000 answered (the map needs moving, and this
+   document needs correcting).
+8. Report the result on the issue tracker either way. A confirmation promotes this driver out
    of Experimental; a mismatch corrects one TOML row and helps the next person more.
 
 ## Sources
@@ -157,5 +204,7 @@ it gets its own explicit handling rather than a widened range.
   <https://github.com/WouterTuinstra/Homeassistant-Growatt-Local-Modbus>
 - Growatt MIC 750–3300TL-X datasheet (single phase, one MPP tracker) —
   <https://www.growatt.tech/wp-content/uploads/shared-files/MIC-7503300TL-X-Datasheet.pdf>
+- Eniris device documentation for the Growatt MIC series, for the `Set Comaddr` touch-control
+  procedure — <https://docs.eniris.be/Devices/PV-hybrid-and-battery-inverters/Growatt/MIC%20Series/>
 - The SPH map and the register-generation split it still has to resolve —
   [docs/growatt-sph-protocol.md](growatt-sph-protocol.md)

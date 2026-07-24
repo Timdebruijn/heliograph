@@ -11,23 +11,30 @@
 # nowhere in the map. Holding register 44 additionally reports the actual tracker and phase
 # count, so a variant that ever deviates is visible rather than silently mis-decoded.
 #
-# The generation question that docs/growatt-sph-protocol.md flags as "resolve this FIRST"
-# is settled for this family WITHOUT hardware: the 3000-series input registers belong to
-# the TL-XH hybrid, not to the plain TL-X string inverter. Both sources below keep the two
-# maps strictly apart, and this one is the 0-124 "first group".
+# The register generation is NOT settled without hardware -- an earlier draft of this file
+# claimed it was, and that claim did not survive review. What is actually known:
 #
-# Sources:
-#   - Growatt Inverter Modbus RTU Protocol II, machine-readable register CSV
-#     (0xAHA/Growatt_ModbusTCP, growatt_modbus_rtu_v139_registers.csv): "First group"
-#     input registers 0-124.
-#   - WouterTuinstra/Homeassistant-Growatt-Local-Modbus, a widely deployed and therefore
-#     hardware-exercised integration: custom_components/growatt_local/API/device_type/
-#     inverter_120.py. Its INPUT_REGISTERS_120 (0-124) is this map; its separate
-#     INPUT_REGISTERS_120_TL_XH (3000+) is the hybrid and is deliberately NOT used here.
+#   - The mapped rows below follow WouterTuinstra/Homeassistant-Growatt-Local-Modbus
+#     (custom_components/growatt_local/API/device_type/inverter_120.py), a widely deployed
+#     and therefore hardware-exercised integration. Its INPUT_REGISTERS_120 table is what
+#     it uses for a plain (non-hybrid) Protocol II inverter, which is what a MIC TL-X is.
+#     This is the strongest source available and every row below matches it exactly.
+#   - The vendor's machine-readable register CSV (0xAHA/Growatt_ModbusTCP) corroborates
+#     only registers 0-10. Its "First group" table describes an OLDER generation from
+#     register 11 onward (Pac at 11, Fac at 13, temperature at 34), and it says of itself
+#     that it is "a representative sample" rather than the complete protocol.
+#   - That same CSV marks the 3000-series "Use for TL-X and TL-XH" -- so those registers
+#     are NOT exclusive to the hybrid. Splitting them off is the HA integration's own
+#     implementation choice, not something the vendor states.
 #
-# Conservative on purpose: only rows both sources agree on are published as measurements.
-# Anything ambiguous is left to the driver's raw-block TRACE dump rather than surfacing as
-# an authoritative-looking value.
+# Hence the third read block below: the 3000 range is probed during bring-up so the first
+# hardware session settles which range this firmware actually populates, exactly as
+# profiles/growatt/sph.toml does for the same open question. A block the device refuses is
+# skipped harmlessly, so probing a range that does not exist costs nothing but a timeout.
+#
+# Conservative on purpose: only rows the hardware-exercised source states outright are
+# published as measurements. Anything ambiguous is left to the driver's raw-block TRACE
+# dump rather than surfacing as an authoritative-looking value.
 
 [profile]
 driver = "growatt_modbus"
@@ -52,9 +59,15 @@ stop_bits = 1
 # the inverter's own app/display and correct it in one pass.
 #
 # The holding block covers the identity area (firmware 9-14, serial 23-27, model 28-29,
-# device type code 43, trackers/phases 44) plus register 3, the output power limit declared
-# at the bottom of this file. Reading it means its CURRENT value is visible in the dump
-# before anything ever considers writing to it.
+# device type code 43, trackers/phases 44, Modbus protocol version 88) plus register 3, the
+# output power limit declared at the bottom of this file. Reading it means its CURRENT value
+# is visible in the dump before anything ever considers writing to it.
+#
+# The third block probes the 3000 range, which the vendor CSV marks as applying to TL-X and
+# not just to the hybrid TL-XH. Nothing is mapped from it: it exists purely so the first
+# bring-up dump answers "does this unit populate 0-124, 3000+, or both?". 40 registers is
+# enough to see whether real values appear there without spending a full extra 125-register
+# transaction on every poll. Narrow or drop this block once the answer is known.
 # ------------------------------------------------------------------------------------------
 
 [[block]]
@@ -65,7 +78,12 @@ count = 125
 [[block]]
 space = "holding"
 start = 0
-count = 45
+count = 89
+
+[[block]]
+space = "input"
+start = 3000
+count = 40
 
 # --- DC / PV side -------------------------------------------------------------------------
 
@@ -148,10 +166,11 @@ type = "u16"
 scale = 0.1
 unit = "A"
 
-# Pac1 (40-41) is deliberately NOT mapped. On a single-phase inverter it duplicates
-# ac.power.total, and the protocol revisions disagree on whether it is real power (W) or
-# apparent power (VA). A second power entity in Home Assistant that might silently be VA is
-# worse than no entity; the raw dump settles it on the bench if anyone wants it.
+# Pac1 (40-41) is deliberately NOT mapped: on a single-phase inverter it duplicates
+# ac.power.total, and neither source states whether it is real power (W) or apparent power
+# (VA) -- both just call it "output power". A second power entity in Home Assistant that
+# might silently be VA is worse than no entity. The raw dump settles it on the bench: on one
+# phase it should track register 35-36 closely, and a persistent offset means VA.
 
 # --- Energy and runtime -------------------------------------------------------------------
 
@@ -186,9 +205,10 @@ unit = "h"
 
 # --- Temperature --------------------------------------------------------------------------
 
-# Declared signed although the protocol table calls it unsigned: for every physically
-# possible reading the two decode identically, and s16 additionally survives a sub-zero
-# winter morning on an outdoor unit instead of reporting 6553 °C.
+# Declared signed. Neither source states the signedness of this register, so this is a
+# choice rather than a transcription: for every physically possible reading the two decode
+# identically, and s16 additionally survives a sub-zero winter morning on an outdoor unit
+# instead of reporting 6553 °C. If the device turns out to be unsigned, nothing breaks.
 [[register]]                    # high confidence
 measurement = "inverter.temperature"
 display_name = "Inverter Temperature"

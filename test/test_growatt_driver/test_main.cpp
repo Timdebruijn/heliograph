@@ -391,16 +391,28 @@ static void test_the_mic_profile_describes_a_single_phase_single_tracker_string_
     TEST_ASSERT_EQUAL(SerialParity::None, mic->serial.parity);
 }
 
-// The MIC map lives in Protocol II's "first group" (input 0-124). The 3000-series belongs to
-// the TL-XH hybrid and must not leak in here: pointing a plain TL-X at it reads nothing.
-static void test_the_mic_profile_reads_only_the_first_group() {
+// Which register generation a MIC populates is NOT settled: the vendor CSV marks the 3000
+// range "Use for TL-X and TL-XH", so it is not hybrid-only the way an earlier draft of the
+// profile claimed. The profile therefore PROBES 3000 while MAPPING nothing from it -- the
+// bring-up dump answers the question, and until it does, no published reading may come from
+// a range nobody has confirmed this device speaks.
+static void test_the_mic_profile_probes_3000_but_publishes_nothing_from_it() {
     const GrowattProfile* mic = findProfile("mic_tl_x");
     TEST_ASSERT_NOT_NULL(mic);
+
+    bool probesTheOpenRange = false;
     for (size_t i = 0; i < mic->blockCount; ++i) {
-        TEST_ASSERT_TRUE(mic->blocks[i].start < 3000);
+        probesTheOpenRange = probesTheOpenRange || mic->blocks[i].start >= 3000;
     }
+    TEST_ASSERT_TRUE(probesTheOpenRange);
+
     for (size_t i = 0; i < mic->mappingCount; ++i) {
         TEST_ASSERT_TRUE(mic->mappings[i].address < 3000);
+    }
+    // Same rule for the write row: writing into an unconfirmed generation is how you set a
+    // register you did not mean to.
+    for (size_t i = 0; i < mic->writeCount; ++i) {
+        TEST_ASSERT_TRUE(mic->writes[i].address < 3000);
     }
 }
 
@@ -523,7 +535,7 @@ int main(int, char**) {
     RUN_TEST(test_the_profile_registry_finds_sph_and_rejects_unknown_ids);
     RUN_TEST(test_the_profile_option_enumerates_every_compiled_profile);
     RUN_TEST(test_the_mic_profile_describes_a_single_phase_single_tracker_string_inverter);
-    RUN_TEST(test_the_mic_profile_reads_only_the_first_group);
+    RUN_TEST(test_the_mic_profile_probes_3000_but_publishes_nothing_from_it);
     RUN_TEST(test_the_mic_profile_decodes_a_realistic_frame);
     RUN_TEST(test_the_mic_profile_converts_half_seconds_to_hours);
     RUN_TEST(test_the_mic_power_limit_write_row_is_declared_but_dormant);

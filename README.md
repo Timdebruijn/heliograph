@@ -137,6 +137,11 @@ you need. The RS485-CAN and Relay-6CH can be powered either over USB-C or from a
 screw terminal, which is handy when there is no USB power near the inverter; check the
 product page for whichever board you buy.
 
+For one inverter, A/B/GND is genuinely all there is to it. If you are putting **several
+inverters on one bus**, read **[docs/rs485-bus.md](docs/rs485-bus.md)** first: chain topology,
+where the 120 Ω termination goes (two places, not one per device), and why each unit needs its
+own address before you connect them together.
+
 ### 2. Flash the firmware
 
 - **In your browser (easiest):** open the
