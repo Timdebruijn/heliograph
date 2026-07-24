@@ -168,6 +168,18 @@ it with your phone or laptop; the setup page opens by itself. Choose your networ
 admin password, and save. The board reboots and tells you the address to visit, something
 like `http://heliograph-a1b2c3.local`.
 
+**Write that admin password down.** The same setup network comes back on its own if the board
+later loses WiFi for a few minutes — a router reboot is enough — so that you can point it at a
+new network without digging the board out. Because that network is open and anyone in range
+could otherwise reconfigure your bridge, changing anything through it asks for the admin
+password once one is set.
+
+If you lose the password, the way back in is a **factory reset**: hold the board's **BOOT**
+button for about 5 seconds while it is running. That erases the stored configuration — WiFi,
+password, everything — and returns the board to first-boot setup. Failing that, re-flash a
+`-factory.bin` over USB, which wipes the same settings. Details and the download-mode caveat:
+[docs/hardware.md](docs/hardware.md#recovery--hold-boot-to-factory-reset).
+
 ### 4. Wire it to the inverter
 
 With the inverter's manual in front of you, connect:
