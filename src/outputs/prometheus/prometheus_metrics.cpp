@@ -149,39 +149,6 @@ std::string buildMetrics(const DeviceState& state, const BridgeInfo& bridge,
                     static_cast<unsigned long>(bridge.lastNtpSyncEpoch));
     }
 
-    // Relays and DRM, on boards that have them. Absent entirely on a board without relays,
-    // like every other output -- hardware that does not exist is never reported as zero.
-    //
-    // The relay label is the SAME index the MQTT topic and the REST route use (0-based), so a
-    // dashboard series and the topic that switched it line up. The web UI numbers them from 1
-    // for humans; machine interfaces agree on 0.
-    if (bridge.relayCount > 0) {
-        appendHelp(out, "heliograph_relays_enabled",
-                   "1 if the relay feature is enabled in the configuration", "gauge");
-        appendValue(out, "heliograph_relays_enabled",
-                    static_cast<unsigned long>(bridge.relaysEnabled ? 1 : 0));
-
-        appendHelp(out, "heliograph_relay_energised",
-                   "1 if the relay coil is energised (DRM line asserted)", "gauge");
-        for (uint8_t i = 0; i < bridge.relayCount; ++i) {
-            const bool on = ((bridge.relayMask >> i) & 1) != 0;
-            out += "heliograph_relay_energised{relay=\"" + std::to_string(i) + "\"} ";
-            out += on ? "1\n" : "0\n";
-        }
-
-        // Only when the configured roles make a mode meaningful, matching the REST payload and
-        // the Home Assistant select: with no roles assigned there is no DRM vocabulary to
-        // report, and an invented "normal" would claim a curtailment model that is not set up.
-        std::vector<std::string> roles = bridge.relayRoles;
-        roles.resize(bridge.relayCount, "none");
-        if (!drm::optionsFor(roles).empty()) {
-            appendHelp(out, "heliograph_drm_mode",
-                       "Active DRM mode; the mode label carries the value", "gauge");
-            out += "heliograph_drm_mode{mode=\"" +
-                   escapeLabel(drm::modeFrom(roles, bridge.relayMask)) + "\"} 1\n";
-        }
-    }
-
     if (bridge.wifiConnected) {
         appendHelp(out, "heliograph_wifi_rssi_dbm", "WiFi signal strength", "gauge");
         appendValue(out, "heliograph_wifi_rssi_dbm", static_cast<long>(bridge.wifiRssiDbm));
@@ -207,6 +174,42 @@ std::string buildMetrics(const DeviceState& state, const BridgeInfo& bridge,
                    "loopTask stack low-water mark", "gauge");
         appendValue(out, "heliograph_loop_stack_free_bytes",
                     static_cast<unsigned long>(d.loopStackFreeBytes));
+    }
+
+    // Relays and DRM last, on boards that have them. Absent entirely on a board without
+    // relays, like every other output -- hardware that does not exist is never reported as a
+    // zero. Kept at the end so a raw curl reads in the same order the documentation groups it.
+    //
+    // The relay label is the SAME index the MQTT topic and the REST route use (0-based), so a
+    // dashboard series and the topic that switched it line up. The web UI numbers them from 1
+    // for humans; machine interfaces agree on 0.
+    if (bridge.relayCount > 0) {
+        appendHelp(out, "heliograph_relays_enabled",
+                   "1 if the relay feature is enabled in the configuration", "gauge");
+        appendValue(out, "heliograph_relays_enabled",
+                    static_cast<unsigned long>(bridge.relaysEnabled ? 1 : 0));
+
+        // One HELP/TYPE for the whole family, then one line per relay. Repeating the header
+        // per series is a parse error in strict parsers (pinned by a test).
+        appendHelp(out, "heliograph_relay_energised",
+                   "1 if the relay coil is energised (DRM line asserted)", "gauge");
+        for (uint8_t i = 0; i < bridge.relayCount; ++i) {
+            const bool on = ((bridge.relayMask >> i) & 1) != 0;
+            out += "heliograph_relay_energised{relay=\"" + std::to_string(i) + "\"} ";
+            out += on ? "1\n" : "0\n";
+        }
+
+        // Only when the configured roles make a mode meaningful, matching the REST payload and
+        // the Home Assistant select: with no roles assigned there is no DRM vocabulary to
+        // report, and an invented "normal" would claim a curtailment model that is not set up.
+        std::vector<std::string> roles = bridge.relayRoles;
+        roles.resize(bridge.relayCount, "none");
+        if (!drm::optionsFor(roles).empty()) {
+            appendHelp(out, "heliograph_drm_mode",
+                       "Active DRM mode; the mode label carries the value", "gauge");
+            out += "heliograph_drm_mode{mode=\"" +
+                   escapeLabel(drm::modeFrom(roles, bridge.relayMask)) + "\"} 1\n";
+        }
     }
 
     return out;

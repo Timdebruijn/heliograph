@@ -13,9 +13,9 @@ and **Telegraf** can all scrape it directly, and Grafana can graph it through an
 
 ## How to scrape it
 
-Add the bridge as a normal static target. It is a small, cheap endpoint (~3.5 kB of text), but
-there is no point scraping faster than the inverter is polled — the default poll interval is
-10 seconds, so anything under that just repeats a sample.
+Add the bridge as a normal static target. It is a small, cheap endpoint — a few kilobytes of
+text — but there is no point scraping faster than the inverter is polled: the default poll
+interval is 10 seconds, so anything under that just repeats a sample.
 
 ```yaml
 scrape_configs:
@@ -182,7 +182,9 @@ one. The serial is available over the REST API instead.
 
 ## Example output
 
-A real scrape from a production bridge:
+An abbreviated real scrape from a production bridge. Note that this one is an RS485-CAN — a
+monitoring-only board — which is exactly why there are **no relay or DRM series in it**: on a
+board without relays those are omitted rather than reported as zeroes.
 
 ```
 # HELP heliograph_build_info Firmware build information
@@ -217,7 +219,8 @@ heliograph_wifi_rssi_dbm -52
 heliograph_max_alloc_heap_bytes 110580
 ```
 
-(Abbreviated — the full response is about 3.5 kB.)
+(Several series are left out above for length — a full response carries the complete set
+listed earlier.)
 
 ## Useful queries
 

@@ -740,6 +740,32 @@ static void test_prometheus_exports_relay_and_drm_state() {
     TEST_ASSERT_TRUE(text.find("heliograph_drm_mode{mode=\"drm5\"} 1\n") != std::string::npos);
 }
 
+// A metric family with labels carries exactly ONE HELP and ONE TYPE line, however many series
+// it has. Repeating them per series is a parse error in strict Prometheus parsers, and it is
+// the natural mistake to make when a later edit moves the header inside the loop -- at which
+// point scraping breaks in the field while every other test here still passes.
+static void test_prometheus_labelled_family_declares_help_once() {
+    Rig r;
+    DeviceContext ctx(r.driver, r.store, r.diagnostics, clockFn);
+    ctx.pollOnce();
+    BridgeInfo b = makeBridge();
+    b.relayCount = 6;
+    b.relayMask  = 0b101010;
+    const auto text = prometheus::buildMetrics(*r.store.snapshot(), b, r.diagnostics.snapshot());
+
+    auto count = [&text](const std::string& needle) {
+        size_t n = 0;
+        for (size_t at = text.find(needle); at != std::string::npos;
+             at        = text.find(needle, at + needle.size())) {
+            ++n;
+        }
+        return n;
+    };
+    TEST_ASSERT_EQUAL_size_t(1, count("# HELP heliograph_relay_energised"));
+    TEST_ASSERT_EQUAL_size_t(1, count("# TYPE heliograph_relay_energised"));
+    TEST_ASSERT_EQUAL_size_t(6, count("heliograph_relay_energised{relay="));
+}
+
 // Relays present but no DRM roles configured: the switches are reportable, the mode is not.
 // Inventing "normal" would claim a curtailment model the operator never set up.
 static void test_prometheus_omits_drm_mode_without_roles() {
@@ -876,6 +902,7 @@ int main(int, char**) {
     RUN_TEST(test_prometheus_omits_unknown_rather_than_exporting_zero);
     RUN_TEST(test_prometheus_omits_relays_on_a_board_without_them);
     RUN_TEST(test_prometheus_exports_relay_and_drm_state);
+    RUN_TEST(test_prometheus_labelled_family_declares_help_once);
     RUN_TEST(test_prometheus_omits_drm_mode_without_roles);
     RUN_TEST(test_prometheus_omits_ntp_timestamp_until_synced);
     RUN_TEST(test_prometheus_has_no_high_cardinality_labels);
