@@ -107,8 +107,16 @@ jobs:
   # none had ever been restored by anything. A transient 504 on that download broke the 0.12.0
   # release (2026-07-24), which is what turned this up.
   #
-  # This job builds nothing. It only materialises the packages so the cache entry exists on
-  # main; the consumers restore it read-only.
+  # This job compiles one board and throws the result away. That it BUILDS is the point, not an
+  # accident: pioarduino does not fetch the ~200 MB xtensa toolchain during `pio pkg install`
+  # (that only lands the platform and the tool-esp_install helper). The toolchain is pulled by
+  # a build-time script -- platform.py's _run_idf_tools_install, invoked from `pio run` -- so a
+  # cache warmed by `pkg install` alone would miss the very thing worth caching and every
+  # consumer would still cold-download it. One real build populates ~/.platformio completely.
+  #
+  # One board covers all four esp32 envs: rs485-can, both relay boards and mock share the same
+  # platform, board and toolchain (they differ only in build flags and partitions), so the
+  # packages this build lands are exactly the ones every env restores.
   warm-toolchain-cache:
     name: Warm firmware toolchain cache
     # Pushes to main only. On a pull request the build jobs restore this cache but must never
@@ -122,8 +130,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Restore-and-save. A hit means the packages are already present and the install below is
-      # a no-op, so a run costs seconds; a miss repopulates the entry the consumers depend on.
+      # Restore-and-save. On a hit the packages are already present, so the build below reuses
+      # them and only recompiles; a miss repopulates the entry every consumer depends on.
       - name: Cache PlatformIO
         uses: actions/cache@v6
         with:
@@ -135,19 +143,20 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
-      # Retried, because this is the download that broke the 0.12.0 release: the platform zip is
-      # fetched from a GitHub release asset, and that endpoint returned 504 for several minutes
-      # while GitHub itself reported all systems operational. One cold attempt is not enough to
-      # hang a release on.
-      - name: Install board packages
+      # Retried, because a cold run downloads from GitHub release assets and that is exactly
+      # what broke the 0.12.0 release: platform-espressif32.zip returned 504 for several minutes
+      # while GitHub reported all systems operational. Retrying `pio run` also re-attempts a
+      # network failure part-way through the toolchain fetch. A genuine compile error would
+      # retry too, but this same tree already compiled green on its PR, so on main that path is
+      # not expected -- and the job only warms a cache, so its failure never blocks a release.
+      - name: Build one board to populate the toolchain cache
         run: |
           for attempt in 1 2 3 4 5; do
-            if pio pkg install \
-                 -e waveshare-rs485-can -e waveshare-relay-1ch -e waveshare-relay-6ch; then
+            if pio run -e waveshare-rs485-can; then
               exit 0
             fi
-            echo "package install failed (attempt ${attempt}); retrying in $((attempt * 20))s"
+            echo "build failed (attempt ${attempt}); retrying in $((attempt * 20))s"
             sleep $((attempt * 20))
           done
-          echo "package install still failing after 5 attempts" >&2
+          echo "build still failing after 5 attempts" >&2
           exit 1
