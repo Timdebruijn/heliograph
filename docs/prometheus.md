@@ -92,6 +92,9 @@ temperature sensor has no temperature series. That is not a fault.
 | `heliograph_rs485_timeouts_total` | counter | Reads that timed out |
 | `heliograph_invalid_frames_total` | counter | Structurally invalid frames |
 | `heliograph_mqtt_reconnects_total` | counter | MQTT reconnections |
+| `heliograph_wifi_reconnects_total` | counter | WiFi reconnections |
+| `heliograph_modbus_client_connections_total` | counter | Modbus TCP connections accepted |
+| `heliograph_modbus_clients` | gauge | Modbus TCP clients connected right now |
 
 The distinction matters when something is wrong. **Timeouts** mean nothing came back — wiring,
 a swapped A/B, or an inverter that is asleep. **Checksum errors and invalid frames** mean bytes
@@ -109,6 +112,38 @@ checksum errors, and that is normal: the inverter powers down after dark.
 | `heliograph_wifi_rssi_dbm` | gauge | Only present while WiFi is connected |
 | `heliograph_rs485_stack_free_bytes` | gauge | Only after the first sample |
 | `heliograph_loop_stack_free_bytes` | gauge | Only after the first sample |
+| `heliograph_time_synced` | gauge | `1` once the clock has been set from NTP |
+| `heliograph_ntp_last_sync_timestamp_seconds` | gauge | Unix time of the last sync; absent until there has been one |
+
+### Relays and curtailment
+
+Only on relay boards. A board without relays exports **none** of these — not zeroes — so a
+monitoring-only bridge never grows a panel for hardware it does not have.
+
+| Metric | Type | Notes |
+|---|---|---|
+| `heliograph_relays_enabled` | gauge | `1` when the relay feature is enabled in the configuration |
+| `heliograph_relay_energised` | gauge | `1` per energised relay, label `relay` |
+| `heliograph_drm_mode` | gauge | Always `1`; the `mode` label carries the active mode |
+
+The **`relay` label is 0-based**, deliberately: it is the same index as the MQTT topic
+(`<base>/<id>/relay/0/state`) and the REST route (`/api/v1/relays/0/set`), so a series in a
+dashboard and the topic that switched it line up. The web UI numbers relays from 1 for humans;
+the machine interfaces all agree on 0.
+
+`heliograph_drm_mode` follows the standard enum-as-label pattern: exactly one series exists at a
+time and its value is always `1`, so `heliograph_drm_mode` in a graph shows *which* mode is
+active over time. It is **absent entirely when no DRM roles are configured** — with no roles
+there is no curtailment vocabulary to report, and inventing a `normal` would claim a model the
+operator never set up.
+
+`relays_enabled` is the configuration flag, not permission to move: a relay also needs
+`security.read_only_mode` off before anything actuates. See [drm.md](drm.md).
+
+This is what makes curtailment reviewable after the fact. Graphing
+`heliograph_relay_energised` beside `heliograph_inverter_ac_power_watts` shows the contact
+closing and the production dropping in the same picture — which is the evidence you want when
+deciding whether a curtailment rule is behaving.
 
 `max_alloc_heap_bytes` is the fragmentation signal, and it is the more useful of the two heap
 numbers on a device meant to run for months: free heap can look healthy while no allocation of
@@ -216,6 +251,18 @@ The bridge rebooted:
 
 ```promql
 resets(heliograph_uptime_seconds[1h]) > 0
+```
+
+How much production a curtailment cost, by pairing the contact with the output it suppressed:
+
+```promql
+heliograph_inverter_ac_power_watts and on() heliograph_relay_energised{relay="0"} == 1
+```
+
+Which DRM mode was active over the last day — one series per mode that occurred:
+
+```promql
+heliograph_drm_mode
 ```
 
 ## Alerting
