@@ -71,6 +71,7 @@ the honest answer today is: only if your inverter is in this table.
 |---|---|---|
 | EverSolar / Zeversolar legacy (TL series) | RS485 | **Beta** — running in production, in a multi-day soak toward Stable |
 | Growatt SPH hybrid (3–6 kW) | Modbus RTU over RS485 | **Experimental** — register map transcribed from documentation, not yet confirmed against real hardware |
+| Growatt MIC TL-X (0.6–3.3 kW, single phase) | Modbus RTU over RS485 | **Experimental** — map cross-checked against two independent sources that agree, not yet confirmed against real hardware; see [docs/growatt-mic-tl-x-protocol.md](docs/growatt-mic-tl-x-protocol.md) |
 | SolaX X1 series (X1 Mini G1/G2/G3) | RS485 | **Experimental** — the first attempt on real hardware (an X1-Mini-G1) returned no data at all. Read [docs/solax-x1-protocol.md](docs/solax-x1-protocol.md) before you buy or wire anything |
 | Any inverter implementing **SunSpec** | Modbus RTU over RS485 | **Experimental** — one generic driver for the published standard, so no per-vendor file is needed. Not yet confirmed against any physical device; see [docs/sunspec.md](docs/sunspec.md) for which vendors are worth trying |
 
@@ -135,6 +136,11 @@ often the easiest source, and for inverters with an RJ45 communication port it m
 you need. The RS485-CAN and Relay-6CH can be powered either over USB-C or from a 7–36 V DC
 screw terminal, which is handy when there is no USB power near the inverter; check the
 product page for whichever board you buy.
+
+For one inverter, A/B/GND is genuinely all there is to it. If you are putting **several
+inverters on one bus**, read **[docs/rs485-bus.md](docs/rs485-bus.md)** first: chain topology,
+where the 120 Ω termination goes (two places, not one per device), and why each unit needs its
+own address before you connect them together.
 
 ### 2. Flash the firmware
 

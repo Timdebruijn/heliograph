@@ -529,6 +529,12 @@ def generate(
         f"const GrowattProfile& defaultProfile() {{ return kProfiles[{default_index}]; }}"
     )
     w("")
+    w("size_t profileCount() { return sizeof(kProfiles) / sizeof(kProfiles[0]); }")
+    w("")
+    w("const GrowattProfile& profileAt(size_t index) {")
+    w("    return kProfiles[index < profileCount() ? index : 0];")
+    w("}")
+    w("")
     w("}  // namespace heliograph::growatt")
     w("")
     return "\n".join(lines)

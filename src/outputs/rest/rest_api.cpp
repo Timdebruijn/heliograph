@@ -440,6 +440,28 @@ bool RestApi::begin() {
                                                         : error.field + ": " + error.message});
                 return;
             }
+
+            // Driver options are checked HERE and not in validate(): the config layer knows
+            // nothing about drivers by design, and only the registry can say what a given
+            // driver accepts. Refusing at the point of saving is the last moment a mistake is
+            // still visible to whoever made it -- at boot a driver can only warn and fall back
+            // to its default, and for an option that selects a register map that fallback
+            // means quietly reading a different inverter family's registers and publishing
+            // values that look entirely plausible.
+            //
+            // Only the PATCH path is gated. A config already in flash is deliberately still
+            // loaded with the warn-and-fall-back behaviour: refusing it at boot would turn a
+            // bad option into an unbootable bridge.
+            if (const DriverDescriptor* d = context_.registry->find(updated.driver.id)) {
+                DriverOptionError optionError;
+                if (!validateDriverOptions(*d, updated.driver.options, optionError)) {
+                    sendError(request, {400, "invalid_config",
+                                        "driver.options." + optionError.key + ": " +
+                                            optionError.message});
+                    return;
+                }
+            }
+
             if (!context_.saveConfig(updated)) {
                 sendError(request, {500, "save_failed", "could not persist the configuration"});
                 return;

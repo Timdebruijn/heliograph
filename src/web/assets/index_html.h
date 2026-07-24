@@ -568,9 +568,21 @@ async function renderConfig(){
       const stored=id===c.driver.id?(c.driver.options||{})[o.key]:undefined;
       const cur=stored??o.default_value;
       if(o.allowed_values&&o.allowed_values.length){
+        // A stored value the firmware does not recognise -- a hand-edited config, or an
+        // option value that disappeared in a firmware update -- gets its own selected entry
+        // so it stays VISIBLE and stays the select's value. Without it the browser silently
+        // selects the first option, and the untouched-card diffing in the save path then
+        // sees a difference and writes that fallback into the config on the next unrelated
+        // save: a setting the user never looked at, quietly changed. Reachable since the
+        // driver profile option became an enumerated list (2026-07-24).
+        const known=o.allowed_values.includes(cur);
+        // Explicit value= on every option: without it the browser takes the option's TEXT as
+        // its value, so the annotated entry below would submit its own label.
         return `<label for="opt_${o.key}">${esc(o.display_name)}</label>
-          <select id="opt_${o.key}" data-opt="${esc(o.key)}">${o.allowed_values.map(v=>
-            `<option ${v===cur?'selected':''}>${esc(v)}</option>`).join('')}</select>
+          <select id="opt_${o.key}" data-opt="${esc(o.key)}">${
+            (known?'':`<option value="${esc(cur)}" selected>${esc(cur)} — not recognised</option>`)+
+            o.allowed_values.map(v=>
+            `<option value="${esc(v)}" ${v===cur?'selected':''}>${v===''?'(driver default)':esc(v)}</option>`).join('')}</select>
           <div class="dim" style="font-size:12px">${esc(o.description||'')}</div>`;
       }
       return `<label for="opt_${o.key}">${esc(o.display_name)}</label>
