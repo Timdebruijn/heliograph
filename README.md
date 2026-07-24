@@ -4,9 +4,10 @@
 > inverter is saying into languages the rest of your network speaks.
 
 Heliograph is open-source firmware for a small, cheap box that sits next to your solar
-inverter, reads it over its own communication port, and hands the data to whatever you
-already use — **Home Assistant, MQTT, Modbus TCP, a REST/JSON API, or Prometheus**. It runs
-entirely on your own network. No account, no cloud, no subscription.
+inverter and talks to it over its own communication port. It **reads** the inverter and hands
+the data to whatever you already use — **Home Assistant, MQTT, Modbus TCP, a REST/JSON API, or
+Prometheus** — and on the relay boards it can also **turn the inverter down** when you want it
+to produce less. It runs entirely on your own network. No account, no cloud, no subscription.
 
 ---
 
@@ -32,8 +33,10 @@ relay boards (see [Curtailment](#curtailment-turning-the-inverter-down)).
 
 ## What it does
 
-It speaks your inverter's native protocol over RS485, converts everything into one common
-set of measurements, and republishes that:
+### It reads your inverter
+
+Heliograph speaks your inverter's native protocol over RS485, converts everything into one
+common set of measurements, and republishes that:
 
 | Integration | How |
 |---|---|
@@ -43,6 +46,19 @@ set of measurements, and republishes that:
 | **REST / JSON** | `/api/v1/` — see [docs/rest-api.md](docs/rest-api.md) |
 | **Prometheus** | `/metrics`, also readable by Zabbix and Checkmk |
 | **Web dashboard** | Built into the device; works with no internet at all |
+
+### And it can turn your inverter down
+
+On the relay boards, Heliograph drives the **DRM input** that many inverters carry — the
+demand-response terminals an energy company would otherwise use — so you can cut or step down
+production during negative electricity prices or under a feed-in limit. You control it from
+Home Assistant, MQTT or the API, like any other switch.
+
+This matters most precisely where the reading side is limited: for an inverter that exposes no
+way to write a power limit over RS485, a DRM contact is often the **only** control path that
+exists. It is the one thing here that acts rather than observes, so it ships switched off,
+behind two independent gates, and fails safe by design — details in
+[Curtailment](#curtailment-turning-the-inverter-down).
 
 ---
 
@@ -108,7 +124,7 @@ curtailment:
 
 | Board | What it adds | Status |
 |---|---|---|
-| [Waveshare ESP32-S3-RS485-CAN](https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN) | battery-backed clock; the reference board | **Production** — recommended for monitoring only |
+| [Waveshare ESP32-S3-RS485-CAN](https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN) | battery-backed clock; the reference board | **Production** — pick this if you only need to read the inverter |
 | [Waveshare ESP32-S3-Relay-1CH](https://www.waveshare.com/wiki/ESP32-S3-Relay-1CH) | 1 relay (on/off curtailment), clock | Builds and ships; not yet confirmed on hardware |
 | [Waveshare ESP32-S3-Relay-6CH](https://www.waveshare.com/wiki/ESP32-S3-Relay-6CH) | 6 relays (stepped curtailment), status LED, buzzer | **Hardware-verified** — relays, polarity and failsafe measured 2026-07-23 |
 
@@ -180,7 +196,14 @@ under a feed-in limit. This matters most for the inverters Heliograph can only r
 is no way to write a power limit over RS485, a DRM contact may be the only control path that
 exists.
 
-Two things are worth understanding before you consider it:
+Three things are worth understanding before you consider it:
+
+**Status: the actuator is proven, the connection to an inverter is not yet.** On the Relay-6CH
+the relays themselves have been verified on real hardware (2026-07-23): channel order,
+polarity, the power-cut failsafe and the de-energised boot state were all measured rather than
+assumed. What has *not* happened yet is driving a real inverter's DRM port with it — that step
+is waiting on a manufacturer's confirmation of how their terminals expect to be driven. Treat
+this as a capability that is built and bench-tested, not as one that has been run in the field.
 
 **It ships switched off.** Two independent settings must both be changed before a relay can
 move (`relays.enabled` on, and `security.read_only_mode` off). A relay board with factory
@@ -248,10 +271,12 @@ pio run -e waveshare-rs485-can   # or -relay-1ch / -relay-6ch
 The `mock` environment runs the full output stack against a simulated inverter — useful for
 UI and integration work without an RS485 bus.
 
-All inverter drivers are **read-only**. Writing setpoints to somebody's inverter needs a
-hardware-verified register map and a deliberate write path; neither is enabled today (see
+All inverter drivers are **read-only**, and that is not in tension with the curtailment above:
+no driver ever writes to your inverter over its protocol. Sending a setpoint would need a
+hardware-verified register map and a deliberate write path, and neither is enabled today (see
 [docs/device-profiles/schema.md](docs/device-profiles/schema.md) for how write support is
-staged).
+staged). Curtailment works the other way round — a potential-free contact on the bridge closing
+a circuit the inverter already offers for exactly that purpose, with no protocol write at all.
 
 ## License
 
