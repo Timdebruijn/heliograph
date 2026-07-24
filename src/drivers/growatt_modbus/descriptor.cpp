@@ -1,8 +1,27 @@
 // SPDX-License-Identifier: MIT
 
+#include <string>
+#include <vector>
+
 #include "growatt_driver.h"
 
 namespace heliograph::growatt {
+namespace {
+
+/// The `profile` option's allowed values: every compiled-in profile id, plus the empty
+/// string, which keeps meaning "use the default profile" rather than becoming a rejected
+/// value the moment this list stops being empty.
+std::vector<std::string> profileOptionValues() {
+    std::vector<std::string> values;
+    values.reserve(profileCount() + 1);
+    values.emplace_back("");
+    for (size_t i = 0; i < profileCount(); ++i) {
+        values.emplace_back(profileAt(i).id);
+    }
+    return values;
+}
+
+}  // namespace
 
 const DriverDescriptor& descriptor() {
     static const DriverDescriptor d = [] {
@@ -14,7 +33,7 @@ const DriverDescriptor& descriptor() {
         x.description =
             "Growatt string and hybrid inverters over Modbus RTU (Protocol II). Read-only "
             "until the register map is confirmed on hardware; battery control follows. "
-            "Table-driven per model family -- SPH first.";
+            "Table-driven per model family -- pick the profile that matches your model.";
         x.supportedTransports = {TransportType::Rs485, TransportType::Mock};
         // Growatt's two documented line speeds. Discovery tries both; the SPH default is 9600
         // but some units ship at 115200, and guessing wrong on a live bus just looks like
@@ -44,7 +63,7 @@ const DriverDescriptor& descriptor() {
                          "Which Growatt register map to use (profiles/growatt/). "
                          "Empty = the default profile.",
                          "",
-                         {}},
+                         profileOptionValues()},
         };
         return x;
     }();

@@ -6,7 +6,9 @@
 
 #include <unity.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "device/device_state.h"
@@ -336,6 +338,170 @@ static void test_the_profile_registry_finds_sph_and_rejects_unknown_ids() {
     TEST_ASSERT_EQUAL_PTR(sph, &defaultProfile());
 }
 
+// --- MIC TL-X profile -----------------------------------------------------------------------
+
+// A second profile in the build is the moment the `profile` option stops being cosmetic: pick
+// the wrong one and you get another family's map applied to your inverter. The descriptor now
+// enumerates the ids so validateDriverOptions refuses a typo at configuration time, instead of
+// optionsFrom() silently falling back to SPH.
+static void test_the_profile_option_enumerates_every_compiled_profile() {
+    TEST_ASSERT_EQUAL_UINT32(2, profileCount());
+
+    bool sawSph = false;
+    bool sawMic = false;
+    for (size_t i = 0; i < profileCount(); ++i) {
+        const std::string id = profileAt(i).id;
+        sawSph               = sawSph || id == "sph";
+        sawMic               = sawMic || id == "mic_tl_x";
+    }
+    TEST_ASSERT_TRUE(sawSph);
+    TEST_ASSERT_TRUE(sawMic);
+
+    // Out of range folds to the first entry rather than reading past the array.
+    TEST_ASSERT_EQUAL_PTR(&profileAt(0), &profileAt(profileCount()));
+
+    const auto& allowed = descriptor().options[1].allowedValues;
+    TEST_ASSERT_EQUAL_STRING("profile", descriptor().options[1].key.c_str());
+    TEST_ASSERT_EQUAL_UINT32(profileCount() + 1, allowed.size());
+    // "" must survive as an allowed value: it is the documented default meaning "use the
+    // default profile", and validateDriverOptions checks values it finds, empty or not.
+    TEST_ASSERT_TRUE(std::find(allowed.begin(), allowed.end(), "") != allowed.end());
+    TEST_ASSERT_TRUE(std::find(allowed.begin(), allowed.end(), "mic_tl_x") != allowed.end());
+
+    DriverOptions     values{{"profile", "mic_tlx"}};  // the plausible typo
+    DriverOptionError err;
+    TEST_ASSERT_FALSE(validateDriverOptions(descriptor(), values, err));
+    TEST_ASSERT_EQUAL_STRING("profile", err.key.c_str());
+
+    values["profile"] = "mic_tl_x";
+    TEST_ASSERT_TRUE(validateDriverOptions(descriptor(), values, err));
+    values["profile"] = "";
+    TEST_ASSERT_TRUE(validateDriverOptions(descriptor(), values, err));
+}
+
+static void test_the_mic_profile_describes_a_single_phase_single_tracker_string_inverter() {
+    const GrowattProfile* mic = findProfile("mic_tl_x");
+    TEST_ASSERT_NOT_NULL(mic);
+    TEST_ASSERT_FALSE(mic->hasBattery);
+    TEST_ASSERT_EQUAL_UINT8(1, mic->phaseCount);
+    TEST_ASSERT_EQUAL_UINT8(1, mic->mpptCount);
+    // 9600 8N1 comes from the profile's own [serial] block, not the descriptor's candidates.
+    TEST_ASSERT_TRUE(mic->hasSerial);
+    TEST_ASSERT_EQUAL_UINT32(9600, mic->serial.baudRate);
+    TEST_ASSERT_EQUAL(SerialParity::None, mic->serial.parity);
+}
+
+// The MIC map lives in Protocol II's "first group" (input 0-124). The 3000-series belongs to
+// the TL-XH hybrid and must not leak in here: pointing a plain TL-X at it reads nothing.
+static void test_the_mic_profile_reads_only_the_first_group() {
+    const GrowattProfile* mic = findProfile("mic_tl_x");
+    TEST_ASSERT_NOT_NULL(mic);
+    for (size_t i = 0; i < mic->blockCount; ++i) {
+        TEST_ASSERT_TRUE(mic->blocks[i].start < 3000);
+    }
+    for (size_t i = 0; i < mic->mappingCount; ++i) {
+        TEST_ASSERT_TRUE(mic->mappings[i].address < 3000);
+    }
+}
+
+// One frame of plausible mid-afternoon values, decoded through the real table. This pins the
+// scaling decisions that differ from the rest of the map -- frequency is /100 where almost
+// everything else is /10, and the runtime counter is in half-seconds.
+static void test_the_mic_profile_decodes_a_realistic_frame() {
+    BlockData blocks[2];
+    blocks[0] = {RegSpace::Input, 0, 125, {}};
+    blocks[1] = {RegSpace::Holding, 0, 45, {}};
+
+    setReg(blocks[0], 1, 0);       // Ppv high
+    setReg(blocks[0], 2, 12040);   // Ppv low   -> 1204.0 W
+    setReg(blocks[0], 3, 3105);    // Vpv1      -> 310.5 V
+    setReg(blocks[0], 4, 39);      // Ipv1      -> 3.9 A
+    setReg(blocks[0], 35, 0);      // Pac high
+    setReg(blocks[0], 36, 11880);  // Pac low   -> 1188.0 W
+    setReg(blocks[0], 37, 5001);   // Fac       -> 50.01 Hz  (/100, not /10)
+    setReg(blocks[0], 38, 2314);   // Vac1      -> 231.4 V
+    setReg(blocks[0], 53, 0);      // E-today high
+    setReg(blocks[0], 54, 87);     // E-today low -> 8.7 kWh
+    setReg(blocks[0], 93, 412);    // Temp      -> 41.2 °C
+
+    MeasurementSet m;
+    applyProfile(*findProfile("mic_tl_x"), blocks, 2, m, 1000);
+
+    const auto* pv = m.find(measurement_id::kDcPowerTotal);
+    TEST_ASSERT_NOT_NULL(pv);
+    TEST_ASSERT_EQUAL_DOUBLE(1204.0, pv->value);
+
+    const auto* vpv = m.find(measurement_id::kDcMppt1Voltage);
+    TEST_ASSERT_NOT_NULL(vpv);
+    TEST_ASSERT_EQUAL_DOUBLE(310.5, vpv->value);
+
+    const auto* ac = m.find(measurement_id::kAcPowerTotal);
+    TEST_ASSERT_NOT_NULL(ac);
+    TEST_ASSERT_EQUAL_DOUBLE(1188.0, ac->value);
+
+    const auto* hz = m.find(measurement_id::kAcFrequency);
+    TEST_ASSERT_NOT_NULL(hz);
+    TEST_ASSERT_EQUAL_DOUBLE(50.01, hz->value);
+
+    const auto* vac = m.find(measurement_id::kAcL1Voltage);
+    TEST_ASSERT_NOT_NULL(vac);
+    TEST_ASSERT_EQUAL_DOUBLE(231.4, vac->value);
+
+    const auto* today = m.find(measurement_id::kEnergyToday);
+    TEST_ASSERT_NOT_NULL(today);
+    TEST_ASSERT_EQUAL_DOUBLE(8.7, today->value);
+
+    const auto* temp = m.find(measurement_id::kTemperature);
+    TEST_ASSERT_NOT_NULL(temp);
+    TEST_ASSERT_EQUAL_DOUBLE(41.2, temp->value);
+
+    // A string inverter has no battery and no second tracker. Neither may appear as a
+    // confident zero -- an undeclared channel is the honest answer.
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatterySoc));
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcMppt2Voltage));
+}
+
+// Work time total counts half-seconds; 7200 of them is one hour. Its own test because the
+// scale is a repeating fraction in the TOML and therefore the easiest row to get subtly wrong.
+static void test_the_mic_profile_converts_half_seconds_to_hours() {
+    BlockData blocks[2];
+    blocks[0] = {RegSpace::Input, 0, 125, {}};
+    blocks[1] = {RegSpace::Holding, 0, 45, {}};
+
+    // 12 345 hours = 88 884 000 half-seconds = 0x054C_4320.
+    setReg(blocks[0], 57, 0x054C);
+    setReg(blocks[0], 58, 0x4320);
+
+    MeasurementSet m;
+    applyProfile(*findProfile("mic_tl_x"), blocks, 2, m, 1000);
+
+    const auto* hours = m.find(measurement_id::kOperatingHours);
+    TEST_ASSERT_NOT_NULL(hours);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, 12345.0, hours->value);
+}
+
+// The active-power-limit row is research, not a control surface: it stays dormant until a
+// bench session sets verified = true AND the driver grows a write path (execute() still
+// returns Unsupported). Both gates are asserted here so neither can be dropped unnoticed.
+static void test_the_mic_power_limit_write_row_is_declared_but_dormant() {
+    const GrowattProfile* mic = findProfile("mic_tl_x");
+    TEST_ASSERT_NOT_NULL(mic);
+    TEST_ASSERT_EQUAL_UINT32(1, mic->writeCount);
+
+    const WriteMapping& w = mic->writes[0];
+    TEST_ASSERT_EQUAL(InverterCommandType::SetActivePowerLimitPercent, w.command);
+    TEST_ASSERT_EQUAL(RegSpace::Holding, w.space);
+    TEST_ASSERT_EQUAL_UINT16(3, w.address);
+    TEST_ASSERT_EQUAL_UINT8(1, w.words);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, w.minimum);
+    // Deliberately 100, not 255: some revisions read 255 as "limit disabled", and a percentage
+    // that silently means "off" needs explicit handling, not a widened bound.
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, w.maximum);
+    TEST_ASSERT_FALSE(w.verified);
+
+    TEST_ASSERT_FALSE(descriptor().supportsWrite);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_soc_is_decoded_as_a_plain_percent);
@@ -355,5 +521,11 @@ int main(int, char**) {
     RUN_TEST(test_begin_configures_the_serial_line);
     RUN_TEST(test_a_profile_declared_serial_overrides_the_descriptor_default);
     RUN_TEST(test_the_profile_registry_finds_sph_and_rejects_unknown_ids);
+    RUN_TEST(test_the_profile_option_enumerates_every_compiled_profile);
+    RUN_TEST(test_the_mic_profile_describes_a_single_phase_single_tracker_string_inverter);
+    RUN_TEST(test_the_mic_profile_reads_only_the_first_group);
+    RUN_TEST(test_the_mic_profile_decodes_a_realistic_frame);
+    RUN_TEST(test_the_mic_profile_converts_half_seconds_to_hours);
+    RUN_TEST(test_the_mic_power_limit_write_row_is_declared_but_dormant);
     return UNITY_END();
 }
