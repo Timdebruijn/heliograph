@@ -535,6 +535,25 @@ static void test_error_payload_is_uniform() {
     TEST_ASSERT_EQUAL_STRING("a3f1", doc["error"]["request_id"]);
 }
 
+// The provision response echoes an operator-supplied hostname that the setup page drops into
+// innerHTML. Validation restricts it to [A-Za-z0-9-] today, so the quotes and backslash below
+// cannot currently reach this builder -- which is exactly why the escaping is pinned here
+// rather than left to that validation: the builder must stay safe on its own terms if the
+// character rules are ever relaxed. Before this test the payload was spliced together by hand.
+static void test_provision_payload_escapes_the_hostname() {
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildProvisionPayload("he\"llo\\bridge", json));
+    auto doc = parse(json);  // would fail outright on a broken splice
+    TEST_ASSERT_EQUAL_STRING("saved", doc["status"]);
+    TEST_ASSERT_TRUE(doc["rebooting"].as<bool>());
+    // Round-trips byte-exact: escaped on the wire, original after parsing.
+    TEST_ASSERT_EQUAL_STRING("he\"llo\\bridge", doc["hostname"]);
+
+    std::string plain;
+    TEST_ASSERT_TRUE(rest::buildProvisionPayload("heliograph-5af4e4", plain));
+    TEST_ASSERT_EQUAL_STRING("heliograph-5af4e4", parse(plain)["hostname"]);
+}
+
 static void test_devices_payload() {
     std::string json;
     TEST_ASSERT_TRUE(rest::buildDevicesPayload({"eversolar_legacy-ABC123"}, json));
@@ -769,6 +788,7 @@ int main(int, char**) {
     RUN_TEST(test_status_reports_unknown_before_the_first_poll);
     RUN_TEST(test_stale_status_is_null);
     RUN_TEST(test_error_payload_is_uniform);
+    RUN_TEST(test_provision_payload_escapes_the_hostname);
     RUN_TEST(test_devices_payload);
     RUN_TEST(test_measurements_payload_omits_unsupported);
     RUN_TEST(test_capabilities_payload);

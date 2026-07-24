@@ -43,6 +43,14 @@ bool buildErrorPayload(const ApiError& error, const std::string& requestId, std:
     return finish(doc, out, 512);
 }
 
+bool buildProvisionPayload(const std::string& hostname, std::string& out, size_t maxBytes) {
+    JsonDocument doc;
+    doc["status"]    = "saved";
+    doc["rebooting"] = true;
+    doc["hostname"]  = hostname;
+    return finish(doc, out, maxBytes);
+}
+
 bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
                         const BridgeInfo& bridge, const DiagnosticsSnapshot& diagnostics,
                         const DriverDescriptor* driver, uint64_t nowMs, std::string& out,

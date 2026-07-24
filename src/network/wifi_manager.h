@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -74,8 +75,12 @@ private:
     Configuration      config_;
     Diagnostics*       diagnostics_ = nullptr;
 
-    ProvisioningState state_               = ProvisioningState::NeedsProvisioning;
-    bool              portalActive_        = false;
+    ProvisioningState state_ = ProvisioningState::NeedsProvisioning;
+    /// Atomic because it is genuinely read across tasks: written only by loop() (start/stop
+    /// portal) but read from the AsyncTCP task, where it decides whether /wifi/scan and the
+    /// setup-only config POST may skip authentication. Every other cross-task flag in this
+    /// firmware is an atomic for the same reason; this one was the exception.
+    std::atomic<bool> portalActive_{false};
     uint32_t          consecutiveFailures_ = 0;
     uint32_t          attempt_             = 0;
     uint64_t          nextAttemptMs_       = 0;
