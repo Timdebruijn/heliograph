@@ -8,6 +8,10 @@
 # The firmware compile lives in its own pull-request-only workflow (firmware.yml), so a push to
 # main posts no firmware check and a release does not rebuild what the PR already built. See
 # that file for the reasoning.
+#
+# This workflow does own one firmware-adjacent job: warming the ESP32 toolchain cache on main.
+# That has to happen on the default branch because of how GitHub scopes caches -- see the
+# comment on the job itself.
 
 name: CI
 
@@ -90,3 +94,60 @@ jobs:
 
       - name: Native test suite
         run: pio test -e native
+
+  # The ONLY writer of the ESP32 toolchain cache, and the reason it exists here rather than in
+  # firmware.yml or release.yml where the builds actually are.
+  #
+  # GitHub scopes a cache to the ref that wrote it. A cache written on refs/pull/21/merge is
+  # invisible to refs/tags/v0.12.0 and to every other PR; caches on the DEFAULT BRANCH are the
+  # only ones readable from any ref. Since firmware.yml runs on pull_request and release.yml on
+  # tags, nothing was ever writing to a scope the others could read: every PR build and every
+  # release downloaded the ~1.7 GB toolchain fresh and then saved its own private copy. Five of
+  # those copies were sitting in the 10 GB repo budget, evicting the small useful caches, and
+  # none had ever been restored by anything. A transient 504 on that download broke the 0.12.0
+  # release (2026-07-24), which is what turned this up.
+  #
+  # This job builds nothing. It only materialises the packages so the cache entry exists on
+  # main; the consumers restore it read-only.
+  warm-toolchain-cache:
+    name: Warm firmware toolchain cache
+    # Pushes to main only. On a pull request the build jobs restore this cache but must never
+    # write one -- a PR-scoped copy is the exact waste described above.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Restore-and-save. A hit means the packages are already present and the install below is
+      # a no-op, so a run costs seconds; a miss repopulates the entry the consumers depend on.
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-fw-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      # Retried, because this is the download that broke the 0.12.0 release: the platform zip is
+      # fetched from a GitHub release asset, and that endpoint returned 504 for several minutes
+      # while GitHub itself reported all systems operational. One cold attempt is not enough to
+      # hang a release on.
+      - name: Install board packages
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if pio pkg install \
+                 -e waveshare-rs485-can -e waveshare-relay-1ch -e waveshare-relay-6ch; then
+              exit 0
+            fi
+            echo "package install failed (attempt ${attempt}); retrying in $((attempt * 20))s"
+            sleep $((attempt * 20))
+          done
+          echo "package install still failing after 5 attempts" >&2
+          exit 1
