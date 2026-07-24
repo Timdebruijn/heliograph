@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -158,11 +159,29 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
 /// with the RESTART_NEEDED map in the web UI.
 bool configChangeRequiresReboot(const Configuration& before, const Configuration& after);
 
+/// Resolves a driver id to its descriptor, or nullptr when the id names no compiled-in driver.
+/// The config layer has no registry of its own, so it asks; the returned pointer is only read
+/// for the option keys the driver declares.
+using DriverLookupFn = std::function<const DriverDescriptor*(const std::string& driverId)>;
+
 /// Applies a `PATCH /api/v1/config` body.
 ///
 /// Absent fields are left alone. A password field set to a string sets it; set to null clears
 /// it. Validation runs on the merged result, so a patch can never leave a half-applied
 /// configuration behind.
-bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error);
+///
+/// `lookupDriver` is optional. When supplied, a stored driver option that the *resulting* driver
+/// does not declare and that this patch did not itself supply is dropped, because it can only be
+/// an orphan left behind by a previous driver. Options are scoped to the driver that declares
+/// them, and the merge has no other way to remove a key -- an orphan otherwise fails every later
+/// PATCH once the REST layer validates options against the descriptor, which is what made
+/// switching drivers impossible in 0.12.0.
+///
+/// Deliberately narrow: a key this patch DID supply is never dropped, so a typo'd option is
+/// still reported rather than silently swallowed, and nothing is dropped when lookupDriver
+/// returns nullptr, so a typo'd *driver* id destroys nothing and stays recoverable by correcting
+/// it.
+bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error,
+                      const DriverLookupFn& lookupDriver = {});
 
 }  // namespace heliograph

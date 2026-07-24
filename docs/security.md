@@ -45,9 +45,21 @@ endpoint requires it even while the portal is running. It was previously open in
 which meant anyone in radio range of a bridge whose WiFi had dropped could overwrite its
 configuration, including the admin password and the relay gates.
 
-`/api/v1/wifi/scan` carries the same gate. What the open AP still exposes on a configured
-device is the setup page itself and the fact that the bridge exists; joining it grants no
-control and no data.
+`/api/v1/wifi/scan` carries the same gate, and the setup page asks for the admin password when
+the bridge already has one.
+
+**What the open AP still exposes is read access, and that is not nothing.** The web server
+listens on every interface, so anyone joining the failure-portal AP reaches the same
+unauthenticated read endpoints a LAN user does: `/api/v1/status`, `/devices`, `/diagnostics`,
+`/discovery`, `/drivers`, `/config` (GET) and `/metrics`. Between them that is live production
+data, the inverter's model and serial number, your WiFi SSID and hostname, the MQTT host, port
+and base topic, the relay roles, and `security.admin_username`. The Modbus TCP server on port
+502 is reachable from that AP too, and Modbus has no authentication at all.
+
+None of it is a secret — no password is served anywhere (see the table above) — and none of it
+grants control. But "an open AP that appears for a few minutes when your WiFi drops" is a
+disclosure surface worth knowing about, and `admin_username` in particular hands out half of a
+login that has no brute-force protection. Closing that one is tracked separately.
 
 **No brute-force protection on HTTP Basic.** Rate limiting is on `/actions/*`, not on the
 auth itself.

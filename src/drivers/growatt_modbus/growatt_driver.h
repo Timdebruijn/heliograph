@@ -65,9 +65,12 @@ private:
     /// binary, poll()'s frame with this array on the stack plus the TRACE logging chain peaked
     /// at ~5.2 KB (64%) -- too close to a second stack-canary boot loop. The driver lives on
     /// the heap and rs485Task owns the bus exclusively, so a member is safe.
-    /// Value-initialised on purpose: readBlock() fills only what the device actually returned,
-    /// so anything it does not reach must be a defined 0 rather than indeterminate memory that
-    /// could be decoded and published as a reading.
+    /// Value-initialised so the FIRST poll cannot decode indeterminate memory. It is only that:
+    /// from the second poll on these slots hold whatever the previous poll left, and because a
+    /// slot is claimed by index as blocks_[validCount] a skipped block can leave a neighbour's
+    /// data behind it. What actually keeps stale words out of a reading is readRegisters()
+    /// refusing a reply shorter than requested, plus applyProfile() only walking [0, validCount).
+    /// This initialiser is a floor under the first poll, not the guarantee.
     BlockData blocks_[kMaxBlocks]{};
 };
 

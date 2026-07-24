@@ -6,6 +6,7 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -349,7 +350,8 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
            a.ntp.server != b.ntp.server || a.ntp.timezone != b.ntp.timezone;
 }
 
-bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error) {
+bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error,
+                      const DriverLookupFn& lookupDriver) {
     JsonDocument doc;
     if (deserializeJson(doc, json) != DeserializationError::Ok) {
         error = {"", "body is not valid JSON"};
@@ -359,6 +361,10 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
         error = {"", "body must be a JSON object"};
         return false;
     }
+
+    // Driver option keys this request itself supplied. Collected during the merge and consulted
+    // by the orphan cleanup below, which must never drop what the caller just asked for.
+    std::vector<std::string> suppliedOptionKeys;
 
     // Merge into a copy: validation runs on the result, so a rejected patch never leaves a
     // half-applied configuration behind.
@@ -397,21 +403,8 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
     }
 
     if (JsonObjectConst driver = doc["driver"]; !driver.isNull()) {
-        const std::string previousDriverId = merged.driver.id;
         if (!patchString(driver["id"], merged.driver.id, "driver.id", error)) return false;
         if (!patchBool(driver["auto_detect"], merged.driver.autoDetect, "driver.auto_detect", error)) return false;
-        // Options are scoped to the driver that declares them: `layout` means something to one
-        // driver and nothing to the next. The merge below has no way to remove a key, so a
-        // stale option used to survive a driver change -- harmless until the REST layer began
-        // validating options against the descriptor, at which point the orphan made every
-        // subsequent PATCH fail with "unknown option for driver X" and switching drivers became
-        // impossible without a factory reset (which also wipes WiFi and the admin password).
-        // Dropping them on the transition is the narrow fix: within one driver, partial patches
-        // still merge exactly as before (regression shipped in 0.12.0, found in review
-        // 2026-07-25).
-        if (merged.driver.id != previousDriverId) {
-            merged.driver.options.clear();
-        }
         if (JsonObjectConst options = driver["options"]; !options.isNull()) {
             for (JsonPairConst kv : options) {
                 if (!kv.value().is<const char*>()) {
@@ -420,6 +413,42 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
                     return false;
                 }
                 merged.driver.options[kv.key().c_str()] = kv.value().as<const char*>();
+                suppliedOptionKeys.emplace_back(kv.key().c_str());
+            }
+        }
+    }
+    // Drop orphans: options the resulting driver does not declare and that this patch did not
+    // itself supply. They can only be left over from a previous driver, and because the merge
+    // has no delete they used to survive forever -- harmless until the REST layer started
+    // validating options against the descriptor, after which an orphan failed every later PATCH
+    // with "unknown option for driver X" and switching drivers became impossible short of a
+    // factory reset (regression shipped in 0.12.0).
+    //
+    // Runs on every patch, not only one that touches `driver`: a bridge already carrying an
+    // orphan must heal on the next save it makes, otherwise it stays locked out forever.
+    //
+    // Two exclusions keep this from destroying data. A key this patch supplied is never dropped,
+    // so a typo'd option is still reported by the REST layer rather than silently swallowed
+    // here. And nothing happens when the id resolves to no driver, which would otherwise orphan
+    // every option at once -- a typo'd DRIVER id must stay recoverable by correcting it, and an
+    // empty id ("let the firmware pick") carries no descriptor to judge against. An earlier
+    // attempt simply cleared the map whenever the id changed; review showed that silently wiped
+    // a working setup on a discovery-wizard click, on a typo, and on an empty id, and never
+    // repaired an already-stuck config (2026-07-25).
+    if (const DriverDescriptor* target = lookupDriver ? lookupDriver(merged.driver.id) : nullptr) {
+        const auto declares = [target](const std::string& key) {
+            for (const auto& o : target->options) {
+                if (o.key == key) return true;
+            }
+            return false;
+        };
+        for (auto it = merged.driver.options.begin(); it != merged.driver.options.end();) {
+            const bool supplied = std::find(suppliedOptionKeys.begin(), suppliedOptionKeys.end(),
+                                            it->first) != suppliedOptionKeys.end();
+            if (!supplied && !declares(it->first)) {
+                it = merged.driver.options.erase(it);
+            } else {
+                ++it;
             }
         }
     }

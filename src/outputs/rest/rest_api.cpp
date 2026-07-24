@@ -451,7 +451,12 @@ bool RestApi::begin() {
             const Configuration before  = *context_.config;
             Configuration       updated = before;
             ConfigError         error;
-            const bool          parsed  = applyConfigPatch(bodyBuffer_, updated, error);
+            // The lookup lets the config layer drop options orphaned by a previous driver
+            // without itself knowing what a driver is; see applyConfigPatch's contract.
+            const auto lookupDriver = [this](const std::string& id) -> const DriverDescriptor* {
+                return context_.registry != nullptr ? context_.registry->find(id) : nullptr;
+            };
+            const bool parsed = applyConfigPatch(bodyBuffer_, updated, error, lookupDriver);
             releaseBody();
             if (!parsed) {
                 sendError(request, {400, "invalid_config",
@@ -471,7 +476,7 @@ bool RestApi::begin() {
             // Only the PATCH path is gated. A config already in flash is deliberately still
             // loaded with the warn-and-fall-back behaviour: refusing it at boot would turn a
             // bad option into an unbootable bridge.
-            if (const DriverDescriptor* d = context_.registry->find(updated.driver.id)) {
+            if (const DriverDescriptor* d = lookupDriver(updated.driver.id)) {
                 DriverOptionError optionError;
                 if (!validateDriverOptions(*d, updated.driver.options, optionError)) {
                     sendError(request, {400, "invalid_config",
@@ -479,6 +484,15 @@ bool RestApi::begin() {
                                             optionError.message});
                     return;
                 }
+            } else if (!updated.driver.id.empty()) {
+                // An id naming no compiled-in driver is refused rather than stored. Storing it
+                // left the bridge pointed at nothing until someone noticed, and it also blinded
+                // the orphan cleanup above (which cannot judge options for a driver it cannot
+                // resolve), so a single typo used to be a quiet dead end. Empty stays legal --
+                // it means "let the firmware pick the highest-priority driver".
+                sendError(request, {400, "invalid_config",
+                                    "driver.id: unknown driver '" + updated.driver.id + "'"});
+                return;
             }
 
             if (!context_.saveConfig(updated)) {

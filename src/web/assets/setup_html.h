@@ -55,8 +55,19 @@ button:disabled{opacity:.5;cursor:default}
 
   <label for="admin2">Admin password (again)</label>
   <input id="admin2" type="password" autocomplete="new-password">
-  <div class="hint">The board has no reset button — a typo here means recovery over USB.
-  Type it twice.</div>
+  <div class="hint">Type it twice — a typo here means holding BOOT for 5 seconds to factory-reset,
+  or re-flashing over USB.</div>
+
+  <!-- Shown only when this bridge already has an admin password, i.e. the setup network came
+       back after a WiFi outage rather than on first boot. Then the new-password fields above are
+       hidden and this one authenticates the change instead. -->
+  <div id="reauth" style="display:none">
+    <label for="cur">Admin password</label>
+    <input id="cur" type="password" autocomplete="current-password">
+    <div class="hint">This bridge is already set up, so changing its network needs the admin
+    password you chose. Forgotten it? Hold <b>BOOT</b> for ~5 seconds while the board is running
+    to erase the configuration and start over.</div>
+  </div>
 
   <button id="b" type="submit">Save and restart</button>
   <div id="m" class="msg"></div>
@@ -71,6 +82,27 @@ button:disabled{opacity:.5;cursor:default}
 const $=s=>document.getElementById(s);
 const msg=(t,ok)=>{const m=$('m');m.textContent=t;m.className='msg '+(ok?'ok':'err')};
 
+// Two modes. First boot: no admin password exists, provisioning is open, and the form sets one.
+// Reconfigure: this setup network came back because the bridge lost WiFi (a router reboot is
+// enough), a password already exists, and provisioning demands it -- so the form authenticates
+// and changes only the network. Detected up front rather than on a failed submit, because a 401
+// from requestAuthentication() has an empty body and the old code parsed it as JSON.
+let reauth=false, adminUser='admin';
+const setupReady=fetch('/api/v1/config').then(r=>r.json()).then(c=>{
+  const sec=(c&&c.security)||{};
+  adminUser=sec.admin_username||'admin';
+  reauth=!!sec.password_set;
+  if(reauth){
+    $('reauth').style.display='block';
+    // The existing password stays as it is; this flow only moves the bridge to a new network.
+    for(const id of ['admin','admin2']){const el=$(id);el.style.display='none';
+      const lab=document.querySelector('label[for="'+id+'"]');if(lab)lab.style.display='none';
+      if(el.nextElementSibling&&el.nextElementSibling.className==='hint')
+        el.nextElementSibling.style.display='none';}
+    $('b').textContent='Save network and restart';
+  }
+}).catch(()=>{});
+
 fetch('/api/v1/wifi/scan').then(r=>r.json()).then(d=>{
   const s=$('ssid');s.innerHTML='';
   // Strongest first: the network the user wants is almost always the loudest one.
@@ -82,8 +114,11 @@ fetch('/api/v1/wifi/scan').then(r=>r.json()).then(d=>{
   const o=document.createElement('option');o.value='__other__';o.textContent='Other…';
   s.appendChild(o);
 }).catch(()=>{
-  // A failed scan must not block setup: the field falls back to free text.
+  // A failed scan must not block setup: the field falls back to free text, and the text box is
+  // revealed straight away rather than hidden behind discovering the "Other…" entry. This is the
+  // normal path in reconfigure mode, where the scan is admin-gated like provisioning itself.
   $('ssid').innerHTML='<option value="__other__">Other…</option>';
+  $('ssid2').style.display='block';$('ssid2l').style.display='block';
 });
 
 $('ssid').onchange=e=>{
@@ -94,17 +129,40 @@ $('ssid').onchange=e=>{
 
 $('f').onsubmit=async e=>{
   e.preventDefault();
+  await setupReady;   // which mode we are in decides what the form must contain
   const ssid=$('ssid').value==='__other__'?$('ssid2').value.trim():$('ssid').value;
   if(!ssid){msg('Pick or type a network name.');return}
-  if(!$('admin').value){msg('An admin password is required.');return}
-  // A typo'd admin password can only be recovered over USB (no reset button), so it is
-  // the one field worth the friction of typing twice.
-  if($('admin').value!==$('admin2').value){msg('The admin passwords do not match.');return}
+  if(reauth){
+    if(!$('cur').value){msg('Enter the admin password for this bridge.');return}
+  }else{
+    if(!$('admin').value){msg('An admin password is required.');return}
+    // A typo'd admin password costs a factory reset, so it is the one field worth the
+    // friction of typing twice.
+    if($('admin').value!==$('admin2').value){msg('The admin passwords do not match.');return}
+  }
   $('b').disabled=true;msg('Saving…',true);
   try{
-    const r=await fetch('/api/v1/provision',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({wifi:{ssid,password:$('pw').value},
-                           security:{admin_password:$('admin').value}})});
+    const headers={'Content-Type':'application/json'};
+    const body={wifi:{ssid,password:$('pw').value}};
+    if(reauth){
+      // Basic auth by hand: fetch() will not surface the browser's credential dialog reliably,
+      // least of all in the captive-portal mini-browser this page is usually opened in.
+      // btoa() only handles Latin-1, so a password with other characters is encoded first.
+      const raw=adminUser+':'+$('cur').value;
+      let enc;try{enc=btoa(raw)}catch(_){enc=btoa(unescape(encodeURIComponent(raw)))}
+      headers['Authorization']='Basic '+enc;
+    }else{
+      body.security={admin_password:$('admin').value};
+    }
+    const r=await fetch('/api/v1/provision',{method:'POST',headers,body:JSON.stringify(body)});
+    if(r.status===401){
+      $('b').disabled=false;
+      msg('That admin password was not accepted. Forgotten it? Hold BOOT for ~5 seconds while '+
+          'the board is running to factory-reset it.');
+      return;
+    }
+    // Only parse once a 401 is ruled out: requestAuthentication() answers with an empty body,
+    // and json() on that throws "Unexpected end of JSON input" instead of anything useful.
     const d=await r.json();
     if(!r.ok)throw new Error(d.error?d.error.message:('HTTP '+r.status));
     // The concrete next step, not "find it via your router": this AP is about to vanish
