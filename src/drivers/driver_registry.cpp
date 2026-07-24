@@ -13,6 +13,9 @@
 #if ENABLE_DRIVER_SOLAX
 #include "solax_x1/solax_driver.h"
 #endif
+#if ENABLE_DRIVER_SUNSPEC
+#include "sunspec/sunspec_driver.h"
+#endif
 #if ENABLE_DRIVER_MOCK
 #include "mock/mock_driver.h"
 #endif
@@ -140,6 +143,9 @@ void registerBuiltinDrivers(DriverRegistry& registry) {
 #endif
 #if ENABLE_DRIVER_SOLAX
     registry.registerDriver(solax::descriptor(), solax::factory);
+#endif
+#if ENABLE_DRIVER_SUNSPEC
+    registry.registerDriver(sunspec::descriptor(), sunspec::factory);
 #endif
 #if ENABLE_DRIVER_MOCK
     registry.registerDriver(mock::readOnlyDescriptor(), mock::readOnlyFactory);
