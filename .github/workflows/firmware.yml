@@ -78,8 +78,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cache PlatformIO
-        uses: actions/cache@v6
+      # Restore-only, on purpose. The writer is the warm-toolchain-cache job in ci.yml, which
+      # runs on main and therefore produces the one cache scope every ref can read. Saving here
+      # instead would write a ~1.7 GB copy scoped to this PR that no other run could ever use,
+      # while crowding the 10 GB repo budget -- and these four matrix jobs would race to write
+      # four of them. A miss just means this build downloads the toolchain itself, as before.
+      - name: Restore PlatformIO toolchain
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.platformio
