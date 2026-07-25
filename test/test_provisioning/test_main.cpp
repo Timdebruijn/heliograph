@@ -548,7 +548,6 @@ static void test_a_serial_override_survives_a_restart() {
     c.serial.profile.baudRate         = 4800;
     c.serial.profile.parity           = SerialParity::Even;
     c.serial.profile.stopBits         = 2;
-    c.serial.profile.responseTimeoutMs = 1500;
     TEST_ASSERT_TRUE(store.save(c));
 
     Configuration loaded;
@@ -557,7 +556,6 @@ static void test_a_serial_override_survives_a_restart() {
     TEST_ASSERT_EQUAL_UINT32(4800, loaded.serial.profile.baudRate);
     TEST_ASSERT_EQUAL(SerialParity::Even, loaded.serial.profile.parity);
     TEST_ASSERT_EQUAL_UINT8(2, loaded.serial.profile.stopBits);
-    TEST_ASSERT_EQUAL_UINT32(1500, loaded.serial.profile.responseTimeoutMs);
 }
 
 // A blob written by a firmware from before this field existed -- written raw, because saving

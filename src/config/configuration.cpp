@@ -261,16 +261,19 @@ bool validate(const Configuration& config, ConfigError& error) {
             error = {"serial.baud_rate", "must be between 1200 and 115200"};
             return false;
         }
-        if (p.dataBits < 7 || p.dataBits > 8) {
-            error = {"serial.data_bits", "must be 7 or 8"};
+        // 8 only. The transport maps a SerialProfile onto the ESP32's SERIAL_* constants and
+        // handles the 8-bit combinations; anything else falls through to SERIAL_8N1, which
+        // loses the data bits AND the parity while configure() still reports success. That
+        // fallthrough was harmless while only drivers picked the line -- every driver ships
+        // 8 bits -- and this override is what made it reachable from the API and the settings
+        // form. Refused here rather than coerced silently, because the symptom of the coercion
+        // is a dead bus and a log line stating the setting that was NOT applied.
+        if (p.dataBits != 8) {
+            error = {"serial.data_bits", "must be 8; 7-bit framing is not supported"};
             return false;
         }
         if (p.stopBits < 1 || p.stopBits > 2) {
             error = {"serial.stop_bits", "must be 1 or 2"};
-            return false;
-        }
-        if (p.responseTimeoutMs < 50 || p.responseTimeoutMs > 10000) {
-            error = {"serial.response_timeout_ms", "must be between 50 and 10000"};
             return false;
         }
     }
@@ -355,7 +358,6 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     serial["parity"]    = parityName(config.serial.profile.parity);
     serial["data_bits"] = config.serial.profile.dataBits;
     serial["stop_bits"] = config.serial.profile.stopBits;
-    serial["response_timeout_ms"] = config.serial.profile.responseTimeoutMs;
 
     JsonObject security = doc["security"].to<JsonObject>();
     // The admin username is omitted for the same reason mqtt.username is, in the mqtt block
@@ -405,9 +407,7 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
            // next boot -- and saying otherwise would leave someone watching a bus that is still
            // running at the old rate while the page claims the new one is in force.
            a.serial.enabled != b.serial.enabled ||
-           (b.serial.enabled && !(a.serial.profile == b.serial.profile)) ||
-           (b.serial.enabled &&
-            a.serial.profile.responseTimeoutMs != b.serial.profile.responseTimeoutMs);
+           (b.serial.enabled && !(a.serial.profile == b.serial.profile));
 }
 
 bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error,
@@ -549,6 +549,7 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
         }
     }
 
+    const bool serialSupplied = !doc["serial"].isNull();
     if (JsonObjectConst serial = doc["serial"]; !serial.isNull()) {
         if (!patchBool(serial["override"], merged.serial.enabled, "serial.override", error))
             return false;
@@ -560,9 +561,6 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
             return false;
         if (!patchNumber(serial["stop_bits"], merged.serial.profile.stopBits, "serial.stop_bits",
                          error))
-            return false;
-        if (!patchNumber(serial["response_timeout_ms"], merged.serial.profile.responseTimeoutMs,
-                         "serial.response_timeout_ms", error))
             return false;
         if (JsonVariantConst parity = serial["parity"]; !parity.isNull()) {
             std::string name;
@@ -577,6 +575,23 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
             }
         }
     }
+
+    // A line override belongs to the driver it was derived from. The wizard pins one only when
+    // the device answered at a profile that driver does not lead with, so carrying it across to
+    // a DIFFERENT driver forces line settings that were never measured against it -- and every
+    // driver in this build leads with 9600 8N1, so the carried value is wrong by construction.
+    // The symptom is a silent bus right after a restart the Driver card asked for, with the
+    // cause sitting in a different card further up the page.
+    //
+    // Only when this patch did not supply `serial` itself. The wizard sends driver AND serial
+    // together, and clearing what the caller just asked for is the mistake the driver-option
+    // rule above already had to be redesigned to avoid. Clearing degrades to "the driver
+    // decides", which is where every healthy install already is, is visible in Settings, and
+    // is re-derived by running discovery again -- so the recovery does not need a factory reset.
+    if (!serialSupplied && merged.driver.id != config.driver.id && merged.serial.enabled) {
+        merged.serial.enabled = false;
+    }
+
 
     if (JsonObjectConst ntp = doc["ntp"]; !ntp.isNull()) {
         if (!patchBool(ntp["enabled"], merged.ntp.enabled, "ntp.enabled", error)) return false;

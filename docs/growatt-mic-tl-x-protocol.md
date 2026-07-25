@@ -184,7 +184,9 @@ address in turn and confirm exactly one answers, at the address you expect.
 1. **Give each inverter a unique Modbus address**, as above, before wiring anything to a
    shared bus.
 2. Wire A/B/GND to the RS485 port — see [rs485-bus.md](rs485-bus.md) for topology, ground and
-   the 120 Ω termination rule. 9600 8N1 is what the profile declares.
+   the 120 Ω termination rule. 9600 8N1 is what the profile declares — if your units are set to
+   something else, run **extended** discovery (quick only tries the first profile) and the
+   wizard stores the line settings that answered.
 3. Configure the driver: `growatt_modbus`, profile `mic_tl_x`, `unit_id` as set in step 1.
 4. Set log level to `trace` and read `/api/v1/logs`. The `GROWATT in <addr>: ...` lines are
    the raw block dump.

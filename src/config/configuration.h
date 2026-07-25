@@ -116,14 +116,21 @@ struct SecuritySettings {
 /// A line-settings override that survives a reboot.
 ///
 /// Normally the driver picks the line: every driver advertises the profiles plausible for its
-/// protocol and configures the first one in begin(). That is right until discovery finds the
-/// device at one of the OTHER profiles it swept -- an inverter set to 4800 8N1 when the driver
-/// leads with 9600, say. The wizard showed which profile answered and then threw it away, so
-/// the selection was saved, the bridge rebooted onto the driver's default, and the device it
-/// had just positively identified went silent with nothing on screen to explain it.
+/// protocol and configures the first one in begin(). That is right until EXTENDED discovery
+/// finds the device at one of the other profiles it tried -- a Modbus inverter answering at
+/// 115200 when its driver leads with 9600, say. (Quick discovery only tries the first profile,
+/// so it cannot find such a device at all.) The wizard showed which profile answered and then
+/// threw it away, so the selection was saved, the bridge rebooted onto the driver's default,
+/// and the device it had just positively identified went silent with nothing to explain it.
 ///
 /// Off unless something set it, so a healthy install keeps following its driver and a device
-/// profile that declares its own [serial] block still wins by default.
+/// profile that declares its own [serial] block still wins by default. Applied after every
+/// begin(), which means at boot AND after a discovery run -- missing the second one silently
+/// undid the override on a running bridge.
+///
+/// responseTimeoutMs and retries within `profile` are carried but unused: read deadlines are
+/// per-driver compile-time constants, and Rs485Transport::read() takes its timeout from the
+/// caller. Exposing them would have been a control that changes nothing.
 struct SerialOverride {
     bool          enabled = false;
     SerialProfile profile{};

@@ -155,12 +155,11 @@ static void test_a_serial_override_round_trips_through_a_patch() {
 
     TEST_ASSERT_TRUE(applyConfigPatch(
         R"({"serial":{"override":true,"baud_rate":4800,"parity":"even","data_bits":8,)"
-        R"("stop_bits":2,"response_timeout_ms":1500}})", c, e));
+        R"("stop_bits":2}})", c, e));
     TEST_ASSERT_TRUE(c.serial.enabled);
     TEST_ASSERT_EQUAL_UINT32(4800, c.serial.profile.baudRate);
     TEST_ASSERT_EQUAL(SerialParity::Even, c.serial.profile.parity);
     TEST_ASSERT_EQUAL_UINT8(2, c.serial.profile.stopBits);
-    TEST_ASSERT_EQUAL_UINT32(1500, c.serial.profile.responseTimeoutMs);
 
     std::string json;
     TEST_ASSERT_TRUE(serializeConfig(c, json));
@@ -200,6 +199,60 @@ static void test_serial_bounds_are_checked_only_when_the_override_is_on() {
 
     c.serial.profile.dataBits = 8;
     TEST_ASSERT_TRUE(validate(c, e));
+
+    // 7-bit framing is refused rather than coerced. The transport maps a profile onto the
+    // ESP32's SERIAL_* constants and only handles the 8-bit ones; anything else falls through
+    // to SERIAL_8N1, losing the data bits AND the parity while configure() still reports
+    // success. That was unreachable while only drivers picked the line -- this override is what
+    // opened it to the API, and a silent coercion there means a dead bus plus a log line
+    // stating the setting that was not applied.
+    c.serial.profile.dataBits = 7;
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("serial.data_bits", e.field.c_str());
+}
+
+// An override is derived from one driver's profile sweep. Carried across to another driver it
+// forces line settings never measured against it, and the symptom is a silent bus right after
+// the restart the Driver card asked for -- with the cause in a different card.
+static void test_switching_driver_drops_a_line_override_it_did_not_ask_for() {
+    Configuration c;
+    c.driver.id               = "eversolar_legacy";
+    c.serial.enabled          = true;
+    c.serial.profile.baudRate = 115200;
+    ConfigError e;
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"driver":{"id":"sunspec"}})", c, e));
+    TEST_ASSERT_FALSE(c.serial.enabled);
+    // The numbers stay put; only the flag drops, so turning it back on in Settings does not
+    // mean retyping what discovery measured.
+    TEST_ASSERT_EQUAL_UINT32(115200, c.serial.profile.baudRate);
+}
+
+// ...but not when the caller supplied `serial` in the same request. That is exactly what the
+// wizard does -- driver and line together -- and clearing what the caller just asked for is the
+// mistake the driver-option orphan rule had to be redesigned to avoid.
+static void test_a_patch_that_sets_both_keeps_the_line_it_asked_for() {
+    Configuration c;
+    c.driver.id = "eversolar_legacy";
+    ConfigError e;
+
+    TEST_ASSERT_TRUE(applyConfigPatch(
+        R"({"driver":{"id":"growatt_modbus"},"serial":{"override":true,"baud_rate":115200}})", c,
+        e));
+    TEST_ASSERT_TRUE(c.serial.enabled);
+    TEST_ASSERT_EQUAL_UINT32(115200, c.serial.profile.baudRate);
+}
+
+// And an unchanged driver never triggers it: a save of something unrelated must not quietly
+// undo a working line override.
+static void test_an_unrelated_save_leaves_the_line_override_alone() {
+    Configuration c;
+    c.driver.id      = "growatt_modbus";
+    c.serial.enabled = true;
+    ConfigError e;
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"bridge_name":"Zolder"})", c, e));
+    TEST_ASSERT_TRUE(c.serial.enabled);
 }
 
 // The line is configured once, in setup(), immediately after the driver's begin(). Nothing
@@ -214,10 +267,6 @@ static void test_changing_the_serial_override_requires_a_reboot() {
     auto faster = on;
     faster.serial.profile.baudRate = 19200;
     TEST_ASSERT_TRUE(configChangeRequiresReboot(on, faster));
-
-    auto slower = on;
-    slower.serial.profile.responseTimeoutMs = 2500;
-    TEST_ASSERT_TRUE(configChangeRequiresReboot(on, slower));
 
     // While the override is off the stored numbers configure nothing, so editing them is not a
     // reason to make someone restart a working bridge.
@@ -1153,6 +1202,9 @@ int main(int, char**) {
     RUN_TEST(test_a_serial_override_round_trips_through_a_patch);
     RUN_TEST(test_an_unknown_parity_is_refused_rather_than_defaulted);
     RUN_TEST(test_serial_bounds_are_checked_only_when_the_override_is_on);
+    RUN_TEST(test_switching_driver_drops_a_line_override_it_did_not_ask_for);
+    RUN_TEST(test_a_patch_that_sets_both_keeps_the_line_it_asked_for);
+    RUN_TEST(test_an_unrelated_save_leaves_the_line_override_alone);
     RUN_TEST(test_changing_the_serial_override_requires_a_reboot);
     RUN_TEST(test_reboot_required_flag_is_patch_only);
     RUN_TEST(test_reboot_required_only_for_boot_time_settings);

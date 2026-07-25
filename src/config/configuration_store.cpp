@@ -127,7 +127,6 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     serial["parity"]    = parityName(config.serial.profile.parity);
     serial["data_bits"] = config.serial.profile.dataBits;
     serial["stop_bits"] = config.serial.profile.stopBits;
-    serial["response_timeout_ms"] = config.serial.profile.responseTimeoutMs;
 
     JsonObject security        = doc["security"].to<JsonObject>();
     security["admin_username"] = config.security.adminUsername;
@@ -268,7 +267,6 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
         if (serial["baud_rate"].is<uint32_t>()) parsed.serial.profile.baudRate = serial["baud_rate"].as<uint32_t>();
         if (serial["data_bits"].is<uint8_t>()) parsed.serial.profile.dataBits = serial["data_bits"].as<uint8_t>();
         if (serial["stop_bits"].is<uint8_t>()) parsed.serial.profile.stopBits = serial["stop_bits"].as<uint8_t>();
-        if (serial["response_timeout_ms"].is<uint32_t>()) parsed.serial.profile.responseTimeoutMs = serial["response_timeout_ms"].as<uint32_t>();
         // An unparseable parity leaves the default rather than guessing. The value came out of
         // our own NVS, so this only fires on a corrupted or hand-edited blob -- and silently
         // becoming "none" there would configure a line nobody chose.

@@ -126,12 +126,14 @@ visible in the logs at `trace` level, in `/api/v1/diagnostics`, and as Prometheu
 - A and B swapped (try swapping them; it costs nothing)
 - Wrong address, or the device is still on its factory default while you are asking for
   another
-- Wrong baud rate or framing. The driver configures the line itself, and discovery sweeps every
-  profile that driver advertises — so if the wizard *found* the device, the working settings are
-  known. Selecting the driver from the wizard saves them when they differ from the driver's own
-  first choice; **Settings → RS485 line** is where to check or change them by hand. Before the
-  release carrying this note the wizard displayed the profile that answered and then discarded
-  it, so a device found at a non-default profile went silent again on the next boot
+- Wrong baud rate or framing. The driver configures the line itself, and **extended** discovery
+  tries every profile that driver advertises — quick mode only tries the first, so a device on a
+  non-default line will not be found by the quick run at all. If the extended run *did* find it,
+  the working settings are known: selecting the driver from the wizard saves them when they
+  differ from the driver's own first choice, and **Settings → RS485 line** is where to check or
+  change them by hand. Before the release carrying this note the wizard displayed the profile
+  that answered and then discarded it, so a device found at a non-default profile went silent
+  again on the next boot
 - Wrong port on the inverter — some units have several RJ45 sockets and only one is RS485
 - The port is occupied by the manufacturer's own WiFi dongle
 - A break in the chain: every device past the break goes silent, which is a useful clue about

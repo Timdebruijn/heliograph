@@ -414,10 +414,16 @@ function renderWizard(){
     <p class="dim">The driver is stored. It takes effect after a restart.</p>`+
     // Said out loud, because it is a setting the user never asked for and would otherwise
     // find in Settings with no idea where it came from.
-    (wizSavedSerial?`<p class="dim">This device answered at
+    (wizSavedSerial&&wizSavedSerial.override?`<p class="dim">This device answered at
       <b>${wizSavedSerial.baud_rate} ${wizSavedSerial.data_bits}${esc(wizSavedSerial.parity[0].toUpperCase())}${wizSavedSerial.stop_bits}</b>,
       which is not this driver's default, so those line settings were saved with it. You can
       change or clear that under <b>Settings → RS485 line</b>.</p>`:'')+
+    // Worth saying in the other direction too, and phrased so it is true whether or not an
+    // override existed before: this run cleared one if there was one. cfgBefore is only
+    // populated once the Settings tab has been opened, so it cannot be relied on here.
+    (wizSavedSerial&&wizSavedSerial.override===false?`<p class="dim">This device answered at
+      this driver's own default, so no <b>RS485 line</b> override is stored — the driver
+      decides. Any override left over from an earlier run has been switched off.</p>`:'')+
     `
     <button onclick="wizReboot()">Restart now</button>
     <div id="wizmsg" class="msg" style="display:none"></div></div>`;
@@ -471,15 +477,22 @@ async function testPoll(){
   },3000);
 }
 
-// The serial profile a candidate answered at, but only when it is NOT the one the chosen driver
-// would configure by itself. Discovery sweeps every profile a driver advertises; if the device
-// replied at the second or third one, saving the driver alone means the next boot configures
-// the first and the bus goes quiet. Returns null when the driver's own default already matches,
-// so the common case stores no override at all and keeps following the driver.
+// What to store for the line, given the candidate that answered.
+//
+// Extended discovery tries every profile a driver advertises (quick mode only tries the
+// first), so a device can reply at one the driver does not lead with. Saving the driver alone
+// then means the next boot configures the driver's own first profile and the bus goes quiet.
+//
+// Returns an override when the match differs from what this driver would configure by itself,
+// and {override:false} when it does not -- NOT null. Omitting the key entirely made the wizard
+// a one-way ratchet: a PATCH without `serial` leaves the stored value alone, so once anything
+// had pinned 115200, re-running the wizard on a device that answers at the driver's default
+// could never undo it and step 7 would not even mention the setting that was about to silence
+// the bus. Null is reserved for "this run learned nothing", where leaving it alone is right.
 async function discoveredSerialOverride(id){
   const cand=((wizReport&&wizReport.candidates)||[]).find(c=>c.driver_id===id);
   const found=cand&&cand.serial_profile;
-  if(!found||!cand.responded)return null;
+  if(!found)return null;
   // cfgDrivers is only populated once the Settings tab has been opened, and the wizard is
   // reachable without ever going there. Fetch rather than assume: with no default to compare
   // against, every discovery would pin an override, including the overwhelming majority where
@@ -489,11 +502,13 @@ async function discoveredSerialOverride(id){
   }
   const drv=((cfgDrivers&&cfgDrivers.drivers)||[]).find(d=>d.id===id);
   const def=drv&&(drv.serial_profiles||[])[0];
-  if(def&&def.baud_rate===found.baud_rate&&def.parity===found.parity&&
-     def.data_bits===found.data_bits&&def.stop_bits===found.stop_bits)return null;
+  if(!def)return null;  // nothing to compare against; do not guess
+  if(def.baud_rate===found.baud_rate&&def.parity===found.parity&&
+     def.data_bits===found.data_bits&&def.stop_bits===found.stop_bits){
+    return {override:false};
+  }
   return {override:true,baud_rate:found.baud_rate,parity:found.parity,
-          data_bits:found.data_bits,stop_bits:found.stop_bits,
-          response_timeout_ms:found.response_timeout_ms};
+          data_bits:found.data_bits,stop_bits:found.stop_bits};
 }
 
 async function saveDriver(){
@@ -575,6 +590,9 @@ const RESTART_NEEDED={
   'driver.id':'Active driver','driver.options':'Driver options',
   'ntp.enabled':'NTP on/off','ntp.use_dhcp':'NTP via DHCP','ntp.server':'NTP server',
   'ntp.timezone':'Timezone',
+  'serial.override':'RS485 line override','serial.baud_rate':'RS485 baud rate',
+  'serial.parity':'RS485 parity','serial.data_bits':'RS485 data bits',
+  'serial.stop_bits':'RS485 stop bits',
 };
 // Applied immediately, no restart:
 //   bridge_name          - read fresh on every status response
@@ -721,9 +739,7 @@ async function renderConfig(){
     <label for="c_serdb">Data bits</label>
     <input id="c_serdb" type="number" value="${c.serial.data_bits}">
     <label for="c_sersb">Stop bits</label>
-    <input id="c_sersb" type="number" value="${c.serial.stop_bits}">
-    <label for="c_serto">Response timeout (ms)</label>
-    <input id="c_serto" type="number" value="${c.serial.response_timeout_ms}"></div>
+    <input id="c_sersb" type="number" value="${c.serial.stop_bits}"></div>
   <div class="card"><b>Driver</b> <span class="tag" style="font-weight:400">needs restart</span>
     <label for="c_drv">Active driver</label>
     <select id="c_drv" onchange="reloadDriverOpts()">${
@@ -840,8 +856,7 @@ async function saveConfig(){
     // enough: no rendered default to mistake for a change (unlike driver options / relay roles).
     // admin_username is added below only when typed, like the other credential fields.
     serial:{override:b('c_ser'),baud_rate:n('c_serbaud'),parity:v('c_serpar'),
-            data_bits:n('c_serdb'),stop_bits:n('c_sersb'),
-            response_timeout_ms:n('c_serto')},
+            data_bits:n('c_serdb'),stop_bits:n('c_sersb')},
     security:{read_only_mode:b('c_ro')},
     logging:{level:v('c_lg')}};
   // A blank password field means "keep": sending "" would clear it, which is never what an

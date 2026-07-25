@@ -247,8 +247,17 @@ EverSolar:
 }
 ```
 
-Only **one** serial profile: 9600 8N1 is hardcoded in the reference. We do not try other
-combinations — that would be blind brute-forcing.
+Only **one** serial profile for this driver: 9600 8N1 is hardcoded in the reference. We do not
+try other combinations — that would be blind brute-forcing. Drivers whose protocol genuinely
+allows more list them, and extended discovery tries each in turn (quick discovery only tries the
+first).
+
+The driver's list is not the last word at runtime. `config.serial` stores an optional line
+override: off by default, and set by the discovery wizard when a device answers at a profile the
+driver does not lead with, since otherwise the next boot would reconfigure the line to the
+driver's own first choice and the identified device would go silent. It is applied after every
+`begin()` — at boot and again after a discovery run — and it is dropped when the driver is
+switched by a request that does not itself carry new line settings. See `docs/rest-api.md`.
 
 ### DriverRegistry
 
