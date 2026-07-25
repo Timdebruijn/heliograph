@@ -30,19 +30,45 @@ modbus::ReadOutcome SunspecDriver::read(uint16_t address, uint16_t count, uint16
                                  address, count, out, capacity, timing);
 }
 
-bool SunspecDriver::walkChain() {
+// Translates a failed read into the poll outcome that describes it honestly. Everything used
+// to become Timeout, which meant a bus with a bad ground -- CRC failures -- was invisible in the
+// one counter the alerting rules key on, and pointed the field diagnosis at the wrong thing.
+static PollResult failureFor(modbus::ReadStatus status) {
+    switch (status) {
+        case modbus::ReadStatus::Crc:
+            return PollResult::ChecksumError;
+        case modbus::ReadStatus::Timeout:
+            return PollResult::Timeout;
+        case modbus::ReadStatus::TransportError:
+            return PollResult::TransportError;
+        case modbus::ReadStatus::Exception:
+        case modbus::ReadStatus::Protocol:
+        case modbus::ReadStatus::Ok:
+            break;
+    }
+    // An exception or a malformed reply both mean the device is present and talking, just not
+    // giving us this range. Not InvalidFrame: nothing is wrong with the wire.
+    return PollResult::NotRegistered;
+}
+
+bool SunspecDriver::walkChain(PollResult& outFailure) {
     chain_.clear();
     inverterEntry_ = nullptr;
     commonEntry_   = nullptr;
     walked_        = false;
 
-    uint16_t marker[2] = {};
-    if (read(options_.baseAddress, 2, marker, 2).status != modbus::ReadStatus::Ok) {
+    uint16_t   marker[2] = {};
+    const auto markerRead = read(options_.baseAddress, 2, marker, 2);
+    if (markerRead.status != modbus::ReadStatus::Ok) {
+        outFailure = failureFor(markerRead.status);
         return false;
     }
     if (marker[0] != kMarkerHigh || marker[1] != kMarkerLow) {
         log::debug("SUNSPEC no marker at %u (read %04X %04X)", options_.baseAddress, marker[0],
                    marker[1]);
+        // A healthy device that simply is not SunSpec. Saying Timeout here accused the wiring
+        // of a fault that does not exist.
+        outFailure = PollResult::NotRegistered;
         return false;
     }
 
@@ -93,7 +119,9 @@ bool SunspecDriver::walkChain() {
     if (commonEntry_ != nullptr) {
         std::vector<uint16_t> regs;
         CommonIdentity        id;
-        if (readModel(*commonEntry_, regs) && decodeCommon(regs.data(), regs.size(), id)) {
+        PollResult            ignored = PollResult::Timeout;  // identity is best-effort here
+        if (readModel(*commonEntry_, regs, ignored) &&
+            decodeCommon(regs.data(), regs.size(), id)) {
             identity_.manufacturer    = id.manufacturer;
             identity_.model           = id.model;
             identity_.serialNumber    = id.serial;
@@ -116,7 +144,8 @@ bool SunspecDriver::walkChain() {
     return true;
 }
 
-bool SunspecDriver::readModel(const ChainEntry& entry, std::vector<uint16_t>& out) {
+bool SunspecDriver::readModel(const ChainEntry& entry, std::vector<uint16_t>& out,
+                              PollResult& outFailure) {
     const uint16_t total = static_cast<uint16_t>(kHeaderRegisters + entry.length);
     out.assign(total, 0);
     uint16_t done = 0;
@@ -125,6 +154,7 @@ bool SunspecDriver::readModel(const ChainEntry& entry, std::vector<uint16_t>& ou
         const auto     r    = read(static_cast<uint16_t>(entry.address + done), want,
                                    out.data() + done, want);
         if (r.status != modbus::ReadStatus::Ok) {
+            outFailure = failureFor(r.status);
             return false;
         }
         done = static_cast<uint16_t>(done + want);
@@ -154,7 +184,8 @@ bool SunspecDriver::begin(Transport& transport) {
 
 ProbeResult SunspecDriver::probe() {
     ProbeResult result;
-    if (transport_ == nullptr || !walkChain()) {
+    PollResult  ignored = PollResult::Timeout;  // probing only cares whether it worked
+    if (transport_ == nullptr || !walkChain(ignored)) {
         return result;
     }
     result.responded     = true;
@@ -194,8 +225,9 @@ PollResult SunspecDriver::poll(DeviceState& state) {
     if (transport_ == nullptr) {
         return PollResult::TransportError;
     }
-    if (!walked_ && !walkChain()) {
-        return PollResult::Timeout;
+    PollResult failure = PollResult::Timeout;
+    if (!walked_ && !walkChain(failure)) {
+        return failure;
     }
     if (inverterEntry_ == nullptr) {
         // Mapped fine, but carries no model this driver reads -- a battery-only device, say.
@@ -206,11 +238,11 @@ PollResult SunspecDriver::poll(DeviceState& state) {
     }
 
     std::vector<uint16_t> regs;
-    if (!readModel(*inverterEntry_, regs)) {
+    if (!readModel(*inverterEntry_, regs, failure)) {
         // Force a fresh walk next time: a device that stopped answering mid-chain may have
         // rebooted into a different layout.
         walked_ = false;
-        return PollResult::Timeout;
+        return failure;
     }
 
     InverterReadings r;

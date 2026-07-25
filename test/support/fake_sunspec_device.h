@@ -132,10 +132,15 @@ public:
     bool     asleep = false;
     uint32_t reads  = 0;  ///< how many requests were answered, for round-trip assertions
 
+    /// Answer with a wrecked checksum, as a bus with a missing ground or no termination does.
+    /// Distinct from `asleep`: the device is talking, the wire is mangling it -- and those two
+    /// send an installer to look at completely different things.
+    bool corruptCrc = false;
+
 private:
-    static void appendCrc(std::vector<uint8_t>& frame) {
+    void appendCrc(std::vector<uint8_t>& frame) const {
         const uint16_t crc = modbus::crc16(frame.data(), frame.size());
-        frame.push_back(static_cast<uint8_t>(crc & 0xFF));
+        frame.push_back(static_cast<uint8_t>((crc & 0xFF) ^ (corruptCrc ? 0xFF : 0x00)));
         frame.push_back(static_cast<uint8_t>(crc >> 8));
     }
 

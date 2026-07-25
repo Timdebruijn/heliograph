@@ -69,9 +69,12 @@ public:
 
 private:
     /// Reads the marker and walks the chain. Fills chain_, inverterEntry_ and commonEntry_.
-    bool walkChain();
+    /// Maps the model chain. On failure `outFailure` says WHY, so poll() can report a corrupt
+    /// wire differently from a silent one -- collapsing both into Timeout hid CRC errors from
+    /// the one counter the alerting rules watch.
+    bool walkChain(PollResult& outFailure);
     /// Reads one model's payload into `out`, chunked to respect the Modbus read ceiling.
-    bool readModel(const ChainEntry& entry, std::vector<uint16_t>& out);
+    bool readModel(const ChainEntry& entry, std::vector<uint16_t>& out, PollResult& outFailure);
     modbus::ReadOutcome read(uint16_t address, uint16_t count, uint16_t* out, uint16_t capacity);
 
     Transport*     transport_ = nullptr;

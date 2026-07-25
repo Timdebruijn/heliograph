@@ -275,6 +275,36 @@ static void test_an_unreadable_device_is_not_reported_as_line_corruption() {
     TEST_ASSERT_NOT_EQUAL(PollResult::ChecksumError, result);
 }
 
+// A perfectly healthy Modbus device that simply is not SunSpec used to be reported as Timeout,
+// which accused the wiring of a fault that does not exist. It answers promptly; the marker is
+// just not there.
+static void test_a_device_without_the_marker_is_not_reported_as_a_timeout() {
+    Rig r;
+    r.device.registers[r.device.baseAddress]     = 0x1234;  // something, but not "SunS"
+    r.device.registers[r.device.baseAddress + 1] = 0x5678;
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    const auto  result = d.poll(state);
+
+    TEST_ASSERT_EQUAL(PollResult::NotRegistered, result);
+}
+
+// The one symptom that indicts the cable. Everything used to collapse into Timeout, so a bus
+// with a bad ground was invisible in the counter the alerting rules key on -- and pointed the
+// field diagnosis at "the inverter is asleep" instead (review, 2026-07-25).
+static void test_a_corrupt_reply_is_reported_as_a_checksum_error() {
+    Rig r;
+    buildTypical(r.device);
+    r.device.corruptCrc = true;
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::ChecksumError, d.poll(state));
+}
+
 static void test_a_silent_device_does_not_poll() {
     Rig r;
     buildTypical(r.device);
@@ -311,6 +341,8 @@ int main(int, char**) {
     RUN_TEST(test_begin_configures_the_serial_line);
     RUN_TEST(test_identity_is_available_without_probing);
     RUN_TEST(test_an_unreadable_device_is_not_reported_as_line_corruption);
+    RUN_TEST(test_a_device_without_the_marker_is_not_reported_as_a_timeout);
+    RUN_TEST(test_a_corrupt_reply_is_reported_as_a_checksum_error);
     RUN_TEST(test_a_silent_device_does_not_poll);
     RUN_TEST(test_the_driver_is_read_only);
     return UNITY_END();

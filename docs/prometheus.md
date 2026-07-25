@@ -96,11 +96,25 @@ temperature sensor has no temperature series. That is not a fault.
 | `heliograph_modbus_client_connections_total` | counter | Modbus TCP connections accepted |
 | `heliograph_modbus_clients` | gauge | Modbus TCP clients connected right now |
 
-The distinction matters when something is wrong. **Timeouts** mean nothing came back — wiring,
-a swapped A/B, or an inverter that is asleep. **Checksum errors and invalid frames** mean bytes
-did come back but were corrupted — usually electrical: a missing ground, no termination, or a
-cable run alongside something noisy. A quiet night on a solar inverter produces timeouts and no
-checksum errors, and that is normal: the inverter powers down after dark.
+The distinction matters when something is wrong, and it is three-way rather than two:
+
+- **Timeouts** — nothing came back at all. Wiring, a swapped A/B, a wrong address, or an
+  inverter that is simply asleep.
+- **Checksum errors** — bytes came back corrupted. This is the one that indicts the *wire*: a
+  missing ground, no termination (or termination in three places instead of two), a long stub,
+  a run alongside the inverter's own output cabling. See [rs485-bus.md](rs485-bus.md).
+- **Invalid frames** — an intact frame that was not what we asked for: a neighbour on a
+  multidrop bus answering, or a device quirk. Addressing, not cabling.
+
+A quiet night on a solar inverter produces timeouts and no checksum errors, and that is normal:
+the inverter powers down after dark. That asymmetry is exactly why the alert below watches
+checksum errors rather than timeouts.
+
+> Until 0.13.0 a Modbus driver could not raise the checksum counter at all: the shared read
+> transaction folded CRC failures into a generic protocol error, so on a Growatt or SunSpec
+> install this metric was structurally always zero and the alert could never fire. The PMU
+> drivers (EverSolar, SolaX) were unaffected. If you have been running a Modbus device on an
+> earlier version, a flat zero there was not evidence of a clean bus.
 
 ### Bridge health
 

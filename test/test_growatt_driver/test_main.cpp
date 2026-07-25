@@ -255,6 +255,56 @@ static void test_a_refused_block_outranks_a_timeout_in_the_outcome() {
     TEST_ASSERT_EQUAL(PollResult::InvalidFrame, driver.poll(state));
 }
 
+// A bus with a bad ground or missing termination shows up as CRC failures, and that is the one
+// symptom the alerting rules watch -- every night legitimately produces timeouts, so a rule
+// built on those would drown. Until this was fixed the codec folded CRC into a generic protocol
+// error and the driver reported InvalidFrame, making PollResult::ChecksumError structurally
+// unreachable on a Modbus bus: the counter existed, the metric existed, the alert existed, and
+// nothing could ever raise it (review, 2026-07-25).
+static void test_a_corrupt_reply_is_reported_as_a_checksum_error() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 8) return false;
+        const uint16_t count = static_cast<uint16_t>((req[4] << 8) | req[5]);
+        reply.push_back(req[0]);
+        reply.push_back(req[1]);
+        reply.push_back(static_cast<uint8_t>(count * 2));
+        for (uint16_t i = 0; i < count * 2; ++i) {
+            reply.push_back(0x11);
+        }
+        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
+        reply.push_back(static_cast<uint8_t>((crc & 0xFF) ^ 0xFF));  // wrecked
+        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        return true;
+    });
+    GrowattDriver driver(transport);
+    DeviceState   state;
+    state.lastPollAttemptMs = 5000;
+    TEST_ASSERT_EQUAL(PollResult::ChecksumError, driver.poll(state));
+}
+
+// ...while a frame that arrives intact but is not ours stays InvalidFrame. Counting a neighbour
+// on the bus as line corruption would send someone to check a cable that is fine.
+static void test_an_intact_reply_from_another_unit_is_not_a_checksum_error() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 8) return false;
+        reply.push_back(static_cast<uint8_t>(req[0] + 1));  // someone else's address
+        reply.push_back(req[1]);
+        reply.push_back(2);
+        reply.push_back(0x00);
+        reply.push_back(0x2A);
+        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
+        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
+        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        return true;
+    });
+    GrowattDriver driver(transport);
+    DeviceState   state;
+    state.lastPollAttemptMs = 5000;
+    TEST_ASSERT_EQUAL(PollResult::InvalidFrame, driver.poll(state));
+}
+
 static void test_a_sustained_noise_trickle_hits_the_transaction_deadline() {
     // Same bound as the eversolar driver: a line that never completes a frame must not hold
     // the bus indefinitely (review, 2026-07-20).
@@ -528,6 +578,8 @@ int main(int, char**) {
     RUN_TEST(test_all_blocks_refused_is_an_invalid_frame);
     RUN_TEST(test_one_refused_block_does_not_sink_the_poll);
     RUN_TEST(test_a_refused_block_outranks_a_timeout_in_the_outcome);
+    RUN_TEST(test_a_corrupt_reply_is_reported_as_a_checksum_error);
+    RUN_TEST(test_an_intact_reply_from_another_unit_is_not_a_checksum_error);
     RUN_TEST(test_a_sustained_noise_trickle_hits_the_transaction_deadline);
     RUN_TEST(test_execute_is_unsupported_read_only);
     RUN_TEST(test_begin_configures_the_serial_line);

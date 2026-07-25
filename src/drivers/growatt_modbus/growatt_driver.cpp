@@ -117,6 +117,8 @@ GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t star
             return ReadResult::Timeout;
         case modbus::ReadStatus::TransportError:
             return ReadResult::TransportError;
+        case modbus::ReadStatus::Crc:
+            return ReadResult::Crc;
         case modbus::ReadStatus::Protocol:
             break;
     }
@@ -131,6 +133,7 @@ PollResult GrowattDriver::poll(DeviceState& state) {
 
     size_t validCount  = 0;
     bool   sawTimeout  = false;
+    bool   sawCrcError = false;  // bytes arrived corrupted -> the cable, not the configuration
     bool   sawResponse = false;  // device answered *something* (exception / bad frame) = alive
 
     // A block the device refuses (exception) or that arrives corrupt is skipped, not fatal:
@@ -154,6 +157,12 @@ PollResult GrowattDriver::poll(DeviceState& state) {
                 log::warn("GROWATT block %u+%u refused (exception 0x%02X) -- skipped", b.start,
                           b.count, lastException_);
                 break;
+            case ReadResult::Crc:
+                sawResponse = true;
+                sawCrcError = true;
+                log::warn("GROWATT block %u+%u failed checksum -- check ground, termination "
+                          "and cable routing", b.start, b.count);
+                break;
             case ReadResult::Protocol:
                 sawResponse = true;
                 log::warn("GROWATT block %u+%u unreadable (bad frame) -- skipped", b.start,
@@ -168,9 +177,13 @@ PollResult GrowattDriver::poll(DeviceState& state) {
     }
 
     if (validCount == 0) {
-        // Nothing usable. Report "silent" only when the device truly said nothing: a refused
-        // range or a bad frame proves it is present and addressable, so that outranks a
-        // timeout on another block -- InvalidFrame, not the misleading Timeout.
+        // Nothing usable. A checksum failure outranks everything else: it is the only outcome
+        // that points at the cable, and it is what the alerting rule watches. Then "silent"
+        // only when the device truly said nothing -- a refused range or a bad frame proves it
+        // is present and addressable, so that outranks a timeout on another block.
+        if (sawCrcError) {
+            return PollResult::ChecksumError;
+        }
         return (sawTimeout && !sawResponse) ? PollResult::Timeout : PollResult::InvalidFrame;
     }
 

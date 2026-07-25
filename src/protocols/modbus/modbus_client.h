@@ -25,10 +25,20 @@
 namespace heliograph::modbus {
 
 enum class ReadStatus : uint8_t {
-    Ok,              ///< `count` registers decoded into the caller's buffer
-    Exception,       ///< the device answered, refusing: see ReadOutcome::exceptionCode
-    Timeout,         ///< nothing, or not a whole frame, arrived in time
-    Protocol,        ///< bad CRC, wrong unit, wrong function code, or malformed
+    Ok,         ///< `count` registers decoded into the caller's buffer
+    Exception,  ///< the device answered, refusing: see ReadOutcome::exceptionCode
+    Timeout,    ///< nothing, or not a whole frame, arrived in time
+    /// Bytes arrived and failed the CRC. Kept apart from Protocol on purpose: this is the one
+    /// outcome that means the WIRE is bad -- a missing ground, no termination, a stub, noise
+    /// coupled from the inverter's own output. Drivers map it to PollResult::ChecksumError,
+    /// which is what the alerting rules key on, precisely because every night legitimately
+    /// produces timeouts and would drown a rule built on those. Fusing it into Protocol made
+    /// that counter structurally unreachable on a Modbus bus (review, 2026-07-25).
+    Crc,
+    /// The frame was intact but not what we asked for: wrong unit, wrong function code,
+    /// malformed, or fewer registers than requested. Points at addressing or a device quirk,
+    /// not at the cable.
+    Protocol,
     TransportError,  ///< the request could not be written at all
 };
 
