@@ -739,7 +739,14 @@ async function saveDriver(){
   if(serial)body.serial=serial;
   const r=await authFetch('/api/v1/config',{method:'PATCH',
     headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!r.ok){alert('Save failed: '+httpWhy(r));return}
+  if(!r.ok){
+    // The body, not just the status. httpWhy() gives "HTTP 400", and the firmware's message is
+    // the whole point of a 400 here: it names the field and the range. The wizard is the path
+    // the bring-up docs send people down, and it was the one place that threw that away.
+    const d=await r.json().catch(()=>({}));
+    alert('Save failed: '+((d.error&&d.error.message)||httpWhy(r)));
+    return;
+  }
   wizSavedSerial=serial;
   wizStep=7;renderWizard();
 }

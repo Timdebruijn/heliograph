@@ -63,9 +63,17 @@ bool validateDriverOptions(const DriverDescriptor& descriptor, const DriverOptio
         if (option->isNumeric()) {
             // Refused, not clamped: a value the user typed and a value we invented must not
             // both end up stored as if they were the same decision.
+            // strtol skips leading whitespace and accepts a leading '+' and leading zeros, so
+            // " 7", "+7" and "007" all parse -- and were then STORED verbatim, which is how
+            // "007" slipped past a duplicate-address check that compares strings. Rejected
+            // rather than normalised: silently rewriting what someone typed is the same class
+            // of substitution this bound exists to remove (review, 2026-07-25).
+            const bool clean = !value.empty() &&
+                               value.find_first_not_of("0123456789") == std::string::npos &&
+                               (value.size() == 1 || value[0] != '0');
             char*      end    = nullptr;
             const long parsed = std::strtol(value.c_str(), &end, 10);
-            if (value.empty() || end == value.c_str() || *end != '\0') {
+            if (!clean || end == value.c_str() || *end != '\0') {
                 error = {key, "must be a whole number between " + std::to_string(option->minValue) +
                                   " and " + std::to_string(option->maxValue)};
                 return false;

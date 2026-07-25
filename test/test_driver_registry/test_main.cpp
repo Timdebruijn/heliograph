@@ -305,6 +305,32 @@ static void test_a_numeric_option_that_is_not_a_number_is_refused() {
 
 // An option with no bounds declared stays free-form, which is what every non-addressing option
 // is. isNumeric() keys on the bounds, not on the value looking like a number.
+// strtol is lenient in three ways that all end up STORED verbatim: it skips leading
+// whitespace, accepts a leading '+', and accepts leading zeros. "007" then slipped past the
+// settings page's duplicate-address check, which compares strings -- so two rows could claim
+// the same unit and only the boot-time collision guard noticed.
+static void test_a_sloppy_but_parseable_number_is_refused() {
+    const auto        d = boundedDescriptor();
+    DriverOptionError e;
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", " 7"}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "+7"}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "007"}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "7 "}}, e));
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"unit_id", "7"}}, e));
+}
+
+// A bound that legitimately starts at zero must still be numeric -- the SunSpec base register
+// is exactly that, and declaring 1 made the descriptor stricter than its own parser.
+static void test_a_range_starting_at_zero_is_still_numeric() {
+    DriverDescriptor d;
+    d.id      = "based";
+    d.options = {DriverOption{"base_address", "Base", "", "40000", {}, 0, 65534}};
+    DriverOptionError e;
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"base_address", "0"}}, e));
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"base_address", "65534"}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"base_address", "65535"}}, e));
+}
+
 static void test_an_unbounded_option_stays_free_form() {
     DriverDescriptor d;
     d.id      = "free";
@@ -318,6 +344,8 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_a_numeric_option_out_of_range_is_refused);
     RUN_TEST(test_a_numeric_option_that_is_not_a_number_is_refused);
+    RUN_TEST(test_a_sloppy_but_parseable_number_is_refused);
+    RUN_TEST(test_a_range_starting_at_zero_is_still_numeric);
     RUN_TEST(test_an_unbounded_option_stays_free_form);
     RUN_TEST(test_registered_driver_is_found);
     RUN_TEST(test_unknown_driver_is_not_found);

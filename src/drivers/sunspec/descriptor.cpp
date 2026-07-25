@@ -44,9 +44,12 @@ const DriverDescriptor& descriptor() {
                                          "would cost a discovery round trip, so this is set rather than searched.",
                                          "40000",
                                          {},
-                                         // A 16-bit register address; the marker cannot sit in
-                                         // the last two registers of the space.
-                                         1, 65533}};
+                                         // Matches what optionsFrom() below actually accepts.
+                                         // Declaring 1 here made the descriptor stricter than
+                                         // its own parser and locked out base 0, which is one
+                                         // of the standard SunSpec bases. The marker is two
+                                         // registers, so 65534 still fits (review).
+                                         0, 65534}};
         return x;
     }();
     return d;
