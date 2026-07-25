@@ -29,6 +29,7 @@
 #include "diagnostics/diagnostics.h"
 #include "mqtt_topics.h"
 #include "publish_policy.h"
+#include "state/state_store.h"
 
 namespace heliograph::mqtt {
 
@@ -53,8 +54,19 @@ public:
     /// Sets up the client and starts connecting. Non-blocking.
     bool begin(const BridgeInfo& bridge);
 
+    /// One inverter's current state, as handed to loop().
+    struct DeviceView {
+        DeviceId           id;
+        const DeviceState* state;
+    };
+
     /// Drives reconnects and publishing. Call regularly from the MQTT task; never blocks.
-    void loop(const DeviceState& state, const BridgeInfo& bridge,
+    ///
+    /// `devices` is every polled device, in a stable order -- the FIRST one keeps the
+    /// bridge-scoped topics and unique_ids it has always had, so an existing install's Home
+    /// Assistant entities and their history survive this becoming plural. An empty list is
+    /// legal and publishes only the bridge's own topics.
+    void loop(const std::vector<DeviceView>& devices, const BridgeInfo& bridge,
               const DiagnosticsSnapshot& diagnostics, uint64_t nowMs);
 
     void stop();
@@ -75,13 +87,31 @@ public:
     void setDrmCommandHandler(DrmCommandFn handler) { drmCommand_ = std::move(handler); }
 
 private:
-    void onConnected(const DeviceState& state, const BridgeInfo& bridge);
-    void publishDiscovery(const DeviceState& state, const BridgeInfo& bridge);
+    /// Everything that is per-inverter rather than per-bridge. Keyed by device id and created
+    /// on first sight, so a device appearing later (a driver that only registers at sunrise)
+    /// gets its own throttle and its own discovery announcement rather than inheriting
+    /// another's.
+    struct Channel {
+        DeviceId        id;
+        MqttTopics      topics;
+        std::string     uniqueBase;
+        PublishThrottle throttle;
+        bool            discoveryPublished  = false;
+        uint64_t        discoveredSignature = 0;
+    };
 
-    MqttConfig      config_;
-    MqttTopics      topics_;
-    PublishThrottle throttle_;
-    Diagnostics*    diagnostics_ = nullptr;
+    Channel& channelFor(const DeviceId& id, const BridgeInfo& bridge);
+
+    void onConnected(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
+    void publishDiscovery(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
+
+    MqttConfig   config_;
+    /// Bridge-scoped: availability, diagnostics, relay and DRM. Never a device's.
+    MqttTopics   topics_;
+    Diagnostics* diagnostics_ = nullptr;
+
+    std::vector<Channel> channels_;
+    PublishPolicy        publishPolicy_;
 
     // espMqttClient's setClientId/setWill/setServer/setCredentials store the POINTER, not a
     // copy (MqttClientSetup.h: `_clientId = clientId;`). Every string handed to them must
@@ -92,13 +122,7 @@ private:
     std::string clientId_;
     std::string willTopic_;
 
-    bool     started_            = false;
-    bool     discoveryPublished_ = false;
-    /// discoverySignature() at the last discovery publish. Discovery re-announces when the
-    /// model changes: the first MQTT connect often beats the first successful poll of a real
-    /// inverter. A signature rather than a count, so a same-size swap of channels is caught.
-    /// 0 = never published; the FNV offset basis makes a real signature never 0 in practice.
-    uint64_t discoveredSignature_ = 0;
+    bool     started_           = false;
     uint64_t lastDiagnosticsMs_  = 0;
     uint64_t nextReconnectMs_    = 0;
     /// Exponential back-off, capped. An unreachable broker must not turn into a busy loop.

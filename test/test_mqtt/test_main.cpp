@@ -148,7 +148,7 @@ static void test_no_discovery_entity_for_an_unsupported_declared_channel() {
                                           "Battery SoC");
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     TEST_ASSERT_NULL(findEntity(entities, "heliograph-a1b2c3_battery_soc"));
 }
@@ -437,7 +437,7 @@ static void test_discovery_creates_an_entity_per_supported_measurement() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     TEST_ASSERT_NOT_NULL(findEntity(entities, "heliograph-a1b2c3_ac_power_total"));
     TEST_ASSERT_NOT_NULL(findEntity(entities, "heliograph-a1b2c3_energy_total"));
@@ -452,7 +452,7 @@ static void test_discovery_metadata_matches_the_measurement_type() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     auto power = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
     TEST_ASSERT_EQUAL_STRING("power", power["device_class"]);
@@ -479,7 +479,7 @@ static void test_value_template_reads_the_right_key() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     TEST_ASSERT_EQUAL_STRING("{{ value_json.measurements['ac.power.total'].value }}",
@@ -494,7 +494,7 @@ static void test_availability_tracks_the_bridge_not_the_inverter() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/availability", doc["availability_topic"]);
@@ -507,7 +507,7 @@ static void test_inverter_is_a_separate_device_behind_the_bridge() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     TEST_ASSERT_EQUAL_STRING("heliograph-a1b2c3_inverter", doc["device"]["identifiers"][0]);
@@ -522,7 +522,7 @@ static void test_the_inverter_device_is_named_after_its_model_not_its_manufactur
     auto bridge      = makeBridge();
     bridge.name      = "Heliograph";
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     // The manufacturer is already its own field. Repeating it in the name gave Home Assistant
@@ -540,7 +540,7 @@ static void test_an_inverter_without_a_model_still_gets_a_usable_name() {
     auto bridge = makeBridge();
     bridge.name = "Heliograph";
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     // Falling back to the manufacturer is the one case where the repetition is acceptable:
@@ -561,7 +561,8 @@ static void test_every_entity_on_a_device_has_a_distinct_display_name() {
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
     const auto entities =
-        buildDiscoveryEntities(*store.snapshot(), bridge, topics, kDefaultDiscoveryPrefix);
+        buildDiscoveryEntities(*store.snapshot(), bridge, topics, kDefaultDiscoveryPrefix,
+                               bridge.bridgeId);
 
     // Home Assistant derives the entity id from the display name and silently disambiguates
     // duplicates with _2/_3 -- a suffix that carries no meaning and reorders itself whenever a
@@ -584,7 +585,7 @@ static void test_no_control_entities_for_a_read_only_driver() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     // Nothing that can be commanded: no number, switch or select component anywhere.
     for (const auto& e : entities) {
@@ -600,7 +601,7 @@ static void test_config_topics_are_well_formed() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     const auto* e = findEntity(entities, "heliograph-a1b2c3_ac_power_total");
     TEST_ASSERT_EQUAL_STRING("homeassistant/sensor/heliograph-a1b2c3/ac_power_total/config",
@@ -625,7 +626,8 @@ static void test_the_mock_hybrid_gets_battery_and_phase_entities_for_free() {
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
     const auto entities =
-        buildDiscoveryEntities(*store.snapshot(), bridge, topics, kDefaultDiscoveryPrefix);
+        buildDiscoveryEntities(*store.snapshot(), bridge, topics, kDefaultDiscoveryPrefix,
+                               bridge.bridgeId);
 
     TEST_ASSERT_NOT_NULL(findEntity(entities, "heliograph-a1b2c3_battery_soc"));
     TEST_ASSERT_NOT_NULL(findEntity(entities, "heliograph-a1b2c3_ac_phase_l3_voltage"));
@@ -841,8 +843,57 @@ static void test_reset_forces_the_next_publish() {
     TEST_ASSERT_TRUE(t.shouldPublish(state, g_now + 1000));
 }
 
+// --- several inverters on one bus ---------------------------------------------------------
+
+// The whole back-compat contract of this change in one assertion: the FIRST device keeps the
+// topics it has always published on. Moving it would change every Home Assistant entity's
+// unique_id, and an existing install would lose its recorder history for a feature it is not
+// even using.
+static void test_the_first_device_keeps_the_bridge_scoped_topics() {
+    const MqttTopics legacy(kDefaultBaseTopic, "heliograph-a1b2c3");
+    const MqttTopics first(kDefaultBaseTopic, "heliograph-a1b2c3", "");
+    TEST_ASSERT_EQUAL_STRING(legacy.state().c_str(), first.state().c_str());
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/state", first.state().c_str());
+}
+
+static void test_further_devices_get_their_own_subtree() {
+    const MqttTopics second(kDefaultBaseTopic, "heliograph-a1b2c3", "growatt_modbus-2");
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/device/growatt_modbus-2/state",
+                             second.state().c_str());
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/device/growatt_modbus-2/identity",
+                             second.identity().c_str());
+}
+
+// Two inverters must not land on each other's entities. Before the unique base existed, every
+// unique_id was built from the bridge id alone, so three identical inverters announced three
+// times over the SAME entity -- and Home Assistant merged them into one.
+static void test_two_devices_produce_distinct_unique_ids_and_ha_devices() {
+    Rig               r;
+    const DeviceState state  = r.poll();
+    const BridgeInfo  bridge = makeBridge();
+
+    const MqttTopics t1(kDefaultBaseTopic, bridge.bridgeId);
+    const MqttTopics t2(kDefaultBaseTopic, bridge.bridgeId, "growatt_modbus-2");
+    const auto       first  = buildDiscoveryEntities(state, bridge, t1, kDefaultDiscoveryPrefix,
+                                                     bridge.bridgeId);
+    const auto       second = buildDiscoveryEntities(state, bridge, t2, kDefaultDiscoveryPrefix,
+                                                     bridge.bridgeId + "_growatt_modbus-2");
+
+    TEST_ASSERT_TRUE(!first.empty() && first.size() == second.size());
+    for (const auto& e : first) {
+        for (const auto& o : second) {
+            TEST_ASSERT_TRUE(e.uniqueId != o.uniqueId);
+            TEST_ASSERT_TRUE(e.configTopic != o.configTopic);
+        }
+    }
+}
+
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_the_first_device_keeps_the_bridge_scoped_topics);
+    RUN_TEST(test_further_devices_get_their_own_subtree);
+    RUN_TEST(test_two_devices_produce_distinct_unique_ids_and_ha_devices);
     RUN_TEST(test_topics_are_built_consistently);
     RUN_TEST(test_state_payload_is_valid_json_with_the_expected_values);
     RUN_TEST(test_unsupported_measurements_are_absent_not_null);

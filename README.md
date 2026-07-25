@@ -153,9 +153,9 @@ own address before you connect them together.
 > ```
 >
 > Then restart. Two more things to know before wiring three: discovery probes only the default
-> address, so the others must be added by hand; and **Home Assistant, Modbus TCP and Prometheus
-> still carry the first device only** — the REST API and `/api/v1/devices` have all of them.
-> Both are next on the list, not wiring faults.
+> address, so the others must be added by hand; and **Modbus TCP and Prometheus still carry the first
+> device only** — REST, `/api/v1/devices` and Home Assistant have all of them. Both are next on
+> the list, not wiring faults.
 
 ### 2. Flash the firmware
 

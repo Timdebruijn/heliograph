@@ -10,8 +10,20 @@ namespace heliograph::mqtt {
 /// call site, where a typo silently publishes into the void.
 class MqttTopics {
 public:
-    MqttTopics(std::string baseTopic, std::string bridgeId)
-        : prefix_(std::move(baseTopic) + "/" + std::move(bridgeId)) {}
+    /// `deviceKey` empty means the bridge-scoped tree: `<base>/<bridgeId>/...`. That is also
+    /// what the FIRST device publishes on, unchanged from before this bridge could poll more
+    /// than one -- deliberately, because moving it would change every Home Assistant entity's
+    /// unique_id and cost an existing install its whole recorder history for a feature it is
+    /// not using. Devices 2..N get `<base>/<bridgeId>/device/<key>/...`.
+    ///
+    /// The asymmetry is the price of not breaking what already works, and it is confined to
+    /// this constructor: everything downstream just uses the prefix it is given.
+    MqttTopics(std::string baseTopic, std::string bridgeId, std::string deviceKey = {})
+        : prefix_(std::move(baseTopic) + "/" + std::move(bridgeId)) {
+        if (!deviceKey.empty()) {
+            prefix_ += "/device/" + std::move(deviceKey);
+        }
+    }
 
     /// Whether the BRIDGE is reachable -- not the inverter.
     ///
@@ -24,7 +36,9 @@ public:
     std::string identity() const { return prefix_ + "/identity"; }
     std::string capabilities() const { return prefix_ + "/capabilities"; }
 
-    /// Bridge relay control (DRM contacts). Commands come in on relaySet, acknowledged
+    /// Bridge relay control (DRM contacts). These belong to the BRIDGE, not to any inverter,
+    /// so they are only ever built from a bridge-scoped MqttTopics -- never from a device one.
+    /// Commands come in on relaySet, acknowledged
     /// state goes out on relayState. The one wildcard subscription this firmware has.
     std::string relaySet(uint8_t index) const {
         return prefix_ + "/relay/" + std::to_string(index) + "/set";

@@ -20,6 +20,29 @@ Configurable; defaults to being derived from the MAC so that two bridges never c
 | `heliograph/<bridge_id>/relay/<n>/state` | ✔ | 1 | `ON` / `OFF` — relay boards only |
 | `heliograph/<bridge_id>/relay/<n>/set` | — | 1 | Command topic (subscribed) — relay boards only |
 
+### More than one inverter
+
+The **first** device publishes on the topics above, unchanged from when a bridge polled only
+one. That is deliberate: moving it would change every Home Assistant entity's `unique_id` and
+cost an existing install its recorder history for a feature it is not using.
+
+Devices 2..N get their own subtree, keyed by device id:
+
+| Topic | Retained | QoS | Payload |
+|---|---|---|---|
+| `heliograph/<bridge_id>/device/<device_id>/state` | ✔ | 0 | Measurements + status (JSON) |
+| `heliograph/<bridge_id>/device/<device_id>/identity` | ✔ | 1 | Device identity (JSON) |
+| `heliograph/<bridge_id>/device/<device_id>/capabilities` | ✔ | 1 | Capabilities (JSON) |
+
+`availability`, `diagnostics` and the relay/DRM topics stay bridge-scoped — they describe the
+bridge, not any inverter. Availability tracking the bridge is also why a sleeping inverter does
+not make its entities unavailable at night.
+
+Each device gets its own Home Assistant device block, its own `unique_id`s and its own retained
+discovery config topics. `<device_id>` is the same id REST uses: the serial number when the
+driver reports one, otherwise the driver id plus the configured address, e.g.
+`growatt_modbus-2`.
+
 **Last Will and Testament:** topic `availability`, payload `offline`, retained, QoS 1. On a
 clean shutdown, the bridge publishes `offline` itself.
 
