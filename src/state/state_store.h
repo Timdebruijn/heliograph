@@ -43,11 +43,13 @@ private:
 
 /// Owns the stores for every known device.
 ///
-/// The MVP allows one active device, enforced by DeviceManager rather than by the interfaces:
-/// nothing here is a singleton, so multiple RS485 devices later need no redesign.
+/// Nothing here is a singleton, which is what made lifting the old one-device cap a matter of
+/// changing this number rather than a redesign. The cap is a bound on memory and on bus time,
+/// not a statement about the protocols: every device shares one half-duplex line, so each one
+/// added stretches the poll cycle by its own transaction time.
 class DeviceManager {
 public:
-    static constexpr size_t kMaxActiveDevices = 1;
+    static constexpr size_t kMaxActiveDevices = kMaxDevices;
 
     /// Returns nullptr when kMaxActiveDevices is reached. Re-adding an existing id returns
     /// the existing store.

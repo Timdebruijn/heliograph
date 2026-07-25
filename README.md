@@ -142,10 +142,12 @@ inverters on one bus**, read **[docs/rs485-bus.md](docs/rs485-bus.md)** first: c
 where the 120 Ω termination goes (two places, not one per device), and why each unit needs its
 own address before you connect them together.
 
-> **This firmware polls one device at a time.** Several inverters can share the bus and the
-> wiring guidance above applies, but the bridge reads whichever address is configured and
-> ignores the rest — and discovery probes only the default address, so only the unit there can
-> be found automatically. Known gap, not a wiring fault.
+> **Several inverters on one bus are polled in turn**, up to eight, each with its own address.
+> Configure the first under *Settings → Driver* and the rest under *Settings → Extra devices*
+> (`additional_devices` over the API). Two caveats worth knowing before you wire three:
+> discovery still probes only the default address, so the others have to be added by hand; and
+> **Home Assistant, Modbus TCP and Prometheus still carry the first device only** — the REST
+> API has all of them. That last one is the next piece of work, not a wiring fault.
 
 ### 2. Flash the firmware
 

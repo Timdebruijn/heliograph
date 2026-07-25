@@ -126,6 +126,30 @@ nothing — `PATCH {"mqtt":{"username":null}}` returns `200` and leaves the stor
 Send `""` to clear the MQTT username. `security.admin_username` cannot be cleared at all:
 `validate()` refuses an empty one.
 
+## `additional_devices` — more than one inverter on the bus
+
+`driver` is device 1. `additional_devices` is a list of devices 2..N, in poll order, each
+`{ "driver_id": "...", "options": { ... } }`. Up to eight devices in total. Empty on every
+single-inverter install.
+
+```json
+{ "additional_devices": [ { "driver_id": "growatt_modbus", "options": { "unit_id": "2" } } ] }
+```
+
+Sending the array **replaces** it; omitting it leaves it alone. There is no per-element patch:
+the list has no stable key to merge on, and an index the caller believes is element 2 may not be
+after someone else's edit. `driver_id` may not be empty — for `driver` an empty id means "pick
+the highest-priority driver compiled in", but for an extra device it would be a poll slot that
+can never be filled.
+
+Adding, removing or retuning a device needs a restart: the drivers and their poll contexts are
+built once, at boot.
+
+**The outputs are not all there yet.** The REST API and the device list carry every configured
+device; **MQTT/Home Assistant, Modbus TCP and Prometheus carry the first one only**, because
+their topic tree, register map and metric names have no device dimension. That is the next piece
+of work and is stated in `docs/architecture.md` too.
+
 ## `serial` — overriding the line the driver picks
 
 Every driver advertises the serial profiles plausible for its protocol and configures the first

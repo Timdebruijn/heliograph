@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "device/device_state.h"
 #include "drivers/driver_descriptor.h"
 #include "transport/serial_profile.h"
 
@@ -66,6 +67,11 @@ struct DriverSettings {
     /// Driver-specific settings, opaque here. The driver declares which keys exist and what
     /// they accept (DriverDescriptor::options); validateDriverOptions checks them against it.
     DriverOptions options;
+
+    friend bool operator==(const DriverSettings& a, const DriverSettings& b) {
+        return a.id == b.id && a.autoDetect == b.autoDetect && a.options == b.options;
+    }
+    friend bool operator!=(const DriverSettings& a, const DriverSettings& b) { return !(a == b); }
 };
 
 // There is deliberately no RS485/serial section here. Line settings are a property of the
@@ -143,7 +149,16 @@ struct Configuration {
     MqttSettings     mqtt;
     ModbusSettings   modbus;
     PollingSettings  polling;
+    /// Device 1. Kept as its own field rather than folded into a list: every existing config,
+    /// every REST client and the whole settings page address it by this name, and renaming it
+    /// would be a migration with no benefit to show for it.
     DriverSettings   driver;
+    /// Devices 2..N on the same bus, in poll order. Empty on every single-inverter install,
+    /// which is what keeps this invisible until someone actually chains a second unit.
+    ///
+    /// Deliberately NOT called `devices`: a field of that name sitting next to `driver` reads
+    /// as "all of them", and a client that iterated it would silently skip the first inverter.
+    std::vector<DriverSettings> additionalDevices;
     RelaySettings    relays;
     NtpSettings      ntp;
     SerialOverride   serial;

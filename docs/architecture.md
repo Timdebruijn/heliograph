@@ -241,7 +241,7 @@ EverSolar:
   .supportLevel = DriverSupportLevel::Experimental,   // → Beta after Phase 3, Stable after Phase 9
   .probePriority = 10,
   .supportsAutoDetection = true,
-  .supportsMultipleDevices = true,    // protocol supports it; MVP allows 1
+  .supportsMultipleDevices = true,    // protocol supports it
   .supportsRead = true,
   .supportsWrite = false,             // 0x12/0x13 empty in the protocol
 }
@@ -632,6 +632,29 @@ Modbus TCP has no encryption, no authentication, and no authorization. This is s
 explicitly in the README and `docs/security.md`: only expose it on a trusted or filtered
 network.
 
+## Several devices on one bus
+
+`DeviceManager` holds up to `kMaxDevices` (8) stores, one per device. `setup()` builds one
+driver and one `DeviceContext` per configured device — `driver` first, then `additional_devices`
+in order — and `rs485Task` polls **one device per loop iteration**, round-robin.
+
+One per iteration rather than a loop over all of them: the watchdog is fed once per iteration,
+and a bus of eight silent devices would otherwise spend eight transaction deadlines back to back
+before the outputs ran. Each context keeps its own interval and back-off, so a dead inverter
+backs off on its own without slowing the others, and the cursor stops a device whose back-off
+has just expired from always losing to the one before it in the list.
+
+A device that cannot be created or started is named on the console and skipped; the others still
+poll. Two configured devices that resolve to the same identity (a duplicated unit id) collide in
+`DeviceManager::add`, which is reported rather than silently polling one twice.
+
+**The outputs have not caught up.** `MqttOutput::loop`, `ModbusTcpServer::refresh` and
+`buildMetrics` each take a single `DeviceState`, so they are fed the first device only. The REST
+API is already device-keyed and carries all of them. Giving the other three a device dimension —
+a topic segment, a register-map offset, a metric label — is the next piece of work, and until it
+lands the limitation is stated in the README, `docs/rest-api.md` and next to the code in
+`main.cpp` rather than left to be discovered from a missing Home Assistant entity.
+
 ## Test strategy
 
 `env:native` runs on the host, without an ESP32. The protocol core (`eversolar_protocol.cpp`,
@@ -648,6 +671,7 @@ network.
 | `test_measurements` | supported/valid/stale matrix, capability filtering |
 | `test_commands` | Read-only rejection per command type, range validation, rate limiting |
 | `test_device_context` | Bus errors reaching the metrics per transaction rather than per poll verdict, including the construction baseline and a counter wrap |
+| `test_provisioning` | NVS round-trips, migrations, OTA gates, and that a config written before a field existed still loads |
 
 Fixtures: `test/fixtures/` with frames from the reference, supplemented in Phase 3 with **real
 recordings** from the TL3000-20, plus deliberately corrupted frames and a night scenario.

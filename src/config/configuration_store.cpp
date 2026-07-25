@@ -121,6 +121,16 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     ntp["timezone"]      = config.ntp.timezone;
     ntp["timezone_name"] = config.ntp.timezoneName;
 
+    JsonArray extra = doc["additional_devices"].to<JsonArray>();
+    for (const auto& d : config.additionalDevices) {
+        JsonObject e   = extra.add<JsonObject>();
+        e["driver_id"] = d.id;
+        JsonObject o   = e["options"].to<JsonObject>();
+        for (const auto& [key, value] : d.options) {
+            o[key] = value;
+        }
+    }
+
     JsonObject serial   = doc["serial"].to<JsonObject>();
     serial["override"]  = config.serial.enabled;
     serial["baud_rate"] = config.serial.profile.baudRate;
@@ -261,6 +271,23 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
         if (ntp["server"].is<const char*>())   parsed.ntp.server   = ntp["server"].as<const char*>();
         if (ntp["timezone"].is<const char*>()) parsed.ntp.timezone = ntp["timezone"].as<const char*>();
         if (ntp["timezone_name"].is<const char*>()) parsed.ntp.timezoneName = ntp["timezone_name"].as<const char*>();
+    }
+    if (JsonArrayConst extra = doc["additional_devices"]; !extra.isNull()) {
+        for (JsonObjectConst e : extra) {
+            DriverSettings d;
+            if (e["driver_id"].is<const char*>()) d.id = e["driver_id"].as<const char*>();
+            if (JsonObjectConst o = e["options"]; !o.isNull()) {
+                for (JsonPairConst kv : o) {
+                    if (kv.value().is<const char*>()) {
+                        d.options[kv.key().c_str()] = kv.value().as<const char*>();
+                    }
+                }
+            }
+            // A nameless entry is dropped rather than loaded: validate() would refuse the whole
+            // configuration for it, and refusing to boot over a corrupted list entry is worse
+            // than polling one inverter fewer.
+            if (!d.id.empty()) parsed.additionalDevices.push_back(std::move(d));
+        }
     }
     if (JsonObjectConst serial = doc["serial"]; !serial.isNull()) {
         if (serial["override"].is<bool>()) parsed.serial.enabled = serial["override"].as<bool>();

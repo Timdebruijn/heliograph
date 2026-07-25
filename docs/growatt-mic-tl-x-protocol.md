@@ -194,12 +194,16 @@ address in turn and confirm exactly one answers, at the address you expect.
    you pick one. That is deliberate: getting the map wrong is the one mistake here that does
    not announce itself. See the warning below.
 
-   > **This firmware polls one device.** With three units on the bus you will see only the one
-   > at the address configured here — the other two are wired, addressed and ignored, with
-   > nothing on any screen saying so. Discovery does not sweep addresses either: it probes the
-   > default unit id, so only the inverter at address 1 can ever appear as a candidate. Both
-   > are known gaps, not symptoms of a wiring fault; bring the units up one at a time by
-   > changing `unit_id` here.
+   > **For the second and third unit**, add an entry each under *Settings → Extra devices*:
+   > same driver and register map, its own `unit_id`. They are polled in turn on the one bus,
+   > and the change takes effect after a restart. Discovery still probes only the default
+   > address, so it will find the unit at address 1 and not the others — that is a known gap,
+   > not a wiring fault. Bring them up one at a time and check each in `/api/v1/devices`
+   > before adding the next.
+   >
+   > **Home Assistant, Modbus TCP and Prometheus still publish the first device only.** All
+   > three appear in the REST API and in the device list; only one reaches those outputs. Next
+   > piece of work.
 4. Set log level to `trace` and read `/api/v1/logs`. The `GROWATT in <addr>: ...` lines are
    the raw block dump.
 5. Check the dump against the inverter's own app: PV voltage, AC power, today's energy,

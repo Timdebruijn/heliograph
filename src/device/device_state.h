@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -12,6 +13,13 @@
 #include "measurement.h"
 
 namespace heliograph {
+
+/// How many devices one bridge will poll, and the size of the state table that holds them.
+///
+/// Lives here rather than in the config or the state store because both need it and neither
+/// should depend on the other. A bound, not a target: every device shares one half-duplex bus,
+/// so each one added stretches the poll cycle by its own transaction time.
+inline constexpr size_t kMaxDevices = 8;
 
 /// Thresholds for the online/stale state machine. Defaults follow docs/architecture.md.
 struct StalenessPolicy {

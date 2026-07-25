@@ -275,6 +275,81 @@ static void test_changing_the_serial_override_requires_a_reboot() {
     TEST_ASSERT_FALSE(configChangeRequiresReboot(base, idle));
 }
 
+// --- several devices on one bus ----------------------------------------------------------
+
+static void test_additional_devices_round_trip_through_a_patch() {
+    Configuration c;
+    ConfigError   e;
+    TEST_ASSERT_TRUE(c.additionalDevices.empty());  // invisible on a single-inverter install
+
+    TEST_ASSERT_TRUE(applyConfigPatch(
+        R"({"additional_devices":[{"driver_id":"growatt_modbus","options":{"unit_id":"2"}},)"
+        R"({"driver_id":"growatt_modbus","options":{"unit_id":"3"}}]})", c, e));
+    TEST_ASSERT_EQUAL_UINT32(2, c.additionalDevices.size());
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus", c.additionalDevices[1].id.c_str());
+    TEST_ASSERT_EQUAL_STRING("3", c.additionalDevices[1].options["unit_id"].c_str());
+
+    std::string json;
+    TEST_ASSERT_TRUE(serializeConfig(c, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(2, doc["additional_devices"].size());
+    TEST_ASSERT_EQUAL_STRING("2", doc["additional_devices"][0]["options"]["unit_id"]);
+}
+
+// Whole-list replacement, not a merge: there is no stable key to merge on, and an index the
+// caller believes is element 2 may not be after someone else's edit.
+static void test_sending_the_list_replaces_it_and_omitting_it_does_not() {
+    Configuration c;
+    ConfigError   e;
+    applyConfigPatch(R"({"additional_devices":[{"driver_id":"sunspec"}]})", c, e);
+    TEST_ASSERT_EQUAL_UINT32(1, c.additionalDevices.size());
+
+    applyConfigPatch(R"({"bridge_name":"Zolder"})", c, e);
+    TEST_ASSERT_EQUAL_UINT32(1, c.additionalDevices.size());  // untouched
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"additional_devices":[]})", c, e));
+    TEST_ASSERT_EQUAL_UINT32(0, c.additionalDevices.size());  // explicitly cleared
+}
+
+static void test_an_extra_device_must_name_a_driver() {
+    Configuration c;
+    ConfigError   e;
+    // Empty is legal for `driver` -- it means "pick the highest-priority one". For an extra
+    // device it is a poll slot that can never be filled, so the whole patch is refused and the
+    // config is left untouched (applyConfigPatch validates the merged copy before adopting it).
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"additional_devices":[{"options":{"unit_id":"2"}}]})",
+                                       c, e));
+    TEST_ASSERT_EQUAL_STRING("additional_devices[0].driver_id", e.field.c_str());
+    TEST_ASSERT_TRUE(c.additionalDevices.empty());
+}
+
+static void test_the_device_count_is_bounded() {
+    Configuration c;
+    ConfigError   e;
+    for (size_t i = 0; i < kMaxDevices - 1; ++i) {
+        c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {}});
+    }
+    TEST_ASSERT_TRUE(validate(c, e));  // driver + kMaxDevices-1 == the cap
+
+    c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {}});
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("additional_devices", e.field.c_str());
+}
+
+// The drivers and their poll contexts are built once, in setup(). Adding an inverter changes
+// nothing until the next boot, and saying otherwise would leave someone waiting for a device
+// that is never going to appear.
+static void test_adding_a_device_requires_a_reboot() {
+    const Configuration base;
+    auto                more = base;
+    more.additionalDevices.push_back(DriverSettings{"sunspec", false, {}});
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, more));
+
+    auto retuned = more;
+    retuned.additionalDevices[0].options["unit_id"] = "4";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(more, retuned));
+}
+
 static void test_reboot_required_flag_is_patch_only() {
     auto        c = configWithSecrets();
     std::string json;
@@ -1206,6 +1281,11 @@ int main(int, char**) {
     RUN_TEST(test_a_patch_that_sets_both_keeps_the_line_it_asked_for);
     RUN_TEST(test_an_unrelated_save_leaves_the_line_override_alone);
     RUN_TEST(test_changing_the_serial_override_requires_a_reboot);
+    RUN_TEST(test_additional_devices_round_trip_through_a_patch);
+    RUN_TEST(test_sending_the_list_replaces_it_and_omitting_it_does_not);
+    RUN_TEST(test_an_extra_device_must_name_a_driver);
+    RUN_TEST(test_the_device_count_is_bounded);
+    RUN_TEST(test_adding_a_device_requires_a_reboot);
     RUN_TEST(test_reboot_required_flag_is_patch_only);
     RUN_TEST(test_reboot_required_only_for_boot_time_settings);
     RUN_TEST(test_patch_leaves_absent_fields_alone);
