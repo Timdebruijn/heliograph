@@ -63,7 +63,8 @@ struct RestContext {
     /// Current discovery report, for the wizard to poll.
     std::function<DiscoveryReport()> discoveryReport;
     /// Wipes stored configuration including credentials, then reboots into the setup portal.
-    /// With no reset button on this board, this is a user's main way back from a bad config.
+    /// The same wipe the BOOT-hold performs, reached over the network instead of the button --
+    /// which is what a user without physical access has when a config locks them out.
     std::function<bool()> requestFactoryReset;
     /// True while the setup portal is up: the API then serves the setup page and /provision.
     std::function<bool()> portalActive;

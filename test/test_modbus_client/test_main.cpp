@@ -145,6 +145,38 @@ static void test_a_request_larger_than_the_buffer_is_refused_before_the_bus() {
     TEST_ASSERT_TRUE(t.writes.empty());  // nothing was ever put on the bus
 }
 
+// A CRC-valid reply that simply carries FEWER registers than were asked for is not success.
+// The codec only bounds the byte count against the caller's capacity, so a short frame leaves
+// the tail of the buffer untouched -- while the driver's block descriptor already claims the
+// full count. Growatt's scratch is a member array (indeterminate on the first poll before it
+// was value-initialised) and SunSpec zero-fills, where a zero scale factor is legal; either
+// way the untouched tail would be decoded and published as genuine readings on a poll that
+// reports Ok. Found in review 2026-07-25.
+static void test_a_reply_with_too_few_registers_is_refused() {
+    MockTransport t;
+    t.replyWith(goodReply(kUnit, kReadHoldingRegisters, {0x1111, 0x2222}));  // 2, not 4
+
+    uint16_t   regs[4] = {0xDEAD, 0xDEAD, 0xDEAD, 0xDEAD};
+    const auto r = readRegisters(t, kUnit, kReadHoldingRegisters, kFrom, 4, regs, 4);
+
+    TEST_ASSERT_EQUAL(ReadStatus::Protocol, r.status);
+    // Whatever the caller had there stays there, and the caller is told not to trust it.
+    TEST_ASSERT_EQUAL_UINT16(0xDEAD, regs[2]);
+    TEST_ASSERT_EQUAL_UINT16(0xDEAD, regs[3]);
+}
+
+// The exact-length reply must still be Ok -- the guard above must not cost a legitimate read.
+static void test_a_reply_with_exactly_the_requested_count_is_ok() {
+    MockTransport t;
+    t.replyWith(goodReply(kUnit, kReadInputRegisters, {1, 2, 3, 4}));
+
+    uint16_t   regs[4] = {};
+    const auto r = readRegisters(t, kUnit, kReadInputRegisters, kFrom, 4, regs, 4);
+
+    TEST_ASSERT_EQUAL(ReadStatus::Ok, r.status);
+    TEST_ASSERT_EQUAL_UINT16(4, regs[3]);
+}
+
 static void test_a_zero_length_read_is_refused() {
     MockTransport t;
     uint16_t      regs[1] = {};
@@ -163,6 +195,8 @@ int main(int, char**) {
     RUN_TEST(test_a_reply_from_another_unit_is_refused);
     RUN_TEST(test_an_endless_trickle_still_hits_the_deadline);
     RUN_TEST(test_a_request_larger_than_the_buffer_is_refused_before_the_bus);
+    RUN_TEST(test_a_reply_with_too_few_registers_is_refused);
+    RUN_TEST(test_a_reply_with_exactly_the_requested_count_is_ok);
     RUN_TEST(test_a_zero_length_read_is_refused);
     return UNITY_END();
 }

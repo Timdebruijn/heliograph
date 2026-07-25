@@ -34,9 +34,39 @@ plain text. Anyone who can read the flash over USB can read them. Flash encrypti
 this but makes OTA and recovery considerably more complex; given the threat model (LAN, no
 physical access) this has not been done. Be aware of it.
 
-**The setup AP is open.** The window is small (until
-the first successful connection) but it is a window: anyone within wifi range at that
-moment can configure the bridge.
+**The setup AP is open**, and it is not limited to first boot: the bridge raises it again on
+an already-configured device after repeated WiFi failures (a router reboot reaches that in
+about two minutes), because without a reset button that portal is the only way back in.
+
+Provisioning over it is therefore gated on whether a credential exists yet, not on whether
+the portal happens to be up. On a factory-fresh device `/api/v1/provision` is open — there is
+nothing to protect and no password to present. Once an admin password is set, the same
+endpoint requires it even while the portal is running. It was previously open in both cases,
+which meant anyone in radio range of a bridge whose WiFi had dropped could overwrite its
+configuration, including the admin password and the relay gates.
+
+`/api/v1/wifi/scan` carries the same gate, and the setup page asks for the admin password when
+the bridge already has one.
+
+**What the open AP still exposes is read access, and that is not nothing.** The web server
+listens on every interface, so anyone joining the failure-portal AP reaches the same
+unauthenticated read endpoints a LAN user does: `/api/v1/status`, `/devices`, `/diagnostics`,
+`/discovery`, `/drivers`, `/config` (GET) and `/metrics`. Between them that is live production
+data, the inverter's model and serial number, your WiFi SSID and hostname, the MQTT host, port
+and base topic, the relay roles, and `security.admin_username`. The Modbus TCP server on port
+502 is reachable from that AP too, and Modbus has no authentication at all.
+
+None of it is a secret — no password is served anywhere (see the table above) — and none of it
+grants control. But "an open AP that appears for a few minutes when your WiFi drops" is a
+disclosure surface worth knowing about, and `admin_username` in particular hands out half of a
+login that has no brute-force protection. Closing that one is tracked separately.
+
+**The gate has a cost of its own: authenticating over that AP puts the admin password on the
+air.** HTTP Basic is base64, not encryption, so a passive listener in radio range of the open
+setup AP can read it — and then use it on your LAN. The same is true of the normal web UI over
+plain HTTP, but the setup AP is the case where the network itself is open by design. If that
+matters to you, do the recovery with the board on a cable-fed network, or factory-reset and
+re-provision instead of authenticating over the air.
 
 **No brute-force protection on HTTP Basic.** Rate limiting is on `/actions/*`, not on the
 auth itself.

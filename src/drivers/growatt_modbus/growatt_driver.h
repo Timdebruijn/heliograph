@@ -65,7 +65,13 @@ private:
     /// binary, poll()'s frame with this array on the stack plus the TRACE logging chain peaked
     /// at ~5.2 KB (64%) -- too close to a second stack-canary boot loop. The driver lives on
     /// the heap and rs485Task owns the bus exclusively, so a member is safe.
-    BlockData blocks_[kMaxBlocks];
+    /// Value-initialised so the FIRST poll cannot decode indeterminate memory. It is only that:
+    /// from the second poll on these slots hold whatever the previous poll left, and because a
+    /// slot is claimed by index as blocks_[validCount] a skipped block can leave a neighbour's
+    /// data behind it. What actually keeps stale words out of a reading is readRegisters()
+    /// refusing a reply shorter than requested, plus applyProfile() only walking [0, validCount).
+    /// This initialiser is a floor under the first poll, not the guarantee.
+    BlockData blocks_[kMaxBlocks]{};
 };
 
 }  // namespace heliograph::growatt

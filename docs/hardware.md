@@ -79,10 +79,28 @@ source — a deliberate decision for later, not an accident waiting in a header 
 ## Recovery — hold BOOT to factory-reset
 
 Holding **BOOT for ~5 seconds while the firmware is running** erases the stored
-configuration and reboots into the setup portal. It is the only recovery path on a headless
-board: a config wrong enough to lock you out of the web UI (a bad hostname, a wrong static
-setup) is otherwise unreachable without USB. The hold is deliberately long so it is never one
-accidental brush.
+configuration and reboots into the setup portal. It is the only on-device recovery path on a
+headless board: a config wrong enough to lock you out of the web UI (a bad hostname, a wrong
+static setup) is otherwise unreachable without USB. The hold is deliberately long so it is
+never one accidental brush.
+
+**This carries more weight than it used to.** Provisioning through the setup portal is now
+gated on the admin password once one exists, because that portal also returns on an
+already-configured board after a few minutes without WiFi and its AP is open (see
+[docs/security.md](security.md)). So for a forgotten password this reset — or a USB
+`-factory.bin` flash, which wipes the same NVS — is the way back in.
+
+**Verification status differs per board, and this is worth knowing before you rely on it:**
+
+| Board | BOOT pin | Factory reset measured? |
+|---|---|---|
+| ESP32-S3-Relay-6CH | GPIO0 | **Yes** — hold, LED countdown and release confirmed on hardware 2026-07-23 |
+| ESP32-S3-RS485-CAN | GPIO0 | Schematic only — the pin is confirmed, the 5 s reset has not been run on this board |
+| ESP32-S3-Relay-1CH | GPIO0 | Schematic only — nobody on the project owns one |
+
+The pin is the same GPIO0 on all three and the code path is shared, so there is no reason to
+expect a difference — but "no reason to expect" is not a measurement. If you own an RS485-CAN
+or a 1CH, running it once and reporting the result is a genuinely useful contribution.
 
 **Not to be confused with download mode.** BOOT is GPIO0, the SoC's download strapping pin,
 so holding it *at power-on or during RESET* drops the board into the USB firmware-download

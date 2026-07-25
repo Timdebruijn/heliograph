@@ -149,7 +149,11 @@ async function askAuth(){
     p.value='';d.returnValue='';
     d.onclose=()=>{
       const ok=d.returnValue==='ok'&&p.value!=='';
-      if(ok)sessionStorage.setItem('sb_auth',btoa(u+':'+p.value));
+      // UTF-8, not btoa()'s default. btoa() only throws above U+00FF, so it would silently emit
+      // Latin-1 for é/ë/ü/ö/ç -- and the firmware compares against the UTF-8 bytes it stored,
+      // so such a password could never authenticate here (review, 2026-07-25).
+      if(ok)sessionStorage.setItem('sb_auth',
+        btoa(String.fromCharCode(...new TextEncoder().encode(u+':'+p.value))));
       p.value='';
       resolve(ok);
     };
@@ -629,7 +633,16 @@ async function renderConfig(){
     fallback is used when the network offers none.</div></div>
   <div class="card"><b>Driver</b> <span class="tag" style="font-weight:400">needs restart</span>
     <label for="c_drv">Active driver</label>
-    <select id="c_drv" onchange="reloadDriverOpts()">${(cfgDrivers.drivers||[]).map(d=>
+    <select id="c_drv" onchange="reloadDriverOpts()">${
+      // A stored id that matches no option selects nothing, so the browser silently shows the
+      // first driver -- and the save path then diffs that against the stored value, sees a
+      // change and PATCHes it. The DEFAULT state hits this: a freshly provisioned bridge stores
+      // "" meaning "let the firmware pick the highest-priority driver", so saving any unrelated
+      // setting would quietly pin the driver to whichever one happens to sort first. Same class
+      // as the driver-option select below; fixed here too (review, 2026-07-25).
+      (((cfgDrivers.drivers||[]).some(d=>d.id===c.driver.id))?'':
+        `<option value="${esc(c.driver.id)}" selected>${c.driver.id?esc(c.driver.id)+' — not recognised':'(firmware picks automatically)'}</option>`)+
+      (cfgDrivers.drivers||[]).map(d=>
       `<option value="${esc(d.id)}" ${d.id===c.driver.id?'selected':''}>${esc(d.display_name)} (${esc(d.support_level)})</option>`).join('')}</select>
     ${driverOpts}
   </div>

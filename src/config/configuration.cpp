@@ -6,6 +6,7 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -349,7 +350,8 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
            a.ntp.server != b.ntp.server || a.ntp.timezone != b.ntp.timezone;
 }
 
-bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error) {
+bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error,
+                      const DriverLookupFn& lookupDriver) {
     JsonDocument doc;
     if (deserializeJson(doc, json) != DeserializationError::Ok) {
         error = {"", "body is not valid JSON"};
@@ -359,6 +361,10 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
         error = {"", "body must be a JSON object"};
         return false;
     }
+
+    // Driver option keys this request itself supplied. Collected during the merge and consulted
+    // by the orphan cleanup below, which must never drop what the caller just asked for.
+    std::vector<std::string> suppliedOptionKeys;
 
     // Merge into a copy: validation runs on the result, so a rejected patch never leaves a
     // half-applied configuration behind.
@@ -407,7 +413,64 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
                     return false;
                 }
                 merged.driver.options[kv.key().c_str()] = kv.value().as<const char*>();
+                suppliedOptionKeys.emplace_back(kv.key().c_str());
             }
+        }
+    }
+    // Heal driver options the resulting driver cannot accept, so that a stored value can never
+    // make the configuration permanently unsaveable. Two shapes of that:
+    //   - a key the driver does not declare at all -- an orphan from a previous driver, which
+    //     the merge has no way to delete;
+    //   - a declared key holding a value outside the driver's allowed set, which happens without
+    //     anyone editing it when a firmware update renames or drops a choice. Not theoretical:
+    //     a driver whose option values are generated from the shipped device profiles narrows
+    //     that list whenever a profile is renamed or removed.
+    // Either one makes the REST layer's validateDriverOptions refuse EVERY later PATCH, including
+    // ones that touch nothing driver-related -- the lockout this batch exists to remove, which
+    // shipped in 0.12.0 as the orphan case.
+    //
+    // Runs on every patch, not only one that touches `driver`: a bridge already carrying a bad
+    // value must heal on the next save it makes, otherwise it stays stuck forever.
+    //
+    // Only values this request did NOT assert are touched. "Asserted" means the patch supplied
+    // the key AND changed it -- a caller echoing back what it just read (the obvious
+    // read-modify-write script) is asking for nothing and must not thereby pin a broken value,
+    // while a genuine new value is left alone so the REST layer reports the mistake instead of
+    // this code silently swallowing it. And nothing at all happens when the id resolves to no
+    // driver: that would orphan every option at once, and a typo'd DRIVER id has to stay
+    // recoverable by correcting it.
+    //
+    // An earlier attempt simply cleared the map whenever the id changed. Review showed that
+    // silently wiped a working setup on a discovery-wizard click, on a typo, and on an empty id,
+    // and never repaired an already-stuck config (2026-07-25).
+    if (const DriverDescriptor* target = lookupDriver ? lookupDriver(merged.driver.id) : nullptr) {
+        for (auto it = merged.driver.options.begin(); it != merged.driver.options.end();) {
+            const bool supplied = std::find(suppliedOptionKeys.begin(), suppliedOptionKeys.end(),
+                                            it->first) != suppliedOptionKeys.end();
+            const auto stored   = config.driver.options.find(it->first);
+            const bool asserted = supplied && (stored == config.driver.options.end() ||
+                                               stored->second != it->second);
+            if (asserted) {
+                ++it;
+                continue;
+            }
+            const DriverOption* declared = nullptr;
+            for (const auto& o : target->options) {
+                if (o.key == it->first) {
+                    declared = &o;
+                    break;
+                }
+            }
+            if (declared == nullptr) {
+                it = merged.driver.options.erase(it);
+                continue;
+            }
+            if (!declared->allowedValues.empty() &&
+                std::find(declared->allowedValues.begin(), declared->allowedValues.end(),
+                          it->second) == declared->allowedValues.end()) {
+                it->second = declared->defaultValue;
+            }
+            ++it;
         }
     }
 

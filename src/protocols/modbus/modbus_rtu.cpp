@@ -148,7 +148,10 @@ ParseResult parseReadResponse(const uint8_t* buf, size_t len, uint8_t expectedUn
     if (buf[1] != expectedFunction) {
         return ParseResult::WrongFunction;
     }
-    // Byte count must be even (whole registers) and match the caller's buffer.
+    // Byte count must be even (whole registers) and fit the caller's buffer. This is a
+    // CAPACITY check only -- the codec is not told how many registers were requested, so a
+    // reply carrying fewer than that still parses as Ok with a smaller registerCount. Callers
+    // must compare registerCount against what they asked for; readRegisters() does.
     if ((byteCount & 1) != 0) {
         return ParseResult::Malformed;
     }

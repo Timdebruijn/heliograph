@@ -194,8 +194,12 @@ bool RestApi::begin() {
     // seconds and briefly takes the radio off-channel -- fine for a deliberate button press.
     g_server->on("/api/v1/wifi/scan", HTTP_GET,
                  [this, authorised](AsyncWebServerRequest* request) {
-        const bool portal = context_.portalActive && context_.portalActive();
-        if (!portal && !authorised(request)) {
+        // Same gate as /provision, and for the same reason: the portal also returns on an
+        // already-configured device after repeated WiFi failures, so "the portal is up" does
+        // not imply "there is nothing to protect". Open only while no password exists yet.
+        const bool portal   = context_.portalActive && context_.portalActive();
+        const bool unsealed = context_.config->security.adminPassword.empty();
+        if (!(portal && unsealed) && !authorised(request)) {
             return;  // authorised() answered with 401
         }
         request->send(200, kJson, context_.scanNetworks().c_str());
@@ -203,7 +207,7 @@ bool RestApi::begin() {
 
     g_server->on(
         "/api/v1/provision", HTTP_POST,
-        [this](AsyncWebServerRequest* request) {
+        [this, authorised](AsyncWebServerRequest* request) {
             // The request handler forms the response; the body handler only collects. If the
             // body never completed, nothing was queued and this is a genuinely empty POST.
             if (bodyOwner_ != request) {
@@ -214,6 +218,21 @@ bool RestApi::begin() {
                 releaseBody();
                 sendError(request, {403, "portal_only", "only available during setup"});
                 return;
+            }
+            // Skipping auth here is safe only while there is nothing to protect. The portal is
+            // NOT exclusive to first boot: WifiManager raises it again on an already-provisioned
+            // device after ProvisioningPolicy::failuresBeforePortal failed attempts, which a
+            // router reboot reaches in about two minutes -- and that AP is open (softAP with no
+            // password). Gated on portalActive() alone, anyone in radio range could then POST a
+            // full config patch over a configured bridge: admin password, broker, relays.enabled,
+            // read_only_mode. On a relay board that is remote control of the DRM contacts.
+            //
+            // So the gate is "does a credential exist yet", not "is the portal up". On first boot
+            // the password is empty and setup proceeds unauthenticated as before; afterwards the
+            // user knows the password they set (review, 2026-07-25).
+            if (!context_.config->security.adminPassword.empty() && !authorised(request)) {
+                releaseBody();
+                return;  // authorised() stored the 401
             }
 
             Configuration updated = *context_.config;
@@ -432,7 +451,12 @@ bool RestApi::begin() {
             const Configuration before  = *context_.config;
             Configuration       updated = before;
             ConfigError         error;
-            const bool          parsed  = applyConfigPatch(bodyBuffer_, updated, error);
+            // The lookup lets the config layer drop options orphaned by a previous driver
+            // without itself knowing what a driver is; see applyConfigPatch's contract.
+            const auto lookupDriver = [this](const std::string& id) -> const DriverDescriptor* {
+                return context_.registry != nullptr ? context_.registry->find(id) : nullptr;
+            };
+            const bool parsed = applyConfigPatch(bodyBuffer_, updated, error, lookupDriver);
             releaseBody();
             if (!parsed) {
                 sendError(request, {400, "invalid_config",
@@ -452,7 +476,7 @@ bool RestApi::begin() {
             // Only the PATCH path is gated. A config already in flash is deliberately still
             // loaded with the warn-and-fall-back behaviour: refusing it at boot would turn a
             // bad option into an unbootable bridge.
-            if (const DriverDescriptor* d = context_.registry->find(updated.driver.id)) {
+            if (const DriverDescriptor* d = lookupDriver(updated.driver.id)) {
                 DriverOptionError optionError;
                 if (!validateDriverOptions(*d, updated.driver.options, optionError)) {
                     sendError(request, {400, "invalid_config",
@@ -460,6 +484,21 @@ bool RestApi::begin() {
                                             optionError.message});
                     return;
                 }
+            } else if (!updated.driver.id.empty() && updated.driver.id != before.driver.id) {
+                // An id naming no compiled-in driver is refused rather than stored: it leaves the
+                // bridge pointed at nothing, and it blinds the orphan cleanup above, which cannot
+                // judge options for a driver it cannot resolve. Empty stays legal -- it means
+                // "let the firmware pick the highest-priority driver".
+                //
+                // Only when THIS patch changes it. A stored id can become unresolvable without
+                // anyone touching it -- flashing a build that compiles that driver out is enough,
+                // which the mock env does to every real driver -- and refusing on the stored value
+                // would make every unrelated setting unsaveable, recoverable only by a factory
+                // reset. That is the same lockout this batch exists to remove; found reviewing
+                // my own fix (2026-07-25).
+                sendError(request, {400, "invalid_config",
+                                    "driver.id: unknown driver '" + updated.driver.id + "'"});
+                return;
             }
 
             if (!context_.saveConfig(updated)) {
@@ -635,9 +674,19 @@ bool RestApi::begin() {
     // that a definitive error response was already stored.
     g_server->on(
         "/api/v1/ota", HTTP_POST,
-        [this](AsyncWebServerRequest* request) {
+        [this, authorised](AsyncWebServerRequest* request) {
             if (request->_tempObject != nullptr) {
                 return;  // the upload callback already stored the specific error response
+            }
+            // Gated here as well as in the upload callback, because the two run on different
+            // conditions. handleUpload is reached ONLY from the multipart parser (verified in
+            // ESPAsyncWebServer 3.11.2: WebRequest.cpp guards it behind _isMultipart), so a POST
+            // with an empty or non-multipart body never runs the upload callback -- and therefore
+            // never ran authorised() -- yet still lands here. Unguarded, that let anyone on the
+            // LAN call end() on an admin's in-flight image: a failed verify destroys the update,
+            // and a complete one flips the boot partition and reboots (review, 2026-07-25).
+            if (!authorised(request)) {
+                return;  // authorised() stored the 401
             }
             const auto result = g_ota.end();
             if (result != ota::OtaResult::Ok) {
