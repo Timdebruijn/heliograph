@@ -78,6 +78,10 @@ struct BridgeInfo {
     /// showed one, and the difference was a warn in a ring buffer. Every mistake the settings
     /// page can produce lands here, which is why it is here and not only in the log.
     size_t                   devicesConfigured = 0;
+    /// How many of them the firmware actually managed to create at boot. Started is not
+    /// answering -- a driver whose begin() succeeded counts here whether or not the inverter
+    /// has ever replied -- but configured-minus-started is a fault by definition.
+    size_t                   devicesStarted    = 0;
     /// One human-readable line per configured device that is NOT polling. Never a payload byte,
     /// never a secret -- the same strings the boot log carries.
     std::vector<std::string> deviceProblems;

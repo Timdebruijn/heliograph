@@ -129,10 +129,23 @@ nothing — `PATCH {"mqtt":{"username":null}}` returns `200` and leaves the stor
 Send `""` to clear the MQTT username. `security.admin_username` cannot be cleared at all:
 `validate()` refuses an empty one.
 
-`devices_configured` is how many devices the configuration asks for; `/api/v1/devices` lists the
-ones actually being polled. When they differ, `device_problems` says why for each missing one —
-the same sentences the boot log carries. The array is always present, empty when there is
-nothing to report, so "no problems" cannot be mistaken for "this firmware does not report them".
+`devices_configured` is how many devices the **current** configuration asks for; `devices_started`
+is how many the firmware built at the last boot. They differ both when something failed and in
+the window between saving a new device and restarting. `device_problems` says why for each
+missing one — the same sentences the boot log carries, each naming the configuration row
+("device 3"), because several rows normally share one driver id. The array is always present,
+empty when there is nothing to report, so "no problems" cannot be mistaken for "this firmware
+does not report them".
+
+**Started is not answering.** A driver whose `begin()` succeeded counts as started whether or
+not the inverter has ever replied — with A and B swapped it never will. Per device,
+`/api/v1/devices/<id>` carries `online`, `data_valid`, `data_stale`,
+`consecutive_poll_failures` and `last_successful_poll_seconds_ago` (`null` when it has never
+answered, which is a different thing from `0`).
+
+`GET /api/v1/status` answers **200 even when nothing is polling**, with an empty device object.
+That is the case where these fields matter most, and refusing the payload for lack of a device
+to describe hid the explanation behind a "cannot reach the bridge" error.
 
 ## `additional_devices` — more than one inverter on the bus
 

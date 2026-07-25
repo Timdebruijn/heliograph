@@ -215,7 +215,6 @@ async function authFetch(url,opts={}){
 function tile(k,v,u,extra=''){return `<div class="card"><div class="k">${esc(k)}</div>
 <div class="v">${esc(v)}<span class="u"> ${esc(u)}</span></div>${extra}</div>`}
 
-let caps=null;
 function render(s){
   const d=s.device,b=s.bridge,m=s.measurements||{};
   const dot=x=>x?'<span class="dot ok"></span>':'<span class="dot bad"></span>';
@@ -300,39 +299,99 @@ function deviceTable(d,caps,m){
 /// and why each missing one is missing. Those strings come from the boot loop, not from
 /// re-deriving device ids in the browser -- the page must not have its own opinion about what
 /// a device id looks like.
-let devsBusy=false;
+// Only keep an OK response. fetch() does not reject on 4xx/5xx, and the error body is valid
+// JSON, so `await r.json()` on a 500 yields a truthy object with none of the expected fields --
+// which this page then renders as `undefined` rows, or as a measurement count of 0. That count
+// is the wrong-register-map tell, so a single failed request would fabricate the exact symptom
+// someone is here to diagnose. The old single-device path carried this guard and a comment
+// about the day it bit; the first version of this function dropped both (review, 2026-07-25).
+async function getJson(url){
+  const r=await fetch(url);
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  return r.json();
+}
+
+// Identity and capabilities do not change while the firmware runs -- they are fixed by the
+// driver at boot. Cached per device so a tab left open re-fetches only what actually moves.
+const devCache={};
+
+/// The one line that must be visible from any tab: some configured device is not running.
+/// Detail stays on the Device tab; this only says look there.
+function deviceBanner(b){
+  const el=$('#banner');
+  if(!el||!b)return;
+  const configured=b.devices_configured;
+  const problems=(b.device_problems||[]).length;
+  // Undefined means this firmware does not report it -- which is not the same as "nothing is
+  // wrong", so say nothing rather than reassure.
+  if(configured===undefined){return}
+  const started=b.devices_started;
+  if(started!==undefined&&(problems||started<configured)){
+    el.textContent=`${started} of ${configured} configured devices started — see the Device tab.`;
+    el.classList.remove('hide');
+  }
+}
+
+let devsBusy=false, devsNextMs=0;
 async function renderDevices(b){
-  if(devsBusy)return;
-  devsBusy=true;
+  // Rate-limited independently of what triggered it. refresh() runs on the 5 s timer AND on
+  // every SSE state event, which the server emits up to once a second -- so without this the
+  // tab issued 1+3N requests per second, back to back, on the one board that is also driving
+  // an RS485 bus. The data underneath changes at the poll interval, ten seconds by default.
+  const now=Date.now();
+  if(devsBusy||now<devsNextMs)return;
+  devsBusy=true;devsNextMs=now+5000;
   const box=$('#devbox');
   try{
-    const ids=((await (await fetch('/api/v1/devices')).json()).devices)||[];
+    const ids=((await getJson('/api/v1/devices')).devices)||[];
     const configured=b.devices_configured??ids.length;
     const problems=b.device_problems||[];
     let h='';
+    // "Started", not "polling": this compares what the configuration asks for against what the
+    // firmware managed to CREATE at boot. A device with A and B swapped starts perfectly and
+    // never returns a byte, so a count alone must not be read as health -- the per-device rows
+    // below carry that, and the summary says which ones are actually answering.
     if(problems.length||configured!==ids.length){
-      h+=`<div class="msg err" style="display:block">Polling ${ids.length} of ${configured}
+      h+=`<div class="msg err" style="display:block">Started ${ids.length} of ${configured}
         configured device${configured===1?'':'s'}.${problems.length?'<ul style="margin:6px 0 0 18px">'+
-        problems.map(p=>`<li>${esc(p)}</li>`).join('')+'</ul>':''}</div>`;
-    }else{
-      h+=`<div class="dim" style="font-size:13px;margin-bottom:10px">Polling
-        ${ids.length} device${ids.length===1?'':'s'}, all configured devices accounted for.</div>`;
+        problems.map(p=>`<li>${esc(p)}</li>`).join('')+'</ul>':
+        '<div style="margin-top:6px">A device added since the last restart only starts after one.</div>'}</div>`;
     }
+    const cards=[];
+    let answering=0;
     for(const id of ids){
-      // Sequential on purpose: eight devices in parallel is eight concurrent handlers on a
-      // single-core web task, and this page already has a 5 s refresh behind it.
-      const dev=await (await fetch('/api/v1/devices/'+encodeURIComponent(id))).json();
-      const m=(await (await fetch('/api/v1/devices/'+encodeURIComponent(id)+'/measurements')).json()).measurements||{};
-      let caps=null;
-      try{caps=await (await fetch('/api/v1/devices/'+encodeURIComponent(id)+'/capabilities')).json()}catch(e){}
+      // Sequential rather than parallel, and cached: eight devices is eight handlers on the
+      // web task, and identity and capabilities never change once the driver has started.
+      const dev=await getJson('/api/v1/devices/'+encodeURIComponent(id));
+      const m=(await getJson('/api/v1/devices/'+encodeURIComponent(id)+'/measurements')).measurements||{};
+      if(devCache[id]===undefined){
+        try{devCache[id]=await getJson('/api/v1/devices/'+encodeURIComponent(id)+'/capabilities')}
+        catch(e){devCache[id]=null}
+      }
       const ident={...(dev.identity||{}),online:dev.online,data_valid:dev.data_valid,
                    data_stale:dev.data_stale,support_level:(dev.driver||{}).support_level};
-      h+=`<div class="card"><b>${esc(id)}</b><table>${deviceTable(ident,caps,m)}</table></div>`;
+      const ago=dev.last_successful_poll_seconds_ago;
+      if(dev.online&&dev.data_valid)answering++;
+      // The line that answers "is this one alive", above the table rather than thirteen rows
+      // into it. Never answered at all is its own state: that is a bus fault, not a sleeping
+      // inverter, and the two look identical in `online: false` alone.
+      const live=ago===null||ago===undefined
+        ? '<span class="tag" style="background:var(--bad)">never answered</span>'
+        : (dev.data_stale?`<span class="tag">stale — last reply ${esc(ago)} s ago</span>`
+                         :`<span class="tag">replied ${esc(ago)} s ago</span>`);
+      cards.push(`<div class="card"><div style="display:flex;justify-content:space-between;
+        align-items:baseline;gap:10px"><b>${esc(id)}</b>${live}</div>
+        <table>${deviceTable(ident,devCache[id],m)}</table></div>`);
     }
-    box.innerHTML=h||'<div class="dim">No device is being polled.</div>';
+    if(ids.length&&!problems.length&&configured===ids.length){
+      h+=`<div class="${answering===ids.length?'dim':'msg err'}"
+        style="font-size:13px;margin-bottom:10px${answering===ids.length?'':';display:block'}">
+        ${answering} of ${ids.length} started device${ids.length===1?'':'s'} answering.</div>`;
+    }
+    box.innerHTML=h+cards.join('')||'<div class="dim">No device is being polled.</div>';
   }catch(e){
-    // Leave whatever was on screen rather than blanking it: this runs on a 5 s timer and a
-    // single failed fetch must not wipe a page someone is reading.
+    // Leave whatever was on screen rather than blanking it: a single failed request must not
+    // wipe a page someone is reading.
     if(!box.innerHTML)box.innerHTML='<div class="dim">Could not read the device list.</div>';
   }finally{devsBusy=false}
 }
@@ -1372,22 +1431,20 @@ async function refresh(){
     const r=await fetch('/api/v1/status');
     if(!r.ok)throw new Error('HTTP '+r.status);
     const s=await r.json();
-    // Capabilities change only when the driver does, so fetch them once rather than every
-    // refresh -- the device page needs them, the dashboard does not.
-    if(tab==='dev'&&!caps&&s.device.id){
-      // Only keep an OK response: storing an error body here handed render() an object
-      // without read/write arrays and took the whole page down with a misleading banner.
-      try{
-        const cr=await fetch('/api/v1/devices/'+encodeURIComponent(s.device.id)+'/capabilities');
-        if(cr.ok)caps=await cr.json();
-      }catch(e){}
-    }
+    // The device page fetches its own capabilities, per device and cached there; this global
+    // one served the single-device table that renderDevices replaced. Its OK-response guard
+    // moved with it, into getJson().
     render(s);
     if(tab==='diag')await loadDiag();
     if(tab==='logs')await loadLogs();
     if(tab==='disc'&&!$('#wiz').innerHTML)renderWizard();
     if(tab==='cfg'&&!$('#cfgform').innerHTML)await renderConfig();
+    // Cleared first, then possibly re-raised: the reachability banner owns this element, and
+    // a device warning must not survive a later refresh that finds everything fine.
     $('#banner').classList.add('hide');
+    // Every tab, not only the device page. A restart lands on the Dashboard, and "one of your
+    // three inverters did not start" is not something to find by clicking around.
+    deviceBanner(s.bridge);
   }catch(e){
     $('#banner').textContent='Cannot reach the bridge: '+e.message;
     $('#banner').classList.remove('hide');

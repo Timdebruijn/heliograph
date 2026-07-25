@@ -295,7 +295,23 @@ bool RestApi::begin() {
         context_.diagnostics->recordRestRequest();
         const auto snapshot = firstDevice();
         if (!snapshot) {
-            sendError(request, {503, "not_ready", "no device is configured yet"});
+            // A bridge with nothing polling is exactly when someone needs this payload: it is
+            // the only place that says how many devices were CONFIGURED and why each one is
+            // missing. Refusing it with 503 meant the whole UI fell back to "cannot reach the
+            // bridge" in the one case the diagnosis was already sitting in memory (review).
+            //
+            // An empty DeviceState, not a fabricated one: every measurement is absent, online
+            // and data_valid are false, and the bridge half of the payload is what carries the
+            // answer.
+            const DeviceState empty;
+            std::string       body;
+            if (!rest::buildStatusPayload(empty, "", context_.bridgeInfo(),
+                                          context_.diagnostics->snapshot(), nullptr,
+                                          context_.clock(), body)) {
+                sendError(request, {500, "payload_too_large", "status payload exceeded its bound"});
+                return;
+            }
+            request->send(200, kJson, body.c_str());
             return;
         }
         // The registered id: the key the per-device routes actually answer on.
@@ -354,7 +370,8 @@ bool RestApi::begin() {
         std::string body;
         bool        ok = false;
         if (sub.empty()) {
-            ok = buildDevicePayload(*snapshot, deviceId, activeDescriptor(*snapshot), body);
+            ok = buildDevicePayload(*snapshot, deviceId, activeDescriptor(*snapshot),
+                                    context_.clock(), body);
         } else if (sub == "measurements") {
             ok = buildMeasurementsPayload(*snapshot, body);
         } else if (sub == "capabilities") {
