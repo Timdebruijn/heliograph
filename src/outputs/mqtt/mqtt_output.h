@@ -61,8 +61,19 @@ public:
         /// True for the device that keeps the bridge-scoped topics and unique ids. Decided by
         /// the caller from the CONFIGURED order, not by arrival: keying it on "first one seen"
         /// meant that a boot where device 1 failed to start handed device 2 its topics, its
-        /// entities and its recorder history (review, 2026-07-25). At most one, possibly none.
-        bool primary = false;
+        /// entities and its recorder history. At most one, possibly none.
+        bool primary;
+
+        /// Spelled out rather than aggregate-initialised, and with no default on `primary`, so
+        /// that omitting it does not compile.
+        ///
+        /// It shipped omitted. The field was added with a default of false and the caller was
+        /// never updated, so every device -- including the first -- took the device-scoped
+        /// topics, and the back-compat guarantee the whole design rests on was quietly not in
+        /// force. `{id, state}` still compiled and still meant something reasonable, which is
+        /// exactly why nothing caught it (2026-07-25).
+        DeviceView(DeviceId deviceId, const DeviceState* deviceState, bool isPrimary)
+            : id(std::move(deviceId)), state(deviceState), primary(isPrimary) {}
     };
 
     /// Drives reconnects and publishing. Call regularly from the MQTT task; never blocks.
