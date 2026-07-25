@@ -49,7 +49,9 @@ public:
     CommandResult execute(const InverterCommand& command) override;
 
 private:
-    enum class ReadResult { Ok, Timeout, Exception, Protocol, TransportError };
+    /// Crc is separate from Protocol for the same reason it is in the codec: it is the only one
+    /// that means the wire is bad, and it is what the checksum-error metric and its alert key on.
+    enum class ReadResult { Ok, Timeout, Exception, Crc, Protocol, TransportError };
 
     /// One Modbus read transaction into `out` (at least `count` words). Sets lastException_ on
     /// an exception reply. TRACE-dumps the raw block for hardware bring-up.

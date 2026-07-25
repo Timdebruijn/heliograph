@@ -62,8 +62,14 @@ ReadOutcome readRegisters(Transport& transport, uint8_t unitId, uint8_t function
                 return outcome;
             case ParseResult::Incomplete:
                 break;  // fall through and read more
+            case ParseResult::BadCrc:
+                // The one outcome that indicts the cable rather than the configuration. The
+                // codec has always kept it separate; fusing it here is what made a Modbus
+                // driver unable to ever report a checksum error.
+                outcome.status = ReadStatus::Crc;
+                return outcome;
             default:
-                // BadCrc / WrongUnit / WrongFunction / Malformed.
+                // WrongUnit / WrongFunction / Malformed.
                 outcome.status = ReadStatus::Protocol;
                 return outcome;
         }

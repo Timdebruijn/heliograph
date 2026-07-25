@@ -37,6 +37,11 @@ struct DiscoveryConfig {
 struct DiscoveryCandidate {
     DriverDescriptor descriptor;
     ProbeResult      probe;
+    /// The line settings this candidate actually answered at -- not the driver's first
+    /// recommendation. Those were the same thing only because begin() used to undo the sweep,
+    /// so every probe really did happen at the driver default. Now that the sweep works, the
+    /// two can differ, and reporting the recommendation would be an active lie in the wizard.
+    SerialProfile matchedProfile{};
     /// False when a repeat probe contradicted the first; the score is halved in that case.
     bool consistent = true;
 };

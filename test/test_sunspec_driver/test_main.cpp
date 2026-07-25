@@ -275,6 +275,69 @@ static void test_an_unreadable_device_is_not_reported_as_line_corruption() {
     TEST_ASSERT_NOT_EQUAL(PollResult::ChecksumError, result);
 }
 
+// A perfectly healthy Modbus device that simply is not SunSpec used to be reported as Timeout,
+// which accused the wiring of a fault that does not exist. It answers promptly; the marker is
+// just not there.
+static void test_a_device_without_the_marker_is_not_reported_as_a_timeout() {
+    Rig r;
+    r.device.registers[r.device.baseAddress]     = 0x1234;  // something, but not "SunS"
+    r.device.registers[r.device.baseAddress + 1] = 0x5678;
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    const auto  result = d.poll(state);
+
+    TEST_ASSERT_EQUAL(PollResult::NotRegistered, result);
+}
+
+// The one symptom that indicts the cable. Everything used to collapse into Timeout, so a bus
+// with a bad ground was invisible in the counter the alerting rules key on -- and pointed the
+// field diagnosis at "the inverter is asleep" instead (review, 2026-07-25).
+static void test_a_corrupt_reply_is_reported_as_a_checksum_error() {
+    Rig r;
+    buildTypical(r.device);
+    r.device.corruptCrc = true;
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::ChecksumError, d.poll(state));
+}
+
+// The same symptom, but appearing only once the chain is already mapped -- so the failure has
+// to travel back out of readModel rather than out of the opening marker read. Corrupting
+// everything from the first byte, as the test above does, never exercises that path.
+static void test_corruption_that_starts_mid_chain_is_still_a_checksum_error() {
+    Rig r;
+    buildTypical(r.device);
+    r.device.corruptCrc    = true;
+    r.device.intactReplies = 5;  // marker, chain headers and the identity read survive
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::ChecksumError, d.poll(state));
+    // Self-evidencing: a fully mapped chain proves the walk completed, so the failure can only
+    // have come out of readModel. Without this the test would silently pass while exercising
+    // the marker read, which is what the sibling test above already covers.
+    TEST_ASSERT_EQUAL_UINT32(2, d.chain().size());
+}
+
+// The marker is there, so something SunSpec-shaped is on the bus, but the very first model
+// header is refused. Nothing gets mapped. The reason the walk stopped used to be discarded
+// here, so the caller's default won and this reported Timeout -- accusing the wiring of a
+// fault on a device that is demonstrably answering (review, 2026-07-25).
+static void test_a_marker_with_no_readable_models_is_not_reported_as_a_timeout() {
+    Rig r;
+    r.device.placeMarker();  // marker only; every later register earns an exception
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::NotRegistered, d.poll(state));
+}
+
 static void test_a_silent_device_does_not_poll() {
     Rig r;
     buildTypical(r.device);
@@ -311,6 +374,10 @@ int main(int, char**) {
     RUN_TEST(test_begin_configures_the_serial_line);
     RUN_TEST(test_identity_is_available_without_probing);
     RUN_TEST(test_an_unreadable_device_is_not_reported_as_line_corruption);
+    RUN_TEST(test_a_device_without_the_marker_is_not_reported_as_a_timeout);
+    RUN_TEST(test_a_corrupt_reply_is_reported_as_a_checksum_error);
+    RUN_TEST(test_corruption_that_starts_mid_chain_is_still_a_checksum_error);
+    RUN_TEST(test_a_marker_with_no_readable_models_is_not_reported_as_a_timeout);
     RUN_TEST(test_a_silent_device_does_not_poll);
     RUN_TEST(test_the_driver_is_read_only);
     return UNITY_END();

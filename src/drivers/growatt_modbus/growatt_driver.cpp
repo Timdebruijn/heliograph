@@ -23,7 +23,8 @@ constexpr uint32_t kTransactionDeadlineMs = 3000;
 /// register number. This is the bring-up tool: with the map still unconfirmed, reading these
 /// against the inverter display is how the correct addresses and scaling are found. TRACE-only,
 /// so it costs nothing in normal operation.
-void traceBlock(RegSpace space, uint16_t start, uint16_t count, const uint16_t* values) {
+void traceBlock(uint8_t unitId, RegSpace space, uint16_t start, uint16_t count,
+                const uint16_t* values) {
     if (!log::enabled(LogLevel::Trace)) {
         return;
     }
@@ -31,7 +32,8 @@ void traceBlock(RegSpace space, uint16_t start, uint16_t count, const uint16_t* 
     constexpr uint16_t perLine = 8;
     for (uint16_t i = 0; i < count; i += perLine) {
         char line[128];
-        int  pos = snprintf(line, sizeof(line), "GROWATT %s %u:", spaceName,
+        int  pos = snprintf(line, sizeof(line), "GROWATT unit %u %s %u:",
+                            static_cast<unsigned>(unitId), spaceName,
                             static_cast<unsigned>(start + i));
         for (uint16_t j = 0; j < perLine && i + j < count; ++j) {
             pos += snprintf(line + pos, sizeof(line) - pos, " %04X", values[i + j]);
@@ -108,7 +110,7 @@ GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t star
 
     switch (outcome.status) {
         case modbus::ReadStatus::Ok:
-            traceBlock(space, start, count, out);
+            traceBlock(options_.unitId, space, start, count, out);
             return ReadResult::Ok;
         case modbus::ReadStatus::Exception:
             lastException_ = outcome.exceptionCode;
@@ -117,6 +119,8 @@ GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t star
             return ReadResult::Timeout;
         case modbus::ReadStatus::TransportError:
             return ReadResult::TransportError;
+        case modbus::ReadStatus::Crc:
+            return ReadResult::Crc;
         case modbus::ReadStatus::Protocol:
             break;
     }
@@ -131,6 +135,7 @@ PollResult GrowattDriver::poll(DeviceState& state) {
 
     size_t validCount  = 0;
     bool   sawTimeout  = false;
+    bool   sawCrcError = false;  // bytes arrived corrupted -> the cable, not the configuration
     bool   sawResponse = false;  // device answered *something* (exception / bad frame) = alive
 
     // A block the device refuses (exception) or that arrives corrupt is skipped, not fatal:
@@ -151,13 +156,19 @@ PollResult GrowattDriver::poll(DeviceState& state) {
                 break;
             case ReadResult::Exception:
                 sawResponse = true;
-                log::warn("GROWATT block %u+%u refused (exception 0x%02X) -- skipped", b.start,
-                          b.count, lastException_);
+                log::warn("GROWATT unit %u block %u+%u refused (exception 0x%02X) -- skipped",
+                          options_.unitId, b.start, b.count, lastException_);
+                break;
+            case ReadResult::Crc:
+                sawResponse = true;
+                sawCrcError = true;
+                log::warn("GROWATT unit %u block %u+%u failed checksum -- check ground, termination "
+                          "and cable routing", options_.unitId, b.start, b.count);
                 break;
             case ReadResult::Protocol:
                 sawResponse = true;
-                log::warn("GROWATT block %u+%u unreadable (bad frame) -- skipped", b.start,
-                          b.count);
+                log::warn("GROWATT unit %u block %u+%u unreadable (bad frame) -- skipped",
+                          options_.unitId, b.start, b.count);
                 break;
             case ReadResult::Timeout:
                 sawTimeout = true;
@@ -168,9 +179,13 @@ PollResult GrowattDriver::poll(DeviceState& state) {
     }
 
     if (validCount == 0) {
-        // Nothing usable. Report "silent" only when the device truly said nothing: a refused
-        // range or a bad frame proves it is present and addressable, so that outranks a
-        // timeout on another block -- InvalidFrame, not the misleading Timeout.
+        // Nothing usable. A checksum failure outranks everything else: it is the only outcome
+        // that points at the cable, and it is what the alerting rule watches. Then "silent"
+        // only when the device truly said nothing -- a refused range or a bad frame proves it
+        // is present and addressable, so that outranks a timeout on another block.
+        if (sawCrcError) {
+            return PollResult::ChecksumError;
+        }
         return (sawTimeout && !sawResponse) ? PollResult::Timeout : PollResult::InvalidFrame;
     }
 
@@ -220,6 +235,16 @@ ProbeResult GrowattDriver::probe() {
         result.responded = true;
         result.confidenceScore += 20;
         result.evidence.push_back("Modbus device answered with an exception (wrong register?)");
+    } else if (r == ReadResult::Crc) {
+        // Bytes DID come back, they just did not survive the CRC. Deliberately still
+        // responded=false: the discovery engine stops sweeping the remaining serial profiles as
+        // soon as a candidate responds, and garbage that happens to frame up as a bad-CRC reply
+        // is entirely normal at the wrong line speed -- claiming a device here would abort the
+        // sweep before the right baud rate is ever tried. Only the wording changes, and that
+        // wording is shown to the user verbatim in the wizard.
+        result.evidence.push_back(
+            "replies arrived but failed their checksum: wrong line speed, or a noisy bus "
+            "(check ground, termination and cable routing)");
     } else {
         result.evidence.push_back("no Modbus reply at this unit id and line speed");
     }

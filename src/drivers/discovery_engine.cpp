@@ -55,6 +55,14 @@ DiscoveryOutcome DiscoveryEngine::run(DiscoveryMode mode, const DiscoveryConfig&
             if (!driver->begin(transport_)) {
                 continue;
             }
+            // Re-applied, because begin() configures the line to the driver's OWN first choice.
+            // That is correct at boot -- a driver started straight from config must not depend
+            // on a discovery run having configured the UART, which was a real bug -- but here it
+            // silently undid the sweep: every iteration probed at the driver's default, so the
+            // second and later profiles were never actually tried. A device shipped at the
+            // family's other baud rate could not be found, and the failure looked exactly like
+            // bad wiring (review, 2026-07-25).
+            transport_.configure(profile);
 
             ProbeResult first = driver->probe();
             if (!first.responded) {
@@ -62,8 +70,9 @@ DiscoveryOutcome DiscoveryEngine::run(DiscoveryMode mode, const DiscoveryConfig&
             }
 
             DiscoveryCandidate candidate;
-            candidate.descriptor = descriptor;
-            candidate.probe      = first;
+            candidate.descriptor    = descriptor;
+            candidate.probe         = first;
+            candidate.matchedProfile = profile;
 
             if (config.requireConsistentProbes) {
                 const ProbeResult second = driver->probe();

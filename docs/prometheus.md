@@ -96,11 +96,41 @@ temperature sensor has no temperature series. That is not a fault.
 | `heliograph_modbus_client_connections_total` | counter | Modbus TCP connections accepted |
 | `heliograph_modbus_clients` | gauge | Modbus TCP clients connected right now |
 
-The distinction matters when something is wrong. **Timeouts** mean nothing came back — wiring,
-a swapped A/B, or an inverter that is asleep. **Checksum errors and invalid frames** mean bytes
-did come back but were corrupted — usually electrical: a missing ground, no termination, or a
-cable run alongside something noisy. A quiet night on a solar inverter produces timeouts and no
-checksum errors, and that is normal: the inverter powers down after dark.
+The distinction matters when something is wrong, and it is three-way rather than two:
+
+- **Timeouts** — nothing came back at all. Wiring, a swapped A/B, a wrong address, or an
+  inverter that is simply asleep.
+- **Checksum errors** — bytes came back corrupted. This is the one that indicts the *wire*: a
+  missing ground, no termination (or termination in three places instead of two), a long stub,
+  a run alongside the inverter's own output cabling. See [rs485-bus.md](rs485-bus.md).
+- **Invalid frames** — an intact frame that was not what we asked for: a neighbour on a
+  multidrop bus answering, or a device quirk. Addressing, not cabling.
+
+A quiet night on a solar inverter produces timeouts and no checksum errors, and that is normal:
+the inverter powers down after dark. That asymmetry is exactly why the alert below watches
+checksum errors rather than timeouts.
+
+> **A flat zero on the checksum counter is weaker evidence than it looks, on a Modbus device.**
+>
+> Before the release carrying this note a Modbus driver could not raise it at all: the shared read transaction folded CRC
+> failures into a generic protocol error, so on a Growatt or SunSpec install the metric was
+> structurally always zero and the alert could never fire. The PMU drivers (EverSolar, SolaX)
+> were unaffected.
+>
+> Even after that fix it still under-counts, in two ways worth knowing before you trust it:
+>
+> - A Growatt poll reads several register blocks and reports success as soon as **one** of them
+>   decodes. So a bus corrupting, say, a third of its frames usually still has a good block per
+>   poll, the poll returns Ok, and the checksum error is logged but never counted. The metric
+>   therefore catches a bus that is *failing*, not one that is *degrading* — which is the
+>   opposite of what an early-warning counter should do. Fixing that means decoupling the
+>   counter from the poll verdict; it is tracked and not done yet.
+> - Line noise that damages a length or byte-count field makes the frame un-parseable rather
+>   than merely wrong, and that surfaces as a **timeout**, not a checksum error.
+>
+> Treat a non-zero value as a definite problem, and a zero as "no proof either way". The log at
+> `trace` level is the reliable source while the above stands: a corrupt block says so on the
+> line it happens.
 
 ### Bridge health
 

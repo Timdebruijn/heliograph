@@ -117,7 +117,7 @@ How you set it is per manufacturer. For Growatt (including the MIC TL-X), see
 
 ## When it does not work
 
-The bridge distinguishes two failure modes, and they point at different causes. Both are
+The bridge distinguishes three failure modes, and they point at different causes. All are
 visible in the logs at `trace` level, in `/api/v1/diagnostics`, and as Prometheus counters
 (see [prometheus.md](prometheus.md)).
 
@@ -132,6 +132,10 @@ visible in the logs at `trace` level, in `/api/v1/diagnostics`, and as Prometheu
 - A break in the chain: every device past the break goes silent, which is a useful clue about
   where to look
 
+**Invalid frames — an intact frame arrived that was not an answer to us.** Usually addressing:
+another device on the bus replied, or this one answered with fewer registers than asked for.
+Look at the addresses before you look at the cable.
+
 **Checksum errors — bytes came back, corrupted.** This is an electrical problem, not a
 configuration one:
 
@@ -144,3 +148,10 @@ configuration one:
 A night of timeouts is normal and expected: the inverter powers down when the sun does. That
 is why the alerting examples in [prometheus.md](prometheus.md) watch checksum errors rather
 than timeouts.
+
+One caveat worth knowing before you trust the counters over your own eyes: noise that *drops*
+bytes — which is what a missing ground most often does — leaves a frame too short to parse, and
+that surfaces as a **timeout**, not a checksum error. So a bus can be electrically bad and still
+show nothing but timeouts. If a "sleeping inverter" is silent at a time it should not be, treat
+the cable as a suspect anyway. See the note in [prometheus.md](prometheus.md) for the other
+place these counters under-report.

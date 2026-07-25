@@ -83,7 +83,7 @@ static void test_silence_is_a_timeout() {
     TEST_ASSERT_EQUAL(ReadStatus::Timeout, r.status);
 }
 
-static void test_a_corrupt_frame_is_protocol_not_timeout() {
+static void test_a_corrupt_frame_is_crc_not_timeout_and_not_protocol() {
     MockTransport t;
     auto bad = goodReply(kUnit, kReadHoldingRegisters, {0x1234});
     bad.back() ^= 0xFF;  // wreck the CRC
@@ -92,18 +92,26 @@ static void test_a_corrupt_frame_is_protocol_not_timeout() {
     uint16_t   regs[1] = {};
     const auto r = readRegisters(t, kUnit, kReadHoldingRegisters, kFrom, 1, regs, 1);
 
-    // The distinction matters in the field: Timeout means nothing came back (wiring, a
-    // sleeping device), Protocol means bytes came back corrupted (electrical noise).
-    TEST_ASSERT_EQUAL(ReadStatus::Protocol, r.status);
+    // Three outcomes, three different things to go check in the field. Timeout: nothing came
+    // back at all -- wiring, address, a sleeping device. Crc: bytes came back corrupted, which
+    // indicts the wire itself (ground, termination, a stub, noise from the inverter). Protocol:
+    // an intact frame that was not what we asked for -- addressing or a device quirk.
+    //
+    // Crc used to be folded into Protocol, and the drivers mapped Protocol to InvalidFrame, so
+    // PollResult::ChecksumError was structurally unreachable on a Modbus bus and the alert rule
+    // built on that counter could never fire (review, 2026-07-25).
+    TEST_ASSERT_EQUAL(ReadStatus::Crc, r.status);
 }
 
-static void test_a_reply_from_another_unit_is_refused() {
+static void test_a_reply_from_another_unit_is_protocol_not_crc() {
     MockTransport t;
-    t.replyWith(goodReply(kUnit + 1, kReadHoldingRegisters, {0x1111}));
+    t.replyWith(goodReply(kUnit + 1, kReadHoldingRegisters, {0x1111}));  // valid CRC, wrong unit
 
     uint16_t   regs[1] = {};
     const auto r = readRegisters(t, kUnit, kReadHoldingRegisters, kFrom, 1, regs, 1);
 
+    // Protocol, deliberately not Crc: the frame arrived intact, a neighbour on the multidrop
+    // bus simply answered. Nothing wrong with the cable, so it must not be counted against it.
     TEST_ASSERT_EQUAL(ReadStatus::Protocol, r.status);
 }
 
@@ -191,8 +199,8 @@ int main(int, char**) {
     RUN_TEST(test_a_good_reply_decodes);
     RUN_TEST(test_an_exception_reports_its_code);
     RUN_TEST(test_silence_is_a_timeout);
-    RUN_TEST(test_a_corrupt_frame_is_protocol_not_timeout);
-    RUN_TEST(test_a_reply_from_another_unit_is_refused);
+    RUN_TEST(test_a_corrupt_frame_is_crc_not_timeout_and_not_protocol);
+    RUN_TEST(test_a_reply_from_another_unit_is_protocol_not_crc);
     RUN_TEST(test_an_endless_trickle_still_hits_the_deadline);
     RUN_TEST(test_a_request_larger_than_the_buffer_is_refused_before_the_bus);
     RUN_TEST(test_a_reply_with_too_few_registers_is_refused);

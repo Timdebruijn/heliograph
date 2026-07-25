@@ -32,16 +32,42 @@ public:
         /// Second and later probes report this serial instead, simulating an unstable match.
         std::string serialOnRepeat;
         bool        writeAttempted = false;
+        /// Non-zero: begin() reconfigures the line to this, as every real driver does.
+        uint32_t    begunAtBaud = 0;
+        /// Non-zero: probe() only answers when `bus` is actually at this rate. `bus` is the
+        /// test's own MockTransport -- the base Transport exposes no way to read back the
+        /// configured line settings, and adding one just for a test would be the tail wagging
+        /// the dog.
+        uint32_t             respondsOnlyAtBaud = 0;
+        const MockTransport* bus                = nullptr;
     };
 
     FakeDriver(DriverDescriptor d, Script* script) : descriptor_(std::move(d)), script_(script) {}
 
     const DriverDescriptor& descriptor() const override { return descriptor_; }
-    bool begin(Transport&) override { return true; }
+
+    // Real drivers configure the UART here, from their own first recommended profile, because a
+    // driver started straight from config must not depend on a discovery run having done it.
+    // Modelled so the profile sweep is tested against the behaviour it actually has to survive.
+    bool begin(Transport& t) override {
+        if (script_->begunAtBaud != 0) {
+            SerialProfile own;
+            own.baudRate = script_->begunAtBaud;
+            t.configure(own);
+        }
+        return true;
+    }
 
     ProbeResult probe() override {
         ++probeCount_;
         ProbeResult r;
+        // A device only answers at the line rate it actually runs at.
+        if (script_->respondsOnlyAtBaud != 0 && script_->bus != nullptr &&
+            script_->bus->profile().baudRate != script_->respondsOnlyAtBaud) {
+            r.responded = false;
+            r.evidence.push_back("wrong baud");
+            return r;
+        }
         r.responded      = script_->responded;
         r.checksumValid  = script_->checksumValid;
         r.confidenceScore = script_->score;
@@ -286,6 +312,33 @@ static void test_drivers_are_skipped_on_an_unsupported_transport() {
     TEST_ASSERT_EQUAL_size_t(0, e.run(DiscoveryMode::Quick).candidates.size());
 }
 
+// The sweep has to survive begin() reconfiguring the line. Every real driver does that, on
+// purpose: a driver started straight from config must not depend on a discovery run having set
+// up the UART, which was a real bug once. But it silently undid the sweep -- the engine set the
+// profile, begin() put it straight back to the driver's own default, and every iteration probed
+// at the same rate. A device shipped at the family's other baud rate simply could not be found,
+// and the failure looked exactly like bad wiring (review, 2026-07-25).
+static void test_a_device_on_the_second_profile_is_still_found() {
+    DriverRegistry     reg;
+    MockTransport      t;
+    FakeDriver::Script s;
+    s.score              = 97;
+    s.begunAtBaud        = 9600;    // what begin() forces, like a real driver
+    s.respondsOnlyAtBaud = 115200;  // where the device actually is
+    s.bus                = &t;
+
+    auto d = desc("two_rates", 10);
+    d.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3},
+                                   SerialProfile{115200, SerialParity::None, 8, 1, 1000, 3}};
+    addDriver(reg, d, &s);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_TRUE(out.autoSelected);
+    TEST_ASSERT_EQUAL_STRING("two_rates", out.selectedDriverId.c_str());
+}
+
 static void test_only_profiles_the_driver_recommends_are_tried() {
     // No brute-forcing baud rates on a live bus.
     DriverRegistry     reg;
@@ -450,6 +503,7 @@ int main(int, char**) {
     RUN_TEST(test_discovery_never_executes_a_command);
     RUN_TEST(test_drivers_opting_out_of_auto_detection_are_skipped);
     RUN_TEST(test_drivers_are_skipped_on_an_unsupported_transport);
+    RUN_TEST(test_a_device_on_the_second_profile_is_still_found);
     RUN_TEST(test_only_profiles_the_driver_recommends_are_tried);
     return UNITY_END();
 }
