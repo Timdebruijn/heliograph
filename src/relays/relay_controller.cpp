@@ -22,14 +22,16 @@ void RelayController::allOff() {
     }
 }
 
-// Same refill logic as CommandDispatcher::allowedByRateLimit, with one fix: "has ever
-// accepted" is an explicit flag instead of the lastAcceptedMs_ == 0 sentinel. millis() at
-// boot is near zero, so the sentinel collides exactly when the device just started -- and
-// the first seconds after a boot are when unthrottled relay chatter is least welcome.
+// Same refill logic as CommandDispatcher::allowedByRateLimit. This copy found two problems
+// first and the dispatcher has since adopted both: "has ever accepted" as an explicit flag
+// rather than a lastAcceptedMs_ == 0 sentinel (millis() at boot IS near zero, so the sentinel
+// collides exactly when the device just started), and a clamped elapsed time so a clock that
+// moves backwards cannot wrap the subtraction into "ages ago" and refill the whole allowance.
 // Duplicated rather than shared through a base class by intent: two small, independently
 // testable copies beat a coupling between the inverter write path and the bridge actuator.
 bool RelayController::allowedByRateLimit(uint64_t nowMs) {
-    if (everAccepted_ && nowMs - lastAcceptedMs_ >= rateLimit_.minIntervalMs) {
+    const uint64_t since = nowMs > lastAcceptedMs_ ? nowMs - lastAcceptedMs_ : 0;
+    if (everAccepted_ && since >= rateLimit_.minIntervalMs) {
         burstUsed_ = 0;
     }
     if (burstUsed_ < rateLimit_.burst) {

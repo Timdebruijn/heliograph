@@ -50,4 +50,16 @@ const char* commandTypeName(InverterCommandType type);
 /// against the active driver's capabilities without knowing which driver it is.
 InverterCapability requiredCapability(InverterCommandType type);
 
+/// Whether this command type carries a number at all.
+///
+/// A property of the COMMAND, not of what a driver happened to declare. The dispatcher's range
+/// check used to be conditional on the driver publishing a NumericCapability, so a driver that
+/// set the write bit and left the bounds at their defaults skipped the check entirely and an
+/// unbounded value reached execute(). Asking the command type instead means a missing bound is
+/// a refusal rather than a bypass.
+bool commandTakesNumericValue(InverterCommandType type);
+
+/// Whether this command type carries an enum selection instead of a number.
+bool commandTakesEnumValue(InverterCommandType type);
+
 }  // namespace heliograph

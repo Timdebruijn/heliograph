@@ -67,4 +67,31 @@ InverterCapability requiredCapability(InverterCommandType type) {
     return InverterCapability::_Count;
 }
 
+bool commandTakesNumericValue(InverterCommandType type) {
+    switch (type) {
+        case InverterCommandType::SetActivePowerLimitPercent:
+        case InverterCommandType::SetActivePowerLimitWatts:
+        case InverterCommandType::SetExportLimitWatts:
+        case InverterCommandType::SetReactivePower:
+        case InverterCommandType::SetBatteryChargeLimitWatts:
+        case InverterCommandType::SetBatteryDischargeLimitWatts:
+        case InverterCommandType::SetMinimumSoc:
+        case InverterCommandType::SetMaximumSoc:
+            return true;
+        // Start/Stop and SynchronizeTime carry nothing; SetBatteryOperatingMode carries an
+        // enum. Listed rather than defaulted so a new command type has to make the choice.
+        case InverterCommandType::Start:
+        case InverterCommandType::Stop:
+        case InverterCommandType::SetBatteryOperatingMode:
+        case InverterCommandType::SynchronizeTime:
+        case InverterCommandType::_Count:
+            return false;
+    }
+    return false;
+}
+
+bool commandTakesEnumValue(InverterCommandType type) {
+    return type == InverterCommandType::SetBatteryOperatingMode;
+}
+
 }  // namespace heliograph

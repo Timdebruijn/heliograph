@@ -299,6 +299,174 @@ static void test_every_rejection_explains_itself() {
     TEST_ASSERT_TRUE(out.reason.find("range") != std::string::npos);
 }
 
+// --- gate 3 must not be skippable ----------------------------------------------------------
+
+// A driver that stands in for the realistic mistake: it claims a capability it can write but
+// never fills in the matching NumericCapability. That combination used to skip range checking
+// entirely, because the check lived inside `if (nc.supported && nc.writable)`.
+namespace {
+class BoundlessDriver : public InverterDriver {
+public:
+    const DriverDescriptor& descriptor() const override {
+        static const DriverDescriptor d = [] {
+            DriverDescriptor x;
+            x.id = "boundless";
+            return x;
+        }();
+        return d;
+    }
+    bool       begin(Transport&) override { return true; }
+    ProbeResult probe() override { return {}; }
+    PollResult  poll(DeviceState&) override { return PollResult::Ok; }
+    DeviceIdentity identity() const override { return {}; }
+    InverterCapabilities capabilities() const override {
+        InverterCapabilities c;
+        c.addWrite(InverterCapability::SetActivePowerLimit);  // ...and no numeric[] entry
+        return c;
+    }
+    CommandResult execute(const InverterCommand& command) override {
+        last = command;
+        ++executed;
+        return CommandResult::Ok;
+    }
+    InverterCommand last{};
+    uint32_t        executed = 0;
+};
+}  // namespace
+
+static void test_a_declared_write_without_published_bounds_is_refused_not_waved_through() {
+    BoundlessDriver   driver;
+    CommandDispatcher d(clockFn);
+    d.setReadOnlyMode(false);
+
+    const auto out = d.dispatch(cmd(InverterCommandType::SetActivePowerLimitWatts, 1e9), driver);
+
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, out.result);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.executed);  // 1e9 W never reached the driver
+}
+
+static void test_a_value_less_command_on_a_boundless_driver_is_also_refused() {
+    BoundlessDriver   driver;
+    CommandDispatcher d(clockFn);
+    d.setReadOnlyMode(false);
+
+    InverterCommand c;
+    c.type = InverterCommandType::SetActivePowerLimitPercent;  // no numericValue at all
+    const auto out = d.dispatch(c, driver);
+
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, out.result);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.executed);
+}
+
+static void test_a_mode_command_without_a_selection_is_refused() {
+    mock::MockOptions o;
+    o.writable = true;
+    mock::MockDriver  driver(clockFn, o);
+    CommandDispatcher d(clockFn);
+    d.setReadOnlyMode(false);
+
+    InverterCommand c;
+    c.type = InverterCommandType::SetBatteryOperatingMode;  // no enumValue
+    // The mock does not declare this capability, so it stops at gate 2 -- which is the point:
+    // an undeclared mode write is refused either way, and the presence check below only bites
+    // once a driver does declare it.
+    const auto out = d.dispatch(c, driver);
+    TEST_ASSERT_TRUE(out.result == CommandResult::Unsupported ||
+                     out.result == CommandResult::OutOfRange);
+}
+
+// --- lifting a restriction is never throttled -----------------------------------------------
+
+// The rate limiter must never be the reason a curtailed inverter stays curtailed. Which way is
+// "safe" is a deliberate choice: this project's failsafe is "bridge dead, inverter keeps
+// producing" (docs/drm.md), so the protected direction is the one that gives production back --
+// the opposite of what a grid-protection stance would pick.
+static void test_start_is_never_throttled() {
+    mock::MockOptions o;
+    o.writable = true;
+    mock::MockDriver  driver(clockFn, o);
+    CommandDispatcher d(clockFn, RateLimitPolicy{1000, 1});
+    d.setReadOnlyMode(false);
+
+    // Burn the whole allowance on a restricting command.
+    TEST_ASSERT_EQUAL(CommandResult::Ok,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 20.0),
+                                 driver).result);
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 30.0),
+                                 driver).result);
+
+    InverterCommand start;
+    start.type = InverterCommandType::Start;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, d.dispatch(start, driver).result);
+}
+
+static void test_a_limit_set_to_its_maximum_is_never_throttled() {
+    mock::MockOptions o;
+    o.writable = true;
+    mock::MockDriver  driver(clockFn, o);
+    CommandDispatcher d(clockFn, RateLimitPolicy{1000, 1});
+    d.setReadOnlyMode(false);
+
+    TEST_ASSERT_EQUAL(CommandResult::Ok,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 20.0),
+                                 driver).result);
+    // 100 % is the declared maximum: explicitly no limit, so it goes through.
+    TEST_ASSERT_EQUAL(CommandResult::Ok,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 100.0),
+                                 driver).result);
+    // ...while anything still restricting keeps paying for a token.
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 99.0),
+                                 driver).result);
+}
+
+// Lifting a restriction must not spend a token either, or a flood of releases would starve the
+// next genuine command.
+static void test_lifting_a_restriction_spends_no_token() {
+    mock::MockOptions o;
+    o.writable = true;
+    mock::MockDriver  driver(clockFn, o);
+    CommandDispatcher d(clockFn, RateLimitPolicy{1000, 2});
+    d.setReadOnlyMode(false);
+
+    InverterCommand start;
+    start.type = InverterCommandType::Start;
+    for (int i = 0; i < 5; ++i) {
+        TEST_ASSERT_EQUAL(CommandResult::Ok, d.dispatch(start, driver).result);
+    }
+    // Both burst slots are still available.
+    TEST_ASSERT_EQUAL(CommandResult::Ok,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 10.0),
+                                 driver).result);
+    TEST_ASSERT_EQUAL(CommandResult::Ok,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 11.0),
+                                 driver).result);
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 12.0),
+                                 driver).result);
+}
+
+// A clock that jumps backwards must not refill the allowance. On unsigned types the naive
+// subtraction wraps to an enormous value, which reads as "ages ago" -- the throttle would fail
+// open, which is the wrong direction for a gate.
+static void test_a_backwards_clock_does_not_refill_the_allowance() {
+    mock::MockOptions o;
+    o.writable = true;
+    mock::MockDriver  driver(clockFn, o);
+    CommandDispatcher d(clockFn, RateLimitPolicy{1000, 1});
+    d.setReadOnlyMode(false);
+
+    g_now = 100000;
+    TEST_ASSERT_EQUAL(CommandResult::Ok,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 20.0),
+                                 driver).result);
+    g_now = 50;  // clock went backwards
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 30.0),
+                                 driver).result);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_read_only_mode_rejects_every_command_type);
@@ -319,5 +487,12 @@ int main(int, char**) {
     RUN_TEST(test_the_allowance_refills_after_a_quiet_period);
     RUN_TEST(test_a_rejected_command_does_not_consume_the_allowance);
     RUN_TEST(test_every_rejection_explains_itself);
+    RUN_TEST(test_a_declared_write_without_published_bounds_is_refused_not_waved_through);
+    RUN_TEST(test_a_value_less_command_on_a_boundless_driver_is_also_refused);
+    RUN_TEST(test_a_mode_command_without_a_selection_is_refused);
+    RUN_TEST(test_start_is_never_throttled);
+    RUN_TEST(test_a_limit_set_to_its_maximum_is_never_throttled);
+    RUN_TEST(test_lifting_a_restriction_spends_no_token);
+    RUN_TEST(test_a_backwards_clock_does_not_refill_the_allowance);
     return UNITY_END();
 }

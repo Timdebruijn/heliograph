@@ -11,6 +11,7 @@
 #pragma once
 
 #include <functional>
+#include <mutex>
 #include <string>
 
 #include "device/capability.h"
@@ -38,19 +39,28 @@ public:
     explicit CommandDispatcher(ClockFn clock, RateLimitPolicy rateLimit = {});
 
     /// Global kill switch, independent of driver capabilities. On in the MVP.
-    void setReadOnlyMode(bool readOnly) { readOnly_ = readOnly; }
-    bool readOnlyMode() const { return readOnly_; }
+    void setReadOnlyMode(bool readOnly);
+    bool readOnlyMode() const;
 
     /// Checks, in order: read-only mode, capability, value range, rate limit. Only then does
     /// the command reach the driver.
+    ///
+    /// Thread-safe. CommandSource already names Mqtt, Rest, ModbusTcp and Web -- three different
+    /// tasks -- and the burst counter is read-modify-write, so two concurrent commands could
+    /// each see the last free slot and both take it, quietly exceeding the burst. Locked
+    /// internally rather than left to every call site: RelayController gets away with being
+    /// lock-free only because main.cpp wraps every one of its callers in the same mutex, and
+    /// that is an easy contract to break from a new call site. Note the driver's execute() runs
+    /// under this lock, which also serialises the bus access a write implies.
     DispatchOutcome dispatch(const InverterCommand& command, InverterDriver& driver);
 
 private:
     bool allowedByRateLimit(uint64_t nowMs);
 
-    ClockFn         clock_;
-    RateLimitPolicy rateLimit_;
-    bool            readOnly_ = true;
+    mutable std::mutex m_;
+    ClockFn            clock_;
+    RateLimitPolicy    rateLimit_;
+    bool               readOnly_ = true;
 
     // Explicit flag, not a "0 means never" sentinel: millis() at boot IS near zero, and
     // the sentinel collision let the first post-boot window bypass the throttle (found by
