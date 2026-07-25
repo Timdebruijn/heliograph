@@ -30,8 +30,10 @@ static Configuration provisionedConfig() {
     return c;
 }
 
-/// Exactly the body the settings form sends when only the Modbus checkbox is cleared: every
-/// section present, passwords omitted (blank field means "keep").
+/// A full-section PATCH of the shape the settings form used to send when only the Modbus
+/// checkbox was cleared. Kept verbatim as a back-compat case rather than updated: the current
+/// form no longer sends admin_username unless it is typed, and always sends read_only_mode, so
+/// this body is now an OLD client's -- which is exactly what makes it worth still accepting.
 static void test_turning_modbus_off_leaves_mqtt_running_after_a_restart() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);

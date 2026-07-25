@@ -86,8 +86,14 @@ dialog::backdrop{background:#000a}
 </main>
 <dialog id="authdlg">
 <form method="dialog">
-<b>Admin password</b>
-<div class="dim" style="font-size:13px;margin-top:4px">Signing in as <span id="authu">admin</span></div>
+<b>Admin sign-in</b>
+<!-- Shown only after a 401. Both fields can be the reason now, and they fail identically, so
+     a silent re-prompt would read as "wrong password" and send the user round in circles. -->
+<div id="autherr" class="msg err" style="display:none">Not accepted. Check the username too — it
+is only <b>admin</b> if you never changed it.</div>
+<label for="authu">Username</label>
+<input id="authu" autocomplete="username" autocapitalize="none" autocorrect="off"
+       spellcheck="false" required value="admin">
 <label for="authpw">Password</label>
 <input id="authpw" type="password" autocomplete="current-password" required autofocus>
 <div style="display:flex;gap:10px">
@@ -133,32 +139,52 @@ function authHeader(){
   return c?{'Authorization':'Basic '+c}:{};
 }
 // A real modal with a masked input, not window.prompt(): prompt() shows the password in
-// plain text on screen. And the device has exactly one admin account, whose name is in the
-// config (readable without auth precisely so the UI can render) -- so only the password is
-// asked; typing a username nobody chose was noise. Fetched fresh on every prompt, so a
-// just-renamed admin user is picked up without a reload.
-async function askAuth(){
-  let u='admin';
-  try{
-    const r=await fetch('/api/v1/config');
-    if(r.ok){const j=await r.json();u=(j.security&&j.security.admin_username)||'admin'}
-  }catch(e){}
-  $('#authu').textContent=u;
+// plain text on screen.
+//
+// The username is typed, not fetched. This dialog used to read it from GET /config, which is
+// unauthenticated -- so the config endpoint was handing every LAN reader half of a login that
+// has no brute-force protection, purely so this field could be filled in for them. The field
+// defaults to 'admin', the factory value and what almost every install keeps.
+//
+// `retry` is true when this prompt follows a 401. That case has to say so: a wrong USERNAME and
+// a wrong PASSWORD are now both possible and they fail identically, so an unexplained second
+// dialog reads as "bad password" and the user retypes the password forever.
+async function askAuth(retry){
+  const remembered=sessionStorage.getItem('sb_user');
   return new Promise(resolve=>{
-    const d=$('#authdlg'),p=$('#authpw');
+    const d=$('#authdlg'),p=$('#authpw'),un=$('#authu'),err=$('#autherr');
+    un.value=remembered||'admin';
+    err.style.display=retry?'block':'none';
     p.value='';d.returnValue='';
     d.onclose=()=>{
+      // Trimmed, and typed lowercase by the input's autocapitalize=none: HTTP Basic compares
+      // bytes, so a phone keyboard capitalising the first letter or autocorrect adding a
+      // trailing space is a login that fails with nothing on screen to show why.
+      const u=un.value.trim()||'admin';
       const ok=d.returnValue==='ok'&&p.value!=='';
       // UTF-8, not btoa()'s default. btoa() only throws above U+00FF, so it would silently emit
       // Latin-1 for é/ë/ü/ö/ç -- and the firmware compares against the UTF-8 bytes it stored,
       // so such a password could never authenticate here (review, 2026-07-25).
-      if(ok)sessionStorage.setItem('sb_auth',
-        btoa(String.fromCharCode(...new TextEncoder().encode(u+':'+p.value))));
+      if(ok){
+        sessionStorage.setItem('sb_auth',
+          btoa(String.fromCharCode(...new TextEncoder().encode(u+':'+p.value))));
+        // Held apart from sb_auth, and NOT written here: rememberUser() is called only once a
+        // request with these credentials has actually come back non-401. Storing it on submit
+        // meant a typo'd username was cached and then helpfully re-filled on every retry, so
+        // the user was handed their own mistake back and could never converge (review).
+        sessionStorage.setItem('sb_pending',u);
+      }
       p.value='';
       resolve(ok);
     };
     d.showModal();
   });
+}
+// Promotes the username that was just proven to work. Anything else stays pending, so the next
+// prompt offers the last name the device actually accepted rather than the last one typed.
+function rememberUser(){
+  const u=sessionStorage.getItem('sb_pending');
+  if(u)sessionStorage.setItem('sb_user',u);
 }
 function clearAuth(){sessionStorage.removeItem('sb_auth')}
 
@@ -174,13 +200,15 @@ const authCancelled=()=>({ok:false,status:0,cancelled:true,
 // as the baffling "HTTP 0" (status is 0 on the cancellation object above).
 const httpWhy=r=>r.cancelled?'cancelled (admin password required)':'HTTP '+r.status;
 async function authFetch(url,opts={}){
-  if(!sessionStorage.getItem('sb_auth')&&!await askAuth())return authCancelled();
+  if(!sessionStorage.getItem('sb_auth')&&!await askAuth(false))return authCancelled();
   let r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()}});
   if(r.status===401){
     clearAuth();
-    if(!await askAuth())return authCancelled();
+    // retry=true: the dialog explains that the username is a candidate too.
+    if(!await askAuth(true))return authCancelled();
     r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()}});
   }
+  if(r.status!==401)rememberUser();
   return r;
 }
 
@@ -291,10 +319,16 @@ let logsAuthStop=false;
 async function loadLogs(){
   if(logsAuthStop||$('#logpause').checked)return;
   const r=await authFetch('/api/v1/logs?limit=64');
-  if(r.cancelled){
+  // A 401 latches too, not just a cancel. authFetch has already prompted twice and failed, and
+  // this runs on a 5 s timer: without the latch the dialog reappears every five seconds and
+  // cannot be escaped except by leaving the tab. That was survivable while a wrong password was
+  // the only way to get here; a mistyped username is now a second way, and a far quieter one.
+  if(r.cancelled||r.status===401){
     logsAuthStop=true;
-    $('#logbox').innerHTML='<span class="dim">Admin password required. '+
-      '<a href="#" onclick="logsAuthStop=false;loadLogs();return false">Try again</a></span>';
+    $('#logbox').innerHTML='<span class="dim">'+
+      (r.cancelled?'Admin sign-in required.':'Admin sign-in was not accepted — check the '+
+       'username as well as the password.')+
+      ' <a href="#" onclick="logsAuthStop=false;loadLogs();return false">Try again</a></span>';
     return;
   }
   if(!r.ok){$('#loginfo').textContent=httpWhy(r);return}
@@ -546,8 +580,14 @@ async function renderConfig(){
   // pre-filled -- blank means keep, typing changes it, exactly like the password fields.
   // Visible text, not dots (a username is not secret to its owner), autocomplete=off for the
   // same login-form reason as the other settings fields.
+  // readonly-until-focus like pw() above, and for the same reason: a text field sitting on top
+  // of a password field is a login form to a password manager, and autocomplete="off" is widely
+  // ignored for that pair. An autofilled username here would PATCH security.admin_username on
+  // every unrelated save. autocapitalize/autocorrect off because HTTP Basic compares bytes: a
+  // phone that capitalises the first letter stores a name its owner cannot see is different.
   const credtxt=(id,label,isSet,hint)=>`<label for="${id}">${label}</label>
-    <input id="${id}" autocomplete="off" placeholder="${isSet?'(unchanged)':'(not set)'}">
+    <input id="${id}" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"
+      placeholder="${isSet?'(unchanged)':'(not set)'}" readonly onfocus="this.removeAttribute('readonly')">
     <div class="dim" style="font-size:12px">${hint}</div>`;
   const num=(id,label,val)=>`<label for="${id}">${label}</label><input id="${id}" type="number" value="${val}">`;
   const chk=(id,label,val)=>`<label style="display:flex;gap:8px;align-items:center;margin-top:12px">
@@ -611,7 +651,7 @@ async function renderConfig(){
     ${pw('c_wpw','Password',c.wifi.password_set)}</div>
   <div class="card"><b>MQTT</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_mqe','Enabled',c.mqtt.enabled)}
     ${txt('c_mqh','Broker host',c.mqtt.host)}${num('c_mqp','Port',c.mqtt.port)}
-    ${credtxt('c_mqu','Username',c.mqtt.username_set,'Leave blank to keep. Not shown here; the API accepts null to clear it.')}${pw('c_mqpw','Password',c.mqtt.password_set)}
+    ${credtxt('c_mqu','Username',c.mqtt.username_set,'Leave blank to keep. Not shown here; send an empty string via the API to clear it (null is a no-op for usernames).')}${pw('c_mqpw','Password',c.mqtt.password_set)}
     ${txt('c_mqt','Base topic',c.mqtt.base_topic)}
     ${chk('c_mqd','Home Assistant discovery',c.mqtt.discovery_enabled)}</div>
   <div class="card"><b>Modbus TCP</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_mbe','Enabled',c.modbus.enabled)}
@@ -665,7 +705,7 @@ async function renderConfig(){
     Disabling releases every relay. Roles name the switches in Home Assistant and build
     the DRM Mode select; see docs/drm.md for the wiring rules (failsafe: a dead bridge
     must leave the inverter running).</div></div>`:''}
-  <div class="card"><b>Security</b> <span class="tag" style="font-weight:400">applied immediately</span>${txt('c_au','Admin username',c.security.admin_username)}
+  <div class="card"><b>Security</b> <span class="tag" style="font-weight:400">applied immediately</span>${credtxt('c_au','Admin username',true,'Leave blank to keep. Not shown here — it is half of the login and this page is readable without one. <b>Write down anything other than “admin”: it cannot be read back, and a forgotten username needs a factory reset.</b>')}
     ${pw('c_ap','Admin password',c.security.password_set)}
     <!-- !==false, not a plain truthiness test: a missing field must render as ON. If GET ever
          stops carrying read_only_mode (a serialiser regression, an older firmware behind a
@@ -745,14 +785,20 @@ async function saveConfig(){
     driver:{id:v('c_drv'),options:{}},
     // read_only_mode is rendered from the stored value, so the generic per-key diff below is
     // enough: no rendered default to mistake for a change (unlike driver options / relay roles).
-    security:{admin_username:v('c_au'),read_only_mode:b('c_ro')},
+    // admin_username is added below only when typed, like the other credential fields.
+    security:{read_only_mode:b('c_ro')},
     logging:{level:v('c_lg')}};
   // A blank password field means "keep": sending "" would clear it, which is never what an
   // untouched field means.
   if(v('c_wpw'))body.wifi.password=v('c_wpw');
   // The MQTT username is credential-like (never returned by GET), so like the passwords it
   // travels only when typed -- a blank field means keep.
-  if(v('c_mqu'))body.mqtt.username=v('c_mqu');
+  if(v('c_mqu'))body.mqtt.username=v('c_mqu').trim();
+  // Same rule for the admin username, and the same reason: GET no longer returns it, so there
+  // is nothing to pre-fill and a blank field can only mean keep. Trimmed, because validate()
+  // only rejects an empty one -- "beheerder " would be stored and then never match again, with
+  // no way to see the difference and no way to read the stored value back.
+  if(v('c_au').trim())body.security.admin_username=v('c_au').trim();
   if(v('c_mqpw'))body.mqtt.password=v('c_mqpw');
   if(v('c_ap'))body.security.admin_password=v('c_ap');
   document.querySelectorAll('[data-opt]').forEach(e=>body.driver.options[e.dataset.opt]=e.value);
@@ -787,11 +833,11 @@ async function saveConfig(){
   for(const sect of Object.keys(body)){
     if(typeof body[sect]!=='object')continue;
     for(const k of Object.keys(body[sect])){
-      // Credential-like keys (passwords, the MQTT username) and driver options are only in
-      // the body when the user acted; GET never returns them, so there is nothing to diff
-      // against and they must not be dropped. Exact match on 'username' so 'admin_username'
-      // -- which IS returned and must be diffed -- is not caught.
-      if(k.includes('password')||k==='username'||k==='options')continue;
+      // Credential-like keys (passwords, both usernames) and driver options are only in the
+      // body when the user acted; GET never returns them, so there is nothing to diff against
+      // and they must not be dropped. admin_username used to be the exception here because it
+      // WAS returned -- that is exactly what this release stopped doing.
+      if(k.includes('password')||k.endsWith('username')||k==='options')continue;
       if(same(body[sect][k],(cfgBefore[sect]||{})[k]))delete body[sect][k];
     }
     if(!Object.keys(body[sect]).length)delete body[sect];
@@ -807,6 +853,21 @@ async function saveConfig(){
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   }catch(e){m.className='msg err';m.textContent='Cancelled.';m.style.display='block';return}
   const d=await r.json().catch(()=>({}));
+  // Renaming the admin account invalidates the credential we just authenticated with. Before
+  // this release the sign-in dialog re-fetched the name from GET /config, so a rename healed
+  // itself; now nothing would, and the very next admin action would 401 straight after a
+  // successful rename -- the most confusing possible moment for it. Re-key on the new name,
+  // reusing the password half of the credential that just worked.
+  if(r.ok&&body.security&&body.security.admin_username){
+    const cur=atob(sessionStorage.getItem('sb_auth')||'');
+    const pw=cur.slice(cur.indexOf(':')+1);
+    if(cur){
+      const raw=body.security.admin_username+':'+pw;
+      sessionStorage.setItem('sb_auth',
+        btoa(String.fromCharCode(...new TextEncoder().encode(raw))));
+      sessionStorage.setItem('sb_user',body.security.admin_username);
+    }
+  }
   if(!r.ok){
     m.className='msg err';
     m.textContent=(d.error&&d.error.message)||('HTTP '+r.status);

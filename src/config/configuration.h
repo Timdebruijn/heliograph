@@ -139,12 +139,20 @@ bool validate(const Configuration& config, ConfigError& error);
 
 /// Serialises for `GET /api/v1/config` and the `PATCH` response.
 ///
-/// Credential material is NOT included -- not masked, omitted. Passwords and the MQTT
-/// username each get a `*_set` boolean saying whether one exists. Masking with "***" still
-/// tells an attacker the length class and invites a client to round-trip the mask back in as
-/// a literal secret. The MQTT username is half of a credential pair, so it is treated like
-/// the password it accompanies; non-credential config (SSID, broker host, topics) stays
-/// readable because the UI needs it and it is not a secret.
+/// Credential material is NOT included -- not masked, omitted. Masking with "***" still tells
+/// an attacker the length class and invites a client to round-trip the mask back in as a
+/// literal secret. Passwords get a `*_set` boolean saying whether one exists, and so does the
+/// MQTT username: a username is half of a credential pair, so it is treated like the password
+/// it accompanies.
+///
+/// `security.admin_username` is omitted on the same grounds but has NO `*_set` companion --
+/// validate() refuses an empty one, so the flag could only ever be true. This endpoint is
+/// unauthenticated, so serving that name reduced guessing an admin login with no brute-force
+/// protection to guessing only the password. Nothing else in the firmware can read it back
+/// either; that is deliberate, and docs/security.md tells the owner to write it down.
+///
+/// Non-credential config (SSID, broker host, topics) stays readable because the UI needs it
+/// and it is not a secret.
 ///
 /// When `rebootRequired` is non-null its value is emitted as a top-level `reboot_required`
 /// boolean -- the PATCH handler passes the result of configChangeRequiresReboot(); GET passes

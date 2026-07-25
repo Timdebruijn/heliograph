@@ -93,10 +93,14 @@ Never an HTTP 200 with an error message in the body.
 ## Secrets
 
 `GET /api/v1/config` **never** returns credential material. Not masked-but-present, but
-omitted, with a boolean indicator. This covers every password **and the MQTT username** —
-the username is half of a login pair, so it is treated like the password it accompanies.
+omitted, with a boolean indicator. This covers every password **and both usernames** — a
+username is half of a login pair, so it is treated like the password it accompanies.
 Non-credential config (SSID, broker host, topics) stays readable; the UI needs it and it is
 not a secret.
+
+`security.admin_username` has no `*_set` companion because it can never be unset: validation
+requires it to be non-empty, so the flag would be a constant `true`. Clients that need to
+authenticate must ask the user for it rather than read it back; the factory value is `admin`.
 
 ```json
 {
@@ -104,14 +108,21 @@ not a secret.
   "mqtt":  { "host": "10.0.0.5", "port": 1883, "username_set": true, "password_set": true },
   "modbus": { "enabled": true, "port": 502, "unit_id": 1, "write_enabled": false },
   "polling": { "interval_seconds": 10 },
+  "security": { "password_set": true, "read_only_mode": false },
   "driver": { "id": "eversolar_legacy", "auto_detect": false },
   "logging": { "level": "info" }
 }
 ```
 
-`PATCH` accepts `"password": "..."` / `"username": "..."` to set either, and `null` to clear
-it. An omitted field stays unchanged. Passwords and the username never appear in logs, in
-SSE, in MQTT, or in Prometheus.
+`PATCH` accepts `"password": "..."` / `"username": "..."` to set either. An omitted field stays
+unchanged. Credentials never appear in logs, in SSE, in MQTT, or in Prometheus.
+
+**`null` clears a password, but not a username.** Passwords go through `patchSecret`, which
+distinguishes an absent key from an explicit `null` and clears on the latter. Usernames go
+through `patchString`, where `null` is indistinguishable from absent and therefore does
+nothing — `PATCH {"mqtt":{"username":null}}` returns `200` and leaves the stored value in place.
+Send `""` to clear the MQTT username. `security.admin_username` cannot be cleared at all:
+`validate()` refuses an empty one.
 
 ## Applying changes: `reboot_required`
 

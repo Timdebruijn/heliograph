@@ -79,6 +79,9 @@ static Configuration configWithSecrets() {
     c.mqtt.username            = "solar";
     c.mqtt.password            = "SuperSecretMqttPassword456";
     c.security.adminPassword   = "SuperSecretAdminPassword789";
+    // Deliberately not the factory "admin": a leak of the default would be invisible in a body
+    // that legitimately contains the word "admin" in prose or in a driver id.
+    c.security.adminUsername   = "beheerder";
     return c;
 }
 
@@ -94,6 +97,11 @@ static void test_config_response_contains_no_secret_anywhere() {
     TEST_ASSERT_TRUE(json.find("SuperSecretWifiPassword123") == std::string::npos);
     TEST_ASSERT_TRUE(json.find("SuperSecretMqttPassword456") == std::string::npos);
     TEST_ASSERT_TRUE(json.find("SuperSecretAdminPassword789") == std::string::npos);
+    // The admin username is half of the login, and this endpoint needs no credentials at all.
+    // Serving it reduced guessing a login with no brute-force protection to guessing only the
+    // password -- while mqtt.username, in the same serialiser, was already
+    // omitted for exactly that reason.
+    TEST_ASSERT_TRUE(json.find("beheerder") == std::string::npos);
     // And no masked placeholder either: a client could round-trip "***" back in as a literal.
     TEST_ASSERT_TRUE(json.find("***") == std::string::npos);
 }
@@ -111,6 +119,13 @@ static void test_config_reports_whether_a_secret_is_set() {
     TEST_ASSERT_TRUE(doc["mqtt"]["username_set"].as<bool>());
     TEST_ASSERT_TRUE(doc["mqtt"]["username"].isNull());
     TEST_ASSERT_TRUE(json.find("solar") == std::string::npos);
+    // No admin_username. This one is the actual regression guard: it fails against the old
+    // serialiser.
+    TEST_ASSERT_TRUE(doc["security"]["admin_username"].isNull());
+    // And no *_set flag for it either, because validate() refuses an empty one so the flag
+    // could only ever be true. Note this asserts nothing about the change -- the flag never
+    // existed on either side. It is a forward guard against someone adding one later.
+    TEST_ASSERT_TRUE(doc["security"]["username_set"].isNull());
     // Non-secret fields are readable, which is what makes the UI usable.
     TEST_ASSERT_EQUAL_STRING("thuisnetwerk", doc["wifi"]["ssid"]);
     TEST_ASSERT_EQUAL_STRING("10.0.0.5", doc["mqtt"]["host"]);
