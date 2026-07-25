@@ -413,10 +413,17 @@ function renderWizard(){
     <div id="wizopts"></div>
     <div id="wizoptnote" class="msg err" style="display:none">Pick a register map first — it
     cannot be detected, and the wrong one produces believable numbers.</div>
-    <button id="wizconfirm" onclick="wizCapture();wizStep=6;renderWizard();testPoll()">Confirm and test</button>
+    <!-- Starts disabled: wizGateConfirm() cannot run until two fetches resolve, and on a slow
+         bridge that is long enough to click through with no map chosen. -->
+    <button id="wizconfirm" disabled onclick="wizCapture();wizStep=6;renderWizard();testPoll()">Confirm and test</button>
     <button onclick="wizStep=4;renderWizard()" style="background:none;border:1px solid var(--line);color:var(--fg)">Back</button></div>`;
   } else if(wizStep===6){
-    h+=`<div class="card"><b>Step 6 — Test poll</b><div id="tp" class="dim">Polling…</div></div>`;
+    h+=`<div class="card"><b>Step 6 — Test poll</b>
+    <p class="dim">This polls the configuration the bridge is <b>running now</b> — the driver is
+    built once at boot, so nothing chosen in step 5 is in force yet. Useful for "is anything
+    alive on this bus", not for confirming the register map. Check that after the restart, by
+    the number of published measurements.</p>
+    <div id="tp" class="dim">Polling…</div></div>`;
   } else if(wizStep===7){
     h+=`<div class="card"><b>Step 7 — Saved</b>
     <p class="dim">The driver is stored. It takes effect after a restart.</p>`+
@@ -591,6 +598,8 @@ function wizRenderOpts(){
 function wizGateConfirm(){
   const btn=$('#wizconfirm');
   if(!btn)return;
+  // Runs on every render, including for drivers with no options at all -- that is what releases
+  // the button from the disabled state it is rendered in.
   const missing=[...document.querySelectorAll('#wizopts [data-mustpick]')].some(e=>e.value==='');
   btn.disabled=missing;
   const note=$('#wizoptnote');

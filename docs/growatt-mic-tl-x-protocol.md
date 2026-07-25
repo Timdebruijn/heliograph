@@ -193,6 +193,13 @@ address in turn and confirm exactly one answers, at the address you expect.
    setup — but on a fresh bridge the map starts unset and the step cannot be completed until
    you pick one. That is deliberate: getting the map wrong is the one mistake here that does
    not announce itself. See the warning below.
+
+   > **This firmware polls one device.** With three units on the bus you will see only the one
+   > at the address configured here — the other two are wired, addressed and ignored, with
+   > nothing on any screen saying so. Discovery does not sweep addresses either: it probes the
+   > default unit id, so only the inverter at address 1 can ever appear as a candidate. Both
+   > are known gaps, not symptoms of a wiring fault; bring the units up one at a time by
+   > changing `unit_id` here.
 4. Set log level to `trace` and read `/api/v1/logs`. The `GROWATT in <addr>: ...` lines are
    the raw block dump.
 5. Check the dump against the inverter's own app: PV voltage, AC power, today's energy,
@@ -202,16 +209,22 @@ address in turn and confirm exactly one answers, at the address you expect.
 > Modbus reply proves the device speaks Modbus at that address and nothing more. It cannot tell
 > a MIC TL-X from an SPH.
 >
-> On the wrong map, **not one published value is correct.** The two maps overlap only in which
-> registers are *fetched* (both read the input block 0–124); they share no mapped address at
-> all. This map reads AC power from register 35 and DC power from 1; the SPH map reads them
-> from 40 and 116, as a different width and sign, and then looks for battery data in a 1000-block
-> a MIC does not implement. So a wrong map yields numbers that are the right shape and the right
-> order of magnitude and are all wrong — which is exactly what makes it dangerous.
+> The two maps overlap only in which registers are *fetched*: both read the input block 0–124.
+> They share **no mapped address at all**. Put a MIC on the SPH map and you get:
 >
-> That also means step 5's test poll cannot confirm the map: it shows an AC power figure, and a
-> wrong map produces a believable one. The check that works is step 4 below — the raw block dump
-> against the inverter's own app.
+> - **two measurements instead of twelve** — that count is the reliable tell, not the values;
+> - an AC power figure that may well look right, because the SPH map reads 40–41 and on this
+>   inverter that is Pac1, which on a single-phase unit tracks total AC power. One number
+>   coinciding is exactly what makes the rest believable;
+> - a DC power figure decoded from register 116, which this map does not use — wrong or zero;
+> - no battery rows, and a steadily climbing RS485 error count, because the SPH map also reads a
+>   1000-block a MIC does not implement.
+>
+> Two consequences for checking your work. The wizard's own test poll **cannot** confirm the map:
+> it displays exactly the AC power figure that coincides. Neither can the raw dump in step 4 —
+> the dump is raw registers, byte-identical under either map, so it confirms the addresses in the
+> TOML rather than which map is configured. Compare the **published measurements**
+> (`GET /api/v1/status`, or the dashboard): twelve entries means `mic_tl_x`, two means `sph`.
 6. Confirm the two odd scales specifically — frequency should read ~50.0 Hz (not 5.0 or
    500.0), and operating hours should be plausible for the age of the unit.
 7. **Settle the generation question.** Look at what the 3000-block dump did. Three outcomes,
