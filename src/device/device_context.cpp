@@ -14,7 +14,22 @@ DeviceContext::DeviceContext(InverterDriver& driver, StateStore& store, Diagnost
     state_.bridgeOnline = true;
     state_.identity     = driver_.identity();
     state_.capabilities = driver_.capabilities();
+    // Read the driver's tally rather than assuming zero. Today it always IS zero -- main.cpp
+    // builds a fresh driver right before this context, discovery uses its own throwaway
+    // instances, and no begin() touches the bus -- so this is defence, not a fix for anything
+    // observed. It costs one read and it means a driver that arrives pre-used cannot inject its
+    // history into the installation's metrics as one enormous step.
+    lastBusErrors_ = driver_.busErrors();
     store_.publish(state_);
+}
+
+void DeviceContext::recordBusErrors() {
+    const BusErrorCounts now = driver_.busErrors();
+    // Unsigned differences, so a counter that wraps still yields the right delta.
+    diagnostics_.recordChecksumErrors(now.checksumErrors - lastBusErrors_.checksumErrors);
+    diagnostics_.recordTimeouts(now.timeouts - lastBusErrors_.timeouts);
+    diagnostics_.recordInvalidFrames(now.invalidFrames - lastBusErrors_.invalidFrames);
+    lastBusErrors_ = now;
 }
 
 PollResult DeviceContext::pollOnce() {
@@ -31,6 +46,13 @@ PollResult DeviceContext::pollOnce() {
     DeviceState working = state_;
     const PollResult result = driver_.poll(working);
 
+    // Unconditionally, and before the verdict is even looked at. The bus counters used to be a
+    // switch over `result`, which meant they only ever moved on a poll that failed OUTRIGHT --
+    // and a driver reading several blocks fails outright only when every one of them does. A
+    // bus corrupting a third of its frames kept polling Ok, so the counter that indicts the
+    // cabling stayed at zero for exactly the degrading bus it should have caught first.
+    recordBusErrors();
+
     if (result == PollResult::Ok) {
         state_ = std::move(working);
         state_.recordPollSuccess(now, policy_.staleness);
@@ -38,12 +60,6 @@ PollResult DeviceContext::pollOnce() {
     } else {
         state_.recordPollFailure(now, policy_.staleness);
         diagnostics_.recordPollFailure();
-        switch (result) {
-            case PollResult::ChecksumError: diagnostics_.recordChecksumError(); break;
-            case PollResult::Timeout:       diagnostics_.recordTimeout(); break;
-            case PollResult::InvalidFrame:  diagnostics_.recordInvalidFrame(); break;
-            default: break;
-        }
         // Only the outcome, never payload bytes: this string is published over MQTT and REST.
         diagnostics_.setLastError(std::string("poll failed: ") + pollResultName(result));
     }

@@ -28,9 +28,9 @@ battery = true
 # 1000-series is the older SPH "second group" (this is where the registers below point); the
 # 3000-series is the newer "TL-X/TL-XH" generation, where the official V1.39 protocol puts
 # battery SOC (3002), power (3005/6) and control (3036-3049). Whichever the device populates
-# tells us the generation. A block the device rejects is skipped (poll() handles it), so
-# probing a range that does not exist on this firmware is harmless — it just does not appear
-# in the raw dump. The whole base block is read, not just mapped registers, so the dump
+# tells us the generation. A block the device rejects is skipped (poll() handles it), and the
+# block is marked `probe`, so a range that does not exist on this firmware costs nothing at all:
+# it does not appear in the raw dump and it does not move the RS485 error counters. The whole base block is read, not just mapped registers, so the dump
 # shows every register for correcting the uncertain rows against the inverter display.
 
 [[block]]
@@ -47,6 +47,11 @@ count = 45
 space = "input"
 start = 3000
 count = 32
+# Marked as a probe: this block answers a question, it does not feed a measurement. Its read
+# failures are therefore kept out of the RS485 bus counters. Without that, a unit that answers
+# an unknown range with silence rather than an exception would add a timeout every poll --
+# roughly 360 an hour, forever, on an installation with nothing wrong with it.
+probe = true
 
 # --- battery (the point of an SPH) ---
 

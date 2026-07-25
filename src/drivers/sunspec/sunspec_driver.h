@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "drivers/inverter_driver.h"
+#include "drivers/modbus_bus_tally.h"
 #include "drivers/sunspec/sunspec_parser.h"
 #include "protocols/modbus/modbus_client.h"
 
@@ -63,6 +64,7 @@ public:
     DeviceIdentity          identity() const override { return identity_; }
     InverterCapabilities    capabilities() const override;
     CommandResult           execute(const InverterCommand& command) override;
+    BusErrorCounts          busErrors() const override { return busErrors_; }
 
     /// Everything the device advertised, in chain order. Empty until a successful walk.
     const std::vector<ChainEntry>& chain() const { return chain_; }
@@ -79,6 +81,7 @@ private:
 
     Transport*     transport_ = nullptr;
     SunspecOptions options_;
+    BusErrorCounts busErrors_{};
 
     std::vector<ChainEntry> chain_;
     const ChainEntry*       inverterEntry_ = nullptr;  ///< into chain_

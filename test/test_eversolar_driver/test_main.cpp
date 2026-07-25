@@ -309,7 +309,7 @@ static void test_corrupt_reply_does_not_touch_state() {
     // The previous reading survives untouched; a corrupt frame yields no data at all.
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, good,
                               state.measurements.find(measurement_id::kAcPowerTotal)->value);
-    TEST_ASSERT_TRUE(r.driver.checksumErrors() > 0);
+    TEST_ASSERT_TRUE(r.driver.busErrors().checksumErrors > 0);
 }
 
 static void test_reply_of_wrong_length_is_an_invalid_frame() {

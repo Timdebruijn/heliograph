@@ -17,6 +17,7 @@
 
 #include "drivers/growatt_modbus/growatt_registers.h"
 #include "drivers/inverter_driver.h"
+#include "drivers/modbus_bus_tally.h"
 
 namespace heliograph::growatt {
 
@@ -48,18 +49,23 @@ public:
     /// on hardware. Battery control is a deliberate later step, not an oversight.
     CommandResult execute(const InverterCommand& command) override;
 
+    BusErrorCounts busErrors() const override { return busErrors_; }
+
 private:
     /// Crc is separate from Protocol for the same reason it is in the codec: it is the only one
     /// that means the wire is bad, and it is what the checksum-error metric and its alert key on.
     enum class ReadResult { Ok, Timeout, Exception, Crc, Protocol, TransportError };
 
     /// One Modbus read transaction into `out` (at least `count` words). Sets lastException_ on
-    /// an exception reply. TRACE-dumps the raw block for hardware bring-up.
-    ReadResult readBlock(RegSpace space, uint16_t start, uint16_t count, uint16_t* out);
+    /// an exception reply. TRACE-dumps the raw block for hardware bring-up. `probe` marks a
+    /// block read only to answer a bring-up question; its failures never reach the bus counters.
+    ReadResult readBlock(RegSpace space, uint16_t start, uint16_t count, uint16_t* out,
+                         bool probe = false);
 
     Transport*     transport_ = nullptr;
     GrowattOptions options_;
     uint8_t        lastException_ = 0;
+    BusErrorCounts busErrors_{};
 
     static constexpr size_t kMaxBlocks = 8;
     /// Scratch for poll(): ~2 KB. A member, not a stack array, on purpose. The rs485 task runs

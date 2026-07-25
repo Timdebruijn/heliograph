@@ -43,6 +43,12 @@ struct RegBlock {
     RegSpace space;
     uint16_t start;
     uint16_t count;
+    /// A block read only to answer a bring-up question, mapping nothing. Its silence is a fact
+    /// about the register map, not about the wire, so it must not move the RS485 bus counters:
+    /// otherwise a profile probing a range this model does not implement would put a permanent
+    /// slope on the timeout metric of a perfectly wired installation -- ~360 an hour at the
+    /// default poll interval, forever, on hardware with nothing wrong with it.
+    bool probe = false;
 };
 
 /// A writable numeric setpoint register, declared in a profile's [[write]] section.

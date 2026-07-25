@@ -242,11 +242,18 @@ def parse_profile(
             )
         if start + count > 0x10000:
             raise ProfileError(f"{bw}: start+count exceeds the register address space")
-        parsed_blocks.append({"space": space, "start": start, "count": count})
+        probe = b.get("probe", False)
+        if not isinstance(probe, bool):
+            raise ProfileError(f"{bw}: probe must be true or false")
+        parsed_blocks.append(
+            {"space": space, "start": start, "count": count, "probe": probe}
+        )
 
-    def covered(space: str, address: int) -> bool:
+    def covered(space: str, address: int, exclude_probe: bool = False) -> bool:
         return any(
-            b["space"] == space and b["start"] <= address < b["start"] + b["count"]
+            b["space"] == space
+            and b["start"] <= address < b["start"] + b["count"]
+            and not (exclude_probe and b["probe"])
             for b in parsed_blocks
         )
 
@@ -280,12 +287,20 @@ def parse_profile(
             raise ProfileError(f"{rw}: type must be one of {sorted(TYPES)}")
         words, _signed = TYPES[rtype]
         for a in range(address, address + words):
-            if not covered(space, a):
+            if covered(space, a, exclude_probe=True):
+                continue
+            if covered(space, a):
                 raise ProfileError(
-                    f"{rw}: register {a} ({space}) is not inside any declared [[block]] "
-                    f"-- the driver would never read it (a {rtype} needs {words} "
-                    f"consecutive registers)"
+                    f"{rw}: register {a} ({space}) is only inside a probe block. A probe "
+                    f"block maps nothing and its read failures are kept out of the RS485 bus "
+                    f"counters, so mapping a measurement into one would hide real bus errors "
+                    f"on a range this profile actually depends on"
                 )
+            raise ProfileError(
+                f"{rw}: register {a} ({space}) is not inside any declared [[block]] "
+                f"-- the driver would never read it (a {rtype} needs {words} "
+                f"consecutive registers)"
+            )
         scale = r.get("scale", 1.0)
         if isinstance(scale, bool) or not isinstance(scale, (int, float)):
             raise ProfileError(f"{rw}: scale must be a number")
@@ -456,7 +471,11 @@ def generate(
         w("};")
         w(f"constexpr RegBlock k{sym}Blocks[] = {{")
         for b in p["blocks"]:
-            w(f"    {{RegSpace::{SPACES[b['space']]}, {b['start']}, {b['count']}}},")
+            probe = "true" if b["probe"] else "false"
+            w(
+                f"    {{RegSpace::{SPACES[b['space']]}, {b['start']}, "
+                f"{b['count']}, {probe}}},"
+            )
         w("};")
         if p["writes"]:
             w(f"constexpr WriteMapping k{sym}Writes[] = {{")

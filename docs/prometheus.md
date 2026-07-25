@@ -110,27 +110,61 @@ A quiet night on a solar inverter produces timeouts and no checksum errors, and 
 the inverter powers down after dark. That asymmetry is exactly why the alert below watches
 checksum errors rather than timeouts.
 
-> **A flat zero on the checksum counter is weaker evidence than it looks, on a Modbus device.**
+> **Upgrading from a release before per-transaction counting?** `heliograph_rs485_timeouts_total`
+> steps up by roughly 2–3× on the same hardware, with nothing wrong. A dark inverter used to add
+> one timeout per poll; it now adds one per read, which is one per register block on a Modbus
+> profile. On EverSolar and SolaX it is worse: after three consecutive timeouts the recovery
+> probe runs on every poll, so a night goes from ~1 to ~2 timeouts per poll — and a bridge that
+> reboots after dark, which used to report a *cold-start* night as zero timeouts, now reports
+> two per poll. Rescale any threshold you built on the raw counter. The checksum counter climbs
+> too, but only on a bus that was already faulty. Nothing else in this file changed meaning.
+
+These three count **transactions, not polls**. A Growatt poll reads each register block as its
+own Modbus transaction; the PMU drivers may re-register before they query. So one poll can add
+several errors, and on a healthy bus adds none.
+
+That distinction took two fixes to get there:
+
+- Before the release carrying this note, a Modbus driver could not raise the checksum counter
+  **at all**: the shared read transaction folded CRC failures into a generic protocol error, so
+  on a Growatt or SunSpec install the metric was structurally always zero and the alert could
+  never fire. The PMU drivers (EverSolar, SolaX) were unaffected.
+- And on every driver it only counted when a poll failed **outright**, because the counters were
+  derived from the poll's verdict — and a poll succeeds as soon as *one* block decodes. Each
+  driver now tallies what the wire did per transaction, and the poll verdict no longer gates it.
+
+  Concretely, on a two-block profile polling every 10 s: at a 3% frame-corruption rate the old
+  counter moved about **once every three hours** — never enough for `rate(...[15m]) > 0` to hold
+  for the alert's `for:` window, so it would never have fired. The new counter moves ~22 times
+  an hour and the alert fires reliably. At heavier corruption the old counter did eventually
+  work: at 30% it caught roughly 32 an hour, because both blocks failing at once stops being
+  rare. So this fix does not make a *failing* bus visible sooner; it makes a *degrading* one
+  visible at all, and the crossover is somewhere around 15%.
+
+> **Two under-counts remain.**
 >
-> Before the release carrying this note a Modbus driver could not raise it at all: the shared read transaction folded CRC
-> failures into a generic protocol error, so on a Growatt or SunSpec install the metric was
-> structurally always zero and the alert could never fire. The PMU drivers (EverSolar, SolaX)
-> were unaffected.
+> - Line noise that damages a length or byte-count field can make the frame un-parseable rather
+>   than merely wrong, and that surfaces as a **timeout** rather than a checksum error. (Not
+>   always: a byte count damaged *downwards* shortens the frame, the CRC is then checked over
+>   the wrong span, and it does land in the checksum counter.)
+> - A poll can fail with all three counters flat. A device that answers every range with an
+>   exception, or a SunSpec device advertising a model this driver cannot decode, is a
+>   configuration fault, not a wire fault — `heliograph_poll_failure_total` and `last_error` are
+>   what carry it.
 >
-> Even after that fix it still under-counts, in two ways worth knowing before you trust it:
->
-> - A Growatt poll reads several register blocks and reports success as soon as **one** of them
->   decodes. So a bus corrupting, say, a third of its frames usually still has a good block per
->   poll, the poll returns Ok, and the checksum error is logged but never counted. The metric
->   therefore catches a bus that is *failing*, not one that is *degrading* — which is the
->   opposite of what an early-warning counter should do. Fixing that means decoupling the
->   counter from the poll verdict; it is tracked and not done yet.
-> - Line noise that damages a length or byte-count field makes the frame un-parseable rather
->   than merely wrong, and that surfaces as a **timeout**, not a checksum error.
->
-> Treat a non-zero value as a definite problem, and a zero as "no proof either way". The log at
-> `trace` level is the reliable source while the above stands: a corrupt block says so on the
-> line it happens.
+> So: treat a non-zero value as a definite problem, and a **zero as "no proof either way"**. The
+> `trace` log is the ground truth: a corrupt block says so on the line it happens.
+
+Two things are deliberately **not** errors in any of the three counters, because both prove the
+wiring and the addressing are fine:
+
+- An **exception reply** — the device answering "I do not have that register".
+- A **probe block** failing in any way. A profile may declare a block that maps nothing and
+  exists only to discover which register generation a model speaks (see
+  [device-profiles/schema.md](device-profiles/schema.md)). A device is allowed to answer an
+  unknown range with silence rather than an exception, and counting that would put a permanent
+  slope on the metric of a perfectly healthy installation — 360 timeouts an hour at the default
+  poll interval.
 
 ### Bridge health
 
@@ -279,6 +313,21 @@ Line noise rather than a dead link:
 ```promql
 rate(heliograph_rs485_checksum_errors_total[15m]) > 0
 ```
+
+Since the counter moves per transaction this fires while the bridge is still delivering data —
+which is the point, but it does mean a *rising* rate on a bus that looks healthy in Home
+Assistant is now the expected shape of an early warning, not a contradiction. Corrupt
+transactions per poll attempt reads more usefully than a bare rate:
+
+```promql
+rate(heliograph_rs485_checksum_errors_total[1h])
+  / (rate(heliograph_poll_success_total[1h]) + rate(heliograph_poll_failure_total[1h]))
+```
+
+Note this is per **poll**, not per transaction — the number of transactions is not exported, so
+on a three-block profile the value ranges 0–3 rather than 0–1. Dividing by successful polls
+alone would be worse than imprecise: on the failing bus the query exists to describe, that
+denominator stops advancing and the expression goes to `+Inf`.
 
 The bridge rebooted:
 

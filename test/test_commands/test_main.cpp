@@ -319,6 +319,7 @@ public:
     ProbeResult probe() override { return {}; }
     PollResult  poll(DeviceState&) override { return PollResult::Ok; }
     DeviceIdentity identity() const override { return {}; }
+    BusErrorCounts busErrors() const override { return {}; }
     InverterCapabilities capabilities() const override {
         InverterCapabilities c;
         c.addWrite(InverterCapability::SetActivePowerLimit);  // ...and no numeric[] entry

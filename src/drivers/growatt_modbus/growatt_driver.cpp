@@ -93,7 +93,7 @@ bool GrowattDriver::begin(Transport& transport) {
 }
 
 GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t start, uint16_t count,
-                                                   uint16_t* out) {
+                                                   uint16_t* out, bool probe) {
     if (transport_ == nullptr) {
         return ReadResult::TransportError;
     }
@@ -107,6 +107,17 @@ GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t star
     const modbus::ReadTiming timing{kTransactionDeadlineMs, kResponseTimeoutMs};
     const auto outcome =
         modbus::readRegisters(*transport_, options_.unitId, fn, start, count, out, count, timing);
+    // Per transaction, not per poll: this driver reads several blocks and reports Ok as soon as
+    // one decodes, so counting from the poll verdict made a bus that corrupted most of its
+    // frames register as healthy.
+    //
+    // A probe block is exempt. Asking a model whether it implements a range we are not sure it
+    // has is the firmware's own question, and an inverter is entitled to answer with silence
+    // rather than the exception the Modbus spec prefers. Counting that silence as a bus timeout
+    // would slope the metric of a healthy install for as long as the probe stays in the profile.
+    if (!probe) {
+        tallyModbusRead(busErrors_, outcome.status);
+    }
 
     switch (outcome.status) {
         case modbus::ReadStatus::Ok:
@@ -134,9 +145,9 @@ PollResult GrowattDriver::poll(DeviceState& state) {
     const GrowattProfile& profile = *options_.profile;
 
     size_t validCount  = 0;
-    bool   sawTimeout  = false;
     bool   sawCrcError = false;  // bytes arrived corrupted -> the cable, not the configuration
     bool   sawResponse = false;  // device answered *something* (exception / bad frame) = alive
+    bool   sawBadFrame = false;  // an intact frame that was not ours: addressing, not cabling
 
     // A block the device refuses (exception) or that arrives corrupt is skipped, not fatal:
     // during bring-up the profile deliberately probes ranges that may not exist on this
@@ -149,7 +160,7 @@ PollResult GrowattDriver::poll(DeviceState& state) {
         data.space = b.space;
         data.start = b.start;
         data.count = b.count;
-        const ReadResult r = readBlock(b.space, b.start, b.count, data.values);
+        const ReadResult r = readBlock(b.space, b.start, b.count, data.values, b.probe);
         switch (r) {
             case ReadResult::Ok:
                 ++validCount;
@@ -167,12 +178,12 @@ PollResult GrowattDriver::poll(DeviceState& state) {
                 break;
             case ReadResult::Protocol:
                 sawResponse = true;
+                sawBadFrame = true;
                 log::warn("GROWATT unit %u block %u+%u unreadable (bad frame) -- skipped",
                           options_.unitId, b.start, b.count);
                 break;
             case ReadResult::Timeout:
-                sawTimeout = true;
-                break;
+                break;  // silence on this block; only total silence is a timeout verdict
             case ReadResult::TransportError:
                 return PollResult::TransportError;
         }
@@ -180,13 +191,24 @@ PollResult GrowattDriver::poll(DeviceState& state) {
 
     if (validCount == 0) {
         // Nothing usable. A checksum failure outranks everything else: it is the only outcome
-        // that points at the cable, and it is what the alerting rule watches. Then "silent"
-        // only when the device truly said nothing -- a refused range or a bad frame proves it
-        // is present and addressable, so that outranks a timeout on another block.
+        // that points at the cable, and it is what the alerting rule watches. Then a bad frame,
+        // which proves the device is present and addressable.
         if (sawCrcError) {
             return PollResult::ChecksumError;
         }
-        return (sawTimeout && !sawResponse) ? PollResult::Timeout : PollResult::InvalidFrame;
+        if (sawBadFrame) {
+            return PollResult::InvalidFrame;
+        }
+        // Nothing but exceptions: the device is present, correctly addressed, and refusing
+        // every range this profile asks for -- a wrong profile or unit id, not a wire fault.
+        // This used to report InvalidFrame, which pointed the field diagnosis at the cabling
+        // AND contradicted the bus counters, since an exception rightly moves none of them: the
+        // poll failed every ten seconds while all three RS485 counters read zero. SunSpec has
+        // always called this NotRegistered (failureFor()); the two Modbus drivers now agree.
+        if (sawResponse) {
+            return PollResult::NotRegistered;
+        }
+        return PollResult::Timeout;
     }
 
     // At least one block is good -> safe to touch state.

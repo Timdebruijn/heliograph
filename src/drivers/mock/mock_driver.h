@@ -60,6 +60,10 @@ public:
     DeviceIdentity       identity() const override;
     InverterCapabilities capabilities() const override;
     CommandResult        execute(const InverterCommand& command) override;
+    /// The simulation has no bytes, but it does have simulated outcomes: a mock told to fail
+    /// its checksum must move the same counter a real driver would, or the metric path is
+    /// untestable without hardware.
+    BusErrorCounts       busErrors() const override { return busErrors_; }
 
     void setOptions(const MockOptions& options) { options_ = options; }
     const MockOptions& options() const { return options_; }
@@ -76,6 +80,7 @@ private:
     InverterCapabilities capabilities_;
     double               lastAcceptedValue_ = 0.0;
     uint32_t             acceptedCommands_  = 0;
+    BusErrorCounts       busErrors_{};
 };
 
 }  // namespace heliograph::mock

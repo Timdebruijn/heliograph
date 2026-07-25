@@ -82,6 +82,7 @@ public:
     PollResult           poll(DeviceState&) override { return PollResult::Ok; }
     DeviceIdentity       identity() const override { return {}; }
     InverterCapabilities capabilities() const override { return {}; }
+    BusErrorCounts       busErrors() const override { return {}; }
     CommandResult        execute(const InverterCommand&) override {
         script_->writeAttempted = true;  // discovery must never reach this
         return CommandResult::Ok;

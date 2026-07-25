@@ -44,6 +44,35 @@ enum class PollResult : uint8_t {
 
 const char* pollResultName(PollResult result);
 
+/// What the wire did, counted per transaction rather than per poll.
+///
+/// The bus counters used to be derived from the PollResult, and a poll is a verdict over
+/// several transactions: any driver that reads more than one block reports Ok as soon as one of
+/// them decodes. A bus corrupting a third of its frames therefore polled Ok almost every time
+/// and moved the checksum counter almost never -- so the one metric that indicts the cabling
+/// caught a bus that had already failed, and stayed flat on a bus that was degrading. That is
+/// backwards for the thing an early warning is for.
+///
+/// Cumulative and monotonic for the driver's lifetime. DeviceContext takes the difference
+/// across each poll, so a driver only has to count; it never has to know what the caller
+/// already saw. Unsigned arithmetic makes the difference correct across a wrap too.
+struct BusErrorCounts {
+    /// Bytes came back corrupted: the wire. See docs/rs485-bus.md.
+    uint32_t checksumErrors = 0;
+    /// A read that got no answer at all.
+    uint32_t timeouts       = 0;
+    /// An intact frame that was not usable: a reply from the wrong unit, a structurally
+    /// unreadable one, or a payload this driver cannot decode. Addressing or a device quirk,
+    /// not cabling.
+    ///
+    /// One deliberate asymmetry: the PMU drivers do NOT count a well-formed frame addressed to
+    /// someone else. On a half-duplex bus that branch also catches our own transmission coming
+    /// back, and the two are not distinguishable there, so counting it would put a per-poll
+    /// slope on every installation that echoes. The Modbus drivers have no such ambiguity and
+    /// do count it. Compare installations of the same protocol, not across protocols.
+    uint32_t invalidFrames  = 0;
+};
+
 class InverterDriver {
 public:
     virtual ~InverterDriver() = default;
@@ -60,6 +89,15 @@ public:
     /// Contract: `state` may only be modified when returning Ok. On any failure the caller
     /// keeps the previous state, so a partially decoded frame can never surface as data.
     virtual PollResult poll(DeviceState& state) = 0;
+
+    /// Frame-level tallies for the metrics. Pure virtual on purpose: a default returning zero
+    /// would let a new driver ship with a permanently flat checksum counter and nothing to
+    /// notice, which is the failure mode this whole mechanism exists to remove.
+    ///
+    /// Errors seen during probe() count too. That is invisible in practice -- DiscoveryEngine
+    /// probes through its own throwaway driver instances, never the polling one -- so a
+    /// discovery sweep across four baud rates does not land in the installation's metrics.
+    virtual BusErrorCounts busErrors() const = 0;
 
     virtual DeviceIdentity       identity() const     = 0;
     virtual InverterCapabilities capabilities() const = 0;
