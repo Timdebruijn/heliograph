@@ -252,6 +252,31 @@ bool validate(const Configuration& config, ConfigError& error) {
     if (!checkLength(config.ntp.server, 64, "ntp.server", error)) return false;
     if (!checkLength(config.ntp.timezone, 48, "ntp.timezone", error)) return false;
     if (!checkLength(config.ntp.timezoneName, 48, "ntp.timezone_name", error)) return false;
+    if (config.serial.enabled) {
+        // Bounds, not a whitelist of "known good" rates. RS485 devices in the field run at
+        // 1200 and at 115200, and refusing an odd-but-real rate would be the firmware deciding
+        // it knows the installation better than the installer does.
+        const auto& p = config.serial.profile;
+        if (p.baudRate < 1200 || p.baudRate > 115200) {
+            error = {"serial.baud_rate", "must be between 1200 and 115200"};
+            return false;
+        }
+        // 8 only. The transport maps a SerialProfile onto the ESP32's SERIAL_* constants and
+        // handles the 8-bit combinations; anything else falls through to SERIAL_8N1, which
+        // loses the data bits AND the parity while configure() still reports success. That
+        // fallthrough was harmless while only drivers picked the line -- every driver ships
+        // 8 bits -- and this override is what made it reachable from the API and the settings
+        // form. Refused here rather than coerced silently, because the symptom of the coercion
+        // is a dead bus and a log line stating the setting that was NOT applied.
+        if (p.dataBits != 8) {
+            error = {"serial.data_bits", "must be 8; 7-bit framing is not supported"};
+            return false;
+        }
+        if (p.stopBits < 1 || p.stopBits > 2) {
+            error = {"serial.stop_bits", "must be 1 or 2"};
+            return false;
+        }
+    }
     // A POSIX TZ is always needed to stamp logs in local time; a default is provided, so empty
     // is a mistake rather than a choice.
     if (config.ntp.timezone.empty()) {
@@ -325,10 +350,18 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     ntp["timezone"]      = config.ntp.timezone;
     ntp["timezone_name"] = config.ntp.timezoneName;
 
+    // Always emitted, enabled or not, so the settings page can show what the bridge will
+    // actually do to the line rather than leaving the reader to infer it from an absent key.
+    JsonObject serial   = doc["serial"].to<JsonObject>();
+    serial["override"]  = config.serial.enabled;
+    serial["baud_rate"] = config.serial.profile.baudRate;
+    serial["parity"]    = parityName(config.serial.profile.parity);
+    serial["data_bits"] = config.serial.profile.dataBits;
+    serial["stop_bits"] = config.serial.profile.stopBits;
+
     JsonObject security = doc["security"].to<JsonObject>();
     // The admin username is omitted for the same reason mqtt.username is, in the mqtt block
-    // above: it
-    // is half of a credential pair, this endpoint is unauthenticated, and HTTP Basic here has no
+    // above: it is half of a credential pair, this endpoint is unauthenticated, and Basic has no
     // brute-force protection. Serving it turned guessing the login into guessing only the
     // password. Unlike the MQTT one it needs no *_set flag -- validate() requires it to be
     // non-empty, so "is one set" is always yes and would say nothing.
@@ -368,7 +401,13 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
            a.polling.intervalSeconds != b.polling.intervalSeconds ||
            a.driver.id != b.driver.id || a.driver.options != b.driver.options ||
            a.ntp.enabled != b.ntp.enabled || a.ntp.useDhcp != b.ntp.useDhcp ||
-           a.ntp.server != b.ntp.server || a.ntp.timezone != b.ntp.timezone;
+           a.ntp.server != b.ntp.server || a.ntp.timezone != b.ntp.timezone ||
+           // The line is configured once, in setup(), right after the driver's begin(). Nothing
+           // reconfigures a live UART mid-poll, so a changed override only takes effect on the
+           // next boot -- and saying otherwise would leave someone watching a bus that is still
+           // running at the old rate while the page claims the new one is in force.
+           a.serial.enabled != b.serial.enabled ||
+           (b.serial.enabled && !(a.serial.profile == b.serial.profile));
 }
 
 bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error,
@@ -509,6 +548,50 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
             }
         }
     }
+
+    const bool serialSupplied = !doc["serial"].isNull();
+    if (JsonObjectConst serial = doc["serial"]; !serial.isNull()) {
+        if (!patchBool(serial["override"], merged.serial.enabled, "serial.override", error))
+            return false;
+        if (!patchNumber(serial["baud_rate"], merged.serial.profile.baudRate, "serial.baud_rate",
+                         error))
+            return false;
+        if (!patchNumber(serial["data_bits"], merged.serial.profile.dataBits, "serial.data_bits",
+                         error))
+            return false;
+        if (!patchNumber(serial["stop_bits"], merged.serial.profile.stopBits, "serial.stop_bits",
+                         error))
+            return false;
+        if (JsonVariantConst parity = serial["parity"]; !parity.isNull()) {
+            std::string name;
+            if (!patchString(parity, name, "serial.parity", error)) {
+                return false;
+            }
+            // Refused rather than defaulted: a typo'd parity that silently became "none" would
+            // configure a line the user did not ask for and then blame the cable.
+            if (!parseParity(name, merged.serial.profile.parity)) {
+                error = {"serial.parity", "must be \"none\", \"even\" or \"odd\""};
+                return false;
+            }
+        }
+    }
+
+    // A line override belongs to the driver it was derived from. The wizard pins one only when
+    // the device answered at a profile that driver does not lead with, so carrying it across to
+    // a DIFFERENT driver forces line settings that were never measured against it -- and every
+    // driver in this build leads with 9600 8N1, so the carried value is wrong by construction.
+    // The symptom is a silent bus right after a restart the Driver card asked for, with the
+    // cause sitting in a different card further up the page.
+    //
+    // Only when this patch did not supply `serial` itself. The wizard sends driver AND serial
+    // together, and clearing what the caller just asked for is the mistake the driver-option
+    // rule above already had to be redesigned to avoid. Clearing degrades to "the driver
+    // decides", which is where every healthy install already is, is visible in Settings, and
+    // is re-derived by running discovery again -- so the recovery does not need a factory reset.
+    if (!serialSupplied && merged.driver.id != config.driver.id && merged.serial.enabled) {
+        merged.serial.enabled = false;
+    }
+
 
     if (JsonObjectConst ntp = doc["ntp"]; !ntp.isNull()) {
         if (!patchBool(ntp["enabled"], merged.ntp.enabled, "ntp.enabled", error)) return false;

@@ -346,7 +346,7 @@ async function loadLogs(){
 }
 
 // ---------------- Discovery wizard (§28: 7 steps) ----------------
-let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null;
+let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null, wizSavedSerial=null;
 const STEPS=['Interface','Mode','Probing','Candidates','Confirm','Test poll','Save'];
 
 function stepBar(){
@@ -411,7 +411,20 @@ function renderWizard(){
     h+=`<div class="card"><b>Step 6 — Test poll</b><div id="tp" class="dim">Polling…</div></div>`;
   } else if(wizStep===7){
     h+=`<div class="card"><b>Step 7 — Saved</b>
-    <p class="dim">The driver is stored. It takes effect after a restart.</p>
+    <p class="dim">The driver is stored. It takes effect after a restart.</p>`+
+    // Said out loud, because it is a setting the user never asked for and would otherwise
+    // find in Settings with no idea where it came from.
+    (wizSavedSerial&&wizSavedSerial.override?`<p class="dim">This device answered at
+      <b>${wizSavedSerial.baud_rate} ${wizSavedSerial.data_bits}${esc(wizSavedSerial.parity[0].toUpperCase())}${wizSavedSerial.stop_bits}</b>,
+      which is not this driver's default, so those line settings were saved with it. You can
+      change or clear that under <b>Settings → RS485 line</b>.</p>`:'')+
+    // Worth saying in the other direction too, and phrased so it is true whether or not an
+    // override existed before: this run cleared one if there was one. cfgBefore is only
+    // populated once the Settings tab has been opened, so it cannot be relied on here.
+    (wizSavedSerial&&wizSavedSerial.override===false?`<p class="dim">This device answered at
+      this driver's own default, so no <b>RS485 line</b> override is stored — the driver
+      decides. Any override left over from an earlier run has been switched off.</p>`:'')+
+    `
     <button onclick="wizReboot()">Restart now</button>
     <div id="wizmsg" class="msg" style="display:none"></div></div>`;
   }
@@ -464,6 +477,40 @@ async function testPoll(){
   },3000);
 }
 
+// What to store for the line, given the candidate that answered.
+//
+// Extended discovery tries every profile a driver advertises (quick mode only tries the
+// first), so a device can reply at one the driver does not lead with. Saving the driver alone
+// then means the next boot configures the driver's own first profile and the bus goes quiet.
+//
+// Returns an override when the match differs from what this driver would configure by itself,
+// and {override:false} when it does not -- NOT null. Omitting the key entirely made the wizard
+// a one-way ratchet: a PATCH without `serial` leaves the stored value alone, so once anything
+// had pinned 115200, re-running the wizard on a device that answers at the driver's default
+// could never undo it and step 7 would not even mention the setting that was about to silence
+// the bus. Null is reserved for "this run learned nothing", where leaving it alone is right.
+async function discoveredSerialOverride(id){
+  const cand=((wizReport&&wizReport.candidates)||[]).find(c=>c.driver_id===id);
+  const found=cand&&cand.serial_profile;
+  if(!found)return null;
+  // cfgDrivers is only populated once the Settings tab has been opened, and the wizard is
+  // reachable without ever going there. Fetch rather than assume: with no default to compare
+  // against, every discovery would pin an override, including the overwhelming majority where
+  // the driver's own first choice is already right.
+  if(!cfgDrivers){
+    try{cfgDrivers=await (await fetch('/api/v1/drivers')).json()}catch(e){return null}
+  }
+  const drv=((cfgDrivers&&cfgDrivers.drivers)||[]).find(d=>d.id===id);
+  const def=drv&&(drv.serial_profiles||[])[0];
+  if(!def)return null;  // nothing to compare against; do not guess
+  if(def.baud_rate===found.baud_rate&&def.parity===found.parity&&
+     def.data_bits===found.data_bits&&def.stop_bits===found.stop_bits){
+    return {override:false};
+  }
+  return {override:true,baud_rate:found.baud_rate,parity:found.parity,
+          data_bits:found.data_bits,stop_bits:found.stop_bits};
+}
+
 async function saveDriver(){
   // wizChosen is captured when leaving step 5 -- the #wd select no longer exists here (step 6
   // re-rendered the wizard). Before that capture existed, the manual path saved
@@ -471,9 +518,13 @@ async function saveDriver(){
   // nothing had been saved at all.
   const id=wizChosen;
   if(!id){alert('No driver selected.');wizStep=5;renderWizard();return}
+  const body={driver:{id}};
+  const serial=await discoveredSerialOverride(id);
+  if(serial)body.serial=serial;
   const r=await authFetch('/api/v1/config',{method:'PATCH',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({driver:{id}})});
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){alert('Save failed: '+httpWhy(r));return}
+  wizSavedSerial=serial;
   wizStep=7;renderWizard();
 }
 
@@ -539,6 +590,9 @@ const RESTART_NEEDED={
   'driver.id':'Active driver','driver.options':'Driver options',
   'ntp.enabled':'NTP on/off','ntp.use_dhcp':'NTP via DHCP','ntp.server':'NTP server',
   'ntp.timezone':'Timezone',
+  'serial.override':'RS485 line override','serial.baud_rate':'RS485 baud rate',
+  'serial.parity':'RS485 parity','serial.data_bits':'RS485 data bits',
+  'serial.stop_bits':'RS485 stop bits',
 };
 // Applied immediately, no restart:
 //   bridge_name          - read fresh on every status response
@@ -671,6 +725,21 @@ async function renderConfig(){
     </span>
     <div class="dim" style="font-size:12px;margin-top:8px">A DHCP-provided server wins; the
     fallback is used when the network offers none.</div></div>
+  <div class="card"><b>RS485 line</b> <span class="tag" style="font-weight:400">needs restart</span>
+    ${chk('c_ser','Override the line settings the driver chooses',c.serial.override)}
+    <div class="dim" style="font-size:12px;margin-top:6px">Off, the driver configures the line
+    itself — right for almost every install. The discovery wizard turns this on by itself when
+    it finds a device at a profile the driver does not lead with, because the driver would
+    otherwise go back to its own default on the next boot and the bus would fall silent.</div>
+    <label for="c_serbaud">Baud rate</label>
+    <input id="c_serbaud" type="number" value="${c.serial.baud_rate}">
+    <label for="c_serpar">Parity</label>
+    <select id="c_serpar">${['none','even','odd'].map(x=>
+      `<option value="${x}" ${c.serial.parity===x?'selected':''}>${x}</option>`).join('')}</select>
+    <label for="c_serdb">Data bits</label>
+    <input id="c_serdb" type="number" value="${c.serial.data_bits}">
+    <label for="c_sersb">Stop bits</label>
+    <input id="c_sersb" type="number" value="${c.serial.stop_bits}"></div>
   <div class="card"><b>Driver</b> <span class="tag" style="font-weight:400">needs restart</span>
     <label for="c_drv">Active driver</label>
     <select id="c_drv" onchange="reloadDriverOpts()">${
@@ -786,6 +855,8 @@ async function saveConfig(){
     // read_only_mode is rendered from the stored value, so the generic per-key diff below is
     // enough: no rendered default to mistake for a change (unlike driver options / relay roles).
     // admin_username is added below only when typed, like the other credential fields.
+    serial:{override:b('c_ser'),baud_rate:n('c_serbaud'),parity:v('c_serpar'),
+            data_bits:n('c_serdb'),stop_bits:n('c_sersb')},
     security:{read_only_mode:b('c_ro')},
     logging:{level:v('c_lg')}};
   // A blank password field means "keep": sending "" would clear it, which is never what an

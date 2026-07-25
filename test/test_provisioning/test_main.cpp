@@ -535,6 +535,49 @@ static void test_non_firmware_is_rejected() {
     TEST_ASSERT_FALSE(looksLikeFirmware(html, 0));
 }
 
+// The whole point of the override: it has to survive the restart. Discovery runs, reports the
+// profile the device answered at, the wizard saves it -- and then the bridge reboots. If NVS
+// does not carry it, setup() configures the driver's own first profile and the inverter that
+// was just positively identified goes quiet, with the wizard's own screenshot showing the
+// right numbers.
+static void test_a_serial_override_survives_a_restart() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    auto               c = provisionedConfig();
+    c.serial.enabled                  = true;
+    c.serial.profile.baudRate         = 4800;
+    c.serial.profile.parity           = SerialParity::Even;
+    c.serial.profile.stopBits         = 2;
+    TEST_ASSERT_TRUE(store.save(c));
+
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_TRUE(loaded.serial.enabled);
+    TEST_ASSERT_EQUAL_UINT32(4800, loaded.serial.profile.baudRate);
+    TEST_ASSERT_EQUAL(SerialParity::Even, loaded.serial.profile.parity);
+    TEST_ASSERT_EQUAL_UINT8(2, loaded.serial.profile.stopBits);
+}
+
+// A blob written by a firmware from before this field existed -- written raw, because saving
+// through the current code would emit the section and prove nothing. It must load as "the
+// driver decides", which is exactly what those bridges are already doing; anything else would
+// change the line under a working install on a firmware update.
+static void test_a_config_without_a_serial_section_keeps_the_driver_in_charge() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    backend.write(kStorageKeyConfig,
+                  R"({"version":1,"bridge_name":"Zolder","wifi":{"ssid":"thuisnetwerk"},)"
+                  R"("driver":{"id":"eversolar_legacy"}})");
+
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_FALSE(loaded.serial.enabled);
+    // ...and the defaults underneath are the driver-neutral ones, not zeroes that would
+    // configure an impossible line if the flag were ever flipped by hand.
+    TEST_ASSERT_EQUAL_UINT32(9600, loaded.serial.profile.baudRate);
+    TEST_ASSERT_EQUAL_UINT8(8, loaded.serial.profile.dataBits);
+}
+
 static void test_ota_rejects_a_non_firmware_upload_before_writing() {
     ota::OtaManager ota;
     TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(1024));
@@ -658,6 +701,8 @@ int main(int, char**) {
     RUN_TEST(test_setup_ssid_is_stable_and_distinguishable);
     RUN_TEST(test_firmware_magic_is_recognised);
     RUN_TEST(test_non_firmware_is_rejected);
+    RUN_TEST(test_a_serial_override_survives_a_restart);
+    RUN_TEST(test_a_config_without_a_serial_section_keeps_the_driver_in_charge);
     RUN_TEST(test_ota_rejects_a_non_firmware_upload_before_writing);
     RUN_TEST(test_ota_accepts_a_firmware_upload);
     RUN_TEST(test_ota_refuses_a_second_concurrent_upload);

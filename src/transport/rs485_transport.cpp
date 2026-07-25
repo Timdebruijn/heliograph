@@ -14,8 +14,11 @@ namespace heliograph {
 namespace {
 
 uint32_t toSerialConfig(const SerialProfile& p) {
-    // Only the combinations a driver can actually ask for. Anything else is a bug, not a
-    // configuration to accommodate.
+    // 8-bit framing only. That used to be safe to assume because only driver descriptors
+    // reached here, and every driver ships 8 bits; the stored line override made it reachable
+    // from the REST API and the settings form, so config validation now refuses anything else
+    // outright rather than letting it land on the fallthrough below -- which silently drops
+    // both the data bits and the parity while configure() still reports success.
     if (p.dataBits == 8 && p.stopBits == 1) {
         switch (p.parity) {
             case SerialParity::None: return SERIAL_8N1;

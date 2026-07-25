@@ -121,6 +121,13 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     ntp["timezone"]      = config.ntp.timezone;
     ntp["timezone_name"] = config.ntp.timezoneName;
 
+    JsonObject serial   = doc["serial"].to<JsonObject>();
+    serial["override"]  = config.serial.enabled;
+    serial["baud_rate"] = config.serial.profile.baudRate;
+    serial["parity"]    = parityName(config.serial.profile.parity);
+    serial["data_bits"] = config.serial.profile.dataBits;
+    serial["stop_bits"] = config.serial.profile.stopBits;
+
     JsonObject security        = doc["security"].to<JsonObject>();
     security["admin_username"] = config.security.adminUsername;
     security["admin_password"] = config.security.adminPassword;
@@ -254,6 +261,19 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
         if (ntp["server"].is<const char*>())   parsed.ntp.server   = ntp["server"].as<const char*>();
         if (ntp["timezone"].is<const char*>()) parsed.ntp.timezone = ntp["timezone"].as<const char*>();
         if (ntp["timezone_name"].is<const char*>()) parsed.ntp.timezoneName = ntp["timezone_name"].as<const char*>();
+    }
+    if (JsonObjectConst serial = doc["serial"]; !serial.isNull()) {
+        if (serial["override"].is<bool>()) parsed.serial.enabled = serial["override"].as<bool>();
+        if (serial["baud_rate"].is<uint32_t>()) parsed.serial.profile.baudRate = serial["baud_rate"].as<uint32_t>();
+        if (serial["data_bits"].is<uint8_t>()) parsed.serial.profile.dataBits = serial["data_bits"].as<uint8_t>();
+        if (serial["stop_bits"].is<uint8_t>()) parsed.serial.profile.stopBits = serial["stop_bits"].as<uint8_t>();
+        // An unparseable parity leaves the default rather than guessing. The value came out of
+        // our own NVS, so this only fires on a corrupted or hand-edited blob -- and silently
+        // becoming "none" there would configure a line nobody chose.
+        if (serial["parity"].is<const char*>()) {
+            SerialParity p{};
+            if (parseParity(serial["parity"].as<const char*>(), p)) parsed.serial.profile.parity = p;
+        }
     }
     if (JsonObjectConst security = doc["security"]; !security.isNull()) {
         if (security["admin_username"].is<const char*>()) parsed.security.adminUsername = security["admin_username"].as<const char*>();

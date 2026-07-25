@@ -142,6 +142,139 @@ static void test_config_reports_whether_a_secret_is_set() {
     TEST_ASSERT_FALSE(doc["security"]["password_set"].as<bool>());
 }
 
+// --- serial override -------------------------------------------------------------------
+
+// Discovery sweeps every profile a driver advertises and reports the one that answered. Saving
+// the driver alone meant the next boot configured the driver's FIRST profile instead, so a
+// device that had just been positively identified went silent. The override is what carries the
+// answer across the reboot.
+static void test_a_serial_override_round_trips_through_a_patch() {
+    Configuration c;
+    ConfigError   e;
+    TEST_ASSERT_FALSE(c.serial.enabled);  // off unless something asks for it
+
+    TEST_ASSERT_TRUE(applyConfigPatch(
+        R"({"serial":{"override":true,"baud_rate":4800,"parity":"even","data_bits":8,)"
+        R"("stop_bits":2}})", c, e));
+    TEST_ASSERT_TRUE(c.serial.enabled);
+    TEST_ASSERT_EQUAL_UINT32(4800, c.serial.profile.baudRate);
+    TEST_ASSERT_EQUAL(SerialParity::Even, c.serial.profile.parity);
+    TEST_ASSERT_EQUAL_UINT8(2, c.serial.profile.stopBits);
+
+    std::string json;
+    TEST_ASSERT_TRUE(serializeConfig(c, json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["serial"]["override"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT32(4800, doc["serial"]["baud_rate"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("even", doc["serial"]["parity"]);
+}
+
+// A typo must not quietly become "none": that configures a line the user did not ask for, and
+// the symptom is a silent bus, which points the diagnosis straight at the cabling instead.
+static void test_an_unknown_parity_is_refused_rather_than_defaulted() {
+    Configuration c;
+    c.serial.profile.parity = SerialParity::Odd;
+    ConfigError e;
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"serial":{"parity":"evne"}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("serial.parity", e.field.c_str());
+    TEST_ASSERT_EQUAL(SerialParity::Odd, c.serial.profile.parity);  // untouched
+}
+
+static void test_serial_bounds_are_checked_only_when_the_override_is_on() {
+    Configuration c;
+    ConfigError   e;
+    // Off: nothing configures the line from these fields, so a stale value must not block a
+    // save of something unrelated.
+    c.serial.profile.baudRate = 300;
+    TEST_ASSERT_TRUE(validate(c, e));
+
+    c.serial.enabled = true;
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("serial.baud_rate", e.field.c_str());
+
+    c.serial.profile.baudRate = 4800;
+    c.serial.profile.dataBits = 9;
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("serial.data_bits", e.field.c_str());
+
+    c.serial.profile.dataBits = 8;
+    TEST_ASSERT_TRUE(validate(c, e));
+
+    // 7-bit framing is refused rather than coerced. The transport maps a profile onto the
+    // ESP32's SERIAL_* constants and only handles the 8-bit ones; anything else falls through
+    // to SERIAL_8N1, losing the data bits AND the parity while configure() still reports
+    // success. That was unreachable while only drivers picked the line -- this override is what
+    // opened it to the API, and a silent coercion there means a dead bus plus a log line
+    // stating the setting that was not applied.
+    c.serial.profile.dataBits = 7;
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("serial.data_bits", e.field.c_str());
+}
+
+// An override is derived from one driver's profile sweep. Carried across to another driver it
+// forces line settings never measured against it, and the symptom is a silent bus right after
+// the restart the Driver card asked for -- with the cause in a different card.
+static void test_switching_driver_drops_a_line_override_it_did_not_ask_for() {
+    Configuration c;
+    c.driver.id               = "eversolar_legacy";
+    c.serial.enabled          = true;
+    c.serial.profile.baudRate = 115200;
+    ConfigError e;
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"driver":{"id":"sunspec"}})", c, e));
+    TEST_ASSERT_FALSE(c.serial.enabled);
+    // The numbers stay put; only the flag drops, so turning it back on in Settings does not
+    // mean retyping what discovery measured.
+    TEST_ASSERT_EQUAL_UINT32(115200, c.serial.profile.baudRate);
+}
+
+// ...but not when the caller supplied `serial` in the same request. That is exactly what the
+// wizard does -- driver and line together -- and clearing what the caller just asked for is the
+// mistake the driver-option orphan rule had to be redesigned to avoid.
+static void test_a_patch_that_sets_both_keeps_the_line_it_asked_for() {
+    Configuration c;
+    c.driver.id = "eversolar_legacy";
+    ConfigError e;
+
+    TEST_ASSERT_TRUE(applyConfigPatch(
+        R"({"driver":{"id":"growatt_modbus"},"serial":{"override":true,"baud_rate":115200}})", c,
+        e));
+    TEST_ASSERT_TRUE(c.serial.enabled);
+    TEST_ASSERT_EQUAL_UINT32(115200, c.serial.profile.baudRate);
+}
+
+// And an unchanged driver never triggers it: a save of something unrelated must not quietly
+// undo a working line override.
+static void test_an_unrelated_save_leaves_the_line_override_alone() {
+    Configuration c;
+    c.driver.id      = "growatt_modbus";
+    c.serial.enabled = true;
+    ConfigError e;
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"bridge_name":"Zolder"})", c, e));
+    TEST_ASSERT_TRUE(c.serial.enabled);
+}
+
+// The line is configured once, in setup(), immediately after the driver's begin(). Nothing
+// reconfigures a live UART, so claiming the change is already in force would leave someone
+// watching a bus still running at the old rate.
+static void test_changing_the_serial_override_requires_a_reboot() {
+    const Configuration base;
+    auto                on = base;
+    on.serial.enabled      = true;
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, on));
+
+    auto faster = on;
+    faster.serial.profile.baudRate = 19200;
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(on, faster));
+
+    // While the override is off the stored numbers configure nothing, so editing them is not a
+    // reason to make someone restart a working bridge.
+    auto idle = base;
+    idle.serial.profile.baudRate = 19200;
+    TEST_ASSERT_FALSE(configChangeRequiresReboot(base, idle));
+}
+
 static void test_reboot_required_flag_is_patch_only() {
     auto        c = configWithSecrets();
     std::string json;
@@ -1066,6 +1199,13 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_config_response_contains_no_secret_anywhere);
     RUN_TEST(test_config_reports_whether_a_secret_is_set);
+    RUN_TEST(test_a_serial_override_round_trips_through_a_patch);
+    RUN_TEST(test_an_unknown_parity_is_refused_rather_than_defaulted);
+    RUN_TEST(test_serial_bounds_are_checked_only_when_the_override_is_on);
+    RUN_TEST(test_switching_driver_drops_a_line_override_it_did_not_ask_for);
+    RUN_TEST(test_a_patch_that_sets_both_keeps_the_line_it_asked_for);
+    RUN_TEST(test_an_unrelated_save_leaves_the_line_override_alone);
+    RUN_TEST(test_changing_the_serial_override_requires_a_reboot);
     RUN_TEST(test_reboot_required_flag_is_patch_only);
     RUN_TEST(test_reboot_required_only_for_boot_time_settings);
     RUN_TEST(test_patch_leaves_absent_fields_alone);

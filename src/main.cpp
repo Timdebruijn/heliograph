@@ -145,6 +145,38 @@ std::string selectedDriverId() {
     return available.empty() ? std::string{} : available.front().id;
 }
 
+/// Puts the stored line-settings override back on the UART, and says what the line is either
+/// way.
+///
+/// Called after EVERY begin(): at boot, and again after a discovery run, because begin()
+/// unconditionally configures the driver's own first profile. Missing the second call meant
+/// running discovery from the web UI on a healthy bridge silently reset the line and the
+/// inverter went quiet until the next power cycle -- the same failure the override exists to
+/// prevent, on the one path that reconfigures the line at runtime (review, 2026-07-25).
+void applySerialOverride() {
+    if (!g_config.serial.enabled) {
+        // Logged even when nothing is overridden. Most bridges follow their driver, and without
+        // this line an owner has no way to learn what the bus is actually running at -- which
+        // matters the day a firmware update changes a driver's recommendation under them.
+        if (g_driver) {
+            Serial.println("[serial] line follows the driver's own profile");
+        }
+        return;
+    }
+    const auto& p = g_config.serial.profile;
+    if (g_transport.configure(p)) {
+        Serial.printf("[serial] override: %u baud, %u data bits, %s parity, %u stop\n",
+                      p.baudRate, p.dataBits, parityName(p.parity), p.stopBits);
+    } else {
+        // configure() opens the UART before the direction-pin setup that is the only thing
+        // that can fail, so on this path the line IS at the override's speed and framing --
+        // what is missing is half-duplex direction control. Saying "the line is still at the
+        // driver's setting" would have sent the reader to the wrong hypothesis entirely.
+        Serial.printf("[serial] override applied at %u baud, but RS485 direction control "
+                      "failed to configure; transmissions may collide\n", p.baudRate);
+    }
+}
+
 BridgeInfo bridgeInfo() {
     BridgeInfo info;
     info.boardName        = board::kName;
@@ -549,6 +581,12 @@ void rs485Task(void* /*arg*/) {
             // poll a stale address.
             if (g_driver) {
                 g_driver->begin(g_transport);
+                // ...and begin() has just put the line back on the driver's own first profile,
+                // exactly as it does at boot. Without this, running discovery from the web UI
+                // on a healthy bridge silently undid the override and the inverter went quiet
+                // until the next power cycle -- the same failure this override exists to
+                // prevent, on the one path that reconfigures the line at runtime.
+                applySerialOverride();
             }
             vTaskDelay(pdMS_TO_TICKS(250));
             continue;
@@ -701,6 +739,7 @@ void setup() {
     if (g_driver && g_driver->begin(g_transport)) {
         Serial.printf("[driver] %s (%s)\n", g_driver->descriptor().id.c_str(),
                       supportLevelName(g_driver->descriptor().supportLevel));
+        applySerialOverride();
         const DeviceId id = g_driver->identity().deviceId();
         g_state           = g_devices.add(id);
         if (g_state) {
