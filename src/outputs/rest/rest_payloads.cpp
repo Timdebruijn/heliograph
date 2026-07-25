@@ -64,6 +64,16 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     // A firmware constant, not configuration: the settings page needs it to stop offering an
     // "Add a device" button past the point the bridge would refuse the save.
     b["max_devices"]        = static_cast<unsigned>(kMaxDevices);
+    b["devices_configured"] = static_cast<unsigned>(bridge.devicesConfigured);
+    // How many actually got built at boot. The difference from devices_configured is the
+    // whole point: it is what any tab can show without walking the device list.
+    b["devices_started"]    = static_cast<unsigned>(bridge.devicesStarted);
+    // Always emitted, empty or not: "no problems" and "this firmware does not report problems"
+    // must not look the same to a client.
+    JsonArray problems      = b["device_problems"].to<JsonArray>();
+    for (const auto& p : bridge.deviceProblems) {
+        problems.add(p);
+    }
     b["uptime_seconds"]     = bridge.uptimeSeconds;
     b["wifi_connected"]     = bridge.wifiConnected;
     if (bridge.wifiConnected) {
@@ -167,7 +177,8 @@ bool buildDevicesPayload(const std::vector<std::string>& deviceIds, std::string&
 }
 
 bool buildDevicePayload(const DeviceState& state, const std::string& deviceId,
-                        const DriverDescriptor* driver, std::string& out, size_t maxBytes) {
+                        const DriverDescriptor* driver, uint64_t nowMs, std::string& out,
+                        size_t maxBytes) {
     JsonDocument doc;
     doc["id"] = deviceId;
 
@@ -192,6 +203,16 @@ bool buildDevicePayload(const DeviceState& state, const std::string& deviceId,
     doc["online"]     = state.inverterOnline;
     doc["data_valid"] = state.dataValid;
     doc["data_stale"] = state.dataStale;
+    // The same two fields the status payload has always carried for the first device. Started
+    // is not answering: a driver whose begin() succeeded is in the device list whether or not
+    // the inverter has ever replied, and with A and B swapped it never will.
+    doc["consecutive_poll_failures"] = state.consecutiveFailures;
+    if (state.lastSuccessfulPollMs == 0) {
+        doc["last_successful_poll_seconds_ago"] = nullptr;  // 0 would read as "just now"
+    } else {
+        doc["last_successful_poll_seconds_ago"] =
+            static_cast<uint32_t>((nowMs - state.lastSuccessfulPollMs) / 1000);
+    }
     return finish(doc, out, maxBytes);
 }
 

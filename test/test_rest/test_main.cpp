@@ -420,6 +420,68 @@ static void test_the_status_payload_publishes_the_device_cap() {
     TEST_ASSERT_EQUAL_UINT32(kMaxDevices, parse(json)["bridge"]["max_devices"].as<uint32_t>());
 }
 
+// A configured device that is not polling is the failure every mistake on the settings page
+// ends in, and until this it existed only as one warn line in a ring buffer: the device list
+// showed the ones that worked and the dashboard showed one.
+static void test_the_status_payload_reports_devices_that_did_not_start() {
+    Rig        r;
+    const auto state  = r.poll();
+    BridgeInfo bridge = makeBridge();
+    bridge.devicesConfigured = 3;
+    bridge.devicesStarted    = 2;
+    bridge.deviceProblems    = {"device 3 ('growatt_modbus') resolves to growatt_modbus-2, "
+                                "which another configured device already uses"};
+
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", bridge,
+                                              r.diagnostics.snapshot(),
+                                              &eversolar::descriptor(), g_now, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(3, doc["bridge"]["devices_configured"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(2, doc["bridge"]["devices_started"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(1, doc["bridge"]["device_problems"].size());
+    // The string has to name the configuration ROW, not just the driver: three inverters on
+    // one bus share a driver id, so "'growatt_modbus' could not be started" identifies none
+    // of them. This asserts the shape the boot loop produces.
+    TEST_ASSERT_TRUE(std::string(doc["bridge"]["device_problems"][0]).find("device 3") !=
+                     std::string::npos);
+}
+
+// Emitted empty rather than omitted: "no problems" and "this firmware cannot report problems"
+// must not look identical to a client.
+static void test_the_problem_list_is_always_present() {
+    Rig         r;
+    const auto  state = r.poll();
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", makeBridge(),
+                                              r.diagnostics.snapshot(),
+                                              &eversolar::descriptor(), g_now, json));
+    auto doc = parse(json);
+    TEST_ASSERT_FALSE(doc["bridge"]["device_problems"].isNull());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["bridge"]["device_problems"].size());
+}
+
+// Every device carries when it last answered, not only the first. Without it "started" and
+// "answering" were indistinguishable for devices 2..N in the UI and in the API both -- and an
+// inverter with A and B swapped starts perfectly and never returns a byte.
+static void test_a_device_payload_says_when_it_last_answered() {
+    Rig        r;
+    const auto state = r.poll();
+
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "growatt_modbus-2",
+                                              &eversolar::descriptor(), g_now + 45000, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(45, doc["last_successful_poll_seconds_ago"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["consecutive_poll_failures"].as<uint32_t>());
+
+    // Never answered is its own state, not "0 seconds ago" -- that is a bus fault, and it must
+    // not read as a device that replied a moment ago.
+    DeviceState fresh;
+    TEST_ASSERT_TRUE(rest::buildDevicePayload(fresh, "growatt_modbus-3", nullptr, g_now, json));
+    TEST_ASSERT_TRUE(parse(json)["last_successful_poll_seconds_ago"].isNull());
+}
+
 static void test_reboot_required_flag_is_patch_only() {
     auto        c = configWithSecrets();
     std::string json;
@@ -1362,6 +1424,9 @@ int main(int, char**) {
     RUN_TEST(test_re_adding_an_id_returns_the_same_store_rather_than_failing);
     RUN_TEST(test_the_device_manager_refuses_past_its_cap);
     RUN_TEST(test_the_status_payload_publishes_the_device_cap);
+    RUN_TEST(test_the_status_payload_reports_devices_that_did_not_start);
+    RUN_TEST(test_the_problem_list_is_always_present);
+    RUN_TEST(test_a_device_payload_says_when_it_last_answered);
     RUN_TEST(test_reboot_required_flag_is_patch_only);
     RUN_TEST(test_reboot_required_only_for_boot_time_settings);
     RUN_TEST(test_patch_leaves_absent_fields_alone);

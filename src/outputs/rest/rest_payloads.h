@@ -49,8 +49,12 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
 bool buildDevicesPayload(const std::vector<std::string>& deviceIds, std::string& out,
                          size_t maxBytes = kMaxResponseBytes);
 
+/// `nowMs` is only used to age the last successful poll. Without it this payload said whether a
+/// device was online and never when it last answered -- and for every device but the first,
+/// this is the ONLY payload there is, so "started but has never returned a byte" and "working"
+/// were indistinguishable outside the status endpoint (review, 2026-07-25).
 bool buildDevicePayload(const DeviceState& state, const std::string& deviceId,
-                        const DriverDescriptor* driver, std::string& out,
+                        const DriverDescriptor* driver, uint64_t nowMs, std::string& out,
                         size_t maxBytes = kMaxResponseBytes);
 
 bool buildMeasurementsPayload(const DeviceState& state, std::string& out,

@@ -238,8 +238,10 @@ address in turn and confirm exactly one answers, at the address you expect.
 > Two consequences for checking your work. The wizard's own test poll **cannot** confirm the map:
 > it displays exactly the AC power figure that coincides. Neither can the raw dump in step 4 —
 > the dump is raw registers, byte-identical under either map, so it confirms the addresses in the
-> TOML rather than which map is configured. Compare the **published measurements**
-> (`GET /api/v1/status`, or the dashboard): twelve entries means `mic_tl_x`, two means `sph`.
+> TOML rather than which map is configured. Compare the **published measurements**: the
+> bridge's **Device** tab lists every polled inverter with its measurement count in the header,
+> side by side — twelve means `mic_tl_x`, two means `sph`. Same data at
+> `GET /api/v1/devices/<id>/measurements`.
 6. Confirm the two odd scales specifically — frequency should read ~50.0 Hz (not 5.0 or
    500.0), and operating hours should be plausible for the age of the unit.
 7. **Settle the generation question.** Look at what the 3000-block dump did. Three outcomes,

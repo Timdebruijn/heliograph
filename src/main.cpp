@@ -115,6 +115,10 @@ std::vector<DeviceId> g_deviceIds;
 /// LED: a configured device that failed to start is a fault to show, not an absence to ignore.
 size_t g_devicesConfigured = 0;
 
+/// One line per configured device that is not being polled, in configuration order. Filled at
+/// boot alongside the log lines, so the same facts reach a screen instead of only a ring buffer.
+std::vector<std::string> g_deviceProblems;
+
 bool g_outputsStarted = false;
 
 /// Guards g_config against the one cross-task hazard it has: the AsyncTCP task replacing
@@ -247,6 +251,20 @@ BridgeInfo bridgeInfo() {
             info.relayRoles = g_config.relays.roles;
         }
     }
+    {
+        // From the LIVE configuration, not the boot-time count. A device added on the settings
+        // page takes effect at the next restart, so between save and reboot the boot count says
+        // "1 configured, 1 polling" and the page cheerfully reports that everything is
+        // accounted for -- while the configuration it just stored asks for two. Reading it here
+        // makes the same screen say "polling 1 of 2", which is both true and the nudge to
+        // restart (review, 2026-07-25).
+        std::lock_guard<std::mutex> lock(g_configMutex);
+        info.devicesConfigured =
+            (g_config.driver.id.empty() ? 0 : 1) + g_config.additionalDevices.size();
+    }
+    // No lock: written once in setup(), before any task that reads them exists.
+    info.devicesStarted = g_deviceIds.size();
+    info.deviceProblems = g_deviceProblems;
     info.hasBootButton     = board::kHasBootButton;
     info.bootButtonPressed = g_bootPressed.load();
     info.hasStatusLed      = board::kHasStatusLed;
@@ -827,13 +845,20 @@ void setup() {
         log::warn("no driver configured and none compiled in; nothing will be polled");
     }
 
-    for (const auto& p : planned) {
+    for (size_t plannedIndex = 0; plannedIndex < planned.size(); ++plannedIndex) {
+        const auto& p = planned[plannedIndex];
+        // "Device 1" is the `driver` section; 2..N are additional_devices, which is how the
+        // settings page numbers them. Naming only the driver id was useless on the very bus
+        // this exists for: three inverters share one driver id, so all three failures read
+        // identically (review, 2026-07-25).
+        const std::string row = "device " + std::to_string(plannedIndex + 1);
         auto driver = g_registry.create(p.id, g_transport, *p.options);
         if (!driver || !driver->begin(g_transport)) {
             // Named, and the loop continues: one unconfigurable device must not cost the others
             // their poll. A bus with three inverters where the second has a typo'd driver id
             // should still report the first and third.
             log::warn("device '%s' could not be started; the others still poll", p.id.c_str());
+            g_deviceProblems.push_back(row + " ('" + p.id + "') could not be started");
             continue;
         }
         Serial.printf("[driver] %s (%s)\n", driver->descriptor().id.c_str(),
@@ -848,12 +873,16 @@ void setup() {
         if (g_devices.contains(id)) {
             log::warn("device '%s' skipped: another configured device already resolves to id "
                       "'%s' -- give them different addresses", p.id.c_str(), id.c_str());
+            g_deviceProblems.push_back(row + " ('" + p.id + "') resolves to " + id +
+                                       ", which another configured device already uses; give "
+                                       "them different addresses");
             continue;
         }
         StateStore* store = g_devices.add(id);
         if (store == nullptr) {
             log::warn("device '%s' skipped: no free device slot (max %u)", p.id.c_str(),
                       static_cast<unsigned>(kMaxDevices));
+            g_deviceProblems.push_back(row + " ('" + p.id + "') has no free device slot");
             continue;
         }
         PollPolicy policy;

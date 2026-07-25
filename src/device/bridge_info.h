@@ -69,6 +69,23 @@ struct BridgeInfo {
     /// relayCount, missing = "none"). Drives switch names and the DRM mode select.
     std::vector<std::string> relayRoles;
 
+    /// How many devices the configuration asks for, and what went wrong with the ones that are
+    /// not being polled.
+    ///
+    /// The firmware already knew both at boot and said so in one log line each. Nothing else
+    /// surfaced them, so a configured inverter that collided on an address or refused to start
+    /// was invisible on every screen: the device list showed the ones that worked, the dashboard
+    /// showed one, and the difference was a warn in a ring buffer. Every mistake the settings
+    /// page can produce lands here, which is why it is here and not only in the log.
+    size_t                   devicesConfigured = 0;
+    /// How many of them the firmware actually managed to create at boot. Started is not
+    /// answering -- a driver whose begin() succeeded counts here whether or not the inverter
+    /// has ever replied -- but configured-minus-started is a fault by definition.
+    size_t                   devicesStarted    = 0;
+    /// One human-readable line per configured device that is NOT polling. Never a payload byte,
+    /// never a secret -- the same strings the boot log carries.
+    std::vector<std::string> deviceProblems;
+
     /// Onboard indicators, present only on boards that have them (board::kHasBootButton /
     /// kHasStatusLed). `bootButtonPressed` makes the hold-to-factory-reset input observable
     /// over REST -- the way its wiring gets verified without a scope. `statusLedColor` is the
