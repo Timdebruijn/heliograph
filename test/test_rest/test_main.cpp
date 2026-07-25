@@ -350,6 +350,63 @@ static void test_adding_a_device_requires_a_reboot() {
     TEST_ASSERT_TRUE(configChangeRequiresReboot(more, retuned));
 }
 
+// The blocker this design turned on. Three identical inverters on one bus differ only in their
+// address, and no driver in this build has a serial number at the moment setup() keys the state
+// store -- Growatt never reads one, EverSolar and SunSpec learn theirs on the first poll. So all
+// three resolved to the bare driver id, DeviceManager handed them the SAME store, and they
+// overwrote each other into one set of Home Assistant entities.
+static void test_devices_on_one_bus_get_distinct_ids_without_a_serial() {
+    DeviceIdentity a;
+    a.driverId    = "growatt_modbus";
+    a.instanceKey = "1";
+    DeviceIdentity b = a;
+    b.instanceKey    = "2";
+
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus-1", a.deviceId().c_str());
+    TEST_ASSERT_TRUE(a.deviceId() != b.deviceId());
+}
+
+// A real serial still wins: it identifies the physical unit however it happens to be addressed,
+// so re-addressing an inverter must not make it look like a new device.
+static void test_a_serial_number_outranks_the_address() {
+    DeviceIdentity id;
+    id.driverId     = "eversolar_legacy";
+    id.instanceKey  = "10";
+    id.serialNumber = "XH300060115506193600V610";
+    TEST_ASSERT_EQUAL_STRING("eversolar_legacy-XH300060115506193600V610", id.deviceId().c_str());
+}
+
+// One device and no address option: unchanged from before multi-device existed, which is what
+// keeps every existing install's REST path and MQTT topic exactly where it was.
+static void test_a_lone_device_without_either_keeps_the_bare_driver_id() {
+    DeviceIdentity id;
+    id.driverId = "eversolar_legacy";
+    TEST_ASSERT_EQUAL_STRING("eversolar_legacy", id.deviceId().c_str());
+}
+
+// add() is idempotent by contract -- re-adding a known id hands back the existing store. That is
+// right for a caller re-registering the same device and exactly wrong for two CONFIGURED devices
+// sharing an id, so the boot loop has to ask contains() first. This pins the contract the loop
+// depends on; an earlier version treated a null return as the collision signal and it never came.
+static void test_re_adding_an_id_returns_the_same_store_rather_than_failing() {
+    DeviceManager devices;
+    StateStore*   first = devices.add("growatt_modbus-1");
+    TEST_ASSERT_NOT_NULL(first);
+    TEST_ASSERT_EQUAL_PTR(first, devices.add("growatt_modbus-1"));
+    TEST_ASSERT_EQUAL_UINT32(1, devices.size());
+    TEST_ASSERT_TRUE(devices.contains("growatt_modbus-1"));
+    TEST_ASSERT_FALSE(devices.contains("growatt_modbus-2"));
+}
+
+static void test_the_device_manager_refuses_past_its_cap() {
+    DeviceManager devices;
+    for (size_t i = 0; i < kMaxDevices; ++i) {
+        TEST_ASSERT_NOT_NULL(devices.add("d" + std::to_string(i)));
+    }
+    TEST_ASSERT_NULL(devices.add("one-too-many"));
+    TEST_ASSERT_EQUAL_UINT32(kMaxDevices, devices.size());
+}
+
 static void test_reboot_required_flag_is_patch_only() {
     auto        c = configWithSecrets();
     std::string json;
@@ -1286,6 +1343,11 @@ int main(int, char**) {
     RUN_TEST(test_an_extra_device_must_name_a_driver);
     RUN_TEST(test_the_device_count_is_bounded);
     RUN_TEST(test_adding_a_device_requires_a_reboot);
+    RUN_TEST(test_devices_on_one_bus_get_distinct_ids_without_a_serial);
+    RUN_TEST(test_a_serial_number_outranks_the_address);
+    RUN_TEST(test_a_lone_device_without_either_keeps_the_bare_driver_id);
+    RUN_TEST(test_re_adding_an_id_returns_the_same_store_rather_than_failing);
+    RUN_TEST(test_the_device_manager_refuses_past_its_cap);
     RUN_TEST(test_reboot_required_flag_is_patch_only);
     RUN_TEST(test_reboot_required_only_for_boot_time_settings);
     RUN_TEST(test_patch_leaves_absent_fields_alone);

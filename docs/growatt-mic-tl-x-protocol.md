@@ -194,12 +194,22 @@ address in turn and confirm exactly one answers, at the address you expect.
    you pick one. That is deliberate: getting the map wrong is the one mistake here that does
    not announce itself. See the warning below.
 
-   > **For the second and third unit**, add an entry each under *Settings → Extra devices*:
-   > same driver and register map, its own `unit_id`. They are polled in turn on the one bus,
-   > and the change takes effect after a restart. Discovery still probes only the default
-   > address, so it will find the unit at address 1 and not the others — that is a known gap,
-   > not a wiring fault. Bring them up one at a time and check each in `/api/v1/devices`
-   > before adding the next.
+   > **For the second and third unit** there is no settings screen yet — they go in over the
+   > API, same driver and register map, their own `unit_id`:
+   >
+   > ```
+   > curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
+   >   -H 'Content-Type: application/json' \
+   >   -d '{"additional_devices":[
+   >         {"driver_id":"growatt_modbus","options":{"unit_id":"2","profile":"mic_tl_x"}},
+   >         {"driver_id":"growatt_modbus","options":{"unit_id":"3","profile":"mic_tl_x"}}]}'
+   > ```
+   >
+   > Note `driver_id` here where the `driver` section uses `id`. Sending the array replaces it,
+   > so send all the extra units at once. Restart afterwards. Discovery probes only the default
+   > address, so it finds the unit at address 1 and not the others — a known gap, not a wiring
+   > fault. Check `/api/v1/devices` after the restart: you should see one entry per unit, named
+   > `growatt_modbus-1`, `-2`, `-3`.
    >
    > **Home Assistant, Modbus TCP and Prometheus still publish the first device only.** All
    > three appear in the REST API and in the device list; only one reaches those outputs. Next

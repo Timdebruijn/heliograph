@@ -143,11 +143,19 @@ where the 120 Ω termination goes (two places, not one per device), and why each
 own address before you connect them together.
 
 > **Several inverters on one bus are polled in turn**, up to eight, each with its own address.
-> Configure the first under *Settings → Driver* and the rest under *Settings → Extra devices*
-> (`additional_devices` over the API). Two caveats worth knowing before you wire three:
-> discovery still probes only the default address, so the others have to be added by hand; and
-> **Home Assistant, Modbus TCP and Prometheus still carry the first device only** — the REST
-> API has all of them. That last one is the next piece of work, not a wiring fault.
+> The first is configured under *Settings → Driver*; **the rest have no settings screen yet** and
+> are set over the API:
+>
+> ```
+> curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
+>   -H 'Content-Type: application/json' \
+>   -d '{"additional_devices":[{"driver_id":"growatt_modbus","options":{"unit_id":"2"}}]}'
+> ```
+>
+> Then restart. Two more things to know before wiring three: discovery probes only the default
+> address, so the others must be added by hand; and **Home Assistant, Modbus TCP and Prometheus
+> still carry the first device only** — the REST API and `/api/v1/devices` have all of them.
+> Both are next on the list, not wiring faults.
 
 ### 2. Flash the firmware
 

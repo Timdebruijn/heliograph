@@ -279,6 +279,9 @@ DeviceIdentity GrowattDriver::identity() const {
     id.model        = options_.profile->displayName;
     id.protocolName = "Modbus RTU";
     id.driverId     = descriptor().id;
+    // The unit id is what distinguishes three identical inverters on one bus, and it is known
+    // before a single byte goes out. Without it all three key the same state store.
+    id.instanceKey  = std::to_string(options_.unitId);
     // Serial number lives in a register block we do not map yet; it stays empty rather than
     // being invented, so deviceId() falls back to the driver id.
     return id;

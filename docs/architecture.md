@@ -393,10 +393,20 @@ public:
 };
 ```
 
-The MVP allows a maximum of one active physical device (`MAX_ACTIVE_DEVICES = 1`), but no
-interface is a singleton. `DeviceId` for the MVP = `"<driverId>-<serialNumber>"`, e.g.
-`eversolar_legacy-XH300060115506193600V610`. REST and MQTT already use that ID in their paths,
-so adding more devices later requires no API change.
+A bridge polls up to `kMaxDevices` (8) physical devices, and no interface is a singleton.
+
+`DeviceId` prefers the serial number — `"<driverId>-<serialNumber>"`, e.g.
+`eversolar_legacy-XH300060115506193600V610` — because that identifies the physical unit however
+it happens to be addressed. It falls back to `"<driverId>-<instanceKey>"`, where the instance key
+is the Modbus unit id or PMU address the driver was configured with, and only then to the bare
+driver id.
+
+The fallback is not cosmetic. `deviceId()` is read once, in `setup()`, to key the state store —
+and at that moment **no driver in this build has a serial number**: Growatt never reads one,
+EverSolar and SunSpec learn theirs on the first poll or chain walk. Without the instance key,
+three identical inverters on one bus all resolved to the bare driver id, `DeviceManager::add`
+handed all three the same store (it is idempotent by contract), and they overwrote each other's
+readings into one set of entities. REST and MQTT use this id in their paths.
 
 ## Capability model
 
@@ -645,8 +655,22 @@ backs off on its own without slowing the others, and the cursor stops a device w
 has just expired from always losing to the one before it in the list.
 
 A device that cannot be created or started is named on the console and skipped; the others still
-poll. Two configured devices that resolve to the same identity (a duplicated unit id) collide in
-`DeviceManager::add`, which is reported rather than silently polling one twice.
+poll. Two configured devices that resolve to the same id are caught by a `contains()` check before
+`add()` — not by `add()` itself, which is idempotent and would hand back the existing store. The
+second is skipped with a log line naming both. With the instance key in the id this only happens
+when two entries really are configured for the same address.
+
+**Not every protocol supports two devices on one bus.** The Modbus drivers address each unit
+explicitly, so several are fine. The PMU drivers (EverSolar, SoLAX) register by *broadcast* --
+"any unregistered unit, speak up" -- with no serial in the request, so two instances of the same
+PMU driver race the same handshake and which physical unit each ends up owning is undefined.
+One PMU device per bus; mixing a PMU driver with Modbus drivers is fine.
+
+**Not every protocol supports two devices on one bus.** The Modbus drivers address each unit
+explicitly, so several are fine. The PMU drivers register by *broadcast* -- "any unregistered
+unit, speak up" -- with no serial in the request, so two instances of the same PMU driver race
+the same handshake and which physical unit each ends up owning is undefined. One PMU device per
+bus; mixing a PMU driver with Modbus drivers is fine.
 
 **The outputs have not caught up.** `MqttOutput::loop`, `ModbusTcpServer::refresh` and
 `buildMetrics` each take a single `DeviceState`, so they are fed the first device only. The REST
