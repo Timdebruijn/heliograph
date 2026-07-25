@@ -79,9 +79,9 @@ private:
     bool            enabled_  = false;
     bool            state_[kMaxRelays] = {};
 
-    // An explicit flag, not the "0 means never" sentinel the dispatcher uses: millis() at
-    // boot IS near zero, and a sentinel collision there let the first post-boot burst
-    // bypass the throttle (caught by test_rate_limit_throttles_on_but_never_off).
+    // An explicit flag, not a "0 means never" sentinel: millis() at boot IS near zero, and a
+    // sentinel collision there let the first post-boot burst bypass the throttle (caught by
+    // test_rate_limit_throttles_on_but_never_off). CommandDispatcher carries the same flag.
     bool     everAccepted_   = false;
     uint64_t lastAcceptedMs_ = 0;
     uint32_t burstUsed_      = 0;

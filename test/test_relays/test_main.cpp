@@ -113,6 +113,30 @@ static void test_rate_limit_throttles_on_but_never_off() {
     TEST_ASSERT_EQUAL(CommandResult::Ok, c.set(0, true));
 }
 
+// A clock that jumps backwards must not refill the allowance. On unsigned types the naive
+// subtraction wraps into an enormous value that reads as "ages ago", so the throttle fails OPEN
+// -- and this controller is the one that already drives real contacts on hardware. No relay test
+// moved the clock at all before this one, which is how a half-applied clamp went unnoticed
+// (found in review, 2026-07-25).
+static void test_a_backwards_clock_does_not_refill_the_allowance() {
+    RateLimitPolicy policy;
+    policy.minIntervalMs = 1000;
+    policy.burst         = 1;
+    RelayController c(&fakeClock, policy);
+    c.begin(1, [](uint8_t i, bool on) { g_writes.push_back({i, on}); });
+    c.setReadOnlyMode(false);
+    c.setEnabled(true);
+
+    g_now = 100000;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, c.set(0, true));
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited, c.set(0, true));
+
+    g_now = 50;  // backwards
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited, c.set(0, true));
+    // Releasing is still never throttled, whatever the clock does.
+    TEST_ASSERT_EQUAL(CommandResult::Ok, c.set(0, false));
+}
+
 static void test_pattern_wider_than_burst_asserts_in_one_command() {
     // The bug this guards against: charging the rate limiter per relay made a role spanning
     // more relays than the burst (default 3) impossible to assert -- the 4th ON was always
@@ -214,6 +238,7 @@ int main(int, char**) {
     RUN_TEST(test_switching_works_when_both_gates_open);
     RUN_TEST(test_out_of_range_index_is_refused);
     RUN_TEST(test_rate_limit_throttles_on_but_never_off);
+    RUN_TEST(test_a_backwards_clock_does_not_refill_the_allowance);
     RUN_TEST(test_pattern_wider_than_burst_asserts_in_one_command);
     RUN_TEST(test_pattern_charges_one_token_and_throttles_as_a_whole);
     RUN_TEST(test_pattern_honours_gates_and_size);
