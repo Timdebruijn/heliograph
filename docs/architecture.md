@@ -672,12 +672,21 @@ unit, speak up" -- with no serial in the request, so two instances of the same P
 the same handshake and which physical unit each ends up owning is undefined. One PMU device per
 bus; mixing a PMU driver with Modbus drivers is fine.
 
-**The outputs have not caught up.** `MqttOutput::loop`, `ModbusTcpServer::refresh` and
-`buildMetrics` each take a single `DeviceState`, so they are fed the first device only. The REST
-API is already device-keyed and carries all of them. Giving the other three a device dimension —
-a topic segment, a register-map offset, a metric label — is the next piece of work, and until it
-lands the limitation is stated in the README, `docs/rest-api.md` and next to the code in
-`main.cpp` rather than left to be discovered from a missing Home Assistant entity.
+**Two of the outputs have not caught up.** `ModbusTcpServer::refresh` and `buildMetrics` each
+take a single `DeviceState`, so they are fed the first device only: the register map holds one
+device's worth of registers and the metric names have no device label. REST is device-keyed, and
+MQTT/Home Assistant became so — `MqttOutput` keeps one `Channel` per device (its own topics,
+throttle and discovery signature) and `buildDiscoveryEntities` takes a `uniqueBase` that scopes
+every `unique_id`, `object_id`, retained config topic and HA device identifier.
+
+The first device deliberately keeps the bridge-scoped topics and unique ids it has always used,
+so an existing install's entities and recorder history survive the change; devices 2..N live
+under `<base>/<bridgeId>/device/<deviceId>/`. Availability, diagnostics and the relay/DRM topics
+stay bridge-scoped, because they describe the bridge.
+
+Until Modbus TCP and Prometheus follow, that limitation is stated in the README,
+`docs/rest-api.md`, `docs/mqtt.md` and next to the code in `main.cpp` rather than left to be
+discovered from a missing entity.
 
 ## Test strategy
 

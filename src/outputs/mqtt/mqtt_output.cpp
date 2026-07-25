@@ -26,7 +26,7 @@ espMqttClient g_client;
 MqttOutput::MqttOutput(MqttConfig config, PublishPolicy publishPolicy)
     : config_(std::move(config)),
       topics_(config_.baseTopic, "pending"),
-      throttle_(publishPolicy) {}
+      publishPolicy_(publishPolicy) {}
 
 bool MqttOutput::begin(const BridgeInfo& bridge) {
     if (!config_.enabled || config_.host.empty()) {
@@ -142,37 +142,69 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
 
 bool MqttOutput::connected() const { return started_ && g_client.connected(); }
 
-void MqttOutput::publishDiscovery(const DeviceState& state, const BridgeInfo& bridge) {
+MqttOutput::Channel& MqttOutput::channelFor(const DeviceView& view, const BridgeInfo& bridge) {
+    for (auto& c : channels_) {
+        if (c.id == view.id) {
+            return c;
+        }
+    }
+    // The primary device keeps the bridge-scoped tree every install had before this became
+    // plural: same topics, same unique ids, same Home Assistant entities and history. Which
+    // device that is comes from the caller, not from arrival order -- see DeviceView::primary.
+    Channel c{view.id,
+              MqttTopics(config_.baseTopic, bridge.bridgeId,
+                         deviceTopicKey(view.primary, view.id)),
+              deviceUniqueBase(view.primary, bridge.bridgeId, view.id),
+              PublishThrottle(publishPolicy_),
+              false,
+              0};
+    channels_.push_back(std::move(c));
+    return channels_.back();
+}
+
+void MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
+                                  const BridgeInfo& bridge) {
     if (!config_.discoveryEnabled) {
         return;
     }
     // Purely derived from measurements and capabilities. Nothing in here knows which device
     // it is talking to; a driver reporting a battery gets battery entities for free.
-    for (const auto& e : buildDiscoveryEntities(state, bridge, topics_, config_.discoveryPrefix)) {
+    // topics_ for availability, deliberately: it is the BRIDGE's liveness, and it is the only
+    // availability topic anything publishes.
+    for (const auto& e : buildDiscoveryEntities(state, bridge, channel.topics,
+                                                topics_.availability(), config_.discoveryPrefix,
+                                                channel.uniqueBase)) {
         g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
     }
-    for (const auto& e : buildBridgeDiagnosticEntities(bridge, topics_, config_.discoveryPrefix)) {
-        g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
+    // Bridge entities belong to the bridge and are announced once -- publishing them per
+    // device would create N copies of the same RSSI sensor. Tied to the bridge-scoped channel
+    // rather than to whichever channel happens to be first in the vector.
+    if (channel.uniqueBase == bridge.bridgeId) {
+        for (const auto& e :
+             buildBridgeDiagnosticEntities(bridge, topics_, config_.discoveryPrefix)) {
+            g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
+        }
+        // Relay switches -- or, when the feature is disabled on a relay board, empty retained
+        // payloads that remove previously announced switches from Home Assistant.
+        for (const auto& e : buildRelayEntities(bridge, topics_, config_.discoveryPrefix)) {
+            g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
+        }
     }
-    // Relay switches -- or, when the feature is disabled on a relay board, empty retained
-    // payloads that remove previously announced switches from Home Assistant.
-    for (const auto& e : buildRelayEntities(bridge, topics_, config_.discoveryPrefix)) {
-        g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
-    }
-    discoveryPublished_ = true;
+    channel.discoveryPublished = true;
 }
 
-void MqttOutput::onConnected(const DeviceState& state, const BridgeInfo& bridge) {
+void MqttOutput::onConnected(Channel& channel, const DeviceState& state,
+                             const BridgeInfo& bridge) {
     g_client.publish(topics_.availability().c_str(), 1, true, kPayloadOnline);
 
     std::string payload;
     if (buildIdentityPayload(state.identity, payload)) {
-        g_client.publish(topics_.identity().c_str(), 1, true, payload.c_str());
+        g_client.publish(channel.topics.identity().c_str(), 1, true, payload.c_str());
     }
     if (buildCapabilitiesPayload(state.capabilities, payload)) {
-        g_client.publish(topics_.capabilities().c_str(), 1, true, payload.c_str());
+        g_client.publish(channel.topics.capabilities().c_str(), 1, true, payload.c_str());
     }
-    publishDiscovery(state, bridge);
+    publishDiscovery(channel, state, bridge);
 
     // The relay command topic is the only subscription; inverter drivers stay read-only
     // and get no command topic -- that follows from the capabilities, not a decision here.
@@ -183,7 +215,7 @@ void MqttOutput::onConnected(const DeviceState& state, const BridgeInfo& bridge)
     }
 }
 
-void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
+void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& bridge,
                       const DiagnosticsSnapshot& diagnostics, uint64_t nowMs) {
     if (!started_) {
         return;
@@ -226,30 +258,41 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
     // anyway, and this way throttle_ and discoveryPublished_ are only ever touched on the
     // task that runs loop().
     if (resyncRequested_.exchange(false)) {
-        throttle_.reset();
-        discoveryPublished_ = false;
-    }
-
-    // Re-announce when the measurement model has grown since the last discovery publish.
-    // Discovery is derived from measurements, and against a real inverter the first MQTT
-    // connect regularly wins the race against the first successful poll -- registration takes
-    // seconds on the bus. Publishing once and never again left Home Assistant with only the
-    // status entities (observed live, 2026-07-19). Retained config topics make republishing
-    // idempotent.
-    const auto signature = discoverySignature(state);
-    if (!discoveryPublished_ || signature != discoveredSignature_) {
-        onConnected(state, bridge);
-        discoveredSignature_ = signature;
-    }
-
-    if (throttle_.shouldPublish(state, nowMs)) {
-        std::string payload;
-        if (buildStatePayload(state, payload)) {
-            g_client.publish(topics_.state().c_str(), config_.qos, true, payload.c_str());
-            throttle_.recordPublished(state, nowMs);
+        for (auto& c : channels_) {
+            c.throttle.reset();
+            c.discoveryPublished = false;
         }
-        // If the payload did not fit it is dropped rather than truncated, and the throttle
-        // is left untouched so the next attempt retries.
+    }
+
+    // Per device: its own discovery announcement, its own throttle. Re-announce when the
+    // measurement model has grown since the last publish -- discovery is derived from
+    // measurements, and against a real inverter the first MQTT connect regularly wins the race
+    // against the first successful poll. Publishing once and never again left Home Assistant
+    // with only the status entities (observed live, 2026-07-19). Retained config topics make
+    // republishing idempotent.
+    for (const auto& view : devices) {
+        if (view.state == nullptr) {
+            continue;
+        }
+        const DeviceState& state   = *view.state;
+        Channel&           channel = channelFor(view, bridge);
+
+        const auto signature = discoverySignature(state);
+        if (!channel.discoveryPublished || signature != channel.discoveredSignature) {
+            onConnected(channel, state, bridge);
+            channel.discoveredSignature = signature;
+        }
+
+        if (channel.throttle.shouldPublish(state, nowMs)) {
+            std::string payload;
+            if (buildStatePayload(state, payload)) {
+                g_client.publish(channel.topics.state().c_str(), config_.qos, true,
+                                 payload.c_str());
+                channel.throttle.recordPublished(state, nowMs);
+            }
+            // If the payload did not fit it is dropped rather than truncated, and the throttle
+            // is left untouched so the next attempt retries.
+        }
     }
 
     if (bridge.relayCount > 0) {
@@ -260,8 +303,13 @@ void MqttOutput::loop(const DeviceState& state, const BridgeInfo& bridge,
         if (bridge.relaysEnabled != lastRelaysEnabled_ || rolesSig != lastRelayRolesSig_) {
             lastRelaysEnabled_  = bridge.relaysEnabled;
             lastRelayRolesSig_  = rolesSig;
-            discoveryPublished_ = false;
-            relayStateForced_   = true;
+            // Relay entities ride along with the bridge-scoped channel's announcement.
+            for (auto& c : channels_) {
+                if (c.uniqueBase == bridge.bridgeId) {
+                    c.discoveryPublished = false;
+                }
+            }
+            relayStateForced_ = true;
         }
         if (relayStateForced_ || relayAckRequested_.exchange(false) ||
             bridge.relayMask != lastRelayMask_) {
@@ -308,15 +356,21 @@ void MqttOutput::stop() {
 namespace heliograph::mqtt {
 
 MqttOutput::MqttOutput(MqttConfig config, PublishPolicy publishPolicy)
-    : config_(std::move(config)), topics_(config_.baseTopic, "host"), throttle_(publishPolicy) {}
+    : config_(std::move(config)), topics_(config_.baseTopic, "host"),
+      publishPolicy_(publishPolicy) {}
 
 bool MqttOutput::begin(const BridgeInfo&) { return false; }
-void MqttOutput::loop(const DeviceState&, const BridgeInfo&, const DiagnosticsSnapshot&,
+void MqttOutput::loop(const std::vector<DeviceView>&, const BridgeInfo&,
+                      const DiagnosticsSnapshot&,
                       uint64_t) {}
 void MqttOutput::stop() { started_ = false; }
 bool MqttOutput::connected() const { return false; }
-void MqttOutput::onConnected(const DeviceState&, const BridgeInfo&) {}
-void MqttOutput::publishDiscovery(const DeviceState&, const BridgeInfo&) {}
+void MqttOutput::onConnected(Channel&, const DeviceState&, const BridgeInfo&) {}
+void MqttOutput::publishDiscovery(Channel&, const DeviceState&, const BridgeInfo&) {}
+MqttOutput::Channel& MqttOutput::channelFor(const DeviceView&, const BridgeInfo&) {
+    static Channel unused{"", MqttTopics("", ""), "", PublishThrottle({}), false, 0};
+    return unused;
+}
 
 }  // namespace heliograph::mqtt
 

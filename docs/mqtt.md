@@ -20,6 +20,45 @@ Configurable; defaults to being derived from the MAC so that two bridges never c
 | `heliograph/<bridge_id>/relay/<n>/state` | ✔ | 1 | `ON` / `OFF` — relay boards only |
 | `heliograph/<bridge_id>/relay/<n>/set` | — | 1 | Command topic (subscribed) — relay boards only |
 
+### More than one inverter
+
+The **first** device publishes on the topics above, unchanged from when a bridge polled only
+one. That is deliberate: moving it would change every Home Assistant entity's `unique_id` and
+cost an existing install its recorder history for a feature it is not using.
+
+Devices 2..N get their own subtree, keyed by device id:
+
+| Topic | Retained | QoS | Payload |
+|---|---|---|---|
+| `heliograph/<bridge_id>/device/<device_id>/state` | ✔ | 0 | Measurements + status (JSON) |
+| `heliograph/<bridge_id>/device/<device_id>/identity` | ✔ | 1 | Device identity (JSON) |
+| `heliograph/<bridge_id>/device/<device_id>/capabilities` | ✔ | 1 | Capabilities (JSON) |
+
+`availability`, `diagnostics` and the relay/DRM topics stay bridge-scoped — they describe the
+bridge, not any inverter. Availability tracking the bridge is also why a sleeping inverter does
+not make its entities unavailable at night.
+
+Each device gets its own Home Assistant device block, its own `unique_id`s and its own retained
+discovery config topics. Devices beyond the first also carry their address in the HA device name
+(`… #2`), because identical inverters report an identical model and no serial number.
+
+`<device_id>` is the id REST uses, frozen at boot: the driver id plus the configured address,
+e.g. `growatt_modbus-2`. It is **not** the serial number even for drivers that report one — the
+serial arrives during the first poll, long after the id is needed.
+
+> **Removing or re-addressing a device leaves its entities behind.** The discovery configs and
+> the last state are retained on the broker, and nothing publishes an empty payload to clear
+> them, so Home Assistant keeps re-creating those entities — and because availability is
+> bridge-scoped they stay *available*, showing the last value ever read. A template or
+> automation summing your inverters will keep counting the ghost. Clear them by hand
+> (`mosquitto_pub -r -n -t <topic>`) or delete the entities in Home Assistant. The relay
+> entities do have an automatic removal path; devices do not, yet.
+
+> **Which device is "first" comes from the configuration, not from boot order.** It is the
+> `driver` entry. If it fails to start, no device takes over the bridge-scoped topics — that is
+> deliberate, so a bad boot cannot transplant one inverter's history onto another. But moving a
+> different inverter into the `driver` slot *does* hand it those topics and that history.
+
 **Last Will and Testament:** topic `availability`, payload `offline`, retained, QoS 1. On a
 clean shutdown, the bridge publishes `offline` itself.
 

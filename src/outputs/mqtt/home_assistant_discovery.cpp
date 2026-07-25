@@ -95,7 +95,7 @@ std::string humanise(const std::string& id) {
 }
 
 void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIdentity& identity,
-                    bool isBridgeEntity) {
+                    bool isBridgeEntity, const std::string& uniqueBase) {
     JsonObject device = entity["device"].to<JsonObject>();
     if (isBridgeEntity) {
         device["identifiers"].to<JsonArray>().add(bridge.bridgeId);
@@ -108,14 +108,30 @@ void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIde
 
     // The inverter is modelled as its own device behind the bridge, so that a second inverter
     // later simply appears alongside it rather than merging into one confused device.
-    device["identifiers"].to<JsonArray>().add(bridge.bridgeId + "_inverter");
+    // Per device, not per bridge: with one identifier for all of them Home Assistant merges
+    // three physical inverters into a single device and their entities fight over the same
+    // names. uniqueBase is the bridge id for device 1, so an existing install's device block
+    // is byte-identical to before.
+    device["identifiers"].to<JsonArray>().add(uniqueBase + "_inverter");
     // Model, not manufacturer: the manufacturer is already its own field, and repeating it here
     // produced names like "Heliograph - Heliograph open-source project". The model is what
     // distinguishes one inverter from the next, which is the whole point of the name.
     const std::string& descriptor = !identity.model.empty()          ? identity.model
                                     : !identity.manufacturer.empty() ? identity.manufacturer
                                                                      : kUnknownInverterName;
-    device["name"] = bridge.name.empty() ? descriptor : bridge.name + " - " + descriptor;
+    std::string name = bridge.name.empty() ? descriptor : bridge.name + " - " + descriptor;
+    // Three identical inverters on one bus produce three identical model strings and no serial
+    // number, so without this Home Assistant lists three devices called exactly the same thing
+    // and twelve entities each called "AC Power". The address is the only thing that tells them
+    // apart, and the driver already put it in the identity.
+    //
+    // Only for devices 2..N: the primary keeps the name it has always had, like its topics and
+    // its unique ids. Same reasoning, same test.
+    const bool primary = uniqueBase == bridge.bridgeId;
+    if (!primary && !identity.instanceKey.empty()) {
+        name += " #" + identity.instanceKey;
+    }
+    device["name"] = name;
     if (!identity.manufacturer.empty()) {
         device["manufacturer"] = identity.manufacturer;
     }
@@ -197,7 +213,9 @@ uint64_t stringListFingerprint(const std::vector<std::string>& items) {
 std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
                                                     const BridgeInfo&  bridge,
                                                     const MqttTopics&  topics,
-                                                    const std::string& discoveryPrefix) {
+                                                    const std::string& availabilityTopic,
+                                                    const std::string& discoveryPrefix,
+                                                    const std::string& uniqueBase) {
     std::vector<DiscoveryEntity> entities;
 
     for (const auto& m : state.measurements.all()) {
@@ -211,8 +229,8 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         JsonDocument      doc;
         JsonObject        e = doc.to<JsonObject>();
 
-        e["unique_id"] = bridge.bridgeId + "_" + slug;
-        e["object_id"] = bridge.bridgeId + "_" + slug;
+        e["unique_id"] = uniqueBase + "_" + slug;
+        e["object_id"] = uniqueBase + "_" + slug;
         const bool noName = m.displayName == nullptr || m.displayName[0] == '\0';
         e["name"]      = noName ? humanise(m.id) : std::string(m.displayName);
         e["state_topic"] = topics.state();
@@ -220,7 +238,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         // than as a reading of 0.
         e["value_template"] =
             std::string("{{ value_json.measurements['") + m.id + "'].value }}";
-        e["availability_topic"]  = topics.availability();
+        e["availability_topic"]  = availabilityTopic;
         e["payload_available"]   = kPayloadOnline;
         e["payload_not_available"] = kPayloadOffline;
 
@@ -237,11 +255,14 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         if (const int precision = displayPrecisionFor(m.type); precision >= 0) {
             e["suggested_display_precision"] = precision;
         }
-        addDeviceBlock(e, bridge, state.identity, /*isBridgeEntity=*/false);
+        addDeviceBlock(e, bridge, state.identity, /*isBridgeEntity=*/false, uniqueBase);
 
         DiscoveryEntity entity;
         entity.uniqueId    = e["unique_id"].as<std::string>();
-        entity.configTopic = discoveryPrefix + "/sensor/" + bridge.bridgeId + "/" + slug + "/config";
+        // The RETAINED config topic has to be per device too. With the bridge id in the node
+        // name, device 2 published its config over device 1's and Home Assistant kept only
+        // the last one -- the unique_id alone was not enough (caught by its own test).
+        entity.configTopic = discoveryPrefix + "/sensor/" + uniqueBase + "/" + slug + "/config";
         if (serialise(doc, entity.payload)) {
             entities.push_back(std::move(entity));
         }
@@ -251,18 +272,18 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
     if (state.capabilities.has(InverterCapability::ReadStatus)) {
         JsonDocument doc;
         JsonObject   e = doc.to<JsonObject>();
-        e["unique_id"]      = bridge.bridgeId + "_status";
-        e["object_id"]      = bridge.bridgeId + "_status";
+        e["unique_id"]      = uniqueBase + "_status";
+        e["object_id"]      = uniqueBase + "_status";
         e["name"]           = "Status";
         e["state_topic"]    = topics.state();
         e["value_template"] = "{{ value_json.status_text }}";
-        e["availability_topic"] = topics.availability();
+        e["availability_topic"] = availabilityTopic;
         e["icon"]           = "mdi:information-outline";
-        addDeviceBlock(e, bridge, state.identity, false);
+        addDeviceBlock(e, bridge, state.identity, false, uniqueBase);
 
         DiscoveryEntity entity;
         entity.uniqueId    = e["unique_id"].as<std::string>();
-        entity.configTopic = discoveryPrefix + "/sensor/" + bridge.bridgeId + "/status/config";
+        entity.configTopic = discoveryPrefix + "/sensor/" + uniqueBase + "/status/config";
         if (serialise(doc, entity.payload)) {
             entities.push_back(std::move(entity));
         }
@@ -272,20 +293,20 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
     {
         JsonDocument doc;
         JsonObject   e = doc.to<JsonObject>();
-        e["unique_id"]      = bridge.bridgeId + "_inverter_online";
-        e["object_id"]      = bridge.bridgeId + "_inverter_online";
+        e["unique_id"]      = uniqueBase + "_inverter_online";
+        e["object_id"]      = uniqueBase + "_inverter_online";
         e["name"]           = "Inverter Online";
         e["state_topic"]    = topics.state();
         e["value_template"] = "{{ 'ON' if value_json.inverter_online else 'OFF' }}";
-        e["availability_topic"] = topics.availability();
+        e["availability_topic"] = availabilityTopic;
         e["device_class"]   = "connectivity";
         e["entity_category"] = "diagnostic";
-        addDeviceBlock(e, bridge, state.identity, false);
+        addDeviceBlock(e, bridge, state.identity, false, uniqueBase);
 
         DiscoveryEntity entity;
         entity.uniqueId = e["unique_id"].as<std::string>();
         entity.configTopic =
-            discoveryPrefix + "/binary_sensor/" + bridge.bridgeId + "/inverter_online/config";
+            discoveryPrefix + "/binary_sensor/" + uniqueBase + "/inverter_online/config";
         if (serialise(doc, entity.payload)) {
             entities.push_back(std::move(entity));
         }
@@ -342,7 +363,7 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
         if (spec.unit) {
             e["unit_of_measurement"] = spec.unit;
         }
-        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true);
+        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true, bridge.bridgeId);
 
         DiscoveryEntity entity;
         entity.uniqueId = e["unique_id"].as<std::string>();
@@ -376,6 +397,8 @@ std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
         }
         JsonDocument doc;
         JsonObject   e = doc.to<JsonObject>();
+        // Bridge-scoped on purpose: the relays are the BRIDGE's contacts, not any inverter's,
+        // so they keep the bridge id even on a multi-device install.
         e["unique_id"] = bridge.bridgeId + "_" + slug;
         e["object_id"] = bridge.bridgeId + "_" + slug;
         // The configured DRM role lands in the entity name, so the HA UI says what the
@@ -398,7 +421,7 @@ std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
         // gates (read-only mode flipped back on, rate limit) visibly snaps back in HA.
         e["optimistic"]         = false;
         e["availability_topic"] = topics.availability();
-        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true);
+        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true, bridge.bridgeId);
 
         entity.uniqueId = e["unique_id"].as<std::string>();
         if (serialise(doc, entity.payload)) {
@@ -437,7 +460,7 @@ std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
         // command; HA requires the state to be one of the options, so it is listed.
         opts.add(drm::kModeCustom);
         e["availability_topic"] = topics.availability();
-        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true);
+        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true, bridge.bridgeId);
         if (serialise(doc, entity.payload)) {
             entities.push_back(std::move(entity));
         }

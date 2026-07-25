@@ -33,10 +33,23 @@ struct DiscoveryEntity {
 ///     bitset, never on the driver id;
 ///   - availability tracks the BRIDGE, so a sleeping inverter leaves entities available and
 ///     reporting unknown, instead of vanishing from the dashboard every night.
+///   - `uniqueBase` prefixes every unique_id and the inverter's HA device identifier. It is
+///     the bridge id for the FIRST device -- unchanged from when a bridge polled only one, so
+///     an existing install keeps its entities and its recorder history -- and bridge id plus
+///     device id for the rest. Two inverters sharing a base would land on each other's
+///     entities, which is exactly what happened before this argument existed.
+///   - `availabilityTopic` is the BRIDGE's, always -- never the device's. Availability tracks
+///     the bridge so a sleeping inverter stays visible, and only the bridge topic is ever
+///     published. Taking it from the device's own MqttTopics announced
+///     `<base>/<bridge>/device/<id>/availability`, which nothing publishes and which has no
+///     retained value, so every entity on devices 2..N sat at `unavailable` in Home Assistant
+///     forever -- the whole feature, silently not working (review, 2026-07-25).
 std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
                                                     const BridgeInfo&  bridge,
                                                     const MqttTopics&  topics,
-                                                    const std::string& discoveryPrefix);
+                                                    const std::string& availabilityTopic,
+                                                    const std::string& discoveryPrefix,
+                                                    const std::string& uniqueBase);
 
 /// Diagnostic entities for the bridge itself (RSSI, uptime, heap, poll counters).
 std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  bridge,

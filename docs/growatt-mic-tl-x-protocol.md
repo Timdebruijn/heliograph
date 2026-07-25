@@ -211,9 +211,9 @@ address in turn and confirm exactly one answers, at the address you expect.
    > fault. Check `/api/v1/devices` after the restart: you should see one entry per unit, named
    > `growatt_modbus-1`, `-2`, `-3`.
    >
-   > **Home Assistant, Modbus TCP and Prometheus still publish the first device only.** All
-   > three appear in the REST API and in the device list; only one reaches those outputs. Next
-   > piece of work.
+   > **Modbus TCP and Prometheus still publish the first device only.** All three units appear
+   > in the REST API, in the device list and in Home Assistant, each as its own HA device; only
+   > one reaches those two outputs. Next piece of work.
 4. Set log level to `trace` and read `/api/v1/logs`. The `GROWATT in <addr>: ...` lines are
    the raw block dump.
 5. Check the dump against the inverter's own app: PV voltage, AC power, today's energy,

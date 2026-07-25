@@ -660,22 +660,35 @@ void rs485Task(void* /*arg*/) {
                 break;
             }
         }
-        // FIRST DEVICE ONLY, deliberately and for now. MQTT, Home Assistant, Modbus TCP and
-        // Prometheus all take a single DeviceState: their topic trees, register map and metric
-        // names have no device dimension yet. Polling several devices without saying so would
-        // put two more inverters in the REST device list and silently nowhere else, so this is
-        // stated here, in docs/architecture.md, and in the REST status payload rather than left
-        // for someone to discover from a missing entity.
+        // MQTT/Home Assistant take every device; Modbus TCP and Prometheus still take one --
+        // the register map holds a single device's registers and the metric names have no
+        // device label. Stated here, in docs/architecture.md, docs/rest-api.md, docs/mqtt.md
+        // and the README rather than left to be found from a missing entity.
         if (g_state) {
-            const auto snapshot = g_state->snapshot();
-            const auto bridge   = bridgeInfo();
-            const auto diag     = g_diagnostics.snapshot();
-            g_modbus.refresh(*snapshot, bridge, diag, nowMs());
+            const auto bridge = bridgeInfo();
+            const auto diag   = g_diagnostics.snapshot();
+            // Snapshots held for the whole block: MqttOutput::DeviceView keeps raw pointers
+            // into them, so the shared_ptrs have to outlive the loop() call.
+            std::vector<StateHandle>               held;
+            std::vector<mqtt::MqttOutput::DeviceView> views;
+            held.reserve(g_deviceIds.size());
+            views.reserve(g_deviceIds.size());
+            for (const auto& id : g_deviceIds) {
+                if (StateHandle h = g_devices.state(id)) {
+                    held.push_back(std::move(h));
+                    views.push_back({id, held.back().get()});
+                }
+            }
+            const auto first = g_state->snapshot();
+            // Still first-device-only, and now the ONLY two that are: the Modbus TCP register
+            // map has one device's worth of registers and the metric names have no device
+            // label. Both are named in docs/architecture.md as the remaining gap.
+            g_modbus.refresh(*first, bridge, diag, nowMs());
             if (g_mqtt) {
-                g_mqtt->loop(*snapshot, bridge, diag, nowMs());
+                g_mqtt->loop(views, bridge, diag, nowMs());
             }
             if (g_rest) {
-                g_rest->notifyState(*snapshot, nowMs());
+                g_rest->notifyState(*first, nowMs());
             }
         }
         // Never a long delay: an unreachable inverter must not stall the task or the watchdog.

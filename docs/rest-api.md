@@ -145,10 +145,10 @@ can never be filled.
 Adding, removing or retuning a device needs a restart: the drivers and their poll contexts are
 built once, at boot.
 
-**The outputs are not all there yet.** The REST API and the device list carry every configured
-device; **MQTT/Home Assistant, Modbus TCP and Prometheus carry the first one only**, because
-their topic tree, register map and metric names have no device dimension. That is the next piece
-of work and is stated in `docs/architecture.md` too.
+**The outputs are not all there yet.** REST, the device list and MQTT/Home Assistant carry every
+configured device; **Modbus TCP and Prometheus carry the first one only**, because the register
+map holds one device's registers and the metric names have no device label. That is the next
+piece of work and is stated in `docs/architecture.md` too.
 
 ## `serial` — overriding the line the driver picks
 

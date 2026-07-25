@@ -152,10 +152,14 @@ own address before you connect them together.
 >   -d '{"additional_devices":[{"driver_id":"growatt_modbus","options":{"unit_id":"2"}}]}'
 > ```
 >
-> Then restart. Two more things to know before wiring three: discovery probes only the default
-> address, so the others must be added by hand; and **Home Assistant, Modbus TCP and Prometheus
-> still carry the first device only** — the REST API and `/api/v1/devices` have all of them.
-> Both are next on the list, not wiring faults.
+> Sending the array **replaces** it, so list every extra unit in one call. Then restart.
+>
+> Three more things before wiring three: discovery probes only the default address, so the
+> others must be added by hand; **Modbus TCP and Prometheus still carry the first device only**
+> — REST, `/api/v1/devices` and Home Assistant have all of them; and **the bridge's own
+> dashboard shows the first device only** too. All three are next on the list, not wiring
+> faults. Note also that the units share one bus and one poll interval, so each is read roughly
+> every N intervals with N inverters.
 
 ### 2. Flash the firmware
 
