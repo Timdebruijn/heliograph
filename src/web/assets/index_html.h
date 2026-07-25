@@ -346,7 +346,10 @@ async function loadLogs(){
 }
 
 // ---------------- Discovery wizard (§28: 7 steps) ----------------
-let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null, wizSavedSerial=null;
+let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null, wizSavedSerial=null,
+    wizOptions={};
+// What the bridge already has configured, so step 5 can offer it back instead of overwriting it.
+let wizStoredDriverId=null, wizStoredOptions={};
 const STEPS=['Interface','Mode','Probing','Candidates','Confirm','Test poll','Save'];
 
 function stepBar(){
@@ -403,12 +406,24 @@ function renderWizard(){
   } else if(wizStep===5){
     h+=`<div class="card"><b>Step 5 — Confirm</b>
     <p class="dim">Nothing is saved until step 7. An uncertain match is never selected for you
-    — that is deliberate: reading the wrong register map produces believable numbers.</p>
-    <label for="wd">Driver</label><select id="wd"></select>
-    <button onclick="wizChosen=$('#wd').value;wizStep=6;renderWizard();testPoll()">Confirm and test</button>
+    — that is deliberate: reading the wrong register map produces believable numbers. Which is
+    why the map is a field here and not an assumption: probing identifies the <i>protocol</i>,
+    never the model, so a driver that ships several register maps cannot pick one for you.</p>
+    <label for="wd">Driver</label><select id="wd" onchange="wizRenderOpts()"></select>
+    <div id="wizopts"></div>
+    <div id="wizoptnote" class="msg err" style="display:none">Pick a register map first — it
+    cannot be detected, and the wrong one produces believable numbers.</div>
+    <!-- Starts disabled: wizGateConfirm() cannot run until two fetches resolve, and on a slow
+         bridge that is long enough to click through with no map chosen. -->
+    <button id="wizconfirm" disabled onclick="wizCapture();wizStep=6;renderWizard();testPoll()">Confirm and test</button>
     <button onclick="wizStep=4;renderWizard()" style="background:none;border:1px solid var(--line);color:var(--fg)">Back</button></div>`;
   } else if(wizStep===6){
-    h+=`<div class="card"><b>Step 6 — Test poll</b><div id="tp" class="dim">Polling…</div></div>`;
+    h+=`<div class="card"><b>Step 6 — Test poll</b>
+    <p class="dim">This polls the configuration the bridge is <b>running now</b> — the driver is
+    built once at boot, so nothing chosen in step 5 is in force yet. Useful for "is anything
+    alive on this bus", not for confirming the register map. Check that after the restart, by
+    the number of published measurements.</p>
+    <div id="tp" class="dim">Polling…</div></div>`;
   } else if(wizStep===7){
     h+=`<div class="card"><b>Step 7 — Saved</b>
     <p class="dim">The driver is stored. It takes effect after a restart.</p>`+
@@ -431,14 +446,22 @@ function renderWizard(){
   $('#wiz').innerHTML=h;
 
   if(wizStep===5){
-    fetch('/api/v1/drivers').then(r=>r.json()).then(d=>{
-      const sel=$('#wd');sel.innerHTML='';
+    // Both, before rendering: the option fields must offer what is stored, not blow it away.
+    Promise.all([fetch('/api/v1/drivers').then(r=>r.json()),
+                 fetch('/api/v1/config').then(r=>r.json()).catch(()=>null)])
+    .then(([d,cfg])=>{
+      cfgDrivers=d;
+      if(cfg&&cfg.driver){wizStoredDriverId=cfg.driver.id;wizStoredOptions=cfg.driver.options||{}}
+      const sel=$('#wd');
+      if(!sel)return;  // the user left step 5 while this was in flight
+      sel.innerHTML='';
       (d.drivers||[]).forEach(x=>{
         const o=document.createElement('option');
         o.value=x.id;o.textContent=`${x.display_name} (${x.support_level})`;
         if(x.id===wizChosen)o.selected=true;
         sel.appendChild(o);
       });
+      wizRenderOpts();
     });
   }
 }
@@ -511,6 +534,78 @@ async function discoveredSerialOverride(id){
           data_bits:found.data_bits,stop_bits:found.stop_bits};
 }
 
+// The selected driver's declared options, at their declared defaults.
+//
+// Discovery identifies a PROTOCOL, never a model: a probe that gets a valid Modbus reply has
+// proved the protocol and nothing about which register map that unit speaks. A driver shipping
+// several maps therefore cannot have one chosen for it, and until this existed the wizard
+// silently saved the driver alone -- so the firmware fell back to whichever map is marked
+// default, and every reading came from the wrong table. Step 5's own text warns that reading
+// the wrong map "produces believable numbers"; the wizard was the thing producing them.
+//
+// Rendered from the driver's own declaration, so a new driver's options appear here with no
+// frontend change, exactly as they already do in Settings.
+// Captured on the way out of step 5, for the same reason wizChosen is: renderWizard() replaces
+// the whole #wiz subtree on every step change, so by the time saveDriver() runs at step 7 both
+// the select and these fields are gone. Reading them there would silently save nothing.
+function wizCapture(){
+  wizChosen=($('#wd')||{}).value||null;
+  wizOptions={};
+  document.querySelectorAll('#wizopts [data-opt]').forEach(e=>{ wizOptions[e.dataset.opt]=e.value });
+}
+
+function wizRenderOpts(){
+  const box=$('#wizopts');
+  if(!box)return;
+  const id=($('#wd')||{}).value;
+  const drv=((cfgDrivers&&cfgDrivers.drivers)||[]).find(x=>x.id===id);
+  const opts=(drv&&drv.options)||[];
+  if(!opts.length){box.innerHTML='';wizGateConfirm();return}
+  box.innerHTML=opts.map(o=>{
+    // Seeded from what is STORED when this is the driver already configured, exactly as the
+    // settings page does. Rendering declared defaults unconditionally meant re-running the
+    // wizard -- which the bring-up docs tell you to do when the line speed is wrong -- silently
+    // rewrote a working {profile:"mic_tl_x", unit_id:"3"} back to the defaults and reported
+    // success. Every rendered key is asserted in the PATCH, so nothing survives by omission.
+    const stored=(id===wizStoredDriverId)?(wizStoredOptions||{})[o.key]:undefined;
+    const cur=stored??o.default_value??'';
+    const hint=o.description?`<div class="dim" style="font-size:12px">${esc(o.description)}</div>`:'';
+    if(o.allowed_values&&o.allowed_values.length){
+      // An empty entry among the allowed values is the driver saying "unset means my own
+      // default". In Settings that is fine -- you are editing a device you already set up.
+      // Here it is not: this is the screen where the register map gets decided, and an unlabeled
+      // blank line that silently resolves to whichever map is marked default is precisely the
+      // failure this change exists to remove. Labelled, and left unselected so the step cannot
+      // be completed until someone has actually chosen.
+      const hasBlank=o.allowed_values.includes('');
+      const needs=hasBlank&&cur==='';
+      return `<label for="wopt_${esc(o.key)}">${esc(o.display_name)}</label>
+        <select id="wopt_${esc(o.key)}" data-opt="${esc(o.key)}" ${hasBlank?'data-mustpick="1"':''}
+          onchange="wizGateConfirm()">${
+          o.allowed_values.map(v=>`<option value="${esc(v)}" ${v===cur&&!needs?'selected':''}>${
+            v===''?'— choose —':esc(v)}</option>`).join('')
+        }</select>${hint}`;
+    }
+    return `<label for="wopt_${esc(o.key)}">${esc(o.display_name)}</label>
+      <input id="wopt_${esc(o.key)}" data-opt="${esc(o.key)}" value="${esc(cur)}">${hint}`;
+  }).join('');
+  wizGateConfirm();
+}
+
+// Blocks "Confirm and test" while any option the driver marked as ambiguous-when-empty is still
+// empty. Cheaper than letting someone click through and discover months later that the numbers
+// came from the wrong table.
+function wizGateConfirm(){
+  const btn=$('#wizconfirm');
+  if(!btn)return;
+  // Runs on every render, including for drivers with no options at all -- that is what releases
+  // the button from the disabled state it is rendered in.
+  const missing=[...document.querySelectorAll('#wizopts [data-mustpick]')].some(e=>e.value==='');
+  btn.disabled=missing;
+  const note=$('#wizoptnote');
+  if(note)note.style.display=missing?'block':'none';
+}
+
 async function saveDriver(){
   // wizChosen is captured when leaving step 5 -- the #wd select no longer exists here (step 6
   // re-rendered the wizard). Before that capture existed, the manual path saved
@@ -519,6 +614,9 @@ async function saveDriver(){
   const id=wizChosen;
   if(!id){alert('No driver selected.');wizStep=5;renderWizard();return}
   const body={driver:{id}};
+  // Only when the driver actually declares options -- an empty object would still be a change
+  // the backend has to merge, and for a driver with no options it says nothing.
+  if(Object.keys(wizOptions).length)body.driver.options=wizOptions;
   const serial=await discoveredSerialOverride(id);
   if(serial)body.serial=serial;
   const r=await authFetch('/api/v1/config',{method:'PATCH',
@@ -655,13 +753,15 @@ async function renderConfig(){
   const optsFor=id=>{
     const drv=(cfgDrivers.drivers||[]).find(x=>x.id===id);
     if(!drv)return'';
-    // The line settings are a property of the protocol, not a user choice: the driver
-    // configures the UART itself when it starts. An editable field here used to exist and
-    // did nothing at all -- shown read-only instead, which is always true.
+    // What this driver would configure on its own. Read-only here on purpose: it is a property
+    // of the protocol, not a per-install choice. It stopped being the last word once the RS485
+    // line card gained an override, so it says which one is actually in force rather than
+    // stating the driver's list as fact.
     const serial=(drv.serial_profiles||[]).map(p=>
       `${p.baud_rate} ${p.data_bits}${p.parity[0].toUpperCase()}${p.stop_bits}`).join(', ');
+    const overridden=c.serial&&c.serial.override;
     return `<div class="dim" style="font-size:12px;margin-top:4px">${esc(drv.description||'')}</div>`+
-      (serial?`<div class="dim" style="font-size:12px;margin-top:4px">Serial: ${serial} — set by the driver${drv.serial_profiles.length>1?' (tried in order during discovery)':''}.</div>`:'')+
+      (serial?`<div class="dim" style="font-size:12px;margin-top:4px">Serial: ${serial} — set by the driver${drv.serial_profiles.length>1?' (extended discovery tries them in order)':''}.${overridden?' <b>Overridden</b> by the RS485 line card above.':''}</div>`:'')+
       (drv.options||[]).map(o=>{
       const stored=id===c.driver.id?(c.driver.options||{})[o.key]:undefined;
       const cur=stored??o.default_value;
@@ -872,7 +972,11 @@ async function saveConfig(){
   if(v('c_au').trim())body.security.admin_username=v('c_au').trim();
   if(v('c_mqpw'))body.mqtt.password=v('c_mqpw');
   if(v('c_ap'))body.security.admin_password=v('c_ap');
-  document.querySelectorAll('[data-opt]').forEach(e=>body.driver.options[e.dataset.opt]=e.value);
+  // Scoped to the settings form. The wizard renders its own [data-opt] fields at step 5, and
+  // both views live in the DOM at the same time -- an unscoped query saved the wizard's
+  // half-finished choices into the active driver's config.
+  document.querySelectorAll('#cfgform [data-opt]')
+    .forEach(e=>body.driver.options[e.dataset.opt]=e.value);
 
   // Send only what actually changed. This form may have been open for hours; PATCHing every
   // field would write its stale copy over anything changed elsewhere in the meantime (another
