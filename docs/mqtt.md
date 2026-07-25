@@ -48,10 +48,11 @@ serial arrives during the first poll, long after the id is needed.
 
 ### Removing or re-addressing a device
 
-The bridge clears up after itself. It remembers which device ids it announced, and on the first
-connection after a restart it publishes empty retained payloads for any of them that is no
-longer configured — the device's own `state`, `identity` and `capabilities`, and every Home
-Assistant discovery config it could have announced. Home Assistant drops those entities.
+The bridge clears up after the devices that publish on `…/device/<device_id>/`. It remembers
+which devices it announced and on which topic tree, and on the first connection after a restart
+it publishes empty retained payloads for any that no longer owns that tree — the device's own
+`state`, `identity` and `capabilities`, and every Home Assistant discovery config it could have
+announced there. Home Assistant drops those entities.
 
 Two things follow from *could have*: the topics are enumerated from the canonical measurement
 ids rather than derived from the device's readings, because by then the device is gone and so
@@ -62,17 +63,36 @@ so a sleeping inverter does not make its entities unavailable every night — wh
 orphaned entity does **not** go unavailable either. It reports *online* forever, showing the
 last value it ever read, and a template or automation summing your inverters keeps counting it.
 
-Changing a device's address counts as removing it: the address is part of the device id.
+Two edits trigger it, and for devices 2..N they are the same edit: changing an address counts as
+removing the device, because the address is part of the device id. The other is promotion —
+moving a device into the `driver` slot, which leaves the per-device tree it used to publish on
+with no owner.
 
-The clearing runs once per boot and only after the broker is connected, so a restart with the
-broker down does not silently record the new list as if the clears had gone out. If a bridge
-ran a build from before this existed, its orphans are still there and have to be cleared by
-hand (`mosquitto_pub -r -n -t <topic>`) or deleted in Home Assistant.
+**The first device's own tree is never cleared, and that is the point.** The bridge-scoped
+topics and `unique_id`s always belong to whatever is in the `driver` slot, so re-addressing or
+replacing the first inverter hands the new one those entities and their recorder history rather
+than orphaning them. A single-inverter bridge therefore never orphans anything by changing its
+address. What can be left behind is narrower: if the replacement publishes *fewer* measurements
+than its predecessor, the discovery configs for the difference stay retained. Delete those
+entities in Home Assistant, or clear them with `mosquitto_pub -r -n -t <topic>`.
+
+The clearing runs once per boot and only after the broker is connected, and every publish is
+checked — a clear that the client refused is retried, and until it succeeds the device stays in
+the bookkeeping rather than being recorded as cleared. Not covered:
+
+- **A boot where a configured device did not start.** Nothing is cleared that boot: a device
+  skipped for a duplicate address or a driver that is not compiled in is still configured, and
+  its id cannot be known without its driver. Fix the configuration and reboot. The log says so.
+- **A changed base topic or discovery prefix.** Everything under the old prefix is orphaned,
+  including the bridge's own topics; the bookkeeping records device ids, not prefixes.
+- **A factory reset**, which erases the bookkeeping along with everything else, and a
+  bookkeeping entry that cannot be read back.
+- **A bridge that ran a build from before this existed.** Its orphans have to be cleared by
+  hand (`mosquitto_pub -r -n -t <topic>`) or deleted in Home Assistant.
 
 > **Which device is "first" comes from the configuration, not from boot order.** It is the
 > `driver` entry. If it fails to start, no device takes over the bridge-scoped topics — that is
-> deliberate, so a bad boot cannot transplant one inverter's history onto another. But moving a
-> different inverter into the `driver` slot *does* hand it those topics and that history.
+> deliberate, so a bad boot cannot transplant one inverter's history onto another.
 
 **Last Will and Testament:** topic `availability`, payload `offline`, retained, QoS 1. On a
 clean shutdown, the bridge publishes `offline` itself.

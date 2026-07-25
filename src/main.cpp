@@ -117,10 +117,12 @@ std::vector<DeviceId> g_deviceIds;
 /// Assistant entities and its recorder history to whichever device did start.
 DeviceId g_primaryDeviceId;
 
-/// Whether the announced-device reconciliation has run this boot. Once per session, and only
-/// once the broker is actually connected: publishing the clears into a disconnected client
-/// would drop them silently and then record the new list as if they had gone out.
-bool g_announcedReconciled = false;
+/// Whether the announced-device reconciliation is done for this boot. Once per session, and
+/// only once the broker is actually connected: publishing the clears into a disconnected client
+/// would drop them silently and then record the new list as if they had gone out. A refused
+/// publish leaves this false so the next pass retries, bounded by the counter below.
+bool     g_announcedReconciled = false;
+unsigned g_announcedAttempts   = 0;
 
 /// How many devices the configuration asked for, whether or not they started. Drives the status
 /// LED: a configured device that failed to start is a fault to show, not an absence to ignore.
@@ -616,6 +618,60 @@ void startRestApi() {
     g_rest->begin();
 }
 
+/// Clears the retained topics of devices that are no longer where we announced them.
+///
+/// Retained discovery configs outlive the device that published them, and because availability
+/// is bridge-scoped an orphaned entity does not go unavailable -- it reports ONLINE forever with
+/// its last value, and anything summing the inverters keeps counting it. What we announced last
+/// time is the one fact nothing else survives a reboot knowing.
+void reconcileAnnouncedDevices(const BridgeInfo& bridge) {
+    // Only when every configured device actually started. g_deviceIds holds the devices that
+    // STARTED; one skipped for a duplicate id, a driver that is not compiled in or a full slot
+    // table is still configured, and tearing its Home Assistant entities down over a typo that
+    // gets corrected in a minute is worse than leaving them one boot longer. Nothing here can
+    // know the id of a device that never got a driver -- the id comes from the driver -- so the
+    // honest move is to defer the whole reconciliation and leave the bookkeeping untouched
+    // (review, 2026-07-26). Zero configured devices lands here too, and never reaches this
+    // function at all: with nothing started there is no state and MQTT does not run.
+    if (g_deviceIds.size() != g_devicesConfigured) {
+        log::warn("MQTT: not clearing retained device topics this boot -- %u of %u configured "
+                  "devices started; fix them and reboot",
+                  static_cast<unsigned>(g_deviceIds.size()),
+                  static_cast<unsigned>(g_devicesConfigured));
+        g_announcedReconciled = true;
+        return;
+    }
+
+    std::vector<mqtt::AnnouncedDevice> record;
+    record.reserve(g_deviceIds.size());
+    for (const auto& id : g_deviceIds) {
+        record.push_back({id, id == g_primaryDeviceId});
+    }
+
+    bool allCleared = true;
+    for (const auto& id :
+         mqtt::devicesToForget(g_store.announcedDevices(), g_deviceIds, g_primaryDeviceId)) {
+        if (!g_mqtt->forgetDevice(id, bridge)) {
+            allCleared = false;
+            // Kept in the record even though it is gone from the configuration: dropping it
+            // here would be the last time anything knew it existed, and its entities would then
+            // be orphaned for good.
+            record.push_back({id, false});
+        }
+    }
+    if (!allCleared && ++g_announcedAttempts < 5) {
+        return;  // link hiccup or a full outbox; try again next pass
+    }
+    if (!allCleared) {
+        log::warn("MQTT: could not clear every removed device's topics; will retry next boot");
+    }
+    if (!g_store.setAnnouncedDevices(record)) {
+        log::warn("MQTT: could not record which devices were announced; removing one later will "
+                  "leave its Home Assistant entities behind");
+    }
+    g_announcedReconciled = true;
+}
+
 void rs485Task(void* /*arg*/) {
     for (;;) {
         // One feed per iteration; the 120 s budget covers the longest legitimate iteration
@@ -717,22 +773,10 @@ void rs485Task(void* /*arg*/) {
             // label. Both are named in docs/architecture.md as the remaining gap.
             g_modbus.refresh(*first, bridge, diag, nowMs());
             if (g_mqtt) {
-                // Once, on the first connected pass. Retained discovery configs outlive the
-                // device that published them, and because availability is bridge-scoped an
-                // orphaned entity does not go unavailable -- it reports ONLINE forever with its
-                // last value, and anything summing the inverters keeps counting it. Removing a
-                // device from the configuration and changing its address (which changes its id)
-                // both leave that behind. What we announced last time is the one fact nothing
-                // else survives a reboot knowing.
+                // Once, on the first connected pass -- before loop() below, so the clears are
+                // queued ahead of this boot's own discovery announcements.
                 if (!g_announcedReconciled && g_mqtt->connected()) {
-                    for (const auto& old : g_store.announcedDevices()) {
-                        if (std::find(g_deviceIds.begin(), g_deviceIds.end(), old) ==
-                            g_deviceIds.end()) {
-                            g_mqtt->forgetDevice(old, bridge, old == g_primaryDeviceId);
-                        }
-                    }
-                    g_store.setAnnouncedDevices(g_deviceIds);
-                    g_announcedReconciled = true;
+                    reconcileAnnouncedDevices(bridge);
                 }
                 g_mqtt->loop(views, bridge, diag, nowMs());
             }

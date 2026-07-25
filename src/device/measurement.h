@@ -79,6 +79,15 @@ inline constexpr const char* kAcFrequency    = "ac.frequency";
 inline constexpr const char* kAcL1Voltage    = "ac.phase_l1.voltage";
 inline constexpr const char* kAcL1Current    = "ac.phase_l1.current";
 inline constexpr const char* kAcL1Power      = "ac.phase_l1.power";
+// L2/L3 exist as constants because three-phase drivers already publish them: a canonical id
+// that only lives as a string literal inside a driver cannot be enumerated, and so cannot be
+// cleared when the device that published it goes away (review, 2026-07-26).
+inline constexpr const char* kAcL2Voltage    = "ac.phase_l2.voltage";
+inline constexpr const char* kAcL2Current    = "ac.phase_l2.current";
+inline constexpr const char* kAcL2Power      = "ac.phase_l2.power";
+inline constexpr const char* kAcL3Voltage    = "ac.phase_l3.voltage";
+inline constexpr const char* kAcL3Current    = "ac.phase_l3.current";
+inline constexpr const char* kAcL3Power      = "ac.phase_l3.power";
 inline constexpr const char* kDcPowerTotal   = "dc.power.total";
 inline constexpr const char* kDcMppt1Voltage = "dc.mppt_1.voltage";
 inline constexpr const char* kDcMppt1Current = "dc.mppt_1.current";
@@ -102,6 +111,15 @@ inline constexpr const char* kBatteryCurrent      = "battery.current";
 inline constexpr const char* kBatteryTemperature  = "battery.temperature";
 inline constexpr const char* kBatteryEnergyCharged    = "battery.energy_charged";
 inline constexpr const char* kBatteryEnergyDischarged = "battery.energy_discharged";
+/// The raw rails, for a device that reads them separately and a consumer that wants them apart:
+/// the Modbus TCP register map has held registers for both since it was written. They exist as
+/// constants because ids that live only as string literals cannot be enumerated -- and an id
+/// that cannot be enumerated is an entity that can never be cleared (review, 2026-07-26).
+inline constexpr const char* kBatteryChargePower    = "battery.charge_power";
+inline constexpr const char* kBatteryDischargePower = "battery.discharge_power";
+/// House-level flows, for hybrids with a meter. Also long-standing Modbus registers.
+inline constexpr const char* kGridImportPower = "grid.import_power";
+inline constexpr const char* kGridExportPower = "grid.export_power";
 
 /// Every id above, in one place.
 ///
@@ -111,10 +129,12 @@ inline constexpr const char* kBatteryEnergyDischarged = "battery.energy_discharg
 /// which fails the build if a constant above is missing here.
 inline constexpr const char* kAll[] = {
     kAcPowerTotal,   kAcFrequency,    kAcL1Voltage,    kAcL1Current,    kAcL1Power,
-    kDcPowerTotal,   kDcMppt1Voltage, kDcMppt1Current, kDcMppt1Power,   kDcMppt2Voltage,
-    kDcMppt2Current, kDcMppt2Power,   kEnergyToday,    kEnergyTotal,    kTemperature,
-    kOperatingHours, kBatterySoc,     kBatteryPower,   kBatteryVoltage, kBatteryCurrent,
-    kBatteryTemperature, kBatteryEnergyCharged, kBatteryEnergyDischarged,
+    kAcL2Voltage,    kAcL2Current,    kAcL2Power,      kAcL3Voltage,    kAcL3Current,
+    kAcL3Power,      kDcPowerTotal,   kDcMppt1Voltage, kDcMppt1Current, kDcMppt1Power,
+    kDcMppt2Voltage, kDcMppt2Current, kDcMppt2Power,   kEnergyToday,    kEnergyTotal,
+    kTemperature,    kOperatingHours, kBatterySoc,     kBatteryPower,   kBatteryVoltage,
+    kBatteryCurrent, kBatteryTemperature, kBatteryEnergyCharged, kBatteryEnergyDischarged,
+    kBatteryChargePower, kBatteryDischargePower, kGridImportPower, kGridExportPower,
 };
 
 }  // namespace measurement_id

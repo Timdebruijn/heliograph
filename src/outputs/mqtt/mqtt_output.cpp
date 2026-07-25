@@ -342,17 +342,26 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
     }
 }
 
-void MqttOutput::forgetDevice(const DeviceId& id, const BridgeInfo& bridge, bool primary) {
+bool MqttOutput::forgetDevice(const DeviceId& id, const BridgeInfo& bridge) {
     if (!started_ || !g_client.connected()) {
-        return;
+        return false;
     }
-    const MqttTopics  topics(config_.baseTopic, bridge.bridgeId, deviceTopicKey(primary, id));
-    const std::string base = deviceUniqueBase(primary, bridge.bridgeId, id);
+    // Always the device-scoped tree; see the header for why the bridge-scoped one is off limits.
+    const MqttTopics  topics(config_.baseTopic, bridge.bridgeId, deviceTopicKey(false, id));
+    const std::string base = deviceUniqueBase(false, bridge.bridgeId, id);
+
+    // Every publish is checked. A packet id of 0 means the client refused it -- the link went
+    // down between the connected() check and here, or the outbox could not allocate -- and a
+    // clear that never left must not be recorded as done (review, 2026-07-26).
+    bool ok = true;
+    const auto clear = [&](const std::string& topic) {
+        ok = (g_client.publish(topic.c_str(), 1, true, "") != 0) && ok;
+    };
 
     // The device's own retained payloads. Empty, retained: a subscriber that connects later
     // must not be handed a reading from an inverter that is no longer configured.
     for (const auto& topic : {topics.state(), topics.identity(), topics.capabilities()}) {
-        g_client.publish(topic.c_str(), 1, true, "");
+        clear(topic);
     }
 
     // Every discovery config it could have announced. Enumerated rather than derived from the
@@ -360,18 +369,15 @@ void MqttOutput::forgetDevice(const DeviceId& id, const BridgeInfo& bridge, bool
     // payload to a topic that was never used is harmless -- Home Assistant has nothing to
     // remove and the broker drops the retained entry.
     for (const char* mid : measurement_id::kAll) {
-        const std::string slug = sanitizeId(mid);
-        g_client.publish((config_.discoveryPrefix + "/sensor/" + base + "/" + slug + "/config")
-                             .c_str(), 1, true, "");
+        clear(config_.discoveryPrefix + "/sensor/" + base + "/" + sanitizeId(mid) + "/config");
     }
-    g_client.publish((config_.discoveryPrefix + "/sensor/" + base + "/status/config").c_str(), 1,
-                     true, "");
-    g_client.publish(
-        (config_.discoveryPrefix + "/binary_sensor/" + base + "/inverter_online/config").c_str(),
-        1, true, "");
+    clear(config_.discoveryPrefix + "/sensor/" + base + "/status/config");
+    clear(config_.discoveryPrefix + "/binary_sensor/" + base + "/inverter_online/config");
 
-    heliograph::log::info("MQTT: cleared retained topics for removed device %s",
-                          id.c_str());
+    if (ok) {
+        heliograph::log::info("MQTT: cleared retained topics for removed device %s", id.c_str());
+    }
+    return ok;
 }
 
 void MqttOutput::stop() {
@@ -398,7 +404,7 @@ void MqttOutput::loop(const std::vector<DeviceView>&, const BridgeInfo&,
                       const DiagnosticsSnapshot&,
                       uint64_t) {}
 void MqttOutput::stop() { started_ = false; }
-void MqttOutput::forgetDevice(const DeviceId&, const BridgeInfo&, bool) {}
+bool MqttOutput::forgetDevice(const DeviceId&, const BridgeInfo&) { return false; }
 bool MqttOutput::connected() const { return false; }
 void MqttOutput::onConnected(Channel&, const DeviceState&, const BridgeInfo&) {}
 void MqttOutput::publishDiscovery(Channel&, const DeviceState&, const BridgeInfo&) {}

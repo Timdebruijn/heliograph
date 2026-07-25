@@ -22,7 +22,12 @@ def main() -> int:
         print("FAIL: measurement_id namespace not found")
         return 1
     body = block.group(1)
-    declared = set(re.findall(r"inline constexpr const char\*\s+(k\w+)\s*=", body))
+    # `const char *k` and `const char* k` are the same declaration; so is one without `inline`.
+    # The strict spelling was the whole guard, and there is no .clang-format to enforce it, so a
+    # constant one space away was invisible here and un-clearable in the firmware (review).
+    declared = set(
+        re.findall(r"(?:inline\s+)?constexpr\s+const\s+char\s*\*\s*(k\w+)\s*=", body)
+    )
     declared.discard("kAll")
     listed_block = re.search(r"kAll\[\] = \{(.*?)\};", body, re.DOTALL)
     if not listed_block:

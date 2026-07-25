@@ -13,6 +13,7 @@
 #include "device/device_context.h"
 #include "drivers/eversolar_legacy/eversolar_driver.h"
 #include "drivers/mock/mock_driver.h"
+#include "outputs/mqtt/announced_devices.h"
 #include "outputs/mqtt/home_assistant_discovery.h"
 #include "outputs/mqtt/mqtt_payloads.h"
 #include "outputs/mqtt/mqtt_topics.h"
@@ -976,11 +977,9 @@ static void test_two_devices_produce_distinct_unique_ids_and_ha_devices() {
 // because by the time the clearing runs the device's measurement set is gone with it. If a
 // canonical id were missing from that list its entity would stay in Home Assistant reporting
 // online forever -- so this pins that every id a discovery entity can be built from is in it.
-static void test_every_announceable_measurement_is_clearable() {
-    Rig               r;
-    const DeviceState state  = r.poll();
-    const BridgeInfo  bridge = makeBridge();
-    const MqttTopics  topics(kDefaultBaseTopic, bridge.bridgeId);
+static void assertEveryAnnouncedSlugIsClearable(const DeviceState& state, const char* who) {
+    const BridgeInfo bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
     const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
                                                  kDefaultDiscoveryPrefix, bridge.bridgeId);
 
@@ -997,14 +996,89 @@ static void test_every_announceable_measurement_is_clearable() {
         const std::string slug = e.uniqueId.substr(bridge.bridgeId.size() + 1);
         TEST_ASSERT_TRUE_MESSAGE(
             std::find(clearable.begin(), clearable.end(), slug) != clearable.end(),
-            ("announced a slug that cannot be cleared: " + slug).c_str());
+            (std::string(who) + " announced a slug that cannot be cleared: " + slug).c_str());
     }
+}
+
+static void test_every_announceable_measurement_is_clearable() {
+    // Both drivers, because one driver's channel set proves nothing about the enumeration. The
+    // EverSolar rig alone happened to be all-canonical, so the first version of this test passed
+    // while the mock -- three phases and a battery, which is what it exists for -- announced
+    // eight ids that no consumer could enumerate or clear (review, 2026-07-26).
+    Rig r;
+    assertEveryAnnouncedSlugIsClearable(r.poll(), "eversolar");
+
+    mock::MockDriver driver(clockFn, mock::MockOptions{});
+    StateStore       store;
+    Diagnostics      diag;
+    g_now = 12ULL * 60 * 60 * 1000;
+    DeviceContext ctx(driver, store, diag, clockFn);
+    ctx.pollOnce();
+    assertEveryAnnouncedSlugIsClearable(*store.snapshot(), "mock");
+}
+
+// --- which devices have to be forgotten ---------------------------------------------------
+//
+// The decision, not the publishing: MqttOutput is ESP32-only, so this rule is the part that can
+// be held to account. Its predecessor -- a `primary` flag computed at the call site from a
+// variable that could never hold a removed device's id -- was dead code no test could reach.
+
+static void test_a_removed_device_is_forgotten() {
+    const auto gone = devicesToForget({{"eversolar-1", true}, {"growatt_modbus-2", false}},
+                                      {"eversolar-1"}, "eversolar-1");
+    TEST_ASSERT_EQUAL_UINT32(1, gone.size());
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", gone[0].c_str());
+}
+
+static void test_a_re_addressed_device_is_forgotten_under_its_old_id() {
+    // Bring-up reality: unit 3 turns out to sit at address 4. The address is part of the id.
+    const auto gone = devicesToForget({{"growatt_modbus-1", true}, {"growatt_modbus-3", false}},
+                                      {"growatt_modbus-1", "growatt_modbus-4"},
+                                      "growatt_modbus-1");
+    TEST_ASSERT_EQUAL_UINT32(1, gone.size());
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus-3", gone[0].c_str());
+}
+
+static void test_a_promoted_device_gives_up_its_device_scoped_tree() {
+    // Device 1 deleted, device 2 moved into the `driver` slot. Its id never changed, so nothing
+    // ever saw it as removed -- and its whole per-device entity set stayed in Home Assistant.
+    const auto gone = devicesToForget({{"eversolar-1", true}, {"growatt_modbus-2", false}},
+                                      {"growatt_modbus-2"}, "growatt_modbus-2");
+    TEST_ASSERT_EQUAL_UINT32(1, gone.size());
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", gone[0].c_str());
+}
+
+static void test_the_bridge_scoped_tree_is_never_cleared() {
+    // The old primary is gone and a different device owns the bridge-scoped tree now. Clearing
+    // what the old one published would delete the live primary's entities and their history --
+    // handing them over is the back-compat contract, not a leak to be plugged.
+    const auto gone = devicesToForget({{"eversolar-1", true}}, {"growatt_modbus-1"},
+                                      "growatt_modbus-1");
+    TEST_ASSERT_TRUE(gone.empty());
+
+    // Same when nothing is primary this boot: still not ours to delete.
+    TEST_ASSERT_TRUE(devicesToForget({{"eversolar-1", true}}, {}, "").empty());
+}
+
+static void test_an_unchanged_line_up_forgets_nothing() {
+    const std::vector<AnnouncedDevice> announced{{"growatt_modbus-1", true},
+                                                 {"growatt_modbus-2", false},
+                                                 {"growatt_modbus-3", false}};
+    const std::vector<std::string>     current{"growatt_modbus-1", "growatt_modbus-2",
+                                               "growatt_modbus-3"};
+    TEST_ASSERT_TRUE(devicesToForget(announced, current, "growatt_modbus-1").empty());
+    TEST_ASSERT_TRUE(devicesToForget({}, current, "growatt_modbus-1").empty());
 }
 
 
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_every_announceable_measurement_is_clearable);
+    RUN_TEST(test_a_removed_device_is_forgotten);
+    RUN_TEST(test_a_re_addressed_device_is_forgotten_under_its_old_id);
+    RUN_TEST(test_a_promoted_device_gives_up_its_device_scoped_tree);
+    RUN_TEST(test_the_bridge_scoped_tree_is_never_cleared);
+    RUN_TEST(test_an_unchanged_line_up_forgets_nothing);
     RUN_TEST(test_the_primary_device_keeps_the_bridge_scoped_identity);
     RUN_TEST(test_a_non_primary_device_gets_its_own_identity);
     RUN_TEST(test_every_device_tracks_the_bridge_availability_topic);

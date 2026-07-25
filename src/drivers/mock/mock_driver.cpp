@@ -193,12 +193,14 @@ PollResult MockDriver::poll(DeviceState& state) {
     // building them fresh every poll only churned the heap (review, 2026-07-21). The phase
     // number stays in the display name -- Home Assistant builds the entity id from it, and
     // three entities called "Phase Voltage" would collide into _2/_3.
-    static const char* kPhaseVoltage[] = {"ac.phase_l1.voltage", "ac.phase_l2.voltage",
-                                          "ac.phase_l3.voltage"};
-    static const char* kPhaseCurrent[] = {"ac.phase_l1.current", "ac.phase_l2.current",
-                                          "ac.phase_l3.current"};
-    static const char* kPhasePower[]   = {"ac.phase_l1.power", "ac.phase_l2.power",
-                                          "ac.phase_l3.power"};
+    static const char* kPhaseVoltage[] = {measurement_id::kAcL1Voltage,
+                                          measurement_id::kAcL2Voltage,
+                                          measurement_id::kAcL3Voltage};
+    static const char* kPhaseCurrent[] = {measurement_id::kAcL1Current,
+                                          measurement_id::kAcL2Current,
+                                          measurement_id::kAcL3Current};
+    static const char* kPhasePower[]   = {measurement_id::kAcL1Power, measurement_id::kAcL2Power,
+                                          measurement_id::kAcL3Power};
     static const char* kPhaseVName[]   = {"Phase L1 Voltage", "Phase L2 Voltage",
                                           "Phase L3 Voltage"};
     static const char* kPhaseCName[]   = {"Phase L1 Current", "Phase L2 Current",
@@ -238,15 +240,21 @@ PollResult MockDriver::poll(DeviceState& state) {
         m.set(kMpptP[i], power, ts);
     }
 
-    m.declare("battery.soc", MeasurementType::Ratio, Unit::Percent, "Battery SoC");
-    m.declare("battery.voltage", MeasurementType::Voltage, Unit::Volt, "Battery Voltage");
-    m.declare("battery.charge_power", MeasurementType::Power, Unit::Watt, "Battery Charge Power");
-    m.declare("battery.discharge_power", MeasurementType::Power, Unit::Watt, "Battery Discharge Power");
+    // Constants, not string literals -- same channels as before. An id written out by hand is
+    // invisible to anything that enumerates the vocabulary, which is how these four ended up
+    // announceable but not clearable (review, 2026-07-26).
+    m.declare(measurement_id::kBatterySoc, MeasurementType::Ratio, Unit::Percent, "Battery SoC");
+    m.declare(measurement_id::kBatteryVoltage, MeasurementType::Voltage, Unit::Volt,
+              "Battery Voltage");
+    m.declare(measurement_id::kBatteryChargePower, MeasurementType::Power, Unit::Watt,
+              "Battery Charge Power");
+    m.declare(measurement_id::kBatteryDischargePower, MeasurementType::Power, Unit::Watt,
+              "Battery Discharge Power");
     const double soc = 40.0 + 40.0 * fraction;
-    m.set("battery.soc", soc, ts);
-    m.set("battery.voltage", 48.0 + soc * 0.05, ts);
-    m.set("battery.charge_power", fraction > 0.3 ? 1000.0 : 0.0, ts);
-    m.set("battery.discharge_power", fraction == 0.0 ? 400.0 : 0.0, ts);
+    m.set(measurement_id::kBatterySoc, soc, ts);
+    m.set(measurement_id::kBatteryVoltage, 48.0 + soc * 0.05, ts);
+    m.set(measurement_id::kBatteryChargePower, fraction > 0.3 ? 1000.0 : 0.0, ts);
+    m.set(measurement_id::kBatteryDischargePower, fraction == 0.0 ? 400.0 : 0.0, ts);
 
     m.set(measurement_id::kAcPowerTotal, acPower, ts);
     m.set(measurement_id::kAcFrequency, 50.0, ts);

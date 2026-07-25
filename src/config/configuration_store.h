@@ -14,6 +14,7 @@
 #include <string>
 
 #include "configuration.h"
+#include "outputs/mqtt/announced_devices.h"
 
 namespace heliograph {
 
@@ -86,13 +87,13 @@ public:
     /// not something a user sets, it must never appear in GET /config, and it must not take
     /// part in the change-diff that decides whether a save needs a reboot.
     ///
-    /// Currently one thing: which device ids have been announced to Home Assistant. Discovery
-    /// configs are retained on the broker, so a device that is removed or re-addressed leaves
-    /// its entities behind -- and because availability is bridge-scoped they report ONLINE
-    /// forever with their last value, straight into an energy dashboard. Clearing them needs
-    /// the one fact nothing else survives a reboot with: what we announced last time.
-    std::vector<std::string> announcedDevices();
-    bool                     setAnnouncedDevices(const std::vector<std::string>& ids);
+    /// Currently one thing: which devices have been announced to Home Assistant, and on which
+    /// topic tree. Discovery configs are retained on the broker, so a device that is removed or
+    /// re-addressed leaves its entities behind -- and because availability is bridge-scoped they
+    /// report ONLINE forever with their last value, straight into an energy dashboard. Clearing
+    /// them needs the one fact nothing else survives a reboot with: what we announced last time.
+    std::vector<mqtt::AnnouncedDevice> announcedDevices();
+    bool setAnnouncedDevices(const std::vector<mqtt::AnnouncedDevice>& devices);
 
 private:
     KeyValueBackend&   backend_;

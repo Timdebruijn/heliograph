@@ -21,6 +21,12 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `ac.phase_l1.voltage` | V | Phase L1 voltage |
 | `ac.phase_l1.current` | A | Phase L1 current |
 | `ac.phase_l1.power` | W | Phase L1 active power |
+| `ac.phase_l2.voltage` | V | Phase L2 voltage |
+| `ac.phase_l2.current` | A | Phase L2 current |
+| `ac.phase_l2.power` | W | Phase L2 active power |
+| `ac.phase_l3.voltage` | V | Phase L3 voltage |
+| `ac.phase_l3.current` | A | Phase L3 current |
+| `ac.phase_l3.power` | W | Phase L3 active power |
 | `dc.power.total` | W | Total PV (DC) power over all MPPTs |
 | `dc.mppt_1.voltage` | V | MPPT/string 1 voltage |
 | `dc.mppt_1.current` | A | MPPT/string 1 current |
@@ -39,13 +45,23 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `battery.temperature` | °C | Battery temperature |
 | `battery.energy_charged` | kWh | Lifetime energy charged into the battery |
 | `battery.energy_discharged` | kWh | Lifetime energy discharged from the battery |
+| `battery.charge_power` | W | Charge rail, for a device that reads the two separately |
+| `battery.discharge_power` | W | Discharge rail, ditto |
+| `grid.import_power` | W | Power drawn from the grid, for a hybrid with a meter |
+| `grid.export_power` | W | Power fed back to the grid |
 
 ## Conventions
 
 - **Battery sign.** `battery.power` is positive while charging, negative while
   discharging — the SunSpec energy-storage convention (Model 120). Many vendors report
   "discharge power" as a positive number; check on hardware which way your device points
-  before mapping it, and note the finding in the profile.
+  before mapping it, and note the finding in the profile. Prefer the single signed channel;
+  `battery.charge_power` / `battery.discharge_power` exist for devices that genuinely expose
+  two rails, and have their own Modbus TCP registers.
+- **Never invent an id in a driver.** Anything not in this list is invisible to everything that
+  enumerates the vocabulary — including the code that clears a removed device's retained Home
+  Assistant topics, which means such an entity can never be cleaned up. Add the constant to
+  `measurement_id` first; `tools/check_measurement_ids.py` enforces the rest.
 - **Named after physics, not vendor registers.** The battery channels are shaped after
   the SunSpec storage model on purpose, so hybrids map onto a standard instead of every
   brand inventing its own vocabulary.

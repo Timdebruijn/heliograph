@@ -383,10 +383,10 @@ bool ConfigurationStore::save(const Configuration& config) {
     return backend_.write(kStorageKeyConfig, blob);
 }
 
-std::vector<std::string> ConfigurationStore::announcedDevices() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::vector<std::string> out;
-    std::string              raw;
+std::vector<mqtt::AnnouncedDevice> ConfigurationStore::announcedDevices() {
+    std::lock_guard<std::mutex>        lock(mutex_);
+    std::vector<mqtt::AnnouncedDevice> out;
+    std::string                        raw;
     if (!backend_.read(kStorageKeyAnnounced, raw) || raw.empty()) {
         return out;
     }
@@ -395,19 +395,26 @@ std::vector<std::string> ConfigurationStore::announcedDevices() {
         return out;  // unreadable bookkeeping is simply forgotten, never fatal
     }
     for (JsonVariantConst v : doc.as<JsonArrayConst>()) {
+        // A bare string is the shape this key had before it carried the topic tree. Read as
+        // non-primary, which is what it always meant: the flag was added when the primary's
+        // tree turned out to need different handling, not to reinterpret old entries.
         if (v.is<const char*>()) {
-            out.emplace_back(v.as<const char*>());
+            out.push_back({v.as<const char*>(), false});
+        } else if (v.is<JsonObjectConst>() && v["id"].is<const char*>()) {
+            out.push_back({v["id"].as<const char*>(), v["primary"].as<bool>()});
         }
     }
     return out;
 }
 
-bool ConfigurationStore::setAnnouncedDevices(const std::vector<std::string>& ids) {
+bool ConfigurationStore::setAnnouncedDevices(const std::vector<mqtt::AnnouncedDevice>& devices) {
     std::lock_guard<std::mutex> lock(mutex_);
     JsonDocument doc;
     JsonArray    arr = doc.to<JsonArray>();
-    for (const auto& id : ids) {
-        arr.add(id);
+    for (const auto& d : devices) {
+        JsonObject o  = arr.add<JsonObject>();
+        o["id"]       = d.id;
+        o["primary"]  = d.primary;
     }
     std::string raw;
     serializeJson(doc, raw);
