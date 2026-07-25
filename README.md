@@ -147,7 +147,8 @@ own address before you connect them together.
 > one row per inverter, each with its own driver and whatever that driver needs to address it.
 > The page refuses to save a row with no driver, an unset register map, or an address already
 > in use, because all three are mistakes the firmware can only report as a log line at boot.
-> Save, then restart.
+> Save, then restart. Afterwards the **Device** tab lists every inverter that is actually being
+> polled, and says so plainly when one of the configured ones is missing and why.
 >
 > Over the API it is one field, and sending the array **replaces** it:
 >

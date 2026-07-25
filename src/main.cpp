@@ -115,6 +115,10 @@ std::vector<DeviceId> g_deviceIds;
 /// LED: a configured device that failed to start is a fault to show, not an absence to ignore.
 size_t g_devicesConfigured = 0;
 
+/// One line per configured device that is not being polled, in configuration order. Filled at
+/// boot alongside the log lines, so the same facts reach a screen instead of only a ring buffer.
+std::vector<std::string> g_deviceProblems;
+
 bool g_outputsStarted = false;
 
 /// Guards g_config against the one cross-task hazard it has: the AsyncTCP task replacing
@@ -247,6 +251,9 @@ BridgeInfo bridgeInfo() {
             info.relayRoles = g_config.relays.roles;
         }
     }
+    // No lock: both are written once in setup(), before any task that reads them exists.
+    info.devicesConfigured = g_devicesConfigured;
+    info.deviceProblems    = g_deviceProblems;
     info.hasBootButton     = board::kHasBootButton;
     info.bootButtonPressed = g_bootPressed.load();
     info.hasStatusLed      = board::kHasStatusLed;
@@ -834,6 +841,7 @@ void setup() {
             // their poll. A bus with three inverters where the second has a typo'd driver id
             // should still report the first and third.
             log::warn("device '%s' could not be started; the others still poll", p.id.c_str());
+            g_deviceProblems.push_back("'" + p.id + "' could not be started");
             continue;
         }
         Serial.printf("[driver] %s (%s)\n", driver->descriptor().id.c_str(),
@@ -848,12 +856,15 @@ void setup() {
         if (g_devices.contains(id)) {
             log::warn("device '%s' skipped: another configured device already resolves to id "
                       "'%s' -- give them different addresses", p.id.c_str(), id.c_str());
+            g_deviceProblems.push_back("'" + p.id + "' shares the address of a device already "
+                                       "added (" + id + "); give them different addresses");
             continue;
         }
         StateStore* store = g_devices.add(id);
         if (store == nullptr) {
             log::warn("device '%s' skipped: no free device slot (max %u)", p.id.c_str(),
                       static_cast<unsigned>(kMaxDevices));
+            g_deviceProblems.push_back("'" + p.id + "' has no free device slot");
             continue;
         }
         PollPolicy policy;

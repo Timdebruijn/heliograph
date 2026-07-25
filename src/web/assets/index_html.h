@@ -70,7 +70,7 @@ dialog::backdrop{background:#000a}
 <main>
 <div id="banner" class="err hide"></div>
 <section id="dash"><div class="grid" id="tiles"></div></section>
-<section id="dev" class="hide"><table id="devtbl"></table></section>
+<section id="dev" class="hide"><div id="devbox"></div></section>
 <section id="diag" class="hide"><table id="diagtbl"></table></section>
 <section id="logs" class="hide">
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
@@ -253,32 +253,88 @@ function render(s){
       // No firmware tile: the version already sits in the header, permanently.
   }
   if(tab==='dev'){
-    let r=`<tr><th>Field</th><th>Value</th></tr>`;
-    const add=(k,v)=>r+=`<tr><td class="dim">${esc(k)}</td><td>${esc(v??'—')}</td></tr>`;
-    add('Manufacturer',d.manufacturer);add('Model',d.model);add('Serial',d.serial_number);
-    add('Driver',d.driver_id);add('Support level',d.support_level);
-    add('Online',d.online);add('Data valid',d.data_valid);add('Data stale',d.data_stale);
-    if(caps){
-      r+=`<tr><th>Capability</th><th></th></tr>`;
-      // "Driver read-only", not "Read-only": this is the driver's own write capability, a
-      // different thing from the security.read_only_mode switch under Settings. Two rows named
-      // "Read-only" meaning different things is how someone looks for the kill switch here.
-      r+=`<tr><td class="dim">Driver read-only</td><td>${caps.read_only}</td></tr>`;
-      r+=`<tr><td class="dim">Phases / MPPTs</td><td>${caps.phase_count} / ${caps.mppt_count}</td></tr>`;
-      r+=`<tr><td class="dim">Battery</td><td>${caps.has_battery}</td></tr>`;
-      r+=`<tr><td class="dim">Read</td><td>${(caps.read||[]).map(esc).join(', ')||'—'}</td></tr>`;
-      // Empty for every driver in this build, and that is the point: the UI shows what the
-      // device can do, it does not assume.
-      r+=`<tr><td class="dim">Write</td><td>${(caps.write||[]).map(esc).join(', ')||'<span class="dim">none</span>'}</td></tr>`;
-    }
-    r+=`<tr><th>Measurement</th><th>Value</th></tr>`;
-    for(const [k,v] of Object.entries(m)){
-      r+=`<tr><td class="dim">${esc(k)}${v.derived?' <span class="tag">derived</span>':''}</td>
-      <td class="n">${v.value===null?'<span class="dim">unknown</span>':esc(v.value)+' '+esc(v.unit)}
-      ${v.stale?'<span class="tag">stale</span>':''}</td></tr>`;
-    }
-    $('#devtbl').innerHTML=r;
+    // Every configured device, not just the first. The bridge polls up to eight; this tab
+    // rendered s.device, which is the first one, so a second inverter that was wired,
+    // addressed and configured was invisible on every screen the owner has -- and every way
+    // it can fail to start was a single warn line in a ring buffer.
+    renderDevices(b);
   }
+}
+
+/// One device's table. Extracted unchanged from the single-device version so that the rows,
+/// their order and their wording stay exactly what they were.
+function deviceTable(d,caps,m){
+  let r=`<tr><th>Field</th><th>Value</th></tr>`;
+  const add=(k,v)=>r+=`<tr><td class="dim">${esc(k)}</td><td>${esc(v??'—')}</td></tr>`;
+  add('Manufacturer',d.manufacturer);add('Model',d.model);add('Serial',d.serial_number);
+  add('Driver',d.driver_id);add('Support level',d.support_level);
+  add('Online',d.online);add('Data valid',d.data_valid);add('Data stale',d.data_stale);
+  if(caps){
+    r+=`<tr><th>Capability</th><th></th></tr>`;
+    // "Driver read-only", not "Read-only": this is the driver's own write capability, a
+    // different thing from the security.read_only_mode switch under Settings. Two rows named
+    // "Read-only" meaning different things is how someone looks for the kill switch here.
+    r+=`<tr><td class="dim">Driver read-only</td><td>${caps.read_only}</td></tr>`;
+    r+=`<tr><td class="dim">Phases / MPPTs</td><td>${caps.phase_count} / ${caps.mppt_count}</td></tr>`;
+    r+=`<tr><td class="dim">Battery</td><td>${caps.has_battery}</td></tr>`;
+    r+=`<tr><td class="dim">Read</td><td>${(caps.read||[]).map(esc).join(', ')||'—'}</td></tr>`;
+    // Empty for every driver in this build, and that is the point: the UI shows what the
+    // device can do, it does not assume.
+    r+=`<tr><td class="dim">Write</td><td>${(caps.write||[]).map(esc).join(', ')||'<span class="dim">none</span>'}</td></tr>`;
+  }
+  const entries=Object.entries(m||{});
+  // The count is the tell for a wrong register map. A driver that ships several maps will
+  // happily decode the wrong one: a couple of measurements instead of a dozen, and the couple
+  // it does publish look entirely plausible. See the per-device protocol docs.
+  r+=`<tr><th>Measurement</th><th>Value (${entries.length})</th></tr>`;
+  for(const [k,v] of entries){
+    r+=`<tr><td class="dim">${esc(k)}${v.derived?' <span class="tag">derived</span>':''}</td>
+    <td class="n">${v.value===null?'<span class="dim">unknown</span>':esc(v.value)+' '+esc(v.unit)}
+    ${v.stale?'<span class="tag">stale</span>':''}</td></tr>`;
+  }
+  return r;
+}
+
+/// Renders one block per polled device, preceded by the reconciliation the firmware alone can
+/// do: how many devices the configuration asks for versus how many are actually being polled,
+/// and why each missing one is missing. Those strings come from the boot loop, not from
+/// re-deriving device ids in the browser -- the page must not have its own opinion about what
+/// a device id looks like.
+let devsBusy=false;
+async function renderDevices(b){
+  if(devsBusy)return;
+  devsBusy=true;
+  const box=$('#devbox');
+  try{
+    const ids=((await (await fetch('/api/v1/devices')).json()).devices)||[];
+    const configured=b.devices_configured??ids.length;
+    const problems=b.device_problems||[];
+    let h='';
+    if(problems.length||configured!==ids.length){
+      h+=`<div class="msg err" style="display:block">Polling ${ids.length} of ${configured}
+        configured device${configured===1?'':'s'}.${problems.length?'<ul style="margin:6px 0 0 18px">'+
+        problems.map(p=>`<li>${esc(p)}</li>`).join('')+'</ul>':''}</div>`;
+    }else{
+      h+=`<div class="dim" style="font-size:13px;margin-bottom:10px">Polling
+        ${ids.length} device${ids.length===1?'':'s'}, all configured devices accounted for.</div>`;
+    }
+    for(const id of ids){
+      // Sequential on purpose: eight devices in parallel is eight concurrent handlers on a
+      // single-core web task, and this page already has a 5 s refresh behind it.
+      const dev=await (await fetch('/api/v1/devices/'+encodeURIComponent(id))).json();
+      const m=(await (await fetch('/api/v1/devices/'+encodeURIComponent(id)+'/measurements')).json()).measurements||{};
+      let caps=null;
+      try{caps=await (await fetch('/api/v1/devices/'+encodeURIComponent(id)+'/capabilities')).json()}catch(e){}
+      const ident={...(dev.identity||{}),online:dev.online,data_valid:dev.data_valid,
+                   data_stale:dev.data_stale,support_level:(dev.driver||{}).support_level};
+      h+=`<div class="card"><b>${esc(id)}</b><table>${deviceTable(ident,caps,m)}</table></div>`;
+    }
+    box.innerHTML=h||'<div class="dim">No device is being polled.</div>';
+  }catch(e){
+    // Leave whatever was on screen rather than blanking it: this runs on a 5 s timer and a
+    // single failed fetch must not wipe a page someone is reading.
+    if(!box.innerHTML)box.innerHTML='<div class="dim">Could not read the device list.</div>';
+  }finally{devsBusy=false}
 }
 
 // Settings-page network picker: same scan as the setup wizard, admin-gated (the endpoint

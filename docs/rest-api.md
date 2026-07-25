@@ -45,7 +45,10 @@ once a driver has write capabilities.
     "wifi_rssi_dbm": -57,
     "wifi_connected": true,
     "mqtt_connected": true,
-    "modbus_clients": 2
+    "modbus_clients": 2,
+    "max_devices": 8,
+    "devices_configured": 3,
+    "device_problems": ["'growatt_modbus' shares the address of a device already added (growatt_modbus-2); give them different addresses"]
   },
   "device": {
     "id": "eversolar_legacy-XH300060115506193600V610",
@@ -125,6 +128,11 @@ through `patchString`, where `null` is indistinguishable from absent and therefo
 nothing — `PATCH {"mqtt":{"username":null}}` returns `200` and leaves the stored value in place.
 Send `""` to clear the MQTT username. `security.admin_username` cannot be cleared at all:
 `validate()` refuses an empty one.
+
+`devices_configured` is how many devices the configuration asks for; `/api/v1/devices` lists the
+ones actually being polled. When they differ, `device_problems` says why for each missing one —
+the same sentences the boot log carries. The array is always present, empty when there is
+nothing to report, so "no problems" cannot be mistaken for "this firmware does not report them".
 
 ## `additional_devices` — more than one inverter on the bus
 

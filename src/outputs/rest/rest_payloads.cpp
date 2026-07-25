@@ -64,6 +64,13 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     // A firmware constant, not configuration: the settings page needs it to stop offering an
     // "Add a device" button past the point the bridge would refuse the save.
     b["max_devices"]        = static_cast<unsigned>(kMaxDevices);
+    b["devices_configured"] = static_cast<unsigned>(bridge.devicesConfigured);
+    // Always emitted, empty or not: "no problems" and "this firmware does not report problems"
+    // must not look the same to a client.
+    JsonArray problems      = b["device_problems"].to<JsonArray>();
+    for (const auto& p : bridge.deviceProblems) {
+        problems.add(p);
+    }
     b["uptime_seconds"]     = bridge.uptimeSeconds;
     b["wifi_connected"]     = bridge.wifiConnected;
     if (bridge.wifiConnected) {
