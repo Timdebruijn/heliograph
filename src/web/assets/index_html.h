@@ -86,8 +86,9 @@ dialog::backdrop{background:#000a}
 </main>
 <dialog id="authdlg">
 <form method="dialog">
-<b>Admin password</b>
-<div class="dim" style="font-size:13px;margin-top:4px">Signing in as <span id="authu">admin</span></div>
+<b>Admin sign-in</b>
+<label for="authu">Username</label>
+<input id="authu" autocomplete="username" required value="admin">
 <label for="authpw">Password</label>
 <input id="authpw" type="password" autocomplete="current-password" required autofocus>
 <div style="display:flex;gap:10px">
@@ -133,27 +134,32 @@ function authHeader(){
   return c?{'Authorization':'Basic '+c}:{};
 }
 // A real modal with a masked input, not window.prompt(): prompt() shows the password in
-// plain text on screen. And the device has exactly one admin account, whose name is in the
-// config (readable without auth precisely so the UI can render) -- so only the password is
-// asked; typing a username nobody chose was noise. Fetched fresh on every prompt, so a
-// just-renamed admin user is picked up without a reload.
+// plain text on screen.
+//
+// The username is typed, not fetched. This dialog used to read it from GET /config, which is
+// unauthenticated -- so the config endpoint was handing every LAN reader half of a login that
+// has no brute-force protection, purely so this field could be filled in for them. The field
+// defaults to 'admin' (the factory value, and what almost every install keeps) and the last
+// one that worked is remembered for the tab, so anyone who renamed the account types it once.
 async function askAuth(){
-  let u='admin';
-  try{
-    const r=await fetch('/api/v1/config');
-    if(r.ok){const j=await r.json();u=(j.security&&j.security.admin_username)||'admin'}
-  }catch(e){}
-  $('#authu').textContent=u;
+  const remembered=sessionStorage.getItem('sb_user');
   return new Promise(resolve=>{
-    const d=$('#authdlg'),p=$('#authpw');
+    const d=$('#authdlg'),p=$('#authpw'),un=$('#authu');
+    un.value=remembered||'admin';
     p.value='';d.returnValue='';
     d.onclose=()=>{
+      const u=un.value||'admin';
       const ok=d.returnValue==='ok'&&p.value!=='';
       // UTF-8, not btoa()'s default. btoa() only throws above U+00FF, so it would silently emit
       // Latin-1 for é/ë/ü/ö/ç -- and the firmware compares against the UTF-8 bytes it stored,
       // so such a password could never authenticate here (review, 2026-07-25).
-      if(ok)sessionStorage.setItem('sb_auth',
-        btoa(String.fromCharCode(...new TextEncoder().encode(u+':'+p.value))));
+      if(ok){
+        sessionStorage.setItem('sb_auth',
+          btoa(String.fromCharCode(...new TextEncoder().encode(u+':'+p.value))));
+        // Remembered separately from the credential so a wrong PASSWORD does not also make the
+        // user retype a username that was right: clearAuth() drops the credential, not this.
+        sessionStorage.setItem('sb_user',u);
+      }
       p.value='';
       resolve(ok);
     };
@@ -665,7 +671,7 @@ async function renderConfig(){
     Disabling releases every relay. Roles name the switches in Home Assistant and build
     the DRM Mode select; see docs/drm.md for the wiring rules (failsafe: a dead bridge
     must leave the inverter running).</div></div>`:''}
-  <div class="card"><b>Security</b> <span class="tag" style="font-weight:400">applied immediately</span>${txt('c_au','Admin username',c.security.admin_username)}
+  <div class="card"><b>Security</b> <span class="tag" style="font-weight:400">applied immediately</span>${credtxt('c_au','Admin username',true,'Leave blank to keep. Not shown here — it is half of the login and this page is readable without one.')}
     ${pw('c_ap','Admin password',c.security.password_set)}
     <!-- !==false, not a plain truthiness test: a missing field must render as ON. If GET ever
          stops carrying read_only_mode (a serialiser regression, an older firmware behind a
@@ -745,7 +751,8 @@ async function saveConfig(){
     driver:{id:v('c_drv'),options:{}},
     // read_only_mode is rendered from the stored value, so the generic per-key diff below is
     // enough: no rendered default to mistake for a change (unlike driver options / relay roles).
-    security:{admin_username:v('c_au'),read_only_mode:b('c_ro')},
+    // admin_username is added below only when typed, like the other credential fields.
+    security:{read_only_mode:b('c_ro')},
     logging:{level:v('c_lg')}};
   // A blank password field means "keep": sending "" would clear it, which is never what an
   // untouched field means.
@@ -753,6 +760,9 @@ async function saveConfig(){
   // The MQTT username is credential-like (never returned by GET), so like the passwords it
   // travels only when typed -- a blank field means keep.
   if(v('c_mqu'))body.mqtt.username=v('c_mqu');
+  // Same rule for the admin username, and the same reason: GET no longer returns it, so there
+  // is nothing to pre-fill and a blank field can only mean keep.
+  if(v('c_au'))body.security.admin_username=v('c_au');
   if(v('c_mqpw'))body.mqtt.password=v('c_mqpw');
   if(v('c_ap'))body.security.admin_password=v('c_ap');
   document.querySelectorAll('[data-opt]').forEach(e=>body.driver.options[e.dataset.opt]=e.value);
@@ -787,11 +797,11 @@ async function saveConfig(){
   for(const sect of Object.keys(body)){
     if(typeof body[sect]!=='object')continue;
     for(const k of Object.keys(body[sect])){
-      // Credential-like keys (passwords, the MQTT username) and driver options are only in
-      // the body when the user acted; GET never returns them, so there is nothing to diff
-      // against and they must not be dropped. Exact match on 'username' so 'admin_username'
-      // -- which IS returned and must be diffed -- is not caught.
-      if(k.includes('password')||k==='username'||k==='options')continue;
+      // Credential-like keys (passwords, both usernames) and driver options are only in the
+      // body when the user acted; GET never returns them, so there is nothing to diff against
+      // and they must not be dropped. admin_username used to be the exception here because it
+      // WAS returned -- that is exactly what this release stopped doing.
+      if(k.includes('password')||k.endsWith('username')||k==='options')continue;
       if(same(body[sect][k],(cfgBefore[sect]||{})[k]))delete body[sect][k];
     }
     if(!Object.keys(body[sect]).length)delete body[sect];

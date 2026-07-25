@@ -53,13 +53,24 @@ listens on every interface, so anyone joining the failure-portal AP reaches the 
 unauthenticated read endpoints a LAN user does: `/api/v1/status`, `/devices`, `/diagnostics`,
 `/discovery`, `/drivers`, `/config` (GET) and `/metrics`. Between them that is live production
 data, the inverter's model and serial number, your WiFi SSID and hostname, the MQTT host, port
-and base topic, the relay roles, and `security.admin_username`. The Modbus TCP server on port
-502 is reachable from that AP too, and Modbus has no authentication at all.
+and base topic, and the relay roles. The Modbus TCP server on port 502 is reachable from that AP
+too, and Modbus has no authentication at all.
 
 None of it is a secret — no password is served anywhere (see the table above) — and none of it
 grants control. But "an open AP that appears for a few minutes when your WiFi drops" is a
-disclosure surface worth knowing about, and `admin_username` in particular hands out half of a
-login that has no brute-force protection. Closing that one is tracked separately.
+disclosure surface worth knowing about.
+
+**`security.admin_username` used to be in that list and no longer is.** It is half of a login
+that has no brute-force protection, and serving it turned guessing the credentials into guessing
+only the password. It is now omitted from `GET /api/v1/config` exactly as `mqtt.username` always
+was. The practical consequence: the web UI can no longer pre-fill it, so the sign-in dialog asks
+for a username (defaulting to `admin`, remembered for the tab) and the settings field behaves
+like the other credential fields — blank means keep. If you renamed the admin account, you now
+type that name once per browser session.
+
+This is defence in depth, not a fix for a hole: HTTP Basic over plain HTTP already puts the
+password itself on the wire, so anyone positioned to sniff had both halves regardless. What it
+removes is the far lower bar of a single unauthenticated GET.
 
 **The gate has a cost of its own: authenticating over that AP puts the admin password on the
 air.** HTTP Basic is base64, not encryption, so a passive listener in radio range of the open

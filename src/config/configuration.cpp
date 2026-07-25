@@ -325,10 +325,14 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     ntp["timezone"]      = config.ntp.timezone;
     ntp["timezone_name"] = config.ntp.timezoneName;
 
-    JsonObject security         = doc["security"].to<JsonObject>();
-    security["admin_username"]  = config.security.adminUsername;
-    security["password_set"]    = !config.security.adminPassword.empty();
-    security["read_only_mode"]  = config.security.readOnlyMode;
+    JsonObject security = doc["security"].to<JsonObject>();
+    // The admin username is omitted for the same reason mqtt.username is, twelve lines up: it
+    // is half of a credential pair, this endpoint is unauthenticated, and HTTP Basic here has no
+    // brute-force protection. Serving it turned guessing the login into guessing only the
+    // password. Unlike the MQTT one it needs no *_set flag -- validate() requires it to be
+    // non-empty, so "is one set" is always yes and would say nothing.
+    security["password_set"]   = !config.security.adminPassword.empty();
+    security["read_only_mode"] = config.security.readOnlyMode;
 
     doc["logging"]["level"] = logLevelName(config.logLevel);
 

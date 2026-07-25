@@ -64,6 +64,11 @@ button:disabled{opacity:.5;cursor:default}
        back after a WiFi outage rather than on first boot. Then the new-password fields above are
        hidden and this one authenticates the change instead. -->
   <div id="reauth" style="display:none">
+    <!-- Typed, not fetched. The username used to come from GET /api/v1/config, which is
+         unauthenticated -- so this page's convenience was the reason every LAN reader was
+         handed half of the bridge's login. Defaults to the factory value. -->
+    <label for="curuser">Admin username</label>
+    <input id="curuser" autocomplete="username" value="admin">
     <label for="cur">Admin password</label>
     <input id="cur" type="password" autocomplete="current-password">
     <div class="hint">This bridge is already set up, so changing its network needs the admin
@@ -89,10 +94,9 @@ const msg=(t,ok)=>{const m=$('m');m.textContent=t;m.className='msg '+(ok?'ok':'e
 // enough), a password already exists, and provisioning demands it -- so the form authenticates
 // and changes only the network. Detected up front rather than on a failed submit, because a 401
 // from requestAuthentication() has an empty body and the old code parsed it as JSON.
-let reauth=false, adminUser='admin', modeKnown=false;
+let reauth=false, modeKnown=false;
 const setupReady=fetch('/api/v1/config').then(r=>r.json()).then(c=>{
   const sec=(c&&c.security)||{};
-  adminUser=sec.admin_username||'admin';
   reauth=!!sec.password_set;
   modeKnown=true;
   if(reauth){
@@ -182,15 +186,16 @@ $('f').onsubmit=async e=>{
       // ö, ç. The firmware compares against the bytes it stored from the setup POST, which are
       // UTF-8, so those passwords would never match and the owner would be locked out of their
       // own recovery with "password not accepted" (review, 2026-07-25).
-      const raw=adminUser+':'+$('cur').value;
+      const raw=($('curuser').value||'admin')+':'+$('cur').value;
       headers['Authorization']='Basic '+btoa(String.fromCharCode(...new TextEncoder().encode(raw)));
     }else{
       body.security={admin_password:$('admin').value};
     }
     const r=await fetch('/api/v1/provision',{method:'POST',headers,body:JSON.stringify(body)});
     if(r.status===401){
-      refuse('That admin password was not accepted. Forgotten it? Hold BOOT for ~5 seconds '+
-             'while the board is running to factory-reset it.');
+      refuse('Those admin credentials were not accepted — check the username too if you ever '+
+             'changed it. Forgotten them? Hold BOOT for ~5 seconds while the board is running '+
+             'to factory-reset it.');
       return;
     }
     // Tolerate a missing or non-JSON body on ANY status, not just 401. requestAuthentication()
