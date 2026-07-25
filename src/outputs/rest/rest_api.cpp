@@ -484,12 +484,18 @@ bool RestApi::begin() {
                                             optionError.message});
                     return;
                 }
-            } else if (!updated.driver.id.empty()) {
-                // An id naming no compiled-in driver is refused rather than stored. Storing it
-                // left the bridge pointed at nothing until someone noticed, and it also blinded
-                // the orphan cleanup above (which cannot judge options for a driver it cannot
-                // resolve), so a single typo used to be a quiet dead end. Empty stays legal --
-                // it means "let the firmware pick the highest-priority driver".
+            } else if (!updated.driver.id.empty() && updated.driver.id != before.driver.id) {
+                // An id naming no compiled-in driver is refused rather than stored: it leaves the
+                // bridge pointed at nothing, and it blinds the orphan cleanup above, which cannot
+                // judge options for a driver it cannot resolve. Empty stays legal -- it means
+                // "let the firmware pick the highest-priority driver".
+                //
+                // Only when THIS patch changes it. A stored id can become unresolvable without
+                // anyone touching it -- flashing a build that compiles that driver out is enough,
+                // which the mock env does to every real driver -- and refusing on the stored value
+                // would make every unrelated setting unsaveable, recoverable only by a factory
+                // reset. That is the same lockout this batch exists to remove; found reviewing
+                // my own fix (2026-07-25).
                 sendError(request, {400, "invalid_config",
                                     "driver.id: unknown driver '" + updated.driver.id + "'"});
                 return;
