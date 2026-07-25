@@ -142,6 +142,90 @@ static void test_config_reports_whether_a_secret_is_set() {
     TEST_ASSERT_FALSE(doc["security"]["password_set"].as<bool>());
 }
 
+// --- serial override -------------------------------------------------------------------
+
+// Discovery sweeps every profile a driver advertises and reports the one that answered. Saving
+// the driver alone meant the next boot configured the driver's FIRST profile instead, so a
+// device that had just been positively identified went silent. The override is what carries the
+// answer across the reboot.
+static void test_a_serial_override_round_trips_through_a_patch() {
+    Configuration c;
+    ConfigError   e;
+    TEST_ASSERT_FALSE(c.serial.enabled);  // off unless something asks for it
+
+    TEST_ASSERT_TRUE(applyConfigPatch(
+        R"({"serial":{"override":true,"baud_rate":4800,"parity":"even","data_bits":8,)"
+        R"("stop_bits":2,"response_timeout_ms":1500}})", c, e));
+    TEST_ASSERT_TRUE(c.serial.enabled);
+    TEST_ASSERT_EQUAL_UINT32(4800, c.serial.profile.baudRate);
+    TEST_ASSERT_EQUAL(SerialParity::Even, c.serial.profile.parity);
+    TEST_ASSERT_EQUAL_UINT8(2, c.serial.profile.stopBits);
+    TEST_ASSERT_EQUAL_UINT32(1500, c.serial.profile.responseTimeoutMs);
+
+    std::string json;
+    TEST_ASSERT_TRUE(serializeConfig(c, json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["serial"]["override"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT32(4800, doc["serial"]["baud_rate"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("even", doc["serial"]["parity"]);
+}
+
+// A typo must not quietly become "none": that configures a line the user did not ask for, and
+// the symptom is a silent bus, which points the diagnosis straight at the cabling instead.
+static void test_an_unknown_parity_is_refused_rather_than_defaulted() {
+    Configuration c;
+    c.serial.profile.parity = SerialParity::Odd;
+    ConfigError e;
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"serial":{"parity":"evne"}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("serial.parity", e.field.c_str());
+    TEST_ASSERT_EQUAL(SerialParity::Odd, c.serial.profile.parity);  // untouched
+}
+
+static void test_serial_bounds_are_checked_only_when_the_override_is_on() {
+    Configuration c;
+    ConfigError   e;
+    // Off: nothing configures the line from these fields, so a stale value must not block a
+    // save of something unrelated.
+    c.serial.profile.baudRate = 300;
+    TEST_ASSERT_TRUE(validate(c, e));
+
+    c.serial.enabled = true;
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("serial.baud_rate", e.field.c_str());
+
+    c.serial.profile.baudRate = 4800;
+    c.serial.profile.dataBits = 9;
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("serial.data_bits", e.field.c_str());
+
+    c.serial.profile.dataBits = 8;
+    TEST_ASSERT_TRUE(validate(c, e));
+}
+
+// The line is configured once, in setup(), immediately after the driver's begin(). Nothing
+// reconfigures a live UART, so claiming the change is already in force would leave someone
+// watching a bus still running at the old rate.
+static void test_changing_the_serial_override_requires_a_reboot() {
+    const Configuration base;
+    auto                on = base;
+    on.serial.enabled      = true;
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(base, on));
+
+    auto faster = on;
+    faster.serial.profile.baudRate = 19200;
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(on, faster));
+
+    auto slower = on;
+    slower.serial.profile.responseTimeoutMs = 2500;
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(on, slower));
+
+    // While the override is off the stored numbers configure nothing, so editing them is not a
+    // reason to make someone restart a working bridge.
+    auto idle = base;
+    idle.serial.profile.baudRate = 19200;
+    TEST_ASSERT_FALSE(configChangeRequiresReboot(base, idle));
+}
+
 static void test_reboot_required_flag_is_patch_only() {
     auto        c = configWithSecrets();
     std::string json;
@@ -1066,6 +1150,10 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_config_response_contains_no_secret_anywhere);
     RUN_TEST(test_config_reports_whether_a_secret_is_set);
+    RUN_TEST(test_a_serial_override_round_trips_through_a_patch);
+    RUN_TEST(test_an_unknown_parity_is_refused_rather_than_defaulted);
+    RUN_TEST(test_serial_bounds_are_checked_only_when_the_override_is_on);
+    RUN_TEST(test_changing_the_serial_override_requires_a_reboot);
     RUN_TEST(test_reboot_required_flag_is_patch_only);
     RUN_TEST(test_reboot_required_only_for_boot_time_settings);
     RUN_TEST(test_patch_leaves_absent_fields_alone);

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "drivers/driver_descriptor.h"
+#include "transport/serial_profile.h"
 
 namespace heliograph {
 
@@ -112,6 +113,22 @@ struct SecuritySettings {
     bool readOnlyMode = true;
 };
 
+/// A line-settings override that survives a reboot.
+///
+/// Normally the driver picks the line: every driver advertises the profiles plausible for its
+/// protocol and configures the first one in begin(). That is right until discovery finds the
+/// device at one of the OTHER profiles it swept -- an inverter set to 4800 8N1 when the driver
+/// leads with 9600, say. The wizard showed which profile answered and then threw it away, so
+/// the selection was saved, the bridge rebooted onto the driver's default, and the device it
+/// had just positively identified went silent with nothing on screen to explain it.
+///
+/// Off unless something set it, so a healthy install keeps following its driver and a device
+/// profile that declares its own [serial] block still wins by default.
+struct SerialOverride {
+    bool          enabled = false;
+    SerialProfile profile{};
+};
+
 struct Configuration {
     uint16_t         version = kConfigVersion;
     std::string      bridgeName = "Heliograph";
@@ -122,6 +139,7 @@ struct Configuration {
     DriverSettings   driver;
     RelaySettings    relays;
     NtpSettings      ntp;
+    SerialOverride   serial;
     SecuritySettings security;
     LogLevel         logLevel = LogLevel::Info;
 

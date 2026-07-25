@@ -701,6 +701,24 @@ void setup() {
     if (g_driver && g_driver->begin(g_transport)) {
         Serial.printf("[driver] %s (%s)\n", g_driver->descriptor().id.c_str(),
                       supportLevelName(g_driver->descriptor().supportLevel));
+        // AFTER begin(), never before: begin() configures the line to the driver's own first
+        // choice, so anything applied earlier is undone by the very next statement. That is
+        // also why discovery finding a device at a non-default profile used to be worthless --
+        // the wizard displayed the profile that answered and the next boot went back to the
+        // driver's default, leaving a positively identified inverter silent.
+        if (g_config.serial.enabled) {
+            const auto& p = g_config.serial.profile;
+            if (g_transport.configure(p)) {
+                Serial.printf("[serial] override %u baud, %u data bits, %s parity, %u stop, "
+                              "timeout %u ms\n", p.baudRate, p.dataBits, parityName(p.parity),
+                              p.stopBits, p.responseTimeoutMs);
+            } else {
+                // Loud, because the fallback is the driver's default and the symptom of that
+                // is silence on the bus -- indistinguishable from a dead inverter.
+                Serial.printf("[serial] override REFUSED (%u baud); the line is still at the "
+                              "driver's own setting\n", p.baudRate);
+            }
+        }
         const DeviceId id = g_driver->identity().deviceId();
         g_state           = g_devices.add(id);
         if (g_state) {

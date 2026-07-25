@@ -108,6 +108,8 @@ authenticate must ask the user for it rather than read it back; the factory valu
   "mqtt":  { "host": "10.0.0.5", "port": 1883, "username_set": true, "password_set": true },
   "modbus": { "enabled": true, "port": 502, "unit_id": 1, "write_enabled": false },
   "polling": { "interval_seconds": 10 },
+  "serial": { "override": false, "baud_rate": 9600, "parity": "none",
+              "data_bits": 8, "stop_bits": 1, "response_timeout_ms": 1000 },
   "security": { "password_set": true, "read_only_mode": false },
   "driver": { "id": "eversolar_legacy", "auto_detect": false },
   "logging": { "level": "info" }
@@ -124,10 +126,28 @@ nothing — `PATCH {"mqtt":{"username":null}}` returns `200` and leaves the stor
 Send `""` to clear the MQTT username. `security.admin_username` cannot be cleared at all:
 `validate()` refuses an empty one.
 
+## `serial` — overriding the line the driver picks
+
+Every driver advertises the serial profiles plausible for its protocol and configures the first
+one in `begin()`. `serial.override` replaces that choice, and it exists for one case: discovery
+sweeps *all* of a driver's profiles, so a device can be found at a profile the driver does not
+lead with. Saving the driver alone then meant the next boot went back to the driver's default
+and the identified inverter fell silent.
+
+`override: false` (the default) means the driver decides — leave it there unless something is
+actually wrong. When it is on, the settings are applied immediately after `begin()`, so they win
+over both the driver's default and a device profile's own `[serial]` block.
+
+Bounds when the override is on: `baud_rate` 1200–115200, `data_bits` 7 or 8, `stop_bits` 1 or 2,
+`response_timeout_ms` 50–10000, `parity` one of `none` / `even` / `odd`. An unrecognised parity
+is a `400`, not a silent fall back to `none`. While the override is off these fields are stored
+but not validated — they configure nothing.
+
 ## Applying changes: `reboot_required`
 
-Most settings — WiFi, MQTT, Modbus, the polling interval, the driver, NTP — are read once at
-boot, so a `PATCH` stores them but they take effect only after a restart. A few
+Most settings — WiFi, MQTT, Modbus, the polling interval, the driver, NTP, the RS485 line
+override — are read once at boot, so a `PATCH` stores them but they take effect only after a
+restart. A few
 (`bridge_name`, `relays.*`, `security.*`, `logging.level`) are applied live.
 
 The `PATCH /api/v1/config` response therefore carries a top-level `reboot_required` boolean so

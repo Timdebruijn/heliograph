@@ -252,6 +252,28 @@ bool validate(const Configuration& config, ConfigError& error) {
     if (!checkLength(config.ntp.server, 64, "ntp.server", error)) return false;
     if (!checkLength(config.ntp.timezone, 48, "ntp.timezone", error)) return false;
     if (!checkLength(config.ntp.timezoneName, 48, "ntp.timezone_name", error)) return false;
+    if (config.serial.enabled) {
+        // Bounds, not a whitelist of "known good" rates. RS485 devices in the field run at
+        // 1200 and at 115200, and refusing an odd-but-real rate would be the firmware deciding
+        // it knows the installation better than the installer does.
+        const auto& p = config.serial.profile;
+        if (p.baudRate < 1200 || p.baudRate > 115200) {
+            error = {"serial.baud_rate", "must be between 1200 and 115200"};
+            return false;
+        }
+        if (p.dataBits < 7 || p.dataBits > 8) {
+            error = {"serial.data_bits", "must be 7 or 8"};
+            return false;
+        }
+        if (p.stopBits < 1 || p.stopBits > 2) {
+            error = {"serial.stop_bits", "must be 1 or 2"};
+            return false;
+        }
+        if (p.responseTimeoutMs < 50 || p.responseTimeoutMs > 10000) {
+            error = {"serial.response_timeout_ms", "must be between 50 and 10000"};
+            return false;
+        }
+    }
     // A POSIX TZ is always needed to stamp logs in local time; a default is provided, so empty
     // is a mistake rather than a choice.
     if (config.ntp.timezone.empty()) {
@@ -325,10 +347,19 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     ntp["timezone"]      = config.ntp.timezone;
     ntp["timezone_name"] = config.ntp.timezoneName;
 
+    // Always emitted, enabled or not, so the settings page can show what the bridge will
+    // actually do to the line rather than leaving the reader to infer it from an absent key.
+    JsonObject serial   = doc["serial"].to<JsonObject>();
+    serial["override"]  = config.serial.enabled;
+    serial["baud_rate"] = config.serial.profile.baudRate;
+    serial["parity"]    = parityName(config.serial.profile.parity);
+    serial["data_bits"] = config.serial.profile.dataBits;
+    serial["stop_bits"] = config.serial.profile.stopBits;
+    serial["response_timeout_ms"] = config.serial.profile.responseTimeoutMs;
+
     JsonObject security = doc["security"].to<JsonObject>();
     // The admin username is omitted for the same reason mqtt.username is, in the mqtt block
-    // above: it
-    // is half of a credential pair, this endpoint is unauthenticated, and HTTP Basic here has no
+    // above: it is half of a credential pair, this endpoint is unauthenticated, and Basic has no
     // brute-force protection. Serving it turned guessing the login into guessing only the
     // password. Unlike the MQTT one it needs no *_set flag -- validate() requires it to be
     // non-empty, so "is one set" is always yes and would say nothing.
@@ -368,7 +399,15 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
            a.polling.intervalSeconds != b.polling.intervalSeconds ||
            a.driver.id != b.driver.id || a.driver.options != b.driver.options ||
            a.ntp.enabled != b.ntp.enabled || a.ntp.useDhcp != b.ntp.useDhcp ||
-           a.ntp.server != b.ntp.server || a.ntp.timezone != b.ntp.timezone;
+           a.ntp.server != b.ntp.server || a.ntp.timezone != b.ntp.timezone ||
+           // The line is configured once, in setup(), right after the driver's begin(). Nothing
+           // reconfigures a live UART mid-poll, so a changed override only takes effect on the
+           // next boot -- and saying otherwise would leave someone watching a bus that is still
+           // running at the old rate while the page claims the new one is in force.
+           a.serial.enabled != b.serial.enabled ||
+           (b.serial.enabled && !(a.serial.profile == b.serial.profile)) ||
+           (b.serial.enabled &&
+            a.serial.profile.responseTimeoutMs != b.serial.profile.responseTimeoutMs);
 }
 
 bool applyConfigPatch(const std::string& json, Configuration& config, ConfigError& error,
@@ -506,6 +545,35 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
                     return false;
                 }
                 merged.relays.roles.emplace_back(v.as<const char*>());
+            }
+        }
+    }
+
+    if (JsonObjectConst serial = doc["serial"]; !serial.isNull()) {
+        if (!patchBool(serial["override"], merged.serial.enabled, "serial.override", error))
+            return false;
+        if (!patchNumber(serial["baud_rate"], merged.serial.profile.baudRate, "serial.baud_rate",
+                         error))
+            return false;
+        if (!patchNumber(serial["data_bits"], merged.serial.profile.dataBits, "serial.data_bits",
+                         error))
+            return false;
+        if (!patchNumber(serial["stop_bits"], merged.serial.profile.stopBits, "serial.stop_bits",
+                         error))
+            return false;
+        if (!patchNumber(serial["response_timeout_ms"], merged.serial.profile.responseTimeoutMs,
+                         "serial.response_timeout_ms", error))
+            return false;
+        if (JsonVariantConst parity = serial["parity"]; !parity.isNull()) {
+            std::string name;
+            if (!patchString(parity, name, "serial.parity", error)) {
+                return false;
+            }
+            // Refused rather than defaulted: a typo'd parity that silently became "none" would
+            // configure a line the user did not ask for and then blame the cable.
+            if (!parseParity(name, merged.serial.profile.parity)) {
+                error = {"serial.parity", "must be \"none\", \"even\" or \"odd\""};
+                return false;
             }
         }
     }

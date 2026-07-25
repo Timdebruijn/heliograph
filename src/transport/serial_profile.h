@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace heliograph {
 
@@ -26,5 +27,8 @@ struct SerialProfile {
 };
 
 const char* parityName(SerialParity parity);
+/// Inverse of parityName(). False on anything else, so a stored or patched value that does not
+/// name a parity is refused rather than quietly becoming None.
+bool        parseParity(const std::string& name, SerialParity& out);
 
 }  // namespace heliograph
