@@ -144,7 +144,10 @@ own address before you connect them together.
 
 > **Several inverters on one bus are polled in turn**, up to eight, each with its own address.
 > The first is configured under *Settings → Driver*, the rest under *Settings → Extra devices* —
-> one row per inverter, each with its own driver and address. Save, then restart.
+> one row per inverter, each with its own driver and whatever that driver needs to address it.
+> The page refuses to save a row with no driver, an unset register map, or an address already
+> in use, because all three are mistakes the firmware can only report as a log line at boot.
+> Save, then restart.
 >
 > Over the API it is one field, and sending the array **replaces** it:
 >

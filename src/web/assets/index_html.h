@@ -692,6 +692,7 @@ const RESTART_NEEDED={
   'serial.override':'RS485 line override','serial.baud_rate':'RS485 baud rate',
   'serial.parity':'RS485 parity','serial.data_bits':'RS485 data bits',
   'serial.stop_bits':'RS485 stop bits',
+  'additional_devices':'Extra devices',
 };
 // Applied immediately, no restart:
 //   bridge_name          - read fresh on every status response
@@ -802,19 +803,46 @@ async function renderConfig(){
   // the primary uses would collide and be skipped at boot with only a log line to say so.
   let xdevs = ((c.additional_devices)||[]).map(d=>({id:d.driver_id||'',options:{...(d.options||{})}}));
 
+  // Fills a row's model with the driver's declared defaults. Called when a row is added or its
+  // driver changes, so the model always holds what the fields SHOW.
+  //
+  // The bug this exists to close: the fields rendered `row.options[key] ?? default_value`, but
+  // only an edit wrote to the model, so an untouched field displayed the driver's default and
+  // sent nothing. The firmware then applied that same default anyway -- unit id 1, the primary's
+  // address -- and skipped the device at boot with one log line. The commit that added this card
+  // claimed a new row "starts empty on purpose" to prevent exactly that; it did not (review).
+  const seedRowOptions=row=>{
+    const drv=(cfgDrivers.drivers||[]).find(x=>x.id===row.id);
+    for(const o of ((drv&&drv.options)||[])){
+      if(row.options[o.key]===undefined)row.options[o.key]=o.default_value??'';
+    }
+  };
+
   const xdevOptionFields=(row,index)=>{
     const drv=(cfgDrivers.drivers||[]).find(x=>x.id===row.id);
     return ((drv&&drv.options)||[]).map(o=>{
       const cur=row.options[o.key]??o.default_value??'';
+      const hint=o.description?`<div class="dim" style="font-size:12px">${esc(o.description)}</div>`:'';
       if(o.allowed_values&&o.allowed_values.length){
+        // A stored value the firmware no longer recognises keeps its own entry, exactly as the
+        // Driver card does. Without it the browser silently selects the first option while the
+        // model keeps the old value, every save resends it, and the REST gate refuses the whole
+        // configuration -- the lockout class this codebase has already had to remove once.
+        const known=o.allowed_values.includes(cur);
+        // An empty entry among the allowed values is the driver saying "unset means my default".
+        // On this card that is a trap: for a register map it silently means the DEFAULT map, so
+        // it is labelled and left unselected until someone picks, like the wizard does.
+        const hasBlank=o.allowed_values.includes('');
         return `<label for="xd${index}_${esc(o.key)}">${esc(o.display_name)}</label>
-          <select id="xd${index}_${esc(o.key)}" onchange="setExtraOption(${index},'${esc(o.key)}',this.value)">${
-            o.allowed_values.map(v=>`<option value="${esc(v)}" ${v===cur?'selected':''}>${
-              v===''?'(driver default)':esc(v)}</option>`).join('')}</select>`;
+          <select id="xd${index}_${esc(o.key)}" ${hasBlank?'data-mustpick="1"':''}
+            onchange="setExtraOption(${index},'${esc(o.key)}',this.value)">${
+            (known?'':`<option value="${esc(cur)}" selected>${esc(cur)} — not recognised</option>`)+
+            o.allowed_values.map(v=>`<option value="${esc(v)}" ${known&&v===cur?'selected':''}>${
+              v===''?'— choose —':esc(v)}</option>`).join('')}</select>${hint}`;
       }
       return `<label for="xd${index}_${esc(o.key)}">${esc(o.display_name)}</label>
         <input id="xd${index}_${esc(o.key)}" value="${esc(cur)}"
-          oninput="setExtraOption(${index},'${esc(o.key)}',this.value)">`;
+          oninput="setExtraOption(${index},'${esc(o.key)}',this.value)">${hint}`;
     }).join('');
   };
 
@@ -846,10 +874,49 @@ async function renderConfig(){
     // Options belong to a driver, so switching driver drops the old one's values rather than
     // carrying keys the new driver never declared -- which the firmware would refuse anyway.
     xdevs[i]={id,options:{}};
+    seedRowOptions(xdevs[i]);
     renderExtraDevices();
   };
   window.setExtraOption=(i,key,value)=>{xdevs[i].options[key]=value};
   window.extraDevicesBody=()=>xdevs.map(d=>({driver_id:d.id,options:{...d.options}}));
+
+  // What the firmware would refuse, or accept and then quietly skip at boot -- said here, next
+  // to the row, instead of as `additional_devices[2].driver_id: ...` under the Save button,
+  // naming an index the card never shows. A boot-time skip is one warn line in a log buffer
+  // nobody is watching, so a mistake made here has to be caught here.
+  window.extraDevicesProblem=()=>{
+    const seen={};
+    // The primary's address counts too -- it is the one every default collides with.
+    const drvNow=$('#c_drv')?$('#c_drv').value:'';
+    const primaryAddr=(()=>{
+      const e=document.querySelector('#cfgform [data-opt="unit_id"], #cfgform [data-opt="address"]');
+      return e?drvNow+'|'+e.value.trim():null;
+    })();
+    if(primaryAddr)seen[primaryAddr]='the inverter under Driver';
+    for(let i=0;i<xdevs.length;i++){
+      const label='Device '+(i+2);
+      const row=xdevs[i];
+      if(!row.id)return label+': pick a driver, or remove the row.';
+      const drv=(cfgDrivers.drivers||[]).find(x=>x.id===row.id);
+      for(const o of ((drv&&drv.options)||[])){
+        const v=(row.options[o.key]??'').trim();
+        if(o.allowed_values&&o.allowed_values.includes('')&&v===''){
+          return label+': choose a '+o.display_name.toLowerCase()+
+                 ' — leaving it unset silently uses the driver default.';
+        }
+      }
+      // Same driver at the same address is the same device. The firmware skips the second with
+      // a log line; here it is a sentence.
+      const addr=row.options.unit_id??row.options.address;
+      if(addr!==undefined){
+        const key=row.id+'|'+String(addr).trim();
+        if(seen[key])return label+' has the same address as '+seen[key]+
+                             '. Each inverter on the bus needs its own.';
+        seen[key]=label;
+      }
+    }
+    return null;
+  };
   const driverOpts=`<span id="drvopts">${optsFor(c.driver.id)}</span>`;
 
   $('#cfgform').innerHTML=`
@@ -925,9 +992,9 @@ async function renderConfig(){
     <div id="xdevs"></div>
     <button type="button" id="xdevadd" onclick="addExtraDevice()"
       style="background:none;border:1px solid var(--line);color:var(--fg);margin-top:10px">Add a device</button>
-    <div class="dim" style="font-size:12px;margin-top:8px">Removing one here does not remove
-    what it already published: its Home Assistant entities stay behind showing their last
-    value. See docs/mqtt.md.</div>
+    <div class="dim" style="font-size:12px;margin-top:8px">Removing a device here — or changing
+    its address — does not remove what it already published: the old entities stay in Home
+    Assistant, <b>available</b>, showing their last value. See docs/mqtt.md.</div>
   </div>
   ${window.g_relayCount>0?`<div class="card"><b>Relays</b> <span class="tag" style="font-weight:400">applied immediately</span>
     ${chk('c_rle','Enabled',(c.relays||{}).enabled)}
@@ -1054,10 +1121,26 @@ async function saveConfig(){
   // half-finished choices into the active driver's config.
   document.querySelectorAll('#cfgform [data-opt]')
     .forEach(e=>body.driver.options[e.dataset.opt]=e.value);
-  // The whole list, always: the API replaces the array rather than merging, and there is no
-  // stable key to merge on. Sent even when empty, because that is how a device is REMOVED --
-  // omitting the key would leave the stored list untouched and the removal would do nothing.
-  if(window.extraDevicesBody)body.additional_devices=window.extraDevicesBody();
+  // The list travels whole -- the API replaces the array rather than merging, and there is no
+  // stable key to merge on -- but ONLY when it differs from what this page loaded. Sending it
+  // unconditionally gave it the one thing every other section is protected from: this form can
+  // sit open for hours, so a save of something unrelated wrote its stale copy over a list
+  // changed since, from another tab or a curl. An empty array still travels when the stored one
+  // was not empty, which is how a device is removed.
+  if(window.extraDevicesBody){
+    const problem=window.extraDevicesProblem();
+    if(problem){
+      const m=$('#cm');
+      m.className='msg err';m.textContent=problem;m.style.display='block';
+      return;
+    }
+    // Compared here rather than with same() below: that helper is declared further down and
+    // would be in its temporal dead zone at this point.
+    const wanted=window.extraDevicesBody();
+    if(JSON.stringify(wanted)!==JSON.stringify(cfgBefore.additional_devices||[])){
+      body.additional_devices=wanted;
+    }
+  }
 
   // Send only what actually changed. This form may have been open for hours; PATCHing every
   // field would write its stale copy over anything changed elsewhere in the meantime (another
