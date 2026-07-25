@@ -36,13 +36,17 @@ const DriverDescriptor& descriptor() {
         x.supportsWrite           = false;
         x.options                 = {
             DriverOption{"unit_id", "Modbus unit id",
-                                         "Slave address of the inverter on the RS485 bus. Range 1-247.", "1", {}},
+                                         "Slave address of the inverter on the RS485 bus. Range 1-247.", "1", {},
+                                         1, 247},
             DriverOption{"base_address", "SunSpec base register",
                                          "Where the 'SunS' marker lives. 40000 covers most devices; 50000 is the "
                                          "other common choice, and some vendors sit elsewhere. Each extra guess "
                                          "would cost a discovery round trip, so this is set rather than searched.",
                                          "40000",
-                                         {}}};
+                                         {},
+                                         // A 16-bit register address; the marker cannot sit in
+                                         // the last two registers of the space.
+                                         1, 65533}};
         return x;
     }();
     return d;

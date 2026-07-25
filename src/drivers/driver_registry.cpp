@@ -2,6 +2,8 @@
 
 #include "driver_registry.h"
 
+#include <cstdlib>
+
 #include <algorithm>
 
 #if ENABLE_DRIVER_EVERSOLAR
@@ -57,6 +59,23 @@ bool validateDriverOptions(const DriverDescriptor& descriptor, const DriverOptio
         if (option == nullptr) {
             error = {key, "unknown option for driver '" + descriptor.id + "'"};
             return false;
+        }
+        if (option->isNumeric()) {
+            // Refused, not clamped: a value the user typed and a value we invented must not
+            // both end up stored as if they were the same decision.
+            char*      end    = nullptr;
+            const long parsed = std::strtol(value.c_str(), &end, 10);
+            if (value.empty() || end == value.c_str() || *end != '\0') {
+                error = {key, "must be a whole number between " + std::to_string(option->minValue) +
+                                  " and " + std::to_string(option->maxValue)};
+                return false;
+            }
+            if (parsed < option->minValue || parsed > option->maxValue) {
+                error = {key, "must be between " + std::to_string(option->minValue) + " and " +
+                                  std::to_string(option->maxValue)};
+                return false;
+            }
+            continue;
         }
         if (option->allowedValues.empty()) {
             continue;  // free-form

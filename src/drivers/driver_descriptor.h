@@ -30,6 +30,23 @@ struct DriverOption {
     std::string defaultValue;
     /// Empty means free-form text. Otherwise the value must be one of these.
     std::vector<std::string> allowedValues;
+
+    /// Inclusive bounds for a numeric option. Both zero means "not numeric", which is the
+    /// default and leaves the value free-form.
+    ///
+    /// Exists because a driver's own parser is too late to be the only check. An address
+    /// outside the protocol's range was accepted by the config layer -- which only length-checks
+    /// option strings -- stored, and then fell back to the driver's default at boot with one
+    /// warn line. On a bus of identical inverters that default is the address the FIRST one
+    /// already uses, so a typo'd unit id became an id collision, and the diagnosis pointed at a
+    /// duplicate address the configuration does not contain (review, 2026-07-25).
+    ///
+    /// Declared here rather than checked in each driver so the REST gate refuses it at PATCH
+    /// time, before a reboot, and so the settings page can render a bounded number field.
+    long minValue = 0;
+    long maxValue = 0;
+
+    bool isNumeric() const { return minValue != 0 || maxValue != 0; }
 };
 
 using DriverOptions = std::map<std::string, std::string>;
