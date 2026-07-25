@@ -407,6 +407,19 @@ static void test_the_device_manager_refuses_past_its_cap() {
     TEST_ASSERT_EQUAL_UINT32(kMaxDevices, devices.size());
 }
 
+// The settings page stops offering "Add a device" at this number, so it is a contract between
+// the firmware and the page, not a decoration. Nothing guarded it: renaming or dropping the
+// field would have degraded the UI to its hardcoded fallback with every test still green.
+static void test_the_status_payload_publishes_the_device_cap() {
+    Rig         r;
+    const auto  state = r.poll();
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", makeBridge(),
+                                              r.diagnostics.snapshot(),
+                                              &eversolar::descriptor(), g_now, json));
+    TEST_ASSERT_EQUAL_UINT32(kMaxDevices, parse(json)["bridge"]["max_devices"].as<uint32_t>());
+}
+
 static void test_reboot_required_flag_is_patch_only() {
     auto        c = configWithSecrets();
     std::string json;
@@ -1348,6 +1361,7 @@ int main(int, char**) {
     RUN_TEST(test_a_lone_device_without_either_keeps_the_bare_driver_id);
     RUN_TEST(test_re_adding_an_id_returns_the_same_store_rather_than_failing);
     RUN_TEST(test_the_device_manager_refuses_past_its_cap);
+    RUN_TEST(test_the_status_payload_publishes_the_device_cap);
     RUN_TEST(test_reboot_required_flag_is_patch_only);
     RUN_TEST(test_reboot_required_only_for_boot_time_settings);
     RUN_TEST(test_patch_leaves_absent_fields_alone);

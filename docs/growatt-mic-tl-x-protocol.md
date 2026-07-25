@@ -194,8 +194,9 @@ address in turn and confirm exactly one answers, at the address you expect.
    you pick one. That is deliberate: getting the map wrong is the one mistake here that does
    not announce itself. See the warning below.
 
-   > **For the second and third unit** there is no settings screen yet — they go in over the
-   > API, same driver and register map, their own `unit_id`:
+   > **For the second and third unit**, add a row each under *Settings → Extra devices*: same
+   > driver and register map, its own `unit_id`. Save and restart. Over the API it is the same
+   > field, and sending the array replaces it:
    >
    > ```
    > curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
