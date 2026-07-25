@@ -85,6 +85,22 @@ public:
     void loop(const std::vector<DeviceView>& devices, const BridgeInfo& bridge,
               const DiagnosticsSnapshot& diagnostics, uint64_t nowMs);
 
+    /// Clears everything a device left on the broker: its retained state, identity and
+    /// capabilities, and every Home Assistant discovery config it could have published.
+    ///
+    /// Retained messages outlive the device that sent them. Because availability is
+    /// bridge-scoped -- deliberately, so a sleeping inverter does not vanish at night -- an
+    /// orphaned entity does not go "unavailable"; it reports ONLINE forever, showing whatever
+    /// it last read, and anything summing the inverters keeps counting it. Removing a device
+    /// from the configuration, or changing its address (which changes its id), both leave that
+    /// behind.
+    ///
+    /// Empty retained payloads are how Home Assistant is told to forget an entity -- the same
+    /// mechanism the relay switches already use when the feature is disabled. The topics are
+    /// enumerated from the canonical measurement ids rather than from the device's state,
+    /// because by the time this runs there is no state: the device is gone.
+    void forgetDevice(const DeviceId& id, const BridgeInfo& bridge, bool primary);
+
     void stop();
     bool connected() const;
 

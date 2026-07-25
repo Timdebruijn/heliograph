@@ -102,6 +102,21 @@ inline constexpr const char* kBatteryCurrent      = "battery.current";
 inline constexpr const char* kBatteryTemperature  = "battery.temperature";
 inline constexpr const char* kBatteryEnergyCharged    = "battery.energy_charged";
 inline constexpr const char* kBatteryEnergyDischarged = "battery.energy_discharged";
+
+/// Every id above, in one place.
+///
+/// Needed because a device removed from the configuration leaves retained Home Assistant
+/// discovery topics behind, and clearing them means naming every topic it could have
+/// published -- which is derived from these ids. Kept in sync by tools/check_measurement_ids.py,
+/// which fails the build if a constant above is missing here.
+inline constexpr const char* kAll[] = {
+    kAcPowerTotal,   kAcFrequency,    kAcL1Voltage,    kAcL1Current,    kAcL1Power,
+    kDcPowerTotal,   kDcMppt1Voltage, kDcMppt1Current, kDcMppt1Power,   kDcMppt2Voltage,
+    kDcMppt2Current, kDcMppt2Power,   kEnergyToday,    kEnergyTotal,    kTemperature,
+    kOperatingHours, kBatterySoc,     kBatteryPower,   kBatteryVoltage, kBatteryCurrent,
+    kBatteryTemperature, kBatteryEnergyCharged, kBatteryEnergyDischarged,
+};
+
 }  // namespace measurement_id
 
 /// An ordered collection of measurements keyed by id.

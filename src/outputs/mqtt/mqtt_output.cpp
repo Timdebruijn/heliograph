@@ -11,6 +11,8 @@
 
 #include <cstring>
 
+#include "diagnostics/logger.h"
+
 #if defined(ESP32)
 
 #include <espMqttClient.h>
@@ -340,6 +342,38 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
     }
 }
 
+void MqttOutput::forgetDevice(const DeviceId& id, const BridgeInfo& bridge, bool primary) {
+    if (!started_ || !g_client.connected()) {
+        return;
+    }
+    const MqttTopics  topics(config_.baseTopic, bridge.bridgeId, deviceTopicKey(primary, id));
+    const std::string base = deviceUniqueBase(primary, bridge.bridgeId, id);
+
+    // The device's own retained payloads. Empty, retained: a subscriber that connects later
+    // must not be handed a reading from an inverter that is no longer configured.
+    for (const auto& topic : {topics.state(), topics.identity(), topics.capabilities()}) {
+        g_client.publish(topic.c_str(), 1, true, "");
+    }
+
+    // Every discovery config it could have announced. Enumerated rather than derived from the
+    // measurement set, which is gone along with the device. Publishing an empty retained
+    // payload to a topic that was never used is harmless -- Home Assistant has nothing to
+    // remove and the broker drops the retained entry.
+    for (const char* mid : measurement_id::kAll) {
+        const std::string slug = sanitizeId(mid);
+        g_client.publish((config_.discoveryPrefix + "/sensor/" + base + "/" + slug + "/config")
+                             .c_str(), 1, true, "");
+    }
+    g_client.publish((config_.discoveryPrefix + "/sensor/" + base + "/status/config").c_str(), 1,
+                     true, "");
+    g_client.publish(
+        (config_.discoveryPrefix + "/binary_sensor/" + base + "/inverter_online/config").c_str(),
+        1, true, "");
+
+    heliograph::log::info("MQTT: cleared retained topics for removed device %s",
+                          id.c_str());
+}
+
 void MqttOutput::stop() {
     if (started_) {
         // Say goodbye properly so subscribers do not have to wait for the will.
@@ -364,6 +398,7 @@ void MqttOutput::loop(const std::vector<DeviceView>&, const BridgeInfo&,
                       const DiagnosticsSnapshot&,
                       uint64_t) {}
 void MqttOutput::stop() { started_ = false; }
+void MqttOutput::forgetDevice(const DeviceId&, const BridgeInfo&, bool) {}
 bool MqttOutput::connected() const { return false; }
 void MqttOutput::onConnected(Channel&, const DeviceState&, const BridgeInfo&) {}
 void MqttOutput::publishDiscovery(Channel&, const DeviceState&, const BridgeInfo&) {}

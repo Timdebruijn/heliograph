@@ -972,8 +972,39 @@ static void test_two_devices_produce_distinct_unique_ids_and_ha_devices() {
 }
 
 
+// The topics a removed device has to be cleared on are enumerated from the canonical ids,
+// because by the time the clearing runs the device's measurement set is gone with it. If a
+// canonical id were missing from that list its entity would stay in Home Assistant reporting
+// online forever -- so this pins that every id a discovery entity can be built from is in it.
+static void test_every_announceable_measurement_is_clearable() {
+    Rig               r;
+    const DeviceState state  = r.poll();
+    const BridgeInfo  bridge = makeBridge();
+    const MqttTopics  topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                                                 kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    std::vector<std::string> clearable;
+    for (const char* id : measurement_id::kAll) {
+        clearable.push_back(sanitizeId(id));
+    }
+    clearable.push_back("status");
+    clearable.push_back("inverter_online");
+
+    TEST_ASSERT_TRUE(!entities.empty());
+    for (const auto& e : entities) {
+        // unique_id is "<base>_<slug>"; the slug is what the config topic is keyed on.
+        const std::string slug = e.uniqueId.substr(bridge.bridgeId.size() + 1);
+        TEST_ASSERT_TRUE_MESSAGE(
+            std::find(clearable.begin(), clearable.end(), slug) != clearable.end(),
+            ("announced a slug that cannot be cleared: " + slug).c_str());
+    }
+}
+
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_every_announceable_measurement_is_clearable);
     RUN_TEST(test_the_primary_device_keeps_the_bridge_scoped_identity);
     RUN_TEST(test_a_non_primary_device_gets_its_own_identity);
     RUN_TEST(test_every_device_tracks_the_bridge_availability_topic);

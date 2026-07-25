@@ -17,6 +17,7 @@
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -115,6 +116,11 @@ std::vector<DeviceId> g_deviceIds;
 /// point: it is what stops a boot where device 1 failed from handing its MQTT topics, its Home
 /// Assistant entities and its recorder history to whichever device did start.
 DeviceId g_primaryDeviceId;
+
+/// Whether the announced-device reconciliation has run this boot. Once per session, and only
+/// once the broker is actually connected: publishing the clears into a disconnected client
+/// would drop them silently and then record the new list as if they had gone out.
+bool g_announcedReconciled = false;
 
 /// How many devices the configuration asked for, whether or not they started. Drives the status
 /// LED: a configured device that failed to start is a fault to show, not an absence to ignore.
@@ -711,6 +717,23 @@ void rs485Task(void* /*arg*/) {
             // label. Both are named in docs/architecture.md as the remaining gap.
             g_modbus.refresh(*first, bridge, diag, nowMs());
             if (g_mqtt) {
+                // Once, on the first connected pass. Retained discovery configs outlive the
+                // device that published them, and because availability is bridge-scoped an
+                // orphaned entity does not go unavailable -- it reports ONLINE forever with its
+                // last value, and anything summing the inverters keeps counting it. Removing a
+                // device from the configuration and changing its address (which changes its id)
+                // both leave that behind. What we announced last time is the one fact nothing
+                // else survives a reboot knowing.
+                if (!g_announcedReconciled && g_mqtt->connected()) {
+                    for (const auto& old : g_store.announcedDevices()) {
+                        if (std::find(g_deviceIds.begin(), g_deviceIds.end(), old) ==
+                            g_deviceIds.end()) {
+                            g_mqtt->forgetDevice(old, bridge, old == g_primaryDeviceId);
+                        }
+                    }
+                    g_store.setAnnouncedDevices(g_deviceIds);
+                    g_announcedReconciled = true;
+                }
                 g_mqtt->loop(views, bridge, diag, nowMs());
             }
             if (g_rest) {

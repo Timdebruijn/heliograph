@@ -383,6 +383,37 @@ bool ConfigurationStore::save(const Configuration& config) {
     return backend_.write(kStorageKeyConfig, blob);
 }
 
+std::vector<std::string> ConfigurationStore::announcedDevices() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<std::string> out;
+    std::string              raw;
+    if (!backend_.read(kStorageKeyAnnounced, raw) || raw.empty()) {
+        return out;
+    }
+    JsonDocument doc;
+    if (deserializeJson(doc, raw) != DeserializationError::Ok || !doc.is<JsonArray>()) {
+        return out;  // unreadable bookkeeping is simply forgotten, never fatal
+    }
+    for (JsonVariantConst v : doc.as<JsonArrayConst>()) {
+        if (v.is<const char*>()) {
+            out.emplace_back(v.as<const char*>());
+        }
+    }
+    return out;
+}
+
+bool ConfigurationStore::setAnnouncedDevices(const std::vector<std::string>& ids) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    JsonDocument doc;
+    JsonArray    arr = doc.to<JsonArray>();
+    for (const auto& id : ids) {
+        arr.add(id);
+    }
+    std::string raw;
+    serializeJson(doc, raw);
+    return backend_.write(kStorageKeyAnnounced, raw);
+}
+
 bool ConfigurationStore::factoryReset() {
     std::lock_guard<std::mutex> lock(mutex_);
     return backend_.erase();

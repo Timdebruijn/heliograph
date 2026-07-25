@@ -631,6 +631,49 @@ static void test_a_nameless_stored_device_is_dropped_not_fatal() {
     TEST_ASSERT_TRUE(validate(loaded, e));  // and what survived is saveable
 }
 
+// Which device ids were announced to the broker is the one fact nothing else survives a reboot
+// knowing -- and without it a removed device's retained Home Assistant entities can never be
+// cleared. Kept out of Configuration on purpose: it is not a user setting, must not appear in
+// GET /config, and must not take part in the reboot-required diff.
+static void test_announced_devices_round_trip_and_start_empty() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+
+    TEST_ASSERT_TRUE(store.setAnnouncedDevices({"growatt_modbus-1", "growatt_modbus-2"}));
+    const auto back = store.announcedDevices();
+    TEST_ASSERT_EQUAL_UINT32(2, back.size());
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", back[1].c_str());
+
+    // Removing the last device must be storable as such, not indistinguishable from "never set".
+    TEST_ASSERT_TRUE(store.setAnnouncedDevices({}));
+    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+}
+
+// Unreadable bookkeeping is forgotten, never fatal: it lives in its own key precisely so it
+// cannot take a working configuration down with it.
+static void test_corrupt_announced_bookkeeping_is_not_fatal() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    backend.write(kStorageKeyAnnounced, "{not json");
+    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+
+    auto c = provisionedConfig();
+    TEST_ASSERT_TRUE(store.save(c));
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+}
+
+// A factory reset erases the whole namespace, so the bookkeeping goes with it -- a bridge that
+// has been wiped must not then try to clear topics for devices from a previous life.
+static void test_a_factory_reset_forgets_what_was_announced() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    store.setAnnouncedDevices({"growatt_modbus-1"});
+    TEST_ASSERT_TRUE(store.factoryReset());
+    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+}
+
 static void test_ota_rejects_a_non_firmware_upload_before_writing() {
     ota::OtaManager ota;
     TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(1024));
@@ -759,6 +802,9 @@ int main(int, char**) {
     RUN_TEST(test_extra_devices_survive_a_restart);
     RUN_TEST(test_a_config_without_the_device_list_stays_single_device);
     RUN_TEST(test_a_nameless_stored_device_is_dropped_not_fatal);
+    RUN_TEST(test_announced_devices_round_trip_and_start_empty);
+    RUN_TEST(test_corrupt_announced_bookkeeping_is_not_fatal);
+    RUN_TEST(test_a_factory_reset_forgets_what_was_announced);
     RUN_TEST(test_ota_rejects_a_non_firmware_upload_before_writing);
     RUN_TEST(test_ota_accepts_a_firmware_upload);
     RUN_TEST(test_ota_refuses_a_second_concurrent_upload);

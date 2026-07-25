@@ -46,13 +46,28 @@ discovery config topics. Devices beyond the first also carry their address in th
 e.g. `growatt_modbus-2`. It is **not** the serial number even for drivers that report one — the
 serial arrives during the first poll, long after the id is needed.
 
-> **Removing or re-addressing a device leaves its entities behind.** The discovery configs and
-> the last state are retained on the broker, and nothing publishes an empty payload to clear
-> them, so Home Assistant keeps re-creating those entities — and because availability is
-> bridge-scoped they stay *available*, showing the last value ever read. A template or
-> automation summing your inverters will keep counting the ghost. Clear them by hand
-> (`mosquitto_pub -r -n -t <topic>`) or delete the entities in Home Assistant. The relay
-> entities do have an automatic removal path; devices do not, yet.
+### Removing or re-addressing a device
+
+The bridge clears up after itself. It remembers which device ids it announced, and on the first
+connection after a restart it publishes empty retained payloads for any of them that is no
+longer configured — the device's own `state`, `identity` and `capabilities`, and every Home
+Assistant discovery config it could have announced. Home Assistant drops those entities.
+
+Two things follow from *could have*: the topics are enumerated from the canonical measurement
+ids rather than derived from the device's readings, because by then the device is gone and so
+are its readings; and clearing a topic that was never used is harmless.
+
+It matters because of how availability works here. Availability is bridge-scoped, deliberately,
+so a sleeping inverter does not make its entities unavailable every night — which means an
+orphaned entity does **not** go unavailable either. It reports *online* forever, showing the
+last value it ever read, and a template or automation summing your inverters keeps counting it.
+
+Changing a device's address counts as removing it: the address is part of the device id.
+
+The clearing runs once per boot and only after the broker is connected, so a restart with the
+broker down does not silently record the new list as if the clears had gone out. If a bridge
+ran a build from before this existed, its orphans are still there and have to be cleared by
+hand (`mosquitto_pub -r -n -t <topic>`) or deleted in Home Assistant.
 
 > **Which device is "first" comes from the configuration, not from boot order.** It is the
 > `driver` entry. If it fails to start, no device takes over the bridge-scoped topics — that is

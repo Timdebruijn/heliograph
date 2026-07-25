@@ -92,6 +92,9 @@ jobs:
       - name: Embedded JS syntax
         run: python3 tools/check_web_js.py
 
+      - name: Canonical measurement ids are enumerable
+        run: python3 tools/check_measurement_ids.py
+
       - name: Native test suite
         run: pio test -e native
 
