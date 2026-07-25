@@ -25,6 +25,20 @@ RegisterMap::RegisterMap() {
     for (size_t i = 0; i < kRegisterCount; ++i) {
         registers_[i] = kInvalidU16;
     }
+    // ...except the validity bitmap, where 0xFFFF means the exact opposite: every bit SET, i.e.
+    // "all of this is valid". The fill above therefore announced that a map full of NaN was
+    // trustworthy. publishMeasurement() promises the two signals always agree so a client can
+    // use whichever it can handle, and before the first poll -- at boot, or all night on an
+    // inverter that never answers -- they disagreed completely. A PLC or EVCC that trusts the
+    // bit and cannot represent NaN would record garbage as a real reading, which is precisely
+    // what the sentinel design exists to prevent (review, 2026-07-25).
+    //
+    // Cleared rather than set: unknown-until-proven is the safe direction, and it also zeroes
+    // the reserved bits past the defined ValidityBit range, which setValidity() never touches
+    // and which otherwise read as 1 forever.
+    for (size_t i = 0; i < reg::kValidityBitmapRegisters; ++i) {
+        registers_[reg::kValidityBitmap + i] = 0;
+    }
     writeU32(reg::kSchemaVersionAddr, kSchemaVersion);
 }
 

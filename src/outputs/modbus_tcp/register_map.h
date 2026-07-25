@@ -96,6 +96,10 @@ inline constexpr uint16_t kStatusText         = 510;  // 16 regs / 32 chars
 inline constexpr uint16_t kCapabilitiesRead  = 600;  // 4 regs, 64 bits
 inline constexpr uint16_t kCapabilitiesWrite = 604;  // 4 regs, 64 bits
 inline constexpr uint16_t kValidityBitmap    = 610;  // 8 regs, 128 bits
+/// Length of that bitmap, as a constant rather than a number in a comment: the map's
+/// constructor has to clear exactly this range, and a mismatch there silently republishes
+/// "everything is valid" over a map full of NaN.
+inline constexpr uint16_t kValidityBitmapRegisters = 8;
 inline constexpr uint16_t kPhaseCount        = 620;  // uint16
 inline constexpr uint16_t kMpptCount         = 621;  // uint16
 inline constexpr uint16_t kBatteryPresent    = 622;  // uint16

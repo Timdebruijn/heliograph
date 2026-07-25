@@ -452,6 +452,25 @@ static void test_a_writable_driver_flips_the_read_only_register() {
     TEST_ASSERT_TRUE(anyWriteBit);
 }
 
+// The agreement below is only tested AFTER a poll. Before one -- at boot, or all night on an
+// inverter that never answers -- the constructor's blanket 0xFFFF fill hit the bitmap too,
+// where every bit set means "all of this is valid". So a map full of NaN announced itself as
+// trustworthy, and a client that trusts the bit and cannot represent NaN would have recorded
+// garbage as a real reading (review, 2026-07-25).
+static void test_a_fresh_map_claims_nothing_is_valid() {
+    RegisterMap map;
+
+    for (size_t i = 0; i < reg::kValidityBitmapRegisters; ++i) {
+        TEST_ASSERT_EQUAL_HEX16(0, map.at(static_cast<uint16_t>(reg::kValidityBitmap + i)));
+    }
+    // Spot-check through the accessor as well, including the reserved bits past the defined
+    // range that setValidity() never touches and that used to read as 1 forever.
+    TEST_ASSERT_FALSE(map.validityBit(ValidityBit::AcPowerTotal));
+    TEST_ASSERT_FALSE(map.validityBit(ValidityBit::EnergyTotal));
+    // ...while the data registers still read as unknown, which was always right.
+    TEST_ASSERT_EQUAL_HEX16(kInvalidU16, map.at(reg::kAcPowerTotal));
+}
+
 static void test_validity_bitmap_and_nan_always_agree() {
     // Two ways of saying "unknown" for clients that cannot handle NaN. They must never
     // disagree, or one of them is a trap.
@@ -511,6 +530,7 @@ int main(int, char**) {
     RUN_TEST(test_the_mock_hybrid_populates_the_same_map_with_no_output_changes);
     RUN_TEST(test_a_writable_driver_flips_the_read_only_register);
     RUN_TEST(test_a_32bit_error_code_saturates_the_16bit_register);
+    RUN_TEST(test_a_fresh_map_claims_nothing_is_valid);
     RUN_TEST(test_validity_bitmap_and_nan_always_agree);
     RUN_TEST(test_validity_bits_fit_the_reserved_space);
     RUN_TEST(test_relay_registers_use_the_sentinel_without_hardware);

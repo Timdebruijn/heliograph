@@ -284,6 +284,30 @@ static void test_diagnostics_unit_id_must_differ_from_the_inverter() {
     TEST_ASSERT_FALSE(applyConfigPatch(R"({"modbus":{"diagnostics_unit_id":1}})", c, e));
 }
 
+// A value too large for the field used to be cast first and validated afterwards, so it wrapped
+// into something validate() was perfectly happy with and the stored config was not the one that
+// was asked for -- with no error anywhere. Whether a bad value got caught depended on where the
+// wrap happened to land: 65537 became 1, a privileged port, while 70000 became 4464 and passed
+// too (review, 2026-07-25).
+static void test_a_value_too_large_for_the_field_is_refused_not_wrapped() {
+    Configuration c;
+    ConfigError   e;
+    const uint16_t before = c.mqtt.port;
+
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"mqtt":{"port":65537}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("mqtt.port", e.field.c_str());
+    TEST_ASSERT_EQUAL_UINT16(before, c.mqtt.port);  // and nothing was half-applied
+
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"mqtt":{"port":70000}})", c, e));
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"mqtt":{"port":-1}})", c, e));
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"modbus":{"unit_id":259}})", c, e));
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"polling":{"interval_seconds":4294967306}})", c, e));
+
+    // The boundary itself still works.
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"mqtt":{"port":65535}})", c, e));
+    TEST_ASSERT_EQUAL_UINT16(65535, c.mqtt.port);
+}
+
 static void test_driver_options_are_opaque_to_the_config_model() {
     // The config model must never gain a manufacturer-specific field. Options are a string
     // map here; what the keys mean is the driver's business.
@@ -1039,6 +1063,7 @@ int main(int, char**) {
     RUN_TEST(test_out_of_range_values_are_refused);
     RUN_TEST(test_modbus_write_cannot_be_enabled);
     RUN_TEST(test_diagnostics_unit_id_must_differ_from_the_inverter);
+    RUN_TEST(test_a_value_too_large_for_the_field_is_refused_not_wrapped);
     RUN_TEST(test_driver_options_are_opaque_to_the_config_model);
     RUN_TEST(test_an_option_orphaned_by_a_driver_change_is_dropped);
     RUN_TEST(test_an_existing_orphan_is_dropped_even_without_a_driver_change);
