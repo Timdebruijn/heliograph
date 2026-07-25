@@ -66,8 +66,17 @@ bool decodeRegisters(const uint8_t regs[7], time_t& out) {
     if (year < kEarliestPlausibleYear || year > kLatestPlausibleYear) {
         return false;
     }
-    out = static_cast<time_t>(daysFromCivil(year, mon, day) * 86400 + hour * 3600 + min * 60 +
-                              sec);
+    // Day against the actual month, not just against 31. February 31st passes every check
+    // above and silently becomes March 3rd -- a plausible date that is not the one on the chip,
+    // which is the exact class of bug this file was split out to close. Round-tripping through
+    // the civil-date conversion is the cheapest way to ask "does this date exist".
+    int ry = 0, rm = 0, rd = 0;
+    const int64_t days = daysFromCivil(year, mon, day);
+    civilFromDays(days, ry, rm, rd);
+    if (ry != year || rm != mon || rd != day) {
+        return false;
+    }
+    out = static_cast<time_t>(days * 86400 + hour * 3600 + min * 60 + sec);
     return true;
 }
 
@@ -83,8 +92,15 @@ void encodeRegisters(time_t utc, uint8_t regs[7]) {
     regs[1] = toBcd(rem / 60);
     regs[2] = toBcd(hour);
     regs[3] = toBcd(d);
-    regs[4] = 0;  // weekday: the chip keeps it, nothing here reads it
+    // The weekday belongs here, not in the caller. Leaving it to the ESP32-only file put the
+    // one bit of arithmetic that is not host-tested back inside the block this unit exists to
+    // get it out of -- and deleting the caller's line as redundant would then store every write
+    // as Sunday with nothing to notice.
+    regs[4] = static_cast<uint8_t>((days + 4) % 7);  // 1970-01-01 was a Thursday
     regs[5] = toBcd(m);
+    // No year guard here on purpose: past 2099 toBcd() emits a non-BCD byte, which the next
+    // boot's decodeRegisters() refuses. The clock is then lost rather than silently wrong, and
+    // that is the direction to fail in.
     regs[6] = toBcd(y - 2000);
 }
 

@@ -246,7 +246,8 @@ PollResult MockDriver::poll(DeviceState& state) {
     m.set(measurement_id::kEnergyTotal, 24680.0, ts);
     m.set(measurement_id::kTemperature, 25.0 + 20.0 * fraction, ts);
 
-    state.statusCode         = fraction > 0.0 ? 1 : 0;
+    state.statusCode          = fraction > 0.0 ? 1 : 0;
+    state.statusCodeSupported = true;
     state.statusText         = fraction > 0.0 ? "Normal" : "Standby";
     state.errorCode          = 0;
     state.errorCodeSupported = true;  // unlike EverSolar, this device really does report it

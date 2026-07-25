@@ -477,7 +477,8 @@ PollResult SolaxDriver::poll(DeviceState& state) {
     m.set(measurement_id::kTemperature, report.temperatureC, ts);
     m.set(measurement_id::kOperatingHours, static_cast<double>(report.runtimeHours), ts);
 
-    state.statusCode = report.mode;
+    state.statusCode          = report.mode;
+    state.statusCodeSupported = true;
     // The mode table is documented (0 Wait .. 6 Self Test); a code outside it is reported
     // as unknown rather than named.
     const char* mode = modeText(report.mode);

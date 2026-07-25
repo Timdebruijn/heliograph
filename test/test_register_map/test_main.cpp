@@ -471,6 +471,32 @@ static void test_a_fresh_map_claims_nothing_is_valid() {
     TEST_ASSERT_EQUAL_HEX16(kInvalidU16, map.at(reg::kAcPowerTotal));
 }
 
+// The bitmap was not the only place all-ones reads as an assertion. refresh() only runs once a
+// driver exists and has begun, so on a bridge with no driver selected -- or one whose inverter
+// never answered -- these are what a Modbus client reads for the ENTIRE uptime, not for a boot
+// window. "Everything is online, valid, and writable in 64 ways" is a confident lie.
+static void test_a_fresh_map_asserts_nothing_it_has_not_measured() {
+    RegisterMap map;
+
+    TEST_ASSERT_EQUAL_UINT16(0, map.at(reg::kBridgeOnline));
+    TEST_ASSERT_EQUAL_UINT16(0, map.at(reg::kInverterOnline));
+    TEST_ASSERT_EQUAL_UINT16(0, map.at(reg::kDataValid));
+    TEST_ASSERT_EQUAL_UINT16(1, map.at(reg::kDataStale));  // absent data is not fresh data
+    TEST_ASSERT_EQUAL_UINT16(0, map.at(reg::kBatteryPresent));
+    TEST_ASSERT_EQUAL_UINT16(0, map.at(reg::kPhaseCount));
+    TEST_ASSERT_EQUAL_UINT16(0, map.at(reg::kMpptCount));
+    // No capability may be claimed before a driver has declared one -- least of all a write.
+    for (uint16_t i = 0; i < 4; ++i) {
+        TEST_ASSERT_EQUAL_UINT16(0, map.at(static_cast<uint16_t>(reg::kCapabilitiesRead + i)));
+        TEST_ASSERT_EQUAL_UINT16(0, map.at(static_cast<uint16_t>(reg::kCapabilitiesWrite + i)));
+    }
+    TEST_ASSERT_EQUAL_UINT16(1, map.at(reg::kDriverReadOnly));
+    // Identity strings read as empty, which is what the format documents as unknown.
+    TEST_ASSERT_EQUAL_UINT16(0, map.at(reg::kManufacturer));
+    TEST_ASSERT_EQUAL_UINT16(0, map.at(reg::kSerialNumber));
+    TEST_ASSERT_EQUAL_STRING("", decodeString(map, reg::kModel, 16).c_str());
+}
+
 static void test_validity_bitmap_and_nan_always_agree() {
     // Two ways of saying "unknown" for clients that cannot handle NaN. They must never
     // disagree, or one of them is a trap.
@@ -531,6 +557,7 @@ int main(int, char**) {
     RUN_TEST(test_a_writable_driver_flips_the_read_only_register);
     RUN_TEST(test_a_32bit_error_code_saturates_the_16bit_register);
     RUN_TEST(test_a_fresh_map_claims_nothing_is_valid);
+    RUN_TEST(test_a_fresh_map_asserts_nothing_it_has_not_measured);
     RUN_TEST(test_validity_bitmap_and_nan_always_agree);
     RUN_TEST(test_validity_bits_fit_the_reserved_space);
     RUN_TEST(test_relay_registers_use_the_sentinel_without_hardware);

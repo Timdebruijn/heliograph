@@ -15,9 +15,11 @@
 namespace heliograph::rtc {
 
 /// The RTC counts a two-digit year from 2000, so 2000-2099 is everything it can express. The
-/// lower bound is deliberately "before this firmware existed": a chip that has lost power reads
-/// back something from the last century or from 2000, and that must fail rather than become the
-/// system clock.
+/// lower bound is deliberately "before this firmware existed", and it deliberately matches
+/// TimeManager's kSaneEpoch so the two agree on what counts as a set clock. A chip that lost
+/// power is already caught by its oscillator-stopped flag; this bound is for the cases that are
+/// not -- a corrupted register that still decodes as valid BCD, or a chip written by something
+/// else entirely.
 inline constexpr int kEarliestPlausibleYear = 2024;
 inline constexpr int kLatestPlausibleYear   = 2099;
 

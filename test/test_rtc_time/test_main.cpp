@@ -103,6 +103,33 @@ static void test_out_of_range_fields_are_refused() {
 
 // A leap day is the classic off-by-one in civil-date arithmetic, and this code deliberately
 // avoids mktime()/timegm() so it owns that correctness itself.
+// February 31st passes every field-range check and silently becomes March 3rd. A plausible
+// date that is not the one on the chip is exactly what this file exists to refuse.
+static void test_a_date_that_does_not_exist_is_refused() {
+    uint8_t r[7];
+    time_t  t = 0;
+    regs(r, 0x00, 0x00, 0x12, 0x31, 0x02, 0x26);  // 31 February
+    TEST_ASSERT_FALSE(decodeRegisters(r, t));
+    regs(r, 0x00, 0x00, 0x12, 0x31, 0x04, 0x26);  // 31 April
+    TEST_ASSERT_FALSE(decodeRegisters(r, t));
+    regs(r, 0x00, 0x00, 0x12, 0x29, 0x02, 0x26);  // 29 February in a non-leap year
+    TEST_ASSERT_FALSE(decodeRegisters(r, t));
+    // ...and the real ones still pass.
+    regs(r, 0x00, 0x00, 0x12, 0x30, 0x04, 0x26);
+    TEST_ASSERT_TRUE(decodeRegisters(r, t));
+}
+
+// The weekday lives in encodeRegisters so it is covered here. Left to the ESP32-only caller it
+// was the one piece of arithmetic no test could see, in the file split out precisely to stop
+// that -- and deleting the caller's line as redundant would have stored every write as Sunday.
+static void test_the_weekday_register_is_filled() {
+    uint8_t r[7];
+    encodeRegisters(1784983530, r);  // 2026-07-25 was a Saturday
+    TEST_ASSERT_EQUAL_UINT8(6, r[4]);
+    encodeRegisters(1835395200, r);  // 2028-02-29 was a Tuesday
+    TEST_ASSERT_EQUAL_UINT8(2, r[4]);
+}
+
 static void test_a_leap_day_is_handled() {
     uint8_t r[7];
     regs(r, 0x00, 0x00, 0x00, 0x29, 0x02, 0x28);  // 2028-02-29T00:00:00Z
@@ -126,6 +153,8 @@ int main(int, char**) {
     RUN_TEST(test_a_year_outside_the_plausible_range_is_refused);
     RUN_TEST(test_a_non_bcd_byte_is_refused_even_when_it_decodes_in_range);
     RUN_TEST(test_out_of_range_fields_are_refused);
+    RUN_TEST(test_a_date_that_does_not_exist_is_refused);
+    RUN_TEST(test_the_weekday_register_is_filled);
     RUN_TEST(test_a_leap_day_is_handled);
     return UNITY_END();
 }

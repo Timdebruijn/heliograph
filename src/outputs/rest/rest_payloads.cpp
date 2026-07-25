@@ -129,7 +129,7 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     }
 
     const bool statusUsable = state.dataValid && !state.dataStale;
-    if (statusUsable) {
+    if (state.statusCodeSupported && statusUsable) {
         doc["status_code"] = state.statusCode;
         // Empty means the driver has no text for this protocol -- same rule as identity
         // fields: absent-as-null, never an empty string the UI would render as a blank tile.

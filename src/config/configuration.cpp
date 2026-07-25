@@ -104,9 +104,11 @@ bool patchNumber(JsonVariantConst v, T& target, const char* field, ConfigError& 
     const long long raw = v.as<long long>();
     if (raw < static_cast<long long>(std::numeric_limits<T>::min()) ||
         raw > static_cast<long long>(std::numeric_limits<T>::max())) {
-        error = {field, "expected an integer between " +
-                            std::to_string(std::numeric_limits<T>::min()) + " and " +
-                            std::to_string(std::numeric_limits<T>::max())};
+        // Deliberately says "out of range for this field" rather than naming numbers: the only
+        // bounds available here are the C type's, and quoting those would be its own plausible
+        // lie -- polling.interval_seconds would advertise 4294967295 where validate() allows
+        // 3600. The narrower rule reports itself one step later, in its own words.
+        error = {field, "value is out of range for this field"};
         return false;
     }
     target = static_cast<T>(raw);

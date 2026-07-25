@@ -27,6 +27,8 @@ core_paths=(
     src/device
     src/protocols/pmu/pmu_protocol.h
     src/protocols/pmu/pmu_protocol.cpp
+    src/network/rtc_time.h
+    src/network/rtc_time.cpp
     src/drivers/eversolar_legacy/eversolar_parser.h
     src/drivers/eversolar_legacy/eversolar_parser.cpp
     src/drivers/solax_x1/solax_parser.h

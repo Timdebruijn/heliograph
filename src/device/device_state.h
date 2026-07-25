@@ -35,6 +35,12 @@ struct DeviceState {
     MeasurementSet       measurements;
 
     uint16_t statusCode = 0;
+    /// The same rule errorCodeSupported already carried, and for the same reason: not every
+    /// driver reads a status word, and 0 is a MEANING in most protocols -- typically "waiting"
+    /// or "standby". Publishing the struct default therefore reports a device at full power as
+    /// idle, with the Modbus validity bit set to say you may believe it. When false, outputs
+    /// publish null (review, 2026-07-25).
+    bool statusCodeSupported = false;
     /// Human-readable status. A driver that cannot map its raw status code to text must say
     /// so ("Unknown (<n>)") rather than guess at a meaning.
     std::string statusText;

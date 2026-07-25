@@ -309,7 +309,8 @@ PollResult SunspecDriver::poll(DeviceState& state) {
         m.set(measurement_id::kTemperature, r.temperatureC, ts);
     }
     if (r.hasState) {
-        state.statusCode = r.state;
+        state.statusCode          = r.state;
+        state.statusCodeSupported = true;
     }
     return PollResult::Ok;
 }

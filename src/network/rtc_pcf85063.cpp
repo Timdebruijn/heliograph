@@ -71,8 +71,7 @@ bool writeUtc(time_t t) {
         return false;
     }
     uint8_t r[7];
-    encodeRegisters(t, r);
-    r[4] = static_cast<uint8_t>(((t / 86400) + 4) % 7);  // weekday; 1970-01-01 was a Thursday
+    encodeRegisters(t, r);  // weekday included; see rtc_time.cpp
 
     Wire.beginTransmission(board::kRtcI2cAddress);
     Wire.write(kRegSeconds);
