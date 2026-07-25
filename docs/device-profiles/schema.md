@@ -60,17 +60,34 @@ per block.
 | `space` | string | yes | `"input"` (function 04) or `"holding"` (function 03). |
 | `start` | int | yes | First register, 0–65535. |
 | `count` | int | yes | Registers in the block, 1–125 (the Modbus per-read limit). |
+| `probe` | bool | no (`false`) | This block exists to answer a question, not to feed a measurement. See below. |
 
 Rules enforced by the build:
 
 - at most **8** blocks (the driver's scratch-buffer limit);
 - `start + count` must stay inside the 16-bit register address space;
 - every mapped register must be covered by a block (including the second word of a
-  32-bit value).
+  32-bit value);
+- a mapped register may **not** live only inside a `probe` block.
 
 A block the device refuses with a Modbus exception is skipped at runtime, not fatal —
 deliberately, so a profile may probe ranges that only exist on some firmware generations
 and the TRACE dump shows which ones this unit actually has.
+
+### `probe = true`
+
+Mark a block that maps nothing and exists only so the raw TRACE dump answers a question — most
+often "which register generation does this model speak?". Two things follow:
+
+- its read failures are **excluded from the RS485 bus counters** (`heliograph_rs485_*_total`);
+- mapping a measurement into it becomes a build error, because the exclusion would then hide
+  real bus errors on a range the profile depends on.
+
+The exclusion is the point. A Modbus device *should* answer an unknown range with an exception,
+which was never counted as a bus error — but nothing forces it to, and a unit that answers with
+silence instead would otherwise add a timeout to the metrics on **every poll**, forever, on an
+installation with nothing wrong with it. A probe block's silence is a fact about the register
+map, not about the wire. See [prometheus.md](../prometheus.md).
 
 ## `[[register]]` — 1 or more per file
 

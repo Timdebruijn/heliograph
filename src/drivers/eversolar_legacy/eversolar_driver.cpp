@@ -173,6 +173,11 @@ EversolarDriver::TransactResult EversolarDriver::transact(CommandCode command,
             }
             if (valid == ParseResult::Ok) {
                 if (frame.dataLength > payloadCapacity) {
+                    // Unreachable today (every caller passes a full-size buffer), but this is
+                    // an InvalidFrame return and every other one tallies. Left untallied it
+                    // would be a return path that silently reports nothing the moment some
+                    // future caller passes a smaller buffer.
+                    ++invalidFrames_;
                     traceOutcome("payload too large");
                     return TransactResult::InvalidFrame;
                 }

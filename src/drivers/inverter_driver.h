@@ -61,7 +61,15 @@ struct BusErrorCounts {
     uint32_t checksumErrors = 0;
     /// A read that got no answer at all.
     uint32_t timeouts       = 0;
-    /// An intact frame that was not the one asked for: addressing, or a device quirk.
+    /// An intact frame that was not usable: a reply from the wrong unit, a structurally
+    /// unreadable one, or a payload this driver cannot decode. Addressing or a device quirk,
+    /// not cabling.
+    ///
+    /// One deliberate asymmetry: the PMU drivers do NOT count a well-formed frame addressed to
+    /// someone else. On a half-duplex bus that branch also catches our own transmission coming
+    /// back, and the two are not distinguishable there, so counting it would put a per-poll
+    /// slope on every installation that echoes. The Modbus drivers have no such ambiguity and
+    /// do count it. Compare installations of the same protocol, not across protocols.
     uint32_t invalidFrames  = 0;
 };
 
@@ -86,9 +94,9 @@ public:
     /// would let a new driver ship with a permanently flat checksum counter and nothing to
     /// notice, which is the failure mode this whole mechanism exists to remove.
     ///
-    /// Errors seen during probe() count too -- but discovery runs before a DeviceContext
-    /// exists, and the context takes its baseline at construction, so probe traffic never
-    /// lands in the metric. The wizard reports on its own probes.
+    /// Errors seen during probe() count too. That is invisible in practice -- DiscoveryEngine
+    /// probes through its own throwaway driver instances, never the polling one -- so a
+    /// discovery sweep across four baud rates does not land in the installation's metrics.
     virtual BusErrorCounts busErrors() const = 0;
 
     virtual DeviceIdentity       identity() const     = 0;

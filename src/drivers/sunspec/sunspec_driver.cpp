@@ -29,9 +29,10 @@ modbus::ReadOutcome SunspecDriver::read(uint16_t address, uint16_t count, uint16
     const auto outcome = modbus::readRegisters(*transport_, options_.unitId,
                                                modbus::kReadHoldingRegisters, address, count, out,
                                                capacity, timing);
-    // Every read this driver makes passes through here, so this is the whole tally. It matters
-    // more here than anywhere: a chain walk plus a chunked model read is a dozen transactions
-    // per poll, and only the one that stops the walk ever reached the old poll-verdict counter.
+    // Every read on the wire passes through here. Note that a steady-state poll is ONE
+    // transaction: the chain walk is gated on walked_ and runs once per session, and model 103
+    // fits inside a single chunk. The dozen-transaction case is the walk itself, where only the
+    // read that stopped it ever reached the old poll-verdict counter.
     tallyModbusRead(busErrors_, outcome.status);
     return outcome;
 }
@@ -271,6 +272,12 @@ PollResult SunspecDriver::poll(DeviceState& state) {
 
     InverterReadings r;
     if (!decodeInverter(regs.data(), regs.size(), r)) {
+        // Counted here, not in read(): every read succeeded with a valid CRC, so the tally in
+        // read() saw nothing wrong. The frame is intact and simply not the one this driver can
+        // use -- which is what invalidFrames means, and what the PMU drivers already count on
+        // their own decode failures. Missing it left this path failing every poll with all
+        // three bus counters flat at zero, and walked_ is not reset here, so it stays that way.
+        ++busErrors_.invalidFrames;
         return PollResult::InvalidFrame;
     }
 

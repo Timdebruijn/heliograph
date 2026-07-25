@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// DeviceContext: the poll rhythm, and how the driver's frame-level tallies reach Diagnostics.
+// DeviceContext: how the driver's frame-level tallies reach Diagnostics.
 //
 // The tallies are the reason this suite exists. They used to be a switch over the PollResult,
 // which made the checksum metric a function of the poll VERDICT -- and a driver reading several
@@ -90,9 +90,9 @@ static void test_only_the_new_errors_are_added() {
     TEST_ASSERT_EQUAL_UINT32(5, diagnostics.snapshot().checksumErrorTotal);
 }
 
-// Discovery probes the bus through the same driver before this context exists. Those errors are
-// reported by the wizard; replaying them into the installation's metrics would put a step at
-// every driver switch that no cable fault explains.
+// The baseline is read, not assumed zero. Production never reaches this state -- main.cpp
+// builds a fresh driver right before the context -- so this guards the mechanism rather than an
+// observed bug: a driver that arrived pre-used must not inject its history as one huge step.
 static void test_errors_from_before_the_context_are_not_replayed() {
     ScriptedDriver driver;
     driver.counts.checksumErrors = 9;
@@ -128,14 +128,21 @@ static void test_the_three_counters_do_not_bleed_into_each_other() {
     TEST_ASSERT_EQUAL_UINT32(1, snapshot.pollFailureTotal);
 }
 
-// A failure the wire had nothing to do with -- no driver, or a UART that would not open. Moving
-// a bus counter here would send someone to check the cabling on a fault that never reached it.
-static void test_a_transport_failure_moves_no_bus_counter() {
+// The driver is the authority now, not the verdict. A poll can fail without a single thing
+// having gone wrong on the wire -- a device refusing every register range, or a UART that would
+// not open -- and moving a bus counter there sends someone to check cabling that is fine.
+//
+// This is the direction that would regress silently: under the old code a Timeout verdict
+// incremented the timeout counter by definition, so this test fails if anything reintroduces a
+// switch over the verdict.
+static void test_a_failing_verdict_alone_moves_no_bus_counter() {
     ScriptedDriver driver;
     StateStore     store;
     Diagnostics    diagnostics;
     DeviceContext  context(driver, store, diagnostics, clockFn);
 
+    driver.verdict = PollResult::Timeout;  // ...but the driver tallied nothing
+    context.pollOnce();
     driver.verdict = PollResult::TransportError;
     context.pollOnce();
 
@@ -143,7 +150,22 @@ static void test_a_transport_failure_moves_no_bus_counter() {
     TEST_ASSERT_EQUAL_UINT32(0, snapshot.checksumErrorTotal);
     TEST_ASSERT_EQUAL_UINT32(0, snapshot.rs485TimeoutTotal);
     TEST_ASSERT_EQUAL_UINT32(0, snapshot.invalidFrameTotal);
-    TEST_ASSERT_EQUAL_UINT32(1, snapshot.pollFailureTotal);
+    TEST_ASSERT_EQUAL_UINT32(2, snapshot.pollFailureTotal);
+}
+
+// ...and the converse: a driver that tallied errors is believed even when the verdict is one
+// the old switch ignored entirely.
+static void test_a_driver_tally_counts_under_a_verdict_the_old_switch_ignored() {
+    ScriptedDriver driver;
+    StateStore     store;
+    Diagnostics    diagnostics;
+    DeviceContext  context(driver, store, diagnostics, clockFn);
+
+    driver.verdict               = PollResult::NotRegistered;
+    driver.counts.checksumErrors = 2;
+    context.pollOnce();
+
+    TEST_ASSERT_EQUAL_UINT32(2, diagnostics.snapshot().checksumErrorTotal);
 }
 
 // uint32 counters on a bridge that runs for years: the difference has to survive the wrap, or
@@ -167,7 +189,8 @@ int main(int, char**) {
     RUN_TEST(test_only_the_new_errors_are_added);
     RUN_TEST(test_errors_from_before_the_context_are_not_replayed);
     RUN_TEST(test_the_three_counters_do_not_bleed_into_each_other);
-    RUN_TEST(test_a_transport_failure_moves_no_bus_counter);
+    RUN_TEST(test_a_failing_verdict_alone_moves_no_bus_counter);
+    RUN_TEST(test_a_driver_tally_counts_under_a_verdict_the_old_switch_ignored);
     RUN_TEST(test_the_difference_survives_a_counter_wrap);
     return UNITY_END();
 }

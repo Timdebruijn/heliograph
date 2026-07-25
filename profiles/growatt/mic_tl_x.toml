@@ -30,7 +30,10 @@
 # Hence the third read block below: the 3000 range is probed during bring-up so the first
 # hardware session settles which range this firmware actually populates, exactly as
 # profiles/growatt/sph.toml does for the same open question. A block the device refuses is
-# skipped harmlessly, so probing a range that does not exist costs nothing but a timeout.
+# skipped harmlessly, and the block is declared `probe = true`, so a range this model does not
+# implement costs nothing at all -- not even a bus-error count. That flag matters: the Modbus
+# spec says an unknown range should be answered with an exception, but a device is free to say
+# nothing instead, and unflagged that silence would read as an RS485 timeout on every poll.
 #
 # Conservative on purpose: only rows the hardware-exercised source states outright are
 # published as measurements. Anything ambiguous is left to the driver's raw-block TRACE
@@ -84,6 +87,10 @@ count = 89
 space = "input"
 start = 3000
 count = 40
+# Marked as a probe: it maps nothing, so its read failures stay out of the RS485 bus counters.
+# See the note above -- with three of these on one bus, a silent range would otherwise show as
+# a steady timeout rate on three healthy bridges.
+probe = true
 
 # --- DC / PV side -------------------------------------------------------------------------
 

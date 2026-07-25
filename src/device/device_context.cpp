@@ -14,9 +14,11 @@ DeviceContext::DeviceContext(InverterDriver& driver, StateStore& store, Diagnost
     state_.bridgeOnline = true;
     state_.identity     = driver_.identity();
     state_.capabilities = driver_.capabilities();
-    // Baseline, not zero: discovery probes the bus through the same driver before this context
-    // exists, and those errors belong to the wizard's report rather than to the running
-    // installation's metrics. Anything already counted is water under the bridge.
+    // Read the driver's tally rather than assuming zero. Today it always IS zero -- main.cpp
+    // builds a fresh driver right before this context, discovery uses its own throwaway
+    // instances, and no begin() touches the bus -- so this is defence, not a fix for anything
+    // observed. It costs one read and it means a driver that arrives pre-used cannot inject its
+    // history into the installation's metrics as one enormous step.
     lastBusErrors_ = driver_.busErrors();
     store_.publish(state_);
 }

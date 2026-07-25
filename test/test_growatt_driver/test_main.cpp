@@ -185,14 +185,19 @@ static heliograph::test::Responder alwaysException() {
     };
 }
 
-static void test_all_blocks_refused_is_an_invalid_frame() {
+// Present, correctly addressed, refusing every range this profile asks for: a wrong profile or
+// unit id, not a wire fault. This used to report InvalidFrame, which pointed the field
+// diagnosis at the cabling and contradicted the bus counters -- an exception rightly moves
+// none of them, so the poll failed every ten seconds while all three RS485 counters read zero.
+// SunSpec has always called this NotRegistered; the two Modbus drivers now agree.
+static void test_all_blocks_refused_is_not_registered() {
     MockTransport transport;
     transport.setResponder(alwaysException());
     GrowattDriver driver(transport);
 
     DeviceState state;
     state.lastPollAttemptMs = 5000;
-    TEST_ASSERT_EQUAL(PollResult::InvalidFrame, driver.poll(state));
+    TEST_ASSERT_EQUAL(PollResult::NotRegistered, driver.poll(state));
 }
 
 static void test_one_refused_block_does_not_sink_the_poll() {
@@ -233,7 +238,7 @@ static void test_one_refused_block_does_not_sink_the_poll() {
 
 static void test_a_refused_block_outranks_a_timeout_in_the_outcome() {
     // One block silent, another refused with an exception: the device is demonstrably alive,
-    // so the poll is InvalidFrame (present, nothing usable), not the misleading Timeout.
+    // so the poll says "present, nothing usable" rather than the misleading Timeout.
     MockTransport transport;
     transport.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
         if (req.size() < 8) return false;
@@ -252,7 +257,7 @@ static void test_a_refused_block_outranks_a_timeout_in_the_outcome() {
     GrowattDriver driver(transport);
     DeviceState   state;
     state.lastPollAttemptMs = 5000;
-    TEST_ASSERT_EQUAL(PollResult::InvalidFrame, driver.poll(state));
+    TEST_ASSERT_EQUAL(PollResult::NotRegistered, driver.poll(state));
 }
 
 // A bus with a bad ground or missing termination shows up as CRC failures, and that is the one
@@ -319,6 +324,72 @@ static void test_a_corrupt_block_is_counted_even_when_the_poll_succeeds() {
     // Cumulative, so a bus that keeps corrupting keeps climbing.
     TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
     TEST_ASSERT_EQUAL_UINT32(2, driver.busErrors().checksumErrors);
+}
+
+// The probe block is the one this profile does not know the device has. The Modbus spec says an
+// unknown range should be answered with an exception, but a device may simply say nothing --
+// and unflagged, that silence would add a timeout to the metrics on EVERY poll of a perfectly
+// wired inverter: ~360 an hour, forever. `probe = true` in the profile is what stops it.
+static void test_a_silent_probe_block_moves_no_bus_counter() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 8) return false;
+        const uint16_t start = static_cast<uint16_t>((req[2] << 8) | req[3]);
+        if (start >= 3000) {
+            return false;  // the probe range: this unit does not implement it, and stays silent
+        }
+        const uint16_t count = static_cast<uint16_t>((req[4] << 8) | req[5]);
+        reply.push_back(req[0]);
+        reply.push_back(req[1]);
+        reply.push_back(static_cast<uint8_t>(count * 2));
+        for (uint16_t i = 0; i < count * 2; ++i) {
+            reply.push_back(0x00);
+        }
+        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
+        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
+        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        return true;
+    });
+    GrowattDriver driver(transport);
+    DeviceState   state;
+    state.lastPollAttemptMs = 5000;
+
+    TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
+    TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
+    const auto errors = driver.busErrors();
+    TEST_ASSERT_EQUAL_UINT32(0, errors.timeouts);
+    TEST_ASSERT_EQUAL_UINT32(0, errors.checksumErrors);
+    TEST_ASSERT_EQUAL_UINT32(0, errors.invalidFrames);
+}
+
+// ...and the flag is on the block the profile actually declares as a probe, not on any block
+// that happens to be silent: a mapped block going quiet is still a real timeout.
+static void test_a_silent_mapped_block_is_still_counted() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 8) return false;
+        const uint16_t start = static_cast<uint16_t>((req[2] << 8) | req[3]);
+        if (start == 1000) {
+            return false;  // a mapped block, silent
+        }
+        const uint16_t count = static_cast<uint16_t>((req[4] << 8) | req[5]);
+        reply.push_back(req[0]);
+        reply.push_back(req[1]);
+        reply.push_back(static_cast<uint8_t>(count * 2));
+        for (uint16_t i = 0; i < count * 2; ++i) {
+            reply.push_back(0x00);
+        }
+        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
+        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
+        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        return true;
+    });
+    GrowattDriver driver(transport);
+    DeviceState   state;
+    state.lastPollAttemptMs = 5000;
+
+    TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
+    TEST_ASSERT_EQUAL_UINT32(1, driver.busErrors().timeouts);
 }
 
 // An exception reply is a healthy device declining a range -- the bring-up probe block does
@@ -630,11 +701,13 @@ int main(int, char**) {
     RUN_TEST(test_find_register_reports_out_of_range);
     RUN_TEST(test_a_full_poll_decodes_measurements_over_the_bus);
     RUN_TEST(test_silence_is_a_timeout);
-    RUN_TEST(test_all_blocks_refused_is_an_invalid_frame);
+    RUN_TEST(test_all_blocks_refused_is_not_registered);
     RUN_TEST(test_one_refused_block_does_not_sink_the_poll);
     RUN_TEST(test_a_refused_block_outranks_a_timeout_in_the_outcome);
     RUN_TEST(test_a_corrupt_reply_is_reported_as_a_checksum_error);
     RUN_TEST(test_a_corrupt_block_is_counted_even_when_the_poll_succeeds);
+    RUN_TEST(test_a_silent_probe_block_moves_no_bus_counter);
+    RUN_TEST(test_a_silent_mapped_block_is_still_counted);
     RUN_TEST(test_a_refused_block_moves_no_bus_counter);
     RUN_TEST(test_an_intact_reply_from_another_unit_is_not_a_checksum_error);
     RUN_TEST(test_a_sustained_noise_trickle_hits_the_transaction_deadline);

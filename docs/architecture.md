@@ -638,7 +638,7 @@ network.
 | `test_register_map` | float32 word order, NaN sentinels, validity bitmap |
 | `test_measurements` | supported/valid/stale matrix, capability filtering |
 | `test_commands` | Read-only rejection per command type, range validation, rate limiting |
-| `test_device_context` | Poll rhythm, and that bus errors reach the metrics per transaction rather than per poll verdict (including across a counter wrap) |
+| `test_device_context` | Bus errors reaching the metrics per transaction rather than per poll verdict, including the construction baseline and a counter wrap |
 
 Fixtures: `test/fixtures/` with frames from the reference, supplemented in Phase 3 with **real
 recordings** from the TL3000-20, plus deliberately corrupted frames and a night scenario.

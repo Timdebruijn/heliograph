@@ -338,6 +338,36 @@ static void test_a_marker_with_no_readable_models_is_not_reported_as_a_timeout()
     TEST_ASSERT_EQUAL(PollResult::NotRegistered, d.poll(state));
 }
 
+// A device advertising an inverter model shorter than this driver can decode. Every read
+// succeeds with a valid CRC, so the tally inside read() sees nothing wrong -- the failure is in
+// the decode, and it has to be counted there. It was not, and because walked_ is not reset on
+// this path the driver loops on the same entry forever: every poll fails, and all three RS485
+// counters read zero for the entire uptime. That is the reading an operator is most likely to
+// act on wrongly, since zero bus errors says "the cable is fine" about a bridge that publishes
+// nothing at all.
+static void test_an_undecodable_model_counts_an_invalid_frame() {
+    Rig      r;
+    uint16_t at = r.device.placeMarker();
+    at = r.device.addModel(at, sunspec::kModelCommon,
+                           FakeSunspecDevice::commonPayload("Acme Solar", "AS-5000", "SN12345"));
+    // Declares itself an inverter, then carries far too few registers to be one.
+    at = r.device.addModel(at, sunspec::kModelInverterThreePhase, std::vector<uint16_t>(10, 0));
+    r.device.terminate(at);
+    r.arm();
+    auto d = r.makeDriver();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::InvalidFrame, d.poll(state));
+    TEST_ASSERT_EQUAL_UINT32(1, d.busErrors().invalidFrames);
+    // Not a wire fault: nothing arrived corrupted and nothing went unanswered.
+    TEST_ASSERT_EQUAL_UINT32(0, d.busErrors().checksumErrors);
+    TEST_ASSERT_EQUAL_UINT32(0, d.busErrors().timeouts);
+
+    // ...and it keeps counting, because the driver keeps retrying the same chain entry.
+    TEST_ASSERT_EQUAL(PollResult::InvalidFrame, d.poll(state));
+    TEST_ASSERT_EQUAL_UINT32(2, d.busErrors().invalidFrames);
+}
+
 static void test_a_silent_device_does_not_poll() {
     Rig r;
     buildTypical(r.device);
@@ -378,6 +408,7 @@ int main(int, char**) {
     RUN_TEST(test_a_corrupt_reply_is_reported_as_a_checksum_error);
     RUN_TEST(test_corruption_that_starts_mid_chain_is_still_a_checksum_error);
     RUN_TEST(test_a_marker_with_no_readable_models_is_not_reported_as_a_timeout);
+    RUN_TEST(test_an_undecodable_model_counts_an_invalid_frame);
     RUN_TEST(test_a_silent_device_does_not_poll);
     RUN_TEST(test_the_driver_is_read_only);
     return UNITY_END();

@@ -49,8 +49,12 @@ integration's implementation choice, not a statement by Growatt.
 **Therefore the profile probes both.** Alongside the mapped 0–124 block it reads 40 registers
 at 3000, mapping nothing from them. The only purpose is that the first bring-up dump answers
 the question directly: does this unit populate 0–124, 3000+, or both? A block the device
-refuses is skipped harmlessly, so probing a range that does not exist costs a timeout and
-nothing else. This is the same tactic `sph.toml` uses for its own open generation question.
+refuses is skipped harmlessly, and the block is declared `probe = true`, which keeps its read
+failures out of the RS485 bus counters — so probing a range that does not exist costs nothing
+at all. That flag is doing real work: a Modbus device *should* answer an unknown range with an
+exception, but it is free to stay silent instead, and an unflagged probe block would then add a
+timeout to the metrics on every poll of a perfectly healthy inverter. This is the same tactic
+`sph.toml` uses for its own open generation question.
 
 The driver stays **Experimental** until someone confirms the map against a physical unit.
 
