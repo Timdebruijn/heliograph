@@ -702,8 +702,10 @@ function wizRenderOpts(){
             v===''?'— choose —':esc(v)}</option>`).join('')
         }</select>${hint}`;
     }
+    const num=o.min_value!==undefined
+      ? ` type="number" min="${esc(o.min_value)}" max="${esc(o.max_value)}"` : '';
     return `<label for="wopt_${esc(o.key)}">${esc(o.display_name)}</label>
-      <input id="wopt_${esc(o.key)}" data-opt="${esc(o.key)}" value="${esc(cur)}">${hint}`;
+      <input id="wopt_${esc(o.key)}"${num} data-opt="${esc(o.key)}" value="${esc(cur)}">${hint}`;
   }).join('');
   wizGateConfirm();
 }
@@ -737,7 +739,14 @@ async function saveDriver(){
   if(serial)body.serial=serial;
   const r=await authFetch('/api/v1/config',{method:'PATCH',
     headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!r.ok){alert('Save failed: '+httpWhy(r));return}
+  if(!r.ok){
+    // The body, not just the status. httpWhy() gives "HTTP 400", and the firmware's message is
+    // the whole point of a 400 here: it names the field and the range. The wizard is the path
+    // the bring-up docs send people down, and it was the one place that threw that away.
+    const d=await r.json().catch(()=>({}));
+    alert('Save failed: '+((d.error&&d.error.message)||httpWhy(r)));
+    return;
+  }
   wizSavedSerial=serial;
   wizStep=7;renderWizard();
 }
@@ -901,8 +910,10 @@ async function renderConfig(){
             `<option value="${esc(v)}" ${v===cur?'selected':''}>${v===''?'(driver default)':esc(v)}</option>`).join('')}</select>
           <div class="dim" style="font-size:12px">${esc(o.description||'')}</div>`;
       }
+      const num=o.min_value!==undefined
+        ? ` type="number" min="${esc(o.min_value)}" max="${esc(o.max_value)}"` : '';
       return `<label for="opt_${o.key}">${esc(o.display_name)}</label>
-        <input id="opt_${o.key}" data-opt="${esc(o.key)}" value="${esc(cur)}">`;
+        <input id="opt_${o.key}"${num} data-opt="${esc(o.key)}" value="${esc(cur)}">`;
     }).join('');
   };
   window.reloadDriverOpts=()=>{$('#drvopts').innerHTML=optsFor($('#c_drv').value)};
@@ -955,8 +966,13 @@ async function renderConfig(){
             o.allowed_values.map(v=>`<option value="${esc(v)}" ${known&&v===cur?'selected':''}>${
               v===''?'— choose —':esc(v)}</option>`).join('')}</select>${hint}`;
       }
+      // A bounded option gets a number field with the driver's own limits. The firmware
+      // refuses an out-of-range value either way; showing the bounds is what stops someone
+      // discovering them from an error message after a save.
+      const num=o.min_value!==undefined
+        ? ` type="number" min="${esc(o.min_value)}" max="${esc(o.max_value)}"` : '';
       return `<label for="xd${index}_${esc(o.key)}">${esc(o.display_name)}</label>
-        <input id="xd${index}_${esc(o.key)}" value="${esc(cur)}"
+        <input id="xd${index}_${esc(o.key)}"${num} value="${esc(cur)}"
           oninput="setExtraOption(${index},'${esc(o.key)}',this.value)">${hint}`;
     }).join('');
   };

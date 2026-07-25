@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -541,26 +542,24 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
     // An earlier attempt simply cleared the map whenever the id changed. Review showed that
     // silently wiped a working setup on a discovery-wizard click, on a typo, and on an empty id,
     // and never repaired an already-stuck config (2026-07-25).
-    if (const DriverDescriptor* target = lookupDriver ? lookupDriver(merged.driver.id) : nullptr) {
-        for (auto it = merged.driver.options.begin(); it != merged.driver.options.end();) {
-            const bool supplied = std::find(suppliedOptionKeys.begin(), suppliedOptionKeys.end(),
-                                            it->first) != suppliedOptionKeys.end();
-            const auto stored   = config.driver.options.find(it->first);
-            const bool asserted = supplied && (stored == config.driver.options.end() ||
-                                               stored->second != it->second);
-            if (asserted) {
+    // Heals one option map against what its driver declares. `assertedKey` decides which
+    // entries are off limits -- a value this request asked for is reported, never rewritten.
+    const auto healOptions = [](const DriverDescriptor& target, DriverOptions& options,
+                                const std::function<bool(const std::string&)>& assertedKey) {
+        for (auto it = options.begin(); it != options.end();) {
+            if (assertedKey(it->first)) {
                 ++it;
                 continue;
             }
             const DriverOption* declared = nullptr;
-            for (const auto& o : target->options) {
+            for (const auto& o : target.options) {
                 if (o.key == it->first) {
                     declared = &o;
                     break;
                 }
             }
             if (declared == nullptr) {
-                it = merged.driver.options.erase(it);
+                it = options.erase(it);
                 continue;
             }
             if (!declared->allowedValues.empty() &&
@@ -568,8 +567,33 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
                           it->second) == declared->allowedValues.end()) {
                 it->second = declared->defaultValue;
             }
+            // The third shape, and the one this loop was missing. A numeric option only gained
+            // bounds in this release, so a value that was perfectly legal before is refused
+            // now -- and because the REST gate validates the MERGED map, that made every later
+            // PATCH fail, including one that touches nothing driver-related. Exactly the
+            // lockout the branches above exist to prevent, reopened for a new shape.
+            if (declared->isNumeric()) {
+                char*      end    = nullptr;
+                const long parsed = std::strtol(it->second.c_str(), &end, 10);
+                const bool number = !it->second.empty() && end != it->second.c_str() && *end == '\0';
+                if (!number || parsed < declared->minValue || parsed > declared->maxValue) {
+                    it->second = declared->defaultValue;
+                }
+            }
             ++it;
         }
+    };
+
+    if (const DriverDescriptor* target = lookupDriver ? lookupDriver(merged.driver.id) : nullptr) {
+        healOptions(*target, merged.driver.options, [&](const std::string& key) {
+            const bool supplied =
+                std::find(suppliedOptionKeys.begin(), suppliedOptionKeys.end(), key) !=
+                suppliedOptionKeys.end();
+            const auto stored = config.driver.options.find(key);
+            const auto now    = merged.driver.options.find(key);
+            return supplied && (stored == config.driver.options.end() ||
+                                (now != merged.driver.options.end() && stored->second != now->second));
+        });
     }
 
 
@@ -588,6 +612,7 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
     }
 
     const bool serialSupplied = !doc["serial"].isNull();
+    bool extraDevicesSupplied = false;
     // Whole-list replacement, not a merge: the list has no stable keys to merge on, and
     // "patch element 2" would need an index the caller cannot know is still the same element.
     // Sending the array replaces it; omitting it leaves it alone, like every other section.
@@ -620,7 +645,22 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
             parsed.push_back(std::move(d));
         }
         merged.additionalDevices = std::move(parsed);
+        extraDevicesSupplied     = true;
     }
+
+    // The extra devices get the same healing, and they need it more: nothing healed them at
+    // all before, so any stored value their driver stopped accepting made the whole
+    // configuration unsaveable with no way to see which row was at fault. Nothing here is ever
+    // "asserted" -- the list travels whole or not at all, and when it travels the caller's
+    // values are validated by the REST layer rather than rewritten here.
+    if (lookupDriver && !extraDevicesSupplied) {
+        for (auto& dev : merged.additionalDevices) {
+            if (const DriverDescriptor* d = lookupDriver(dev.id)) {
+                healOptions(*d, dev.options, [](const std::string&) { return false; });
+            }
+        }
+    }
+
 
     if (JsonObjectConst serial = doc["serial"]; !serial.isNull()) {
         if (!patchBool(serial["override"], merged.serial.enabled, "serial.override", error))

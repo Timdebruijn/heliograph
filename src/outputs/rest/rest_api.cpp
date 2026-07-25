@@ -525,10 +525,15 @@ bool RestApi::begin() {
             // hybrid's registers and publishing values that look entirely plausible. That is the
             // exact hazard the gate above exists for; the new list walked straight past it.
             //
-            // Unconditional, unlike the driver.id check above: an entry here is only ever
-            // present because this patch sent the whole array, so there is no stored value to
-            // become unresolvable behind the user's back and no lockout to avoid.
-            for (size_t i = 0; i < updated.additionalDevices.size(); ++i) {
+            // Only when this patch actually changed the list. The comment here used to claim an
+            // entry is "only ever present because this patch sent the whole array" -- provably
+            // false: applyConfigPatch leaves the array alone when it is omitted, and there is a
+            // test asserting exactly that. So validating the merged list unconditionally meant a
+            // stored value the firmware stopped accepting -- a numeric option that only gained
+            // bounds this release -- refused every later PATCH, including ones touching nothing
+            // driver-related. Same rule as driver.id below, for the same reason (review).
+            const bool extraDevicesChanged = updated.additionalDevices != before.additionalDevices;
+            for (size_t i = 0; extraDevicesChanged && i < updated.additionalDevices.size(); ++i) {
                 const auto&             dev   = updated.additionalDevices[i];
                 const std::string       where = "additional_devices[" + std::to_string(i) + "]";
                 const DriverDescriptor* d     = lookupDriver(dev.id);

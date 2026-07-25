@@ -36,13 +36,20 @@ const DriverDescriptor& descriptor() {
         x.supportsWrite           = false;
         x.options                 = {
             DriverOption{"unit_id", "Modbus unit id",
-                                         "Slave address of the inverter on the RS485 bus. Range 1-247.", "1", {}},
+                                         "Slave address of the inverter on the RS485 bus. Range 1-247.", "1", {},
+                                         1, 247},
             DriverOption{"base_address", "SunSpec base register",
                                          "Where the 'SunS' marker lives. 40000 covers most devices; 50000 is the "
                                          "other common choice, and some vendors sit elsewhere. Each extra guess "
                                          "would cost a discovery round trip, so this is set rather than searched.",
                                          "40000",
-                                         {}}};
+                                         {},
+                                         // Matches what optionsFrom() below actually accepts.
+                                         // Declaring 1 here made the descriptor stricter than
+                                         // its own parser and locked out base 0, which is one
+                                         // of the standard SunSpec bases. The marker is two
+                                         // registers, so 65534 still fits (review).
+                                         0, 65534}};
         return x;
     }();
     return d;

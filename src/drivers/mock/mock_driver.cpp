@@ -67,7 +67,14 @@ DriverDescriptor makeDescriptor(bool writable) {
     x.options = {DriverOption{"day_length_minutes", "Simulated day length",
                               "How long one simulated sunrise-to-sunset cycle takes. Short by "
                               "default so a full curve is visible within minutes of booting.",
-                              "10", {}}};
+                              "10", {},
+                              // Bounded like every other numeric option. Its parser has the
+                              // same silent fallback the others had -- a non-positive or
+                              // garbage value keeps the default with no log line at all -- and
+                              // leaving the one driver everybody has compiled in unbounded
+                              // would make "the numeric driver options" a claim about most of
+                              // them (review, 2026-07-25).
+                              1, 1440}};
     return x;
 }
 

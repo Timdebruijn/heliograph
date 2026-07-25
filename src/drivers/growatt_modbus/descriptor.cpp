@@ -54,11 +54,15 @@ const DriverDescriptor& descriptor() {
         // the deliberate next step, gated on the map being confirmed.
         x.supportsWrite = false;
         x.options       = {
+            // Bounded here, not only in optionsFrom(): the parser's fallback is silent by the
+            // time it runs, and on a bus of identical inverters the value it falls back to is
+            // the address the first one already uses.
             DriverOption{"unit_id", "Modbus unit id",
                          "The inverter's Modbus slave address (Growatt default is 1). "
                          "Range 1-247.",
                          "1",
-                         {}},
+                         {},
+                         1, 247},
             DriverOption{"profile", "Register-map profile",
                          "Which Growatt register map to use (profiles/growatt/). "
                          "Empty = the default profile.",

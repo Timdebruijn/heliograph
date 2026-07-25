@@ -36,7 +36,8 @@ const DriverDescriptor& descriptor() {
             "Address handed to the inverter at registration (reference default 10 = 0x0A). "
             "Range 1-254.",
             "10",
-            {}}};
+            {},
+            1, 254}};
         return x;
     }();
     return d;

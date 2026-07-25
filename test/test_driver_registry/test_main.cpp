@@ -269,8 +269,84 @@ static void test_configured_options_reach_the_created_driver() {
     TEST_ASSERT_EQUAL_UINT8(3, transport.writes.front().at(0));
 }
 
+
+// --- numeric option bounds ---------------------------------------------------------------
+
+static DriverDescriptor boundedDescriptor() {
+    DriverDescriptor d;
+    d.id      = "bounded";
+    d.options = {DriverOption{"unit_id", "Modbus unit id", "", "1", {}, 1, 247}};
+    return d;
+}
+
+// A driver's own parser is too late to be the only check: by the time it falls back the value
+// is already stored, and on a bus of identical inverters the address it falls back to is the
+// one the first device uses -- so a typo'd unit id surfaced as an id collision naming a
+// duplicate the configuration does not contain.
+static void test_a_numeric_option_out_of_range_is_refused() {
+    const auto        d = boundedDescriptor();
+    DriverOptionError e;
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "300"}}, e));
+    TEST_ASSERT_EQUAL_STRING("unit_id", e.key.c_str());
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "0"}}, e));
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"unit_id", "1"}}, e));
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"unit_id", "247"}}, e));
+}
+
+// Refused rather than parsed leniently: strtol would read "3x" as 3, and storing 3 for a value
+// the user typed as something else is the same silent substitution this exists to remove.
+static void test_a_numeric_option_that_is_not_a_number_is_refused() {
+    const auto        d = boundedDescriptor();
+    DriverOptionError e;
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "3x"}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", ""}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "one"}}, e));
+}
+
+// An option with no bounds declared stays free-form, which is what every non-addressing option
+// is. isNumeric() keys on the bounds, not on the value looking like a number.
+// strtol is lenient in three ways that all end up STORED verbatim: it skips leading
+// whitespace, accepts a leading '+', and accepts leading zeros. "007" then slipped past the
+// settings page's duplicate-address check, which compares strings -- so two rows could claim
+// the same unit and only the boot-time collision guard noticed.
+static void test_a_sloppy_but_parseable_number_is_refused() {
+    const auto        d = boundedDescriptor();
+    DriverOptionError e;
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", " 7"}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "+7"}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "007"}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "7 "}}, e));
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"unit_id", "7"}}, e));
+}
+
+// A bound that legitimately starts at zero must still be numeric -- the SunSpec base register
+// is exactly that, and declaring 1 made the descriptor stricter than its own parser.
+static void test_a_range_starting_at_zero_is_still_numeric() {
+    DriverDescriptor d;
+    d.id      = "based";
+    d.options = {DriverOption{"base_address", "Base", "", "40000", {}, 0, 65534}};
+    DriverOptionError e;
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"base_address", "0"}}, e));
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"base_address", "65534"}}, e));
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"base_address", "65535"}}, e));
+}
+
+static void test_an_unbounded_option_stays_free_form() {
+    DriverDescriptor d;
+    d.id      = "free";
+    d.options = {DriverOption{"note", "Note", "", "", {}}};
+    DriverOptionError e;
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"note", "anything at all"}}, e));
+    TEST_ASSERT_TRUE(validateDriverOptions(d, {{"note", "999999"}}, e));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_a_numeric_option_out_of_range_is_refused);
+    RUN_TEST(test_a_numeric_option_that_is_not_a_number_is_refused);
+    RUN_TEST(test_a_sloppy_but_parseable_number_is_refused);
+    RUN_TEST(test_a_range_starting_at_zero_is_still_numeric);
+    RUN_TEST(test_an_unbounded_option_stays_free_form);
     RUN_TEST(test_registered_driver_is_found);
     RUN_TEST(test_unknown_driver_is_not_found);
     RUN_TEST(test_registering_the_same_id_replaces_rather_than_duplicates);

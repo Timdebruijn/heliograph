@@ -410,6 +410,12 @@ bool buildDriversPayload(const std::vector<DriverDescriptor>& drivers, std::stri
             oo["display_name"]   = o.displayName;
             oo["description"]    = o.description;
             oo["default_value"]  = o.defaultValue;
+            // Emitted only for a numeric option, so a client can tell "bounded number" from
+            // "free text" without guessing from the key name.
+            if (o.isNumeric()) {
+                oo["min_value"] = o.minValue;
+                oo["max_value"] = o.maxValue;
+            }
             JsonArray allowed    = oo["allowed_values"].to<JsonArray>();
             for (const auto& v : o.allowedValues) {
                 allowed.add(v);

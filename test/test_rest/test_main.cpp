@@ -482,6 +482,67 @@ static void test_a_device_payload_says_when_it_last_answered() {
     TEST_ASSERT_TRUE(parse(json)["last_successful_poll_seconds_ago"].isNull());
 }
 
+static const DriverDescriptor& boundedUnitIdDescriptor() {
+    static const DriverDescriptor d = [] {
+        DriverDescriptor x;
+        x.id      = "growatt_modbus";
+        x.options = {DriverOption{"unit_id", "Modbus unit id", "", "1", {}, 1, 247}};
+        return x;
+    }();
+    return d;
+}
+
+// The lockout this repo has had to remove twice, reopened by a new option shape. A numeric
+// option only gained bounds in this release, so a value that was legal when it was stored is
+// refused now -- and the REST gate validates the MERGED map, so it made every later PATCH fail,
+// including one touching nothing driver-related. Healed on the same terms as the other two
+// shapes: only a value this request did NOT assert.
+static void test_a_stored_out_of_range_option_is_healed_not_fatal() {
+    Configuration c;
+    c.driver.id                  = "growatt_modbus";
+    c.driver.options["unit_id"]  = "300";  // legal before the bounds existed
+    ConfigError e;
+
+    // A locally declared descriptor rather than a real driver's: this suite runs on env:native,
+    // where the drivers are compiled out, and the behaviour under test is the config layer's.
+    const auto lookup = [](const std::string& id) -> const DriverDescriptor* {
+        return id == "growatt_modbus" ? &boundedUnitIdDescriptor() : nullptr;
+    };
+    // A patch that touches nothing driver-related must still go through.
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"logging":{"level":"debug"}})", c, e, lookup));
+    TEST_ASSERT_EQUAL_STRING("1", c.driver.options["unit_id"].c_str());  // back to the default
+}
+
+// ...but a bad value the caller just supplied is reported, not silently rewritten. Swallowing
+// it would tell someone their typo had been accepted.
+static void test_an_asserted_out_of_range_option_is_left_for_the_caller() {
+    Configuration c;
+    c.driver.id = "growatt_modbus";
+    ConfigError e;
+    const auto  lookup = [](const std::string& id) -> const DriverDescriptor* {
+        return id == "growatt_modbus" ? &boundedUnitIdDescriptor() : nullptr;
+    };
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"driver":{"options":{"unit_id":"300"}}})", c, e, lookup));
+    TEST_ASSERT_EQUAL_STRING("300", c.driver.options["unit_id"].c_str());
+    DriverOptionError optionError;
+    TEST_ASSERT_FALSE(validateDriverOptions(boundedUnitIdDescriptor(), c.driver.options,
+                                           optionError));
+}
+
+// The extra devices had no healing at all, so one stored value their driver stopped accepting
+// made the whole configuration unsaveable with nothing naming the row.
+static void test_a_stored_out_of_range_extra_device_option_is_healed() {
+    Configuration c;
+    c.driver.id = "growatt_modbus";
+    c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {{"unit_id", "300"}}});
+    ConfigError e;
+    const auto  lookup = [](const std::string& id) -> const DriverDescriptor* {
+        return id == "growatt_modbus" ? &boundedUnitIdDescriptor() : nullptr;
+    };
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"logging":{"level":"debug"}})", c, e, lookup));
+    TEST_ASSERT_EQUAL_STRING("1", c.additionalDevices[0].options["unit_id"].c_str());
+}
+
 static void test_reboot_required_flag_is_patch_only() {
     auto        c = configWithSecrets();
     std::string json;
@@ -1427,6 +1488,9 @@ int main(int, char**) {
     RUN_TEST(test_the_status_payload_reports_devices_that_did_not_start);
     RUN_TEST(test_the_problem_list_is_always_present);
     RUN_TEST(test_a_device_payload_says_when_it_last_answered);
+    RUN_TEST(test_a_stored_out_of_range_option_is_healed_not_fatal);
+    RUN_TEST(test_an_asserted_out_of_range_option_is_left_for_the_caller);
+    RUN_TEST(test_a_stored_out_of_range_extra_device_option_is_healed);
     RUN_TEST(test_reboot_required_flag_is_patch_only);
     RUN_TEST(test_reboot_required_only_for_boot_time_settings);
     RUN_TEST(test_patch_leaves_absent_fields_alone);

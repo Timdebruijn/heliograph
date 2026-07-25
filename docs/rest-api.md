@@ -27,6 +27,34 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | GET | `/api/v1/events` | — | Server-Sent Events (live updates) |
 | GET | `/metrics` | — | Prometheus |
 
+Each driver in `/api/v1/drivers` declares its own options, and the web UI renders them
+generically from that declaration — a new driver's settings appear with no frontend change.
+An option is one of three shapes:
+
+| Shape | Declared as | Rendered as | Refused when |
+|---|---|---|---|
+| Free text | neither bounds nor `allowed_values` | text field | never |
+| Enumerated | `allowed_values` | select | not one of them |
+| Bounded number | `min_value` / `max_value` | number field with those limits | not a plain whole number, or outside the range |
+
+The bounded shape exists because a driver's own parser is too late to be the only check. An
+address outside the protocol's range used to pass config validation — which only length-checks
+option strings — get stored, and then fall back to the driver's default at boot with a single
+log line — for two of the three drivers; SunSpec's fallback had no log line at all. On a bus of
+identical inverters that default is the address the *first* one already uses, so a typo became
+an id collision, and the diagnosis pointed at a duplicate address the configuration does not
+contain. `PATCH` refuses it now, before the reboot.
+
+"Plain" is strict on purpose: `" 7"`, `"+7"` and `"007"` all parse, and were then stored
+verbatim — which is how `007` slipped past a duplicate-address check that compares strings.
+They are refused rather than normalised, because silently rewriting what someone typed is the
+substitution these bounds exist to remove.
+
+A value **already stored** when the bounds arrived is a different case: it is healed back to the
+option's default on the next `PATCH`, exactly as an unrecognised enumerated value is. Validating
+the merged configuration without that would have made a pre-existing value refuse every later
+save, including ones touching nothing driver-related.
+
 `/api/v1/drivers` is not in the assignment but is needed for the discovery wizard: it
 must be able to show the available drivers and their support level without hardcoding
 them in the frontend.
