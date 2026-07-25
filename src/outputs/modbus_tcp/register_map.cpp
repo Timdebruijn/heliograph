@@ -25,6 +25,50 @@ RegisterMap::RegisterMap() {
     for (size_t i = 0; i < kRegisterCount; ++i) {
         registers_[i] = kInvalidU16;
     }
+    // ...except the validity bitmap, where 0xFFFF means the exact opposite: every bit SET, i.e.
+    // "all of this is valid". The fill above therefore announced that a map full of NaN was
+    // trustworthy. publishMeasurement() promises the two signals always agree so a client can
+    // use whichever it can handle, and before the first poll -- at boot, or all night on an
+    // inverter that never answers -- they disagreed completely. A PLC or EVCC that trusts the
+    // bit and cannot represent NaN would record garbage as a real reading, which is precisely
+    // what the sentinel design exists to prevent (review, 2026-07-25).
+    //
+    // Cleared rather than set: unknown-until-proven is the safe direction, and it also zeroes
+    // the reserved bits past the defined ValidityBit range, which setValidity() never touches
+    // and which otherwise read as 1 forever.
+    for (size_t i = 0; i < reg::kValidityBitmapRegisters; ++i) {
+        registers_[reg::kValidityBitmap + i] = 0;
+    }
+    // Same inversion, same reasoning, on every other register where all-ones reads as an
+    // assertion rather than as "unknown". A first version of this fix did only the bitmap;
+    // review pointed out that the flags, the capability bitmaps and the identity strings tell
+    // the same lie, and for longer. refresh() only runs once a driver exists and has begun
+    // (main.cpp gates it on g_state), so on a bridge with no driver selected, or one whose
+    // inverter never answered, this is not a boot-time window of a few hundred milliseconds --
+    // it is what a Modbus client reads for the entire uptime: data_valid true, inverter_online
+    // true, and a capability bitmap claiming the driver can write all 64 channels while
+    // driver_read_only reads true in the same breath (review, 2026-07-25).
+    writeU16(reg::kBridgeOnline, 0);
+    writeU16(reg::kInverterOnline, 0);
+    writeU16(reg::kDataValid, 0);
+    writeU16(reg::kDataStale, 1);  // data we do not have is certainly not fresh
+    writeU16(reg::kBatteryPresent, 0);
+    writeU16(reg::kDriverReadOnly, 1);  // claim no write ability until a driver says otherwise
+    writeU16(reg::kPhaseCount, 0);
+    writeU16(reg::kMpptCount, 0);
+    for (uint16_t i = 0; i < 4; ++i) {
+        writeU16(static_cast<uint16_t>(reg::kCapabilitiesRead + i), 0);
+        writeU16(static_cast<uint16_t>(reg::kCapabilitiesWrite + i), 0);
+    }
+    // Identity strings: NUL-padded empty, which writeString() documents as unambiguously
+    // "unknown". 0xFF bytes are neither empty nor printable.
+    writeString(reg::kManufacturer, {}, 16);
+    writeString(reg::kModel, {}, 16);
+    writeString(reg::kSerialNumber, {}, 16);
+    writeString(reg::kFirmwareVersion, {}, 8);
+    writeString(reg::kDriverId, {}, 8);
+    writeString(reg::kBridgeFirmware, {}, 8);
+
     writeU32(reg::kSchemaVersionAddr, kSchemaVersion);
 }
 
@@ -125,9 +169,12 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
 
     // Status is only meaningful while the data is valid; otherwise it is last night's value.
     const bool statusUsable = state.dataValid && !state.dataStale;
-    writeU16(reg::kStatusCode, statusUsable ? state.statusCode : kInvalidU16);
-    writeU16(reg::kStatusCodeMirror, statusUsable ? state.statusCode : kInvalidU16);
-    setValidity(ValidityBit::StatusCode, statusUsable);
+    // ...and only when the driver actually reads a status word. 0 means "waiting"/"standby" in
+    // most protocols, so the struct default would report a device at full power as idle.
+    const bool statusCodeUsable = state.statusCodeSupported && statusUsable;
+    writeU16(reg::kStatusCode, statusCodeUsable ? state.statusCode : kInvalidU16);
+    writeU16(reg::kStatusCodeMirror, statusCodeUsable ? state.statusCode : kInvalidU16);
+    setValidity(ValidityBit::StatusCode, statusCodeUsable);
 
     // A driver whose protocol has no error code field must not publish 0 here: 0 means
     // "no fault", which is a claim we cannot make.

@@ -86,7 +86,7 @@ bool buildStatePayload(const DeviceState& state, std::string& out, size_t maxByt
     }
 
     const bool statusUsable = state.dataValid && !state.dataStale;
-    if (statusUsable) {
+    if (state.statusCodeSupported && statusUsable) {
         doc["status_code"] = state.statusCode;
         // Absent-as-null, mirroring the REST payload: a driver with no status text for its
         // protocol must not surface as an empty string in Home Assistant.

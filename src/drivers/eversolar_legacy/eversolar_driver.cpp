@@ -499,7 +499,8 @@ PollResult EversolarDriver::poll(DeviceState& state) {
     m.set(measurement_id::kTemperature, info.temperatureC, ts);
     m.set(measurement_id::kOperatingHours, static_cast<double>(info.operatingHours), ts);
 
-    state.statusCode = info.statusCode;
+    state.statusCode          = info.statusCode;
+    state.statusCodeSupported = true;
     // Observed meanings only (see opModeText for the per-code evidence); anything never
     // seen on hardware stays an honest "Unknown (n)" until the day/night captures grow
     // the map further.

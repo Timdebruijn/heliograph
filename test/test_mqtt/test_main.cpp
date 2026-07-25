@@ -220,14 +220,33 @@ static void test_an_empty_status_text_is_null_not_an_empty_string() {
     state.inverterOnline = true;
     state.dataValid      = true;
     state.dataStale      = false;
-    state.statusCode     = 3;
-    state.statusText     = "";
+    state.statusCode          = 3;
+    state.statusCodeSupported = true;
+    state.statusText          = "";
 
     std::string json;
     TEST_ASSERT_TRUE(buildStatePayload(state, json));
     const auto doc = parse(json);
     TEST_ASSERT_TRUE(doc["status_text"].isNull());
     TEST_ASSERT_EQUAL(3, doc["status_code"].as<int>());
+}
+
+// A driver that never reads a status word leaves statusCode at 0 -- and 0 is a MEANING in most
+// protocols ("waiting", "standby"), so publishing the default reports an inverter at full power
+// as idle. Exactly the rule errorCodeSupported already carried, applied to its neighbour
+// (review, 2026-07-25).
+static void test_a_driver_without_a_status_word_publishes_no_status_code() {
+    DeviceState state;
+    state.inverterOnline = true;
+    state.dataValid      = true;
+    state.dataStale      = false;
+    // statusCodeSupported left false, statusCode left at its 0 default.
+
+    std::string json;
+    TEST_ASSERT_TRUE(buildStatePayload(state, json));
+    const auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["status_code"].isNull());
+    TEST_ASSERT_TRUE(json.find("\"status_code\":0") == std::string::npos);
 }
 
 static void test_stale_measurements_are_published_as_null() {
@@ -834,6 +853,7 @@ int main(int, char**) {
     RUN_TEST(test_error_code_is_null_when_the_protocol_has_none);
     RUN_TEST(test_status_text_is_not_invented);
     RUN_TEST(test_an_empty_status_text_is_null_not_an_empty_string);
+    RUN_TEST(test_a_driver_without_a_status_word_publishes_no_status_code);
     RUN_TEST(test_stale_measurements_are_published_as_null);
     RUN_TEST(test_a_genuine_zero_is_published_as_zero);
     RUN_TEST(test_derived_measurements_are_flagged);

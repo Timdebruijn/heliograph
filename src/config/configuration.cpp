@@ -7,6 +7,7 @@
 #include <ArduinoJson.h>
 
 #include <algorithm>
+#include <limits>
 #include <cstring>
 #include <string>
 
@@ -95,7 +96,22 @@ bool patchNumber(JsonVariantConst v, T& target, const char* field, ConfigError& 
         error = {field, "expected an integer"};
         return false;
     }
-    target = static_cast<T>(v.as<long long>());
+    // Range-checked BEFORE the narrowing cast. Casting first silently wrapped a value into
+    // something the later validate() was perfectly happy with, so the config that got stored was
+    // not the one that was asked for and nothing said so: port 65537 became 1 -- a privileged
+    // port -- and unit_id 259 became 3. Whether a bad value was caught depended entirely on
+    // where the wrap happened to land (review, 2026-07-25).
+    const long long raw = v.as<long long>();
+    if (raw < static_cast<long long>(std::numeric_limits<T>::min()) ||
+        raw > static_cast<long long>(std::numeric_limits<T>::max())) {
+        // Deliberately says "out of range for this field" rather than naming numbers: the only
+        // bounds available here are the C type's, and quoting those would be its own plausible
+        // lie -- polling.interval_seconds would advertise 4294967295 where validate() allows
+        // 3600. The narrower rule reports itself one step later, in its own words.
+        error = {field, "value is out of range for this field"};
+        return false;
+    }
+    target = static_cast<T>(raw);
     return true;
 }
 

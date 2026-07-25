@@ -633,7 +633,13 @@ void setup() {
             log::info("rtc: clock restored: %s (awaiting ntp for drift correction)",
                       n > 0 ? buf : "?");
         } else {
-            log::warn("rtc: present but time not set (first boot or empty backup supply)");
+            // Deliberately does not name a cause. readUtc() refuses for five distinct reasons
+            // -- oscillator stopped, a byte that is not valid BCD, a field out of range, a
+            // year outside 2024-2099, or a date that does not exist -- and only the first is
+            // "flat backup cell". Naming that one sent someone to replace a battery over what
+            // was actually a wiring or I2C fault (review, 2026-07-25).
+            log::warn("rtc: present but gave no usable time; running without it until ntp "
+                      "(flat backup cell, or a bad read -- check the I2C wiring if it persists)");
         }
     }
 
