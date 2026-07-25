@@ -111,6 +111,11 @@ size_t g_pollCursor = 0;
 /// Device ids, index-aligned with g_contexts, so a log line can name the inverter it means.
 std::vector<DeviceId> g_deviceIds;
 
+/// The id of the CONFIGURED first device, if it started. Empty otherwise -- and empty is the
+/// point: it is what stops a boot where device 1 failed from handing its MQTT topics, its Home
+/// Assistant entities and its recorder history to whichever device did start.
+DeviceId g_primaryDeviceId;
+
 /// How many devices the configuration asked for, whether or not they started. Drives the status
 /// LED: a configured device that failed to start is a fault to show, not an absence to ignore.
 size_t g_devicesConfigured = 0;
@@ -694,7 +699,10 @@ void rs485Task(void* /*arg*/) {
             for (const auto& id : g_deviceIds) {
                 if (StateHandle h = g_devices.state(id)) {
                     held.push_back(std::move(h));
-                    views.push_back({id, held.back().get()});
+                    // Primary is the CONFIGURED first device, not the first that happened to
+                    // start. When it fails to start no device is primary and nobody inherits
+                    // its topics, its Home Assistant entities or its history.
+                    views.push_back({id, held.back().get(), id == g_primaryDeviceId});
                 }
             }
             const auto first = g_state->snapshot();
@@ -890,6 +898,11 @@ void setup() {
         g_contexts.push_back(std::make_unique<DeviceContext>(*driver, *store, g_diagnostics,
                                                              nowMs, policy));
         g_deviceIds.push_back(id);
+        // `planned` is in configuration order and `p` is the entry being started, so this is
+        // true only for the first configured device -- never for a later one that starts first.
+        if (&p == &planned.front()) {
+            g_primaryDeviceId = id;
+        }
         g_drivers.push_back(std::move(driver));
         if (g_driver == nullptr) {
             g_driver  = g_drivers.front().get();
