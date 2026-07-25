@@ -153,5 +153,9 @@ One caveat worth knowing before you trust the counters over your own eyes: noise
 bytes — which is what a missing ground most often does — leaves a frame too short to parse, and
 that surfaces as a **timeout**, not a checksum error. So a bus can be electrically bad and still
 show nothing but timeouts. If a "sleeping inverter" is silent at a time it should not be, treat
-the cable as a suspect anyway. See the note in [prometheus.md](prometheus.md) for the other
-place these counters under-report.
+the cable as a suspect anyway.
+
+The counters are per **transaction**, so on a multi-block device they climb while the bridge is
+still publishing perfectly good data. That is deliberate — a bus losing a third of its frames
+should be visible long before it stops working — and it means a slowly rising checksum rate is
+the signal to act on, not a number waiting to jump off zero.

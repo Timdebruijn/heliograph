@@ -48,6 +48,10 @@ public:
     // never worked -- bridgeOnline is simply true while the poll loop runs.
 
 private:
+    /// Feeds the difference in the driver's frame-level tallies into Diagnostics. Called on
+    /// every poll, successful or not.
+    void recordBusErrors();
+
     InverterDriver& driver_;
     StateStore&     store_;
     Diagnostics&    diagnostics_;
@@ -57,6 +61,8 @@ private:
     DeviceState state_;
     uint64_t    lastAttemptMs_ = 0;
     bool        everPolled_    = false;
+    /// The driver's cumulative tallies as of the previous poll.
+    BusErrorCounts lastBusErrors_{};
 };
 
 }  // namespace heliograph

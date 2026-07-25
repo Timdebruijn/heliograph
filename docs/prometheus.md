@@ -110,27 +110,34 @@ A quiet night on a solar inverter produces timeouts and no checksum errors, and 
 the inverter powers down after dark. That asymmetry is exactly why the alert below watches
 checksum errors rather than timeouts.
 
-> **A flat zero on the checksum counter is weaker evidence than it looks, on a Modbus device.**
->
-> Before the release carrying this note a Modbus driver could not raise it at all: the shared read transaction folded CRC
-> failures into a generic protocol error, so on a Growatt or SunSpec install the metric was
-> structurally always zero and the alert could never fire. The PMU drivers (EverSolar, SolaX)
-> were unaffected.
->
-> Even after that fix it still under-counts, in two ways worth knowing before you trust it:
->
-> - A Growatt poll reads several register blocks and reports success as soon as **one** of them
->   decodes. So a bus corrupting, say, a third of its frames usually still has a good block per
->   poll, the poll returns Ok, and the checksum error is logged but never counted. The metric
->   therefore catches a bus that is *failing*, not one that is *degrading* — which is the
->   opposite of what an early-warning counter should do. Fixing that means decoupling the
->   counter from the poll verdict; it is tracked and not done yet.
-> - Line noise that damages a length or byte-count field makes the frame un-parseable rather
->   than merely wrong, and that surfaces as a **timeout**, not a checksum error.
->
-> Treat a non-zero value as a definite problem, and a zero as "no proof either way". The log at
-> `trace` level is the reliable source while the above stands: a corrupt block says so on the
-> line it happens.
+These three count **transactions, not polls**. One poll is several reads — a Modbus poll reads
+each register block separately, and a SunSpec poll walks the model chain before it reads
+anything — so a single poll can add several errors, and on a healthy bus adds none.
+
+That distinction is the whole value of the counter, and it took two fixes to get there:
+
+- Before the release carrying this note, a Modbus driver could not raise the checksum counter
+  **at all**: the shared read transaction folded CRC failures into a generic protocol error, so
+  on a Growatt or SunSpec install the metric was structurally always zero and the alert could
+  never fire. The PMU drivers (EverSolar, SolaX) were unaffected.
+- And on every driver it only counted when a poll failed **outright**, because the counters were
+  derived from the poll's verdict — and a poll succeeds as soon as *one* block decodes. A bus
+  corrupting a third of its frames therefore polled `Ok` nearly every time and left the metric
+  at zero. The counter caught a bus that had already failed and said nothing about one that was
+  degrading, which is backwards for an early warning. Each driver now tallies what the wire did
+  per transaction, and the poll verdict no longer gates it.
+
+> **One under-count remains.** Line noise that damages a length or byte-count field makes the
+> frame un-parseable rather than merely wrong, so it surfaces as a **timeout** rather than a
+> checksum error. A bus with a genuine cabling fault will normally produce both, but a slow rise
+> in timeouts on an inverter that should be awake deserves the same suspicion as a checksum
+> error. The `trace` log is the ground truth either way: a corrupt block says so on the line it
+> happens.
+
+An exception reply — the device answering "I do not have that register" — is deliberately **not**
+an error in any of the three. It proves the wiring and the addressing are both fine, and a
+bring-up profile that probes a range the inverter does not implement would otherwise put a
+permanent slope on the metric of a perfectly healthy installation.
 
 ### Bridge health
 
@@ -278,6 +285,16 @@ Line noise rather than a dead link:
 
 ```promql
 rate(heliograph_rs485_checksum_errors_total[15m]) > 0
+```
+
+Since the counter moves per transaction this fires while the bridge is still delivering data —
+which is the point, but it does mean a *rising* rate on a bus that looks healthy in Home
+Assistant is now the expected shape of an early warning, not a contradiction. The fraction of
+transactions going bad is the more readable version:
+
+```promql
+rate(heliograph_rs485_checksum_errors_total[1h])
+  / rate(heliograph_poll_success_total[1h])
 ```
 
 The bridge rebooted:

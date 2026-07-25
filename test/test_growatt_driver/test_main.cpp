@@ -283,6 +283,61 @@ static void test_a_corrupt_reply_is_reported_as_a_checksum_error() {
     TEST_ASSERT_EQUAL(PollResult::ChecksumError, driver.poll(state));
 }
 
+// The degrading bus, which is the case the metric exists for and the one it used to miss
+// entirely. One block comes back corrupt, the other decodes; the poll therefore succeeds --
+// correctly, there IS usable data -- and for as long as the counter was derived from that
+// verdict the checksum metric stayed at zero. A third of the frames on the floor and the
+// dashboard said the wire was fine. The tally has to move on the transaction, not the poll.
+static void test_a_corrupt_block_is_counted_even_when_the_poll_succeeds() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 8) return false;
+        const uint16_t start = static_cast<uint16_t>((req[2] << 8) | req[3]);
+        const uint16_t count = static_cast<uint16_t>((req[4] << 8) | req[5]);
+        reply.push_back(req[0]);
+        reply.push_back(req[1]);
+        reply.push_back(static_cast<uint8_t>(count * 2));
+        for (uint16_t i = 0; i < count * 2; ++i) {
+            reply.push_back(0x00);
+        }
+        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
+        // Only the storage block is wrecked. The base and probe blocks arrive clean, so the
+        // poll has something to publish.
+        const bool wreck = start == 1000;
+        reply.push_back(static_cast<uint8_t>((crc & 0xFF) ^ (wreck ? 0xFF : 0x00)));
+        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        return true;
+    });
+    GrowattDriver driver(transport);
+    DeviceState   state;
+    state.lastPollAttemptMs = 5000;
+
+    TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
+    TEST_ASSERT_EQUAL_UINT32(1, driver.busErrors().checksumErrors);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.busErrors().timeouts);
+
+    // Cumulative, so a bus that keeps corrupting keeps climbing.
+    TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
+    TEST_ASSERT_EQUAL_UINT32(2, driver.busErrors().checksumErrors);
+}
+
+// An exception reply is a healthy device declining a range -- the bring-up probe block does
+// exactly this. Counting it as a bus error would put a permanent slope on the metric of every
+// correctly wired installation.
+static void test_a_refused_block_moves_no_bus_counter() {
+    MockTransport transport;
+    transport.setResponder(alwaysException());
+    GrowattDriver driver(transport);
+
+    DeviceState state;
+    state.lastPollAttemptMs = 5000;
+    driver.poll(state);
+    const auto errors = driver.busErrors();
+    TEST_ASSERT_EQUAL_UINT32(0, errors.checksumErrors);
+    TEST_ASSERT_EQUAL_UINT32(0, errors.timeouts);
+    TEST_ASSERT_EQUAL_UINT32(0, errors.invalidFrames);
+}
+
 // ...while a frame that arrives intact but is not ours stays InvalidFrame. Counting a neighbour
 // on the bus as line corruption would send someone to check a cable that is fine.
 static void test_an_intact_reply_from_another_unit_is_not_a_checksum_error() {
@@ -579,6 +634,8 @@ int main(int, char**) {
     RUN_TEST(test_one_refused_block_does_not_sink_the_poll);
     RUN_TEST(test_a_refused_block_outranks_a_timeout_in_the_outcome);
     RUN_TEST(test_a_corrupt_reply_is_reported_as_a_checksum_error);
+    RUN_TEST(test_a_corrupt_block_is_counted_even_when_the_poll_succeeds);
+    RUN_TEST(test_a_refused_block_moves_no_bus_counter);
     RUN_TEST(test_an_intact_reply_from_another_unit_is_not_a_checksum_error);
     RUN_TEST(test_a_sustained_noise_trickle_hits_the_transaction_deadline);
     RUN_TEST(test_execute_is_unsupported_read_only);

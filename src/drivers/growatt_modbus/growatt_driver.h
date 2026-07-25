@@ -17,6 +17,7 @@
 
 #include "drivers/growatt_modbus/growatt_registers.h"
 #include "drivers/inverter_driver.h"
+#include "drivers/modbus_bus_tally.h"
 
 namespace heliograph::growatt {
 
@@ -48,6 +49,8 @@ public:
     /// on hardware. Battery control is a deliberate later step, not an oversight.
     CommandResult execute(const InverterCommand& command) override;
 
+    BusErrorCounts busErrors() const override { return busErrors_; }
+
 private:
     /// Crc is separate from Protocol for the same reason it is in the codec: it is the only one
     /// that means the wire is bad, and it is what the checksum-error metric and its alert key on.
@@ -60,6 +63,7 @@ private:
     Transport*     transport_ = nullptr;
     GrowattOptions options_;
     uint8_t        lastException_ = 0;
+    BusErrorCounts busErrors_{};
 
     static constexpr size_t kMaxBlocks = 8;
     /// Scratch for poll(): ~2 KB. A member, not a stack array, on purpose. The rs485 task runs

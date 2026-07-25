@@ -44,9 +44,24 @@ public:
         pollFailureTotal_.fetch_add(1, std::memory_order_relaxed);
         consecutivePollFailures_.fetch_add(1, std::memory_order_relaxed);
     }
-    void recordChecksumError() { checksumErrorTotal_.fetch_add(1, std::memory_order_relaxed); }
-    void recordTimeout() { rs485TimeoutTotal_.fetch_add(1, std::memory_order_relaxed); }
-    void recordInvalidFrame() { invalidFrameTotal_.fetch_add(1, std::memory_order_relaxed); }
+    /// Bus errors arrive in batches: one poll is several transactions, and each can fail on its
+    /// own. Adding a count rather than one at a time is what lets the metric describe a bus
+    /// that is degrading instead of only one that has already stopped working.
+    void recordChecksumErrors(uint32_t n) {
+        if (n != 0) {
+            checksumErrorTotal_.fetch_add(n, std::memory_order_relaxed);
+        }
+    }
+    void recordTimeouts(uint32_t n) {
+        if (n != 0) {
+            rs485TimeoutTotal_.fetch_add(n, std::memory_order_relaxed);
+        }
+    }
+    void recordInvalidFrames(uint32_t n) {
+        if (n != 0) {
+            invalidFrameTotal_.fetch_add(n, std::memory_order_relaxed);
+        }
+    }
     void recordWifiReconnect() { wifiReconnectTotal_.fetch_add(1, std::memory_order_relaxed); }
     void recordMqttReconnect() { mqttReconnectTotal_.fetch_add(1, std::memory_order_relaxed); }
     void recordModbusClient() { modbusClientConnections_.fetch_add(1, std::memory_order_relaxed); }

@@ -108,9 +108,9 @@ private:
     uint32_t timeouts_       = 0;
 
 public:
-    uint32_t checksumErrors() const { return checksumErrors_; }
-    uint32_t invalidFrames() const { return invalidFrames_; }
-    uint32_t timeouts() const { return timeouts_; }
+    BusErrorCounts busErrors() const override {
+        return {checksumErrors_, timeouts_, invalidFrames_};
+    }
 };
 
 }  // namespace heliograph::eversolar

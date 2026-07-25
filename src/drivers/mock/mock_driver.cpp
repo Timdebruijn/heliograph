@@ -161,9 +161,11 @@ ProbeResult MockDriver::probe() {
 
 PollResult MockDriver::poll(DeviceState& state) {
     if (options_.timeout || options_.offline) {
+        ++busErrors_.timeouts;
         return PollResult::Timeout;
     }
     if (options_.failChecksum) {
+        ++busErrors_.checksumErrors;
         return PollResult::ChecksumError;
     }
 

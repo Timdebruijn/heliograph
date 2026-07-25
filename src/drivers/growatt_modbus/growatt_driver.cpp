@@ -107,6 +107,10 @@ GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t star
     const modbus::ReadTiming timing{kTransactionDeadlineMs, kResponseTimeoutMs};
     const auto outcome =
         modbus::readRegisters(*transport_, options_.unitId, fn, start, count, out, count, timing);
+    // Per transaction, not per poll: this driver reads several blocks and reports Ok as soon as
+    // one decodes, so counting from the poll verdict made a bus that corrupted most of its
+    // frames register as healthy.
+    tallyModbusRead(busErrors_, outcome.status);
 
     switch (outcome.status) {
         case modbus::ReadStatus::Ok:

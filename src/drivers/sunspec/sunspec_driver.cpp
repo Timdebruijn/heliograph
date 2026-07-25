@@ -26,8 +26,14 @@ modbus::ReadOutcome SunspecDriver::read(uint16_t address, uint16_t count, uint16
     const modbus::ReadTiming timing{kTransactionDeadlineMs, kResponseTimeoutMs};
     // Holding registers: SunSpec's own convention, and what every implementation this was
     // checked against uses.
-    return modbus::readRegisters(*transport_, options_.unitId, modbus::kReadHoldingRegisters,
-                                 address, count, out, capacity, timing);
+    const auto outcome = modbus::readRegisters(*transport_, options_.unitId,
+                                               modbus::kReadHoldingRegisters, address, count, out,
+                                               capacity, timing);
+    // Every read this driver makes passes through here, so this is the whole tally. It matters
+    // more here than anywhere: a chain walk plus a chunked model read is a dozen transactions
+    // per poll, and only the one that stops the walk ever reached the old poll-verdict counter.
+    tallyModbusRead(busErrors_, outcome.status);
+    return outcome;
 }
 
 // Translates a failed read into the poll outcome that describes it honestly. Everything used
