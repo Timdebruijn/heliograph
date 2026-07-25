@@ -187,11 +187,19 @@ address in turn and confirm exactly one answers, at the address you expect.
    the 120 Ω termination rule. 9600 8N1 is what the profile declares — if your units are set to
    something else, run **extended** discovery (quick only tries the first profile) and the
    wizard stores the line settings that answered.
-3. Configure the driver: `growatt_modbus`, profile `mic_tl_x`, `unit_id` as set in step 1.
+3. Configure the driver: `growatt_modbus`, register map `mic_tl_x`, `unit_id` as set in step 1.
+   Both are fields in the discovery wizard's confirm step, and in *Settings → Driver*. Getting
+   the map wrong is the one mistake here that does not announce itself — see the warning below.
 4. Set log level to `trace` and read `/api/v1/logs`. The `GROWATT in <addr>: ...` lines are
    the raw block dump.
 5. Check the dump against the inverter's own app: PV voltage, AC power, today's energy,
    total energy. All four should match without any arithmetic on your part.
+
+> **The register map is a choice, not a detection.** Probing identifies the *protocol* — a valid
+> Modbus reply proves the device speaks Modbus at that address and nothing more. It cannot tell
+> a MIC TL-X from an SPH. The two maps share the base block, so leaving the map on the wrong one
+> still yields values, and the ones the base block covers are even correct — which is exactly
+> what makes it dangerous. Set the map yourself, and use step 5 to confirm it.
 6. Confirm the two odd scales specifically — frequency should read ~50.0 Hz (not 5.0 or
    500.0), and operating hours should be plausible for the age of the unit.
 7. **Settle the generation question.** Look at what the 3000-block dump did. Three outcomes,
