@@ -194,12 +194,26 @@ address in turn and confirm exactly one answers, at the address you expect.
    you pick one. That is deliberate: getting the map wrong is the one mistake here that does
    not announce itself. See the warning below.
 
-   > **This firmware polls one device.** With three units on the bus you will see only the one
-   > at the address configured here — the other two are wired, addressed and ignored, with
-   > nothing on any screen saying so. Discovery does not sweep addresses either: it probes the
-   > default unit id, so only the inverter at address 1 can ever appear as a candidate. Both
-   > are known gaps, not symptoms of a wiring fault; bring the units up one at a time by
-   > changing `unit_id` here.
+   > **For the second and third unit** there is no settings screen yet — they go in over the
+   > API, same driver and register map, their own `unit_id`:
+   >
+   > ```
+   > curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
+   >   -H 'Content-Type: application/json' \
+   >   -d '{"additional_devices":[
+   >         {"driver_id":"growatt_modbus","options":{"unit_id":"2","profile":"mic_tl_x"}},
+   >         {"driver_id":"growatt_modbus","options":{"unit_id":"3","profile":"mic_tl_x"}}]}'
+   > ```
+   >
+   > Note `driver_id` here where the `driver` section uses `id`. Sending the array replaces it,
+   > so send all the extra units at once. Restart afterwards. Discovery probes only the default
+   > address, so it finds the unit at address 1 and not the others — a known gap, not a wiring
+   > fault. Check `/api/v1/devices` after the restart: you should see one entry per unit, named
+   > `growatt_modbus-1`, `-2`, `-3`.
+   >
+   > **Home Assistant, Modbus TCP and Prometheus still publish the first device only.** All
+   > three appear in the REST API and in the device list; only one reaches those outputs. Next
+   > piece of work.
 4. Set log level to `trace` and read `/api/v1/logs`. The `GROWATT in <addr>: ...` lines are
    the raw block dump.
 5. Check the dump against the inverter's own app: PV voltage, AC power, today's energy,

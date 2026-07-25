@@ -501,6 +501,34 @@ bool RestApi::begin() {
                 return;
             }
 
+            // The same two gates for every additional device. Without them the list was the one
+            // way into the configuration that validated nothing: an unknown driver id was stored
+            // and surfaced only as a boot log line, and a typo'd register-map option fell back at
+            // boot to the DEFAULT profile -- which for a string inverter means quietly reading a
+            // hybrid's registers and publishing values that look entirely plausible. That is the
+            // exact hazard the gate above exists for; the new list walked straight past it.
+            //
+            // Unconditional, unlike the driver.id check above: an entry here is only ever
+            // present because this patch sent the whole array, so there is no stored value to
+            // become unresolvable behind the user's back and no lockout to avoid.
+            for (size_t i = 0; i < updated.additionalDevices.size(); ++i) {
+                const auto&             dev   = updated.additionalDevices[i];
+                const std::string       where = "additional_devices[" + std::to_string(i) + "]";
+                const DriverDescriptor* d     = lookupDriver(dev.id);
+                if (d == nullptr) {
+                    sendError(request, {400, "invalid_config",
+                                        where + ".driver_id: unknown driver '" + dev.id + "'"});
+                    return;
+                }
+                DriverOptionError optionError;
+                if (!validateDriverOptions(*d, dev.options, optionError)) {
+                    sendError(request, {400, "invalid_config",
+                                        where + ".options." + optionError.key + ": " +
+                                            optionError.message});
+                    return;
+                }
+            }
+
             if (!context_.saveConfig(updated)) {
                 sendError(request, {500, "save_failed", "could not persist the configuration"});
                 return;

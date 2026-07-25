@@ -81,6 +81,7 @@ bool EversolarDriver::begin(Transport& transport) {
     identity_.manufacturer  = "Ever-Solar";
     identity_.protocolName  = "EverSolar PMU RS485";
     identity_.driverId      = eversolar::descriptor().id;
+    identity_.instanceKey   = std::to_string(options_.assignedAddress);
 
     reRegisterAll();
     return true;

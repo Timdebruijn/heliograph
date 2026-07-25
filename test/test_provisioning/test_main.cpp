@@ -578,6 +578,59 @@ static void test_a_config_without_a_serial_section_keeps_the_driver_in_charge() 
     TEST_ASSERT_EQUAL_UINT8(8, loaded.serial.profile.dataBits);
 }
 
+// Three inverters on one bus is a configuration, so it has to survive the reboot that makes it
+// take effect at all.
+static void test_extra_devices_survive_a_restart() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    auto               c = provisionedConfig();
+    c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {{"unit_id", "2"}}});
+    c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {{"unit_id", "3"}}});
+    TEST_ASSERT_TRUE(store.save(c));
+
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_EQUAL_UINT32(2, loaded.additionalDevices.size());
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus", loaded.additionalDevices[0].id.c_str());
+    TEST_ASSERT_EQUAL_STRING("2", loaded.additionalDevices[0].options["unit_id"].c_str());
+    TEST_ASSERT_EQUAL_STRING("3", loaded.additionalDevices[1].options["unit_id"].c_str());
+}
+
+// A blob written before this field existed -- raw, because saving through the current code
+// would emit the section and prove nothing. Must load as one device, which is what those
+// bridges are already doing.
+static void test_a_config_without_the_device_list_stays_single_device() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    backend.write(kStorageKeyConfig,
+                  R"({"version":1,"bridge_name":"Zolder","wifi":{"ssid":"thuisnetwerk"},)"
+                  R"("driver":{"id":"eversolar_legacy"}})");
+
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_TRUE(loaded.additionalDevices.empty());
+    TEST_ASSERT_EQUAL_STRING("eversolar_legacy", loaded.driver.id.c_str());
+}
+
+// A stored entry with no driver id is dropped rather than loaded: validate() would refuse the
+// whole configuration for it, and refusing to boot over one corrupted list entry is worse than
+// polling one inverter fewer.
+static void test_a_nameless_stored_device_is_dropped_not_fatal() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    backend.write(kStorageKeyConfig,
+                  R"({"version":1,"wifi":{"ssid":"thuisnetwerk"},)"
+                  R"("driver":{"id":"eversolar_legacy"},)"
+                  R"("additional_devices":[{"options":{"unit_id":"2"}},{"driver_id":"sunspec"}]})");
+
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_EQUAL_UINT32(1, loaded.additionalDevices.size());
+    TEST_ASSERT_EQUAL_STRING("sunspec", loaded.additionalDevices[0].id.c_str());
+    ConfigError e;
+    TEST_ASSERT_TRUE(validate(loaded, e));  // and what survived is saveable
+}
+
 static void test_ota_rejects_a_non_firmware_upload_before_writing() {
     ota::OtaManager ota;
     TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(1024));
@@ -703,6 +756,9 @@ int main(int, char**) {
     RUN_TEST(test_non_firmware_is_rejected);
     RUN_TEST(test_a_serial_override_survives_a_restart);
     RUN_TEST(test_a_config_without_a_serial_section_keeps_the_driver_in_charge);
+    RUN_TEST(test_extra_devices_survive_a_restart);
+    RUN_TEST(test_a_config_without_the_device_list_stays_single_device);
+    RUN_TEST(test_a_nameless_stored_device_is_dropped_not_fatal);
     RUN_TEST(test_ota_rejects_a_non_firmware_upload_before_writing);
     RUN_TEST(test_ota_accepts_a_firmware_upload);
     RUN_TEST(test_ota_refuses_a_second_concurrent_upload);

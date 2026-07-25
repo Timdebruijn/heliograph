@@ -252,6 +252,29 @@ bool validate(const Configuration& config, ConfigError& error) {
     if (!checkLength(config.ntp.server, 64, "ntp.server", error)) return false;
     if (!checkLength(config.ntp.timezone, 48, "ntp.timezone", error)) return false;
     if (!checkLength(config.ntp.timezoneName, 48, "ntp.timezone_name", error)) return false;
+    if (1 + config.additionalDevices.size() > kMaxDevices) {
+        error = {"additional_devices",
+                 "at most " + std::to_string(kMaxDevices) + " devices per bridge"};
+        return false;
+    }
+    for (size_t i = 0; i < config.additionalDevices.size(); ++i) {
+        const auto&       d     = config.additionalDevices[i];
+        const std::string where = "additional_devices[" + std::to_string(i) + "]";
+        // An empty id is fine for `driver` -- it means "let the application pick the
+        // highest-priority driver". For an extra device it means nothing at all: there is no
+        // second driver to pick, and an entry that names no driver would just be a poll slot
+        // that can never be filled.
+        if (d.id.empty()) {
+            error = {where + ".driver_id", "must name a driver"};
+            return false;
+        }
+        if (!checkLength(d.id, 64, (where + ".driver_id").c_str(), error)) return false;
+        for (const auto& [key, value] : d.options) {
+            if (!checkLength(key, 32, (where + ".options").c_str(), error)) return false;
+            if (!checkLength(value, 128, (where + ".options").c_str(), error)) return false;
+        }
+    }
+
     if (config.serial.enabled) {
         // Bounds, not a whitelist of "known good" rates. RS485 devices in the field run at
         // 1200 and at 115200, and refusing an odd-but-real rate would be the firmware deciding
@@ -343,6 +366,18 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     }
 
 
+    // Always emitted, empty or not, so a client can tell "this firmware has no idea about
+    // extra devices" from "this bridge has none configured".
+    JsonArray extra = doc["additional_devices"].to<JsonArray>();
+    for (const auto& d : config.additionalDevices) {
+        JsonObject e   = extra.add<JsonObject>();
+        e["driver_id"] = d.id;
+        JsonObject o   = e["options"].to<JsonObject>();
+        for (const auto& [key, value] : d.options) {
+            o[key] = value;
+        }
+    }
+
     JsonObject ntp       = doc["ntp"].to<JsonObject>();
     ntp["enabled"]       = config.ntp.enabled;
     ntp["use_dhcp"]      = config.ntp.useDhcp;
@@ -400,6 +435,9 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
            a.modbus.diagnosticsUnitId != b.modbus.diagnosticsUnitId ||
            a.polling.intervalSeconds != b.polling.intervalSeconds ||
            a.driver.id != b.driver.id || a.driver.options != b.driver.options ||
+           // The drivers and their poll contexts are built once, in setup(). Adding or
+           // removing an inverter therefore changes nothing until the next boot.
+           a.additionalDevices != b.additionalDevices ||
            a.ntp.enabled != b.ntp.enabled || a.ntp.useDhcp != b.ntp.useDhcp ||
            a.ntp.server != b.ntp.server || a.ntp.timezone != b.ntp.timezone ||
            // The line is configured once, in setup(), right after the driver's begin(). Nothing
@@ -550,6 +588,40 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
     }
 
     const bool serialSupplied = !doc["serial"].isNull();
+    // Whole-list replacement, not a merge: the list has no stable keys to merge on, and
+    // "patch element 2" would need an index the caller cannot know is still the same element.
+    // Sending the array replaces it; omitting it leaves it alone, like every other section.
+    if (JsonVariantConst extra = doc["additional_devices"]; !extra.isNull()) {
+        if (!extra.is<JsonArrayConst>()) {
+            error = {"additional_devices", "expected an array"};
+            return false;
+        }
+        std::vector<DriverSettings> parsed;
+        size_t                      index = 0;
+        for (JsonVariantConst item : extra.as<JsonArrayConst>()) {
+            const std::string where = "additional_devices[" + std::to_string(index++) + "]";
+            if (!item.is<JsonObjectConst>()) {
+                error = {where, "expected an object"};
+                return false;
+            }
+            JsonObjectConst obj = item.as<JsonObjectConst>();
+            DriverSettings  d;
+            if (!patchString(obj["driver_id"], d.id, (where + ".driver_id").c_str(), error))
+                return false;
+            if (JsonObjectConst options = obj["options"]; !options.isNull()) {
+                for (JsonPairConst kv : options) {
+                    if (!kv.value().is<const char*>()) {
+                        error = {where + ".options", "option values must be strings"};
+                        return false;
+                    }
+                    d.options[kv.key().c_str()] = kv.value().as<const char*>();
+                }
+            }
+            parsed.push_back(std::move(d));
+        }
+        merged.additionalDevices = std::move(parsed);
+    }
+
     if (JsonObjectConst serial = doc["serial"]; !serial.isNull()) {
         if (!patchBool(serial["override"], merged.serial.enabled, "serial.override", error))
             return false;

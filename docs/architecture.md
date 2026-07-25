@@ -241,7 +241,7 @@ EverSolar:
   .supportLevel = DriverSupportLevel::Experimental,   // → Beta after Phase 3, Stable after Phase 9
   .probePriority = 10,
   .supportsAutoDetection = true,
-  .supportsMultipleDevices = true,    // protocol supports it; MVP allows 1
+  .supportsMultipleDevices = true,    // protocol supports it
   .supportsRead = true,
   .supportsWrite = false,             // 0x12/0x13 empty in the protocol
 }
@@ -393,10 +393,20 @@ public:
 };
 ```
 
-The MVP allows a maximum of one active physical device (`MAX_ACTIVE_DEVICES = 1`), but no
-interface is a singleton. `DeviceId` for the MVP = `"<driverId>-<serialNumber>"`, e.g.
-`eversolar_legacy-XH300060115506193600V610`. REST and MQTT already use that ID in their paths,
-so adding more devices later requires no API change.
+A bridge polls up to `kMaxDevices` (8) physical devices, and no interface is a singleton.
+
+`DeviceId` prefers the serial number — `"<driverId>-<serialNumber>"`, e.g.
+`eversolar_legacy-XH300060115506193600V610` — because that identifies the physical unit however
+it happens to be addressed. It falls back to `"<driverId>-<instanceKey>"`, where the instance key
+is the Modbus unit id or PMU address the driver was configured with, and only then to the bare
+driver id.
+
+The fallback is not cosmetic. `deviceId()` is read once, in `setup()`, to key the state store —
+and at that moment **no driver in this build has a serial number**: Growatt never reads one,
+EverSolar and SunSpec learn theirs on the first poll or chain walk. Without the instance key,
+three identical inverters on one bus all resolved to the bare driver id, `DeviceManager::add`
+handed all three the same store (it is idempotent by contract), and they overwrote each other's
+readings into one set of entities. REST and MQTT use this id in their paths.
 
 ## Capability model
 
@@ -632,6 +642,43 @@ Modbus TCP has no encryption, no authentication, and no authorization. This is s
 explicitly in the README and `docs/security.md`: only expose it on a trusted or filtered
 network.
 
+## Several devices on one bus
+
+`DeviceManager` holds up to `kMaxDevices` (8) stores, one per device. `setup()` builds one
+driver and one `DeviceContext` per configured device — `driver` first, then `additional_devices`
+in order — and `rs485Task` polls **one device per loop iteration**, round-robin.
+
+One per iteration rather than a loop over all of them: the watchdog is fed once per iteration,
+and a bus of eight silent devices would otherwise spend eight transaction deadlines back to back
+before the outputs ran. Each context keeps its own interval and back-off, so a dead inverter
+backs off on its own without slowing the others, and the cursor stops a device whose back-off
+has just expired from always losing to the one before it in the list.
+
+A device that cannot be created or started is named on the console and skipped; the others still
+poll. Two configured devices that resolve to the same id are caught by a `contains()` check before
+`add()` — not by `add()` itself, which is idempotent and would hand back the existing store. The
+second is skipped with a log line naming both. With the instance key in the id this only happens
+when two entries really are configured for the same address.
+
+**Not every protocol supports two devices on one bus.** The Modbus drivers address each unit
+explicitly, so several are fine. The PMU drivers (EverSolar, SoLAX) register by *broadcast* --
+"any unregistered unit, speak up" -- with no serial in the request, so two instances of the same
+PMU driver race the same handshake and which physical unit each ends up owning is undefined.
+One PMU device per bus; mixing a PMU driver with Modbus drivers is fine.
+
+**Not every protocol supports two devices on one bus.** The Modbus drivers address each unit
+explicitly, so several are fine. The PMU drivers register by *broadcast* -- "any unregistered
+unit, speak up" -- with no serial in the request, so two instances of the same PMU driver race
+the same handshake and which physical unit each ends up owning is undefined. One PMU device per
+bus; mixing a PMU driver with Modbus drivers is fine.
+
+**The outputs have not caught up.** `MqttOutput::loop`, `ModbusTcpServer::refresh` and
+`buildMetrics` each take a single `DeviceState`, so they are fed the first device only. The REST
+API is already device-keyed and carries all of them. Giving the other three a device dimension —
+a topic segment, a register-map offset, a metric label — is the next piece of work, and until it
+lands the limitation is stated in the README, `docs/rest-api.md` and next to the code in
+`main.cpp` rather than left to be discovered from a missing Home Assistant entity.
+
 ## Test strategy
 
 `env:native` runs on the host, without an ESP32. The protocol core (`eversolar_protocol.cpp`,
@@ -648,6 +695,7 @@ network.
 | `test_measurements` | supported/valid/stale matrix, capability filtering |
 | `test_commands` | Read-only rejection per command type, range validation, rate limiting |
 | `test_device_context` | Bus errors reaching the metrics per transaction rather than per poll verdict, including the construction baseline and a counter wrap |
+| `test_provisioning` | NVS round-trips, migrations, OTA gates, and that a config written before a field existed still loads |
 
 Fixtures: `test/fixtures/` with frames from the reference, supplemented in Phase 3 with **real
 recordings** from the TL3000-20, plus deliberately corrupted frames and a night scenario.

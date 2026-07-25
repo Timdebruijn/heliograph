@@ -80,6 +80,7 @@ bool SolaxDriver::begin(Transport& transport) {
     identity_.manufacturer = "SolaX";
     identity_.protocolName = "SolaX X1 RS485 (PMU)";
     identity_.driverId     = solax::descriptor().id;
+    identity_.instanceKey  = std::to_string(options_.assignedAddress);
     return true;
 }
 

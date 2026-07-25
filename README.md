@@ -142,10 +142,20 @@ inverters on one bus**, read **[docs/rs485-bus.md](docs/rs485-bus.md)** first: c
 where the 120 Ω termination goes (two places, not one per device), and why each unit needs its
 own address before you connect them together.
 
-> **This firmware polls one device at a time.** Several inverters can share the bus and the
-> wiring guidance above applies, but the bridge reads whichever address is configured and
-> ignores the rest — and discovery probes only the default address, so only the unit there can
-> be found automatically. Known gap, not a wiring fault.
+> **Several inverters on one bus are polled in turn**, up to eight, each with its own address.
+> The first is configured under *Settings → Driver*; **the rest have no settings screen yet** and
+> are set over the API:
+>
+> ```
+> curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
+>   -H 'Content-Type: application/json' \
+>   -d '{"additional_devices":[{"driver_id":"growatt_modbus","options":{"unit_id":"2"}}]}'
+> ```
+>
+> Then restart. Two more things to know before wiring three: discovery probes only the default
+> address, so the others must be added by hand; and **Home Assistant, Modbus TCP and Prometheus
+> still carry the first device only** — the REST API and `/api/v1/devices` have all of them.
+> Both are next on the list, not wiring faults.
 
 ### 2. Flash the firmware
 

@@ -195,6 +195,7 @@ bool SunspecDriver::begin(Transport& transport) {
     walked_                = false;
     identity_              = DeviceIdentity{};
     identity_.driverId     = descriptor().id;
+    identity_.instanceKey  = std::to_string(options_.unitId);
     identity_.protocolName = descriptor().protocol;
 
     // Configure the line, exactly as the sibling Modbus driver does and for the reason its

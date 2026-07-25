@@ -89,9 +89,31 @@ modbus::ModbusTcpServer           g_modbus;
 std::unique_ptr<mqtt::MqttOutput> g_mqtt;
 std::unique_ptr<rest::RestApi>    g_rest;
 
-std::unique_ptr<InverterDriver> g_driver;
-std::unique_ptr<DeviceContext>  g_context;
-StateStore*                     g_state = nullptr;
+/// One entry per configured device, in poll order. Element 0 is the `driver` section; the rest
+/// come from `additional_devices`. Held as parallel owning vectors rather than one struct so
+/// the existing single-device call sites (g_driver / g_context / g_state below) keep meaning
+/// exactly what they meant: the FIRST device.
+std::vector<std::unique_ptr<InverterDriver>> g_drivers;
+std::vector<std::unique_ptr<DeviceContext>>  g_contexts;
+
+/// The first device, or nullptr. Everything that still speaks about "the" inverter -- the
+/// status LED, the boot-confirm check, the outputs -- reads these. Naming them rather than
+/// indexing at each call site keeps the remaining single-device assumptions countable: every
+/// use of g_driver/g_context/g_state is a place that has not been taught about the others yet.
+InverterDriver* g_driver  = nullptr;
+DeviceContext*  g_context = nullptr;
+StateStore*     g_state   = nullptr;
+
+/// Round-robin cursor for the poll loop, so a device whose backoff has expired does not always
+/// lose to the one before it in the list.
+size_t g_pollCursor = 0;
+
+/// Device ids, index-aligned with g_contexts, so a log line can name the inverter it means.
+std::vector<DeviceId> g_deviceIds;
+
+/// How many devices the configuration asked for, whether or not they started. Drives the status
+/// LED: a configured device that failed to start is a fault to show, not an absence to ignore.
+size_t g_devicesConfigured = 0;
 
 bool g_outputsStarted = false;
 
@@ -410,7 +432,11 @@ void serviceOnboard() {
         }
         in.factoryResetHolding = holding;
         in.wifiConnected       = g_wifi.connected();
-        in.inverterExpected    = g_driver != nullptr;
+        // "A device was configured", not "a device started". The old expression was
+        // `g_driver != nullptr`, and the multi-device loop destroys the unique_ptr when begin()
+        // fails -- so a bridge whose only configured driver refused to start went from RED to
+        // GREEN, reporting "all healthy" while polling nothing (review, 2026-07-25).
+        in.inverterExpected    = g_devicesConfigured > 0;
         in.mqttConnected       = g_mqtt && g_mqtt->connected();
         in.modbusListening      = g_modbus.running();
         if (g_state) {
@@ -579,8 +605,11 @@ void rs485Task(void* /*arg*/) {
             Serial.printf("[discovery] %s\n", g_discovery.report().outcome.reason.c_str());
             // The probe left the bus re-registered; make the driver pick that up rather than
             // poll a stale address.
-            if (g_driver) {
-                g_driver->begin(g_transport);
+            // Every device, not just the first: the probe re-registered the whole bus.
+            for (auto& d : g_drivers) {
+                d->begin(g_transport);
+            }
+            if (!g_drivers.empty()) {
                 // ...and begin() has just put the line back on the driver's own first profile,
                 // exactly as it does at boot. Without this, running discovery from the web UI
                 // on a healthy bridge silently undid the override and the inverter went quiet
@@ -591,16 +620,52 @@ void rs485Task(void* /*arg*/) {
             vTaskDelay(pdMS_TO_TICKS(250));
             continue;
         }
-        // A requested manual poll (wizard test poll, REST action) runs now rather than at the
-        // next interval; exchange() clears the flag so one request is one poll.
-        if (g_context &&
-            (g_manualPollRequested.exchange(false) || g_context->due(nowMs()))) {
-            const PollResult result = g_context->pollOnce();
-            if (result != PollResult::Ok) {
-                // Bounded: one line per attempt, no payload, no growth over time.
-                log::warn("poll: %s", pollResultName(result));
+        // At most ONE device per iteration, round-robin. Not a loop over all of them: the
+        // watchdog is fed once per iteration, and a bus of eight silent devices would spend
+        // eight transaction deadlines back to back before the outputs below ever ran. One per
+        // pass keeps the loop's timing independent of how many inverters are chained, and the
+        // cursor keeps a device whose backoff has expired from always losing to the one before
+        // it in the list.
+        //
+        // The manual-poll request is honoured by whichever device comes up first. exchange()
+        // clears the flag, so one request is still one poll.
+        if (!g_contexts.empty()) {
+            // A manual poll always goes to device 1, never to whichever device the cursor
+            // happens to sit on. The wizard's test poll and POST /actions/poll are both read
+            // back through /api/v1/status, which serves the FIRST device -- so sending the poll
+            // anywhere else made the button report that nothing had happened.
+            if (g_manualPollRequested.exchange(false)) {
+                const PollResult r = g_contexts.front()->pollOnce();
+                if (r != PollResult::Ok) {
+                    log::warn("manual poll of %s: %s", g_deviceIds.front().c_str(),
+                              pollResultName(r));
+                }
+            }
+            for (size_t i = 0; i < g_contexts.size(); ++i) {
+                const size_t index = (g_pollCursor + i) % g_contexts.size();
+                DeviceContext& ctx = *g_contexts[index];
+                if (!ctx.due(nowMs())) {
+                    continue;
+                }
+                const PollResult r = ctx.pollOnce();
+                if (r != PollResult::Ok) {
+                    // Bounded: one line per attempt, no payload, no growth over time. The device
+                    // ID rather than a position: a position among the STARTED devices is not the
+                    // position in the config, so "device 2" would name the wrong inverter as
+                    // soon as one failed to start -- and it carries the address, which is what
+                    // someone standing at the bus actually needs.
+                    log::warn("poll %s: %s", g_deviceIds[index].c_str(), pollResultName(r));
+                }
+                g_pollCursor = (index + 1) % g_contexts.size();
+                break;
             }
         }
+        // FIRST DEVICE ONLY, deliberately and for now. MQTT, Home Assistant, Modbus TCP and
+        // Prometheus all take a single DeviceState: their topic trees, register map and metric
+        // names have no device dimension yet. Polling several devices without saying so would
+        // put two more inverters in the REST device list and silently nowhere else, so this is
+        // stated here, in docs/architecture.md, and in the REST status payload rather than left
+        // for someone to discover from a missing entity.
         if (g_state) {
             const auto snapshot = g_state->snapshot();
             const auto bridge   = bridgeInfo();
@@ -733,23 +798,74 @@ void setup() {
     const std::string driverId = selectedDriverId();
     // Pass the configured driver options through: a unit_id or profile set in the web UI
     // must reach the driver, not silently fall back to factory defaults (2026-07-21 review).
-    g_driver = driverId.empty() ? nullptr
-                                : g_registry.create(driverId, g_transport,
-                                                    g_config.driver.options);
-    if (g_driver && g_driver->begin(g_transport)) {
-        Serial.printf("[driver] %s (%s)\n", g_driver->descriptor().id.c_str(),
-                      supportLevelName(g_driver->descriptor().supportLevel));
-        applySerialOverride();
-        const DeviceId id = g_driver->identity().deviceId();
-        g_state           = g_devices.add(id);
-        if (g_state) {
-            PollPolicy policy;
-            policy.intervalMs = g_config.polling.intervalSeconds * 1000;
-            g_context =
-                std::make_unique<DeviceContext>(*g_driver, *g_state, g_diagnostics, nowMs, policy);
+    // Device 1 comes from `driver`, the rest from `additional_devices`, in that order. One list
+    // so the poll loop has one thing to walk, and so a bring-up log reads in the same order the
+    // settings page shows.
+    struct Planned { std::string id; const DriverOptions* options; };
+    std::vector<Planned> planned;
+    if (!driverId.empty()) {
+        planned.push_back({driverId, &g_config.driver.options});
+    }
+    for (const auto& d : g_config.additionalDevices) {
+        planned.push_back({d.id, &d.options});
+    }
+    g_devicesConfigured = planned.size();
+    if (planned.empty()) {
+        log::warn("no driver configured and none compiled in; nothing will be polled");
+    }
+
+    for (const auto& p : planned) {
+        auto driver = g_registry.create(p.id, g_transport, *p.options);
+        if (!driver || !driver->begin(g_transport)) {
+            // Named, and the loop continues: one unconfigurable device must not cost the others
+            // their poll. A bus with three inverters where the second has a typo'd driver id
+            // should still report the first and third.
+            log::warn("device '%s' could not be started; the others still poll", p.id.c_str());
+            continue;
         }
-    } else {
-        Serial.printf("[driver] '%s' unavailable\n", driverId.c_str());
+        Serial.printf("[driver] %s (%s)\n", driver->descriptor().id.c_str(),
+                      supportLevelName(driver->descriptor().supportLevel));
+        const DeviceId id = driver->identity().deviceId();
+        // Checked BEFORE add(), because add() is idempotent: re-adding a known id hands back
+        // the existing store rather than refusing. That is right for a caller re-registering
+        // the same device, and exactly wrong here -- two configured devices sharing an id would
+        // have silently shared one store and overwritten each other's readings into one set of
+        // Home Assistant entities. An earlier version of this loop treated a null return as the
+        // collision signal; it never came (review, 2026-07-25).
+        if (g_devices.contains(id)) {
+            log::warn("device '%s' skipped: another configured device already resolves to id "
+                      "'%s' -- give them different addresses", p.id.c_str(), id.c_str());
+            continue;
+        }
+        StateStore* store = g_devices.add(id);
+        if (store == nullptr) {
+            log::warn("device '%s' skipped: no free device slot (max %u)", p.id.c_str(),
+                      static_cast<unsigned>(kMaxDevices));
+            continue;
+        }
+        PollPolicy policy;
+        policy.intervalMs = g_config.polling.intervalSeconds * 1000;
+        g_contexts.push_back(std::make_unique<DeviceContext>(*driver, *store, g_diagnostics,
+                                                             nowMs, policy));
+        g_deviceIds.push_back(id);
+        g_drivers.push_back(std::move(driver));
+        if (g_driver == nullptr) {
+            g_driver  = g_drivers.front().get();
+            g_context = g_contexts.front().get();
+            g_state   = store;
+        }
+    }
+    if (!g_drivers.empty()) {
+        // Once, after the LAST begin(): every begin() reconfigures the line to its own driver's
+        // first profile, so applying the override per device would only be undone by the next
+        // one. All devices share the bus, so there is one line to set, not one per device --
+        // which also means that on a MIXED bus, with the override off, the line is left on the
+        // last driver's profile. Drivers whose profiles differ need the override set explicitly.
+        applySerialOverride();
+        if (g_drivers.size() > 1) {
+            Serial.printf("[driver] polling %u devices in turn on one bus\n",
+                          static_cast<unsigned>(g_drivers.size()));
+        }
     }
 
     // The web server runs on the portal AP too -- that is how setup happens at all.
