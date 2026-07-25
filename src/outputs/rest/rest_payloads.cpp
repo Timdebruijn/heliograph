@@ -335,8 +335,10 @@ bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::s
             addOptional(e, "detected_model", c.probe.detectedModel);
             addOptional(e, "serial_number", c.probe.serialNumber);
             addOptional(e, "firmware_version", c.probe.firmwareVersion);
-            if (!c.descriptor.recommendedSerialProfiles.empty()) {
-                const auto& p        = c.descriptor.recommendedSerialProfiles.front();
+            {
+                // What it answered at, not what the driver recommends first -- with a working
+                // profile sweep those are no longer the same thing.
+                const auto& p        = c.matchedProfile;
                 JsonObject  profile  = e["serial_profile"].to<JsonObject>();
                 profile["baud_rate"] = p.baudRate;
                 profile["parity"]    = parityName(p.parity);

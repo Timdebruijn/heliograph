@@ -70,8 +70,9 @@ DiscoveryOutcome DiscoveryEngine::run(DiscoveryMode mode, const DiscoveryConfig&
             }
 
             DiscoveryCandidate candidate;
-            candidate.descriptor = descriptor;
-            candidate.probe      = first;
+            candidate.descriptor    = descriptor;
+            candidate.probe         = first;
+            candidate.matchedProfile = profile;
 
             if (config.requireConsistentProbes) {
                 const ProbeResult second = driver->probe();

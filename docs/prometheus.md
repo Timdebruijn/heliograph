@@ -112,7 +112,7 @@ checksum errors rather than timeouts.
 
 > **A flat zero on the checksum counter is weaker evidence than it looks, on a Modbus device.**
 >
-> Until 0.13.0 a Modbus driver could not raise it at all: the shared read transaction folded CRC
+> Before the release carrying this note a Modbus driver could not raise it at all: the shared read transaction folded CRC
 > failures into a generic protocol error, so on a Growatt or SunSpec install the metric was
 > structurally always zero and the alert could never fire. The PMU drivers (EverSolar, SolaX)
 > were unaffected.

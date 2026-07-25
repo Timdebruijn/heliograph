@@ -23,7 +23,8 @@ constexpr uint32_t kTransactionDeadlineMs = 3000;
 /// register number. This is the bring-up tool: with the map still unconfirmed, reading these
 /// against the inverter display is how the correct addresses and scaling are found. TRACE-only,
 /// so it costs nothing in normal operation.
-void traceBlock(RegSpace space, uint16_t start, uint16_t count, const uint16_t* values) {
+void traceBlock(uint8_t unitId, RegSpace space, uint16_t start, uint16_t count,
+                const uint16_t* values) {
     if (!log::enabled(LogLevel::Trace)) {
         return;
     }
@@ -31,7 +32,8 @@ void traceBlock(RegSpace space, uint16_t start, uint16_t count, const uint16_t* 
     constexpr uint16_t perLine = 8;
     for (uint16_t i = 0; i < count; i += perLine) {
         char line[128];
-        int  pos = snprintf(line, sizeof(line), "GROWATT %s %u:", spaceName,
+        int  pos = snprintf(line, sizeof(line), "GROWATT unit %u %s %u:",
+                            static_cast<unsigned>(unitId), spaceName,
                             static_cast<unsigned>(start + i));
         for (uint16_t j = 0; j < perLine && i + j < count; ++j) {
             pos += snprintf(line + pos, sizeof(line) - pos, " %04X", values[i + j]);
@@ -108,7 +110,7 @@ GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t star
 
     switch (outcome.status) {
         case modbus::ReadStatus::Ok:
-            traceBlock(space, start, count, out);
+            traceBlock(options_.unitId, space, start, count, out);
             return ReadResult::Ok;
         case modbus::ReadStatus::Exception:
             lastException_ = outcome.exceptionCode;
@@ -154,19 +156,19 @@ PollResult GrowattDriver::poll(DeviceState& state) {
                 break;
             case ReadResult::Exception:
                 sawResponse = true;
-                log::warn("GROWATT block %u+%u refused (exception 0x%02X) -- skipped", b.start,
-                          b.count, lastException_);
+                log::warn("GROWATT unit %u block %u+%u refused (exception 0x%02X) -- skipped",
+                          options_.unitId, b.start, b.count, lastException_);
                 break;
             case ReadResult::Crc:
                 sawResponse = true;
                 sawCrcError = true;
-                log::warn("GROWATT block %u+%u failed checksum -- check ground, termination "
-                          "and cable routing", b.start, b.count);
+                log::warn("GROWATT unit %u block %u+%u failed checksum -- check ground, termination "
+                          "and cable routing", options_.unitId, b.start, b.count);
                 break;
             case ReadResult::Protocol:
                 sawResponse = true;
-                log::warn("GROWATT block %u+%u unreadable (bad frame) -- skipped", b.start,
-                          b.count);
+                log::warn("GROWATT unit %u block %u+%u unreadable (bad frame) -- skipped",
+                          options_.unitId, b.start, b.count);
                 break;
             case ReadResult::Timeout:
                 sawTimeout = true;

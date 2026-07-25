@@ -305,6 +305,25 @@ static void test_a_corrupt_reply_is_reported_as_a_checksum_error() {
     TEST_ASSERT_EQUAL(PollResult::ChecksumError, d.poll(state));
 }
 
+// The same symptom, but appearing only once the chain is already mapped -- so the failure has
+// to travel back out of readModel rather than out of the opening marker read. Corrupting
+// everything from the first byte, as the test above does, never exercises that path.
+static void test_corruption_that_starts_mid_chain_is_still_a_checksum_error() {
+    Rig r;
+    buildTypical(r.device);
+    r.device.corruptCrc    = true;
+    r.device.intactReplies = 5;  // marker, chain headers and the identity read survive
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::ChecksumError, d.poll(state));
+    // Self-evidencing: a fully mapped chain proves the walk completed, so the failure can only
+    // have come out of readModel. Without this the test would silently pass while exercising
+    // the marker read, which is what the sibling test above already covers.
+    TEST_ASSERT_EQUAL_UINT32(2, d.chain().size());
+}
+
 // The marker is there, so something SunSpec-shaped is on the bus, but the very first model
 // header is refused. Nothing gets mapped. The reason the walk stopped used to be discarded
 // here, so the caller's default won and this reported Timeout -- accusing the wiring of a
@@ -357,6 +376,7 @@ int main(int, char**) {
     RUN_TEST(test_an_unreadable_device_is_not_reported_as_line_corruption);
     RUN_TEST(test_a_device_without_the_marker_is_not_reported_as_a_timeout);
     RUN_TEST(test_a_corrupt_reply_is_reported_as_a_checksum_error);
+    RUN_TEST(test_corruption_that_starts_mid_chain_is_still_a_checksum_error);
     RUN_TEST(test_a_marker_with_no_readable_models_is_not_reported_as_a_timeout);
     RUN_TEST(test_a_silent_device_does_not_poll);
     RUN_TEST(test_the_driver_is_read_only);

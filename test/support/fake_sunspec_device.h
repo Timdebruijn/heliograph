@@ -137,10 +137,17 @@ public:
     /// send an installer to look at completely different things.
     bool corruptCrc = false;
 
+    /// Leave the first N replies intact before `corruptCrc` starts biting. Without this a test
+    /// wrecks the very first read too, so the driver never gets past its opening exchange and
+    /// everything downstream stays unexercised -- which is exactly how a swallowed status in the
+    /// SunSpec chain walk survived its own test (review, 2026-07-25).
+    uint32_t intactReplies = 0;
+
 private:
     void appendCrc(std::vector<uint8_t>& frame) const {
-        const uint16_t crc = modbus::crc16(frame.data(), frame.size());
-        frame.push_back(static_cast<uint8_t>((crc & 0xFF) ^ (corruptCrc ? 0xFF : 0x00)));
+        const uint16_t crc     = modbus::crc16(frame.data(), frame.size());
+        const bool     corrupt = corruptCrc && reads > intactReplies;
+        frame.push_back(static_cast<uint8_t>((crc & 0xFF) ^ (corrupt ? 0xFF : 0x00)));
         frame.push_back(static_cast<uint8_t>(crc >> 8));
     }
 
