@@ -358,21 +358,47 @@ static void test_a_value_less_command_on_a_boundless_driver_is_also_refused() {
     TEST_ASSERT_EQUAL_UINT32(0, driver.executed);
 }
 
+// Reaching gate 3's enum branch needs a driver that actually declares the mode write -- the
+// mock does not, so it stops at gate 2. An earlier version of this test used the mock and
+// accepted either result, which meant it passed with the enum branch deleted entirely.
+namespace {
+class ModeDriver : public BoundlessDriver {
+public:
+    InverterCapabilities capabilities() const override {
+        InverterCapabilities c;
+        c.addWrite(InverterCapability::SetBatteryOperatingMode);
+        return c;
+    }
+};
+}  // namespace
+
 static void test_a_mode_command_without_a_selection_is_refused() {
-    mock::MockOptions o;
-    o.writable = true;
-    mock::MockDriver  driver(clockFn, o);
+    ModeDriver        driver;
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
 
     InverterCommand c;
     c.type = InverterCommandType::SetBatteryOperatingMode;  // no enumValue
-    // The mock does not declare this capability, so it stops at gate 2 -- which is the point:
-    // an undeclared mode write is refused either way, and the presence check below only bites
-    // once a driver does declare it.
     const auto out = d.dispatch(c, driver);
-    TEST_ASSERT_TRUE(out.result == CommandResult::Unsupported ||
-                     out.result == CommandResult::OutOfRange);
+
+    TEST_ASSERT_EQUAL(CommandResult::OutOfRange, out.result);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.executed);
+}
+
+static void test_a_mode_command_with_a_selection_reaches_the_driver() {
+    ModeDriver        driver;
+    CommandDispatcher d(clockFn);
+    d.setReadOnlyMode(false);
+
+    InverterCommand c;
+    c.type      = InverterCommandType::SetBatteryOperatingMode;
+    c.enumValue = 2;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, d.dispatch(c, driver).result);
+    TEST_ASSERT_EQUAL_UINT32(1, driver.executed);
+    // No EnumCapability exists to range-check against, so the value is passed through
+    // unvalidated. The first driver implementing a mode write brings its own validation --
+    // this pins that the dispatcher is not silently pretending to do it.
+    TEST_ASSERT_EQUAL_INT32(2, *driver.last.enumValue);
 }
 
 // --- lifting a restriction is never throttled -----------------------------------------------
@@ -401,7 +427,12 @@ static void test_start_is_never_throttled() {
     TEST_ASSERT_EQUAL(CommandResult::Ok, d.dispatch(start, driver).result);
 }
 
-static void test_a_limit_set_to_its_maximum_is_never_throttled() {
+// A limit at its maximum is NOT exempt, deliberately. An earlier version treated "value >=
+// declared maximum" as "explicitly no limit" -- which a driver declaring minimum == maximum, or
+// leaving both at their 0 defaults, turned inside out: full curtailment then satisfied the test
+// and skipped the limiter entirely. Deriving intent from bounds the driver may not have thought
+// about is the same trust gate 3 just removed.
+static void test_a_limit_at_its_maximum_still_pays_for_a_token() {
     mock::MockOptions o;
     o.writable = true;
     mock::MockDriver  driver(clockFn, o);
@@ -411,19 +442,14 @@ static void test_a_limit_set_to_its_maximum_is_never_throttled() {
     TEST_ASSERT_EQUAL(CommandResult::Ok,
                       d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 20.0),
                                  driver).result);
-    // 100 % is the declared maximum: explicitly no limit, so it goes through.
-    TEST_ASSERT_EQUAL(CommandResult::Ok,
-                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 100.0),
-                                 driver).result);
-    // ...while anything still restricting keeps paying for a token.
     TEST_ASSERT_EQUAL(CommandResult::RateLimited,
-                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 99.0),
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 100.0),
                                  driver).result);
 }
 
-// Lifting a restriction must not spend a token either, or a flood of releases would starve the
-// next genuine command.
-static void test_lifting_a_restriction_spends_no_token() {
+// Run/stop commands ride their own track, so a burst of restricting traffic can never swallow
+// them -- but they are still spaced, so a loop cannot saturate the bus with them either.
+static void test_run_state_commands_are_spaced_but_never_starved() {
     mock::MockOptions o;
     o.writable = true;
     mock::MockDriver  driver(clockFn, o);
@@ -432,10 +458,13 @@ static void test_lifting_a_restriction_spends_no_token() {
 
     InverterCommand start;
     start.type = InverterCommandType::Start;
-    for (int i = 0; i < 5; ++i) {
-        TEST_ASSERT_EQUAL(CommandResult::Ok, d.dispatch(start, driver).result);
-    }
-    // Both burst slots are still available.
+    TEST_ASSERT_EQUAL(CommandResult::Ok, d.dispatch(start, driver).result);
+    // Immediately again: spaced, not starved.
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited, d.dispatch(start, driver).result);
+    g_now += 1000;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, d.dispatch(start, driver).result);
+
+    // ...and none of that touched the restricting allowance: both burst slots are intact.
     TEST_ASSERT_EQUAL(CommandResult::Ok,
                       d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 10.0),
                                  driver).result);
@@ -445,6 +474,29 @@ static void test_lifting_a_restriction_spends_no_token() {
     TEST_ASSERT_EQUAL(CommandResult::RateLimited,
                       d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 12.0),
                                  driver).result);
+}
+
+// Both directions ride that track. Which of stopping or starting is the safer failure depends on
+// whose hazard you reason about, and there is no need to choose: neither carries a value that
+// could be wrong, and RateLimited here is a DROP -- nothing queues or retries -- so losing
+// either is worse than losing "run at 60%", which an automation resends on its next tick.
+static void test_stop_is_not_starved_by_restricting_traffic() {
+    mock::MockOptions o;
+    o.writable = true;
+    mock::MockDriver  driver(clockFn, o);
+    CommandDispatcher d(clockFn, RateLimitPolicy{1000, 1});
+    d.setReadOnlyMode(false);
+
+    TEST_ASSERT_EQUAL(CommandResult::Ok,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 20.0),
+                                 driver).result);
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited,
+                      d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 30.0),
+                                 driver).result);
+
+    InverterCommand stop;
+    stop.type = InverterCommandType::Stop;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, d.dispatch(stop, driver).result);
 }
 
 // A clock that jumps backwards must not refill the allowance. On unsigned types the naive
@@ -490,9 +542,11 @@ int main(int, char**) {
     RUN_TEST(test_a_declared_write_without_published_bounds_is_refused_not_waved_through);
     RUN_TEST(test_a_value_less_command_on_a_boundless_driver_is_also_refused);
     RUN_TEST(test_a_mode_command_without_a_selection_is_refused);
-    RUN_TEST(test_start_is_never_throttled);
-    RUN_TEST(test_a_limit_set_to_its_maximum_is_never_throttled);
-    RUN_TEST(test_lifting_a_restriction_spends_no_token);
+    RUN_TEST(test_a_mode_command_with_a_selection_reaches_the_driver);
+
+    RUN_TEST(test_a_limit_at_its_maximum_still_pays_for_a_token);
+    RUN_TEST(test_run_state_commands_are_spaced_but_never_starved);
+    RUN_TEST(test_stop_is_not_starved_by_restricting_traffic);
     RUN_TEST(test_a_backwards_clock_does_not_refill_the_allowance);
     return UNITY_END();
 }

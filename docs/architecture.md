@@ -437,15 +437,36 @@ MQTT / REST / Modbus / HA
           │
           ▼
    CommandDispatcher
-     1. global read-only mode?          → Rejected(ReadOnlyMode)
-     2. capabilities.write[type]?        → Rejected(NotSupported)
-     3. range/step validation            → Rejected(OutOfRange)
-     4. rate limit (1/s, burst 3)        → Rejected(RateLimited)
+     1. global read-only mode?           → ReadOnlyMode
+     2. capabilities.write[type]?        → Unsupported
+     3. range/step validation            → OutOfRange / Unsupported
+     4. rate limit                       → RateLimited
      5. driver->execute(command)
           │
           ▼
-       Driver → Unsupported (EverSolar)
+       Driver → Unsupported (every driver today)
 ```
+
+Two details of that chain are easy to get wrong and are worth stating.
+
+**Gate 3 asks the command, not the driver.** Whether a value is required follows from the
+command type (`commandTakesNumericValue`), so a driver that declares a write capability but
+publishes no `NumericCapability` is *refused*, not waved through. That check used to live inside
+`if (nc.supported && nc.writable)`, which made a missing bound a bypass — the failure mode being
+that the first driver to grow a write path gets no range checking at all.
+
+**Gate 4 is not one queue.** Commands that change whether the inverter runs at all — `Start` and
+`Stop` — ride a separate track: never blocked by a burst of restricting traffic, but still spaced
+so a loop cannot saturate the bus with them. Everything that carries a value uses the normal
+burst allowance. The reason is that `RateLimited` is a *drop*, not a defer — nothing queues or
+retries — and losing "run" or "stop" is worse than losing "run at 60%", which an automation
+resends on its next tick. A limit set to its own maximum is deliberately **not** exempt: deriving
+"unrestricted" from a bound the driver may not have thought about reintroduces exactly the trust
+gate 3 removes.
+
+The dispatcher locks only its rate-limiter bookkeeping; `execute()` runs outside that lock,
+because a real write is a multi-second RS485 transaction and bus exclusivity is already the
+transport's job.
 
 ```cpp
 enum class CommandResult { Ok, Unsupported, Rejected, ReadOnlyMode,

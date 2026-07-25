@@ -40,7 +40,7 @@ bool RelayController::allowedByRateLimit(uint64_t nowMs) {
         lastAcceptedMs_ = nowMs;
         return true;
     }
-    if (!everAccepted_ || nowMs - lastAcceptedMs_ >= rateLimit_.minIntervalMs) {
+    if (!everAccepted_ || since >= rateLimit_.minIntervalMs) {
         everAccepted_   = true;
         lastAcceptedMs_ = nowMs;
         return true;

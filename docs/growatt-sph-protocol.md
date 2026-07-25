@@ -100,9 +100,10 @@ Battery *mode* (Battery First / Grid First / Load First) is driven by time-slot 
 (3038-3056), not a single mode write — a later, more involved mapping. The percentage/SoC
 writes above are the useful, low-risk first control surface.
 
-Every write goes through the existing CommandDispatcher (kill switch on by default, rate limit,
-range check) and must be write-verified (write → read back → confirm) before being reported
-as applied.
+Every write goes through the existing CommandDispatcher (kill switch on by default, capability
+check, range check, rate limit) and must be write-verified (write → read back → confirm) before
+being reported as applied. Note the rate limit is not uniform: `Start` and `Stop` ride a separate
+track so a burst of setpoint traffic can never swallow them. See docs/architecture.md for why.
 
 ## Sources
 
