@@ -16,8 +16,11 @@ import sys
 def main() -> int:
     root = pathlib.Path(__file__).resolve().parent.parent
     text = (root / "src/device/measurement.h").read_text()
-    block = re.search(r"namespace measurement_id \{(.*?)\}\s*//\s*namespace measurement_id",
-                      text, re.DOTALL)
+    block = re.search(
+        r"namespace measurement_id \{(.*?)\}\s*//\s*namespace measurement_id",
+        text,
+        re.DOTALL,
+    )
     if not block:
         print("FAIL: measurement_id namespace not found")
         return 1

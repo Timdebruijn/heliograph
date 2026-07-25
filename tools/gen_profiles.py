@@ -110,12 +110,15 @@ def load_vocabulary() -> dict[str, str]:
     # constant declared after kAll would have been invisible here while check_measurement_ids.py
     # still saw it -- a profile mapping it would be rejected as "unknown measurement".
     block = re.search(
-        r"namespace measurement_id \{(.*?)\}\s*//\s*namespace measurement_id", text, re.DOTALL
+        r"namespace measurement_id \{(.*?)\}\s*//\s*namespace measurement_id",
+        text,
+        re.DOTALL,
     )
     if not block:
         raise SystemExit(f"could not find namespace measurement_id in {MEASUREMENT_H}")
     pairs = re.findall(
-        r'(?:inline\s+)?constexpr\s+const\s+char\s*\*\s*(k\w+)\s*=\s*"([^"]+)"', block.group(1)
+        r'(?:inline\s+)?constexpr\s+const\s+char\s*\*\s*(k\w+)\s*=\s*"([^"]+)"',
+        block.group(1),
     )
     if not pairs:
         raise SystemExit(f"no measurement ids parsed from {MEASUREMENT_H}")
