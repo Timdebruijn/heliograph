@@ -61,6 +61,13 @@ grants control. But "an open AP that appears for a few minutes when your WiFi dr
 disclosure surface worth knowing about, and `admin_username` in particular hands out half of a
 login that has no brute-force protection. Closing that one is tracked separately.
 
+**The gate has a cost of its own: authenticating over that AP puts the admin password on the
+air.** HTTP Basic is base64, not encryption, so a passive listener in radio range of the open
+setup AP can read it — and then use it on your LAN. The same is true of the normal web UI over
+plain HTTP, but the setup AP is the case where the network itself is open by design. If that
+matters to you, do the recovery with the board on a cable-fed network, or factory-reset and
+re-provision instead of authenticating over the air.
+
 **No brute-force protection on HTTP Basic.** Rate limiting is on `/actions/*`, not on the
 auth itself.
 

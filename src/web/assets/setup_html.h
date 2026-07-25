@@ -48,6 +48,8 @@ button:disabled{opacity:.5;cursor:default}
 
   <label for="pw">WiFi password</label>
   <input id="pw" type="password" autocomplete="new-password">
+  <div class="hint" id="pwhint" style="display:none">Leave empty to keep the password already
+  stored for this network.</div>
 
   <label for="admin">Admin password</label>
   <input id="admin" type="password" autocomplete="new-password">
@@ -87,12 +89,14 @@ const msg=(t,ok)=>{const m=$('m');m.textContent=t;m.className='msg '+(ok?'ok':'e
 // enough), a password already exists, and provisioning demands it -- so the form authenticates
 // and changes only the network. Detected up front rather than on a failed submit, because a 401
 // from requestAuthentication() has an empty body and the old code parsed it as JSON.
-let reauth=false, adminUser='admin';
+let reauth=false, adminUser='admin', modeKnown=false;
 const setupReady=fetch('/api/v1/config').then(r=>r.json()).then(c=>{
   const sec=(c&&c.security)||{};
   adminUser=sec.admin_username||'admin';
   reauth=!!sec.password_set;
+  modeKnown=true;
   if(reauth){
+    $('pwhint').style.display='block';
     $('reauth').style.display='block';
     // The existing password stays as it is; this flow only moves the bridge to a new network.
     for(const id of ['admin','admin2']){const el=$(id);el.style.display='none';
@@ -101,7 +105,13 @@ const setupReady=fetch('/api/v1/config').then(r=>r.json()).then(c=>{
         el.nextElementSibling.style.display='none';}
     $('b').textContent='Save network and restart';
   }
-}).catch(()=>{});
+}).catch(()=>{
+  // Which mode we are in decides whether the form must carry a new admin password or an
+  // existing one. Guessing wrong means submitting a body the firmware refuses and then blaming
+  // the user's password for it, so the form stays shut until this is actually known.
+  msg('Could not read this bridge’s state. Reload the page to try again.');
+  $('b').disabled=true;
+});
 
 fetch('/api/v1/wifi/scan').then(r=>r.json()).then(d=>{
   const s=$('ssid');s.innerHTML='';
@@ -129,41 +139,65 @@ $('ssid').onchange=e=>{
 
 $('f').onsubmit=async e=>{
   e.preventDefault();
-  await setupReady;   // which mode we are in decides what the form must contain
+  // Disabled first, before any await: two quick taps while the mode lookup is still in flight
+  // would otherwise fire two provisions.
+  $('b').disabled=true;
+  // Which mode we are in decides what the form must contain. Bounded, because a web task busy
+  // with a WiFi scan can leave this pending for seconds and a dead-looking button with no
+  // message is worse than an honest one.
+  await Promise.race([setupReady, new Promise(r=>setTimeout(r,3000))]);
+  if(!modeKnown){
+    $('b').disabled=false;
+    msg('Could not read this bridge’s state. Reload the page to try again.');
+    return;
+  }
+  // Every rejection has to hand the button back, or the form is dead until a reload.
+  const refuse=t=>{$('b').disabled=false;msg(t)};
   const ssid=$('ssid').value==='__other__'?$('ssid2').value.trim():$('ssid').value;
-  if(!ssid){msg('Pick or type a network name.');return}
+  if(!ssid){refuse('Pick or type a network name.');return}
   if(reauth){
-    if(!$('cur').value){msg('Enter the admin password for this bridge.');return}
+    if(!$('cur').value){refuse('Enter the admin password for this bridge.');return}
   }else{
-    if(!$('admin').value){msg('An admin password is required.');return}
+    if(!$('admin').value){refuse('An admin password is required.');return}
     // A typo'd admin password costs a factory reset, so it is the one field worth the
     // friction of typing twice.
-    if($('admin').value!==$('admin2').value){msg('The admin passwords do not match.');return}
+    if($('admin').value!==$('admin2').value){refuse('The admin passwords do not match.');return}
   }
-  $('b').disabled=true;msg('Saving…',true);
+  msg('Saving…',true);
   try{
     const headers={'Content-Type':'application/json'};
-    const body={wifi:{ssid,password:$('pw').value}};
+    const body={wifi:{ssid}};
+    // An absent password leaves the stored one alone; an empty string SETS it to empty. In
+    // reconfigure mode the field starts blank while a password is already stored, so sending it
+    // unconditionally wiped the credential of anyone reconnecting to the same network -- after
+    // which the bridge could never join anything again and sat in the portal forever. On first
+    // boot there is nothing to preserve, so an open network still sends the empty value.
+    if(!reauth||$('pw').value!=='')body.wifi.password=$('pw').value;
     if(reauth){
       // Basic auth by hand: fetch() will not surface the browser's credential dialog reliably,
       // least of all in the captive-portal mini-browser this page is usually opened in.
-      // btoa() only handles Latin-1, so a password with other characters is encoded first.
+      //
+      // Always UTF-8. btoa() takes a string of code units and only throws above U+00FF, so a
+      // plain btoa() silently emits LATIN-1 for exactly the range that matters here -- é, ë, ü,
+      // ö, ç. The firmware compares against the bytes it stored from the setup POST, which are
+      // UTF-8, so those passwords would never match and the owner would be locked out of their
+      // own recovery with "password not accepted" (review, 2026-07-25).
       const raw=adminUser+':'+$('cur').value;
-      let enc;try{enc=btoa(raw)}catch(_){enc=btoa(unescape(encodeURIComponent(raw)))}
-      headers['Authorization']='Basic '+enc;
+      headers['Authorization']='Basic '+btoa(String.fromCharCode(...new TextEncoder().encode(raw)));
     }else{
       body.security={admin_password:$('admin').value};
     }
     const r=await fetch('/api/v1/provision',{method:'POST',headers,body:JSON.stringify(body)});
     if(r.status===401){
-      $('b').disabled=false;
-      msg('That admin password was not accepted. Forgotten it? Hold BOOT for ~5 seconds while '+
-          'the board is running to factory-reset it.');
+      refuse('That admin password was not accepted. Forgotten it? Hold BOOT for ~5 seconds '+
+             'while the board is running to factory-reset it.');
       return;
     }
-    // Only parse once a 401 is ruled out: requestAuthentication() answers with an empty body,
-    // and json() on that throws "Unexpected end of JSON input" instead of anything useful.
-    const d=await r.json();
+    // Tolerate a missing or non-JSON body on ANY status, not just 401. requestAuthentication()
+    // answers empty, and a captive-portal interceptor or a truncated response can do the same
+    // on other codes -- json() then throws "Unexpected end of JSON input", which is exactly the
+    // useless message this rewrite set out to remove rather than relocate.
+    const d=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(d.error?d.error.message:('HTTP '+r.status));
     // The concrete next step, not "find it via your router": this AP is about to vanish
     // and the user needs an address to type on the network they are returning to.

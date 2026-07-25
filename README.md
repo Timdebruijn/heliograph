@@ -177,7 +177,13 @@ password once one is set.
 If you lose the password, the way back in is a **factory reset**: hold the board's **BOOT**
 button for about 5 seconds while it is running. That erases the stored configuration — WiFi,
 password, everything — and returns the board to first-boot setup. Failing that, re-flash a
-`-factory.bin` over USB, which wipes the same settings. Details and the download-mode caveat:
+`-factory.bin` over USB, which wipes the same settings.
+
+Two things worth knowing before you rely on it. On the Relay-6CH the countdown blinks the LED
+and the buzzer confirms the wipe; **on the RS485-CAN there is no LED and no buzzer, so the hold
+gives no feedback at all** — the board simply reboots into setup when it worked. And the reset
+itself is only hardware-verified on the Relay-6CH; on the other two boards the pin comes from
+the schematic and nobody has run it. Details and the download-mode caveat:
 [docs/hardware.md](docs/hardware.md#recovery--hold-boot-to-factory-reset).
 
 ### 4. Wire it to the inverter

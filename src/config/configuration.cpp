@@ -417,39 +417,60 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
             }
         }
     }
-    // Drop orphans: options the resulting driver does not declare and that this patch did not
-    // itself supply. They can only be left over from a previous driver, and because the merge
-    // has no delete they used to survive forever -- harmless until the REST layer started
-    // validating options against the descriptor, after which an orphan failed every later PATCH
-    // with "unknown option for driver X" and switching drivers became impossible short of a
-    // factory reset (regression shipped in 0.12.0).
+    // Heal driver options the resulting driver cannot accept, so that a stored value can never
+    // make the configuration permanently unsaveable. Two shapes of that:
+    //   - a key the driver does not declare at all -- an orphan from a previous driver, which
+    //     the merge has no way to delete;
+    //   - a declared key holding a value outside the driver's allowed set, which happens without
+    //     anyone editing it when a firmware update renames or drops a choice. Not theoretical:
+    //     a driver whose option values are generated from the shipped device profiles narrows
+    //     that list whenever a profile is renamed or removed.
+    // Either one makes the REST layer's validateDriverOptions refuse EVERY later PATCH, including
+    // ones that touch nothing driver-related -- the lockout this batch exists to remove, which
+    // shipped in 0.12.0 as the orphan case.
     //
-    // Runs on every patch, not only one that touches `driver`: a bridge already carrying an
-    // orphan must heal on the next save it makes, otherwise it stays locked out forever.
+    // Runs on every patch, not only one that touches `driver`: a bridge already carrying a bad
+    // value must heal on the next save it makes, otherwise it stays stuck forever.
     //
-    // Two exclusions keep this from destroying data. A key this patch supplied is never dropped,
-    // so a typo'd option is still reported by the REST layer rather than silently swallowed
-    // here. And nothing happens when the id resolves to no driver, which would otherwise orphan
-    // every option at once -- a typo'd DRIVER id must stay recoverable by correcting it, and an
-    // empty id ("let the firmware pick") carries no descriptor to judge against. An earlier
-    // attempt simply cleared the map whenever the id changed; review showed that silently wiped
-    // a working setup on a discovery-wizard click, on a typo, and on an empty id, and never
-    // repaired an already-stuck config (2026-07-25).
+    // Only values this request did NOT assert are touched. "Asserted" means the patch supplied
+    // the key AND changed it -- a caller echoing back what it just read (the obvious
+    // read-modify-write script) is asking for nothing and must not thereby pin a broken value,
+    // while a genuine new value is left alone so the REST layer reports the mistake instead of
+    // this code silently swallowing it. And nothing at all happens when the id resolves to no
+    // driver: that would orphan every option at once, and a typo'd DRIVER id has to stay
+    // recoverable by correcting it.
+    //
+    // An earlier attempt simply cleared the map whenever the id changed. Review showed that
+    // silently wiped a working setup on a discovery-wizard click, on a typo, and on an empty id,
+    // and never repaired an already-stuck config (2026-07-25).
     if (const DriverDescriptor* target = lookupDriver ? lookupDriver(merged.driver.id) : nullptr) {
-        const auto declares = [target](const std::string& key) {
-            for (const auto& o : target->options) {
-                if (o.key == key) return true;
-            }
-            return false;
-        };
         for (auto it = merged.driver.options.begin(); it != merged.driver.options.end();) {
             const bool supplied = std::find(suppliedOptionKeys.begin(), suppliedOptionKeys.end(),
                                             it->first) != suppliedOptionKeys.end();
-            if (!supplied && !declares(it->first)) {
-                it = merged.driver.options.erase(it);
-            } else {
+            const auto stored   = config.driver.options.find(it->first);
+            const bool asserted = supplied && (stored == config.driver.options.end() ||
+                                               stored->second != it->second);
+            if (asserted) {
                 ++it;
+                continue;
             }
+            const DriverOption* declared = nullptr;
+            for (const auto& o : target->options) {
+                if (o.key == it->first) {
+                    declared = &o;
+                    break;
+                }
+            }
+            if (declared == nullptr) {
+                it = merged.driver.options.erase(it);
+                continue;
+            }
+            if (!declared->allowedValues.empty() &&
+                std::find(declared->allowedValues.begin(), declared->allowedValues.end(),
+                          it->second) == declared->allowedValues.end()) {
+                it->second = declared->defaultValue;
+            }
+            ++it;
         }
     }
 

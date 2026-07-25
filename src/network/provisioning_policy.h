@@ -2,10 +2,12 @@
 //
 // When to start the setup portal, and when to stop trying.
 //
-// Pure policy, no WiFi calls, so the state machine is host-tested. This board has no
-// confirmed reset button (the BOOT GPIO could not be established from the schematic -- see
-// docs/hardware.md), which makes this logic the ONLY way out of a bad WiFi configuration
-// short of reflashing. It had better be right.
+// Pure policy, no WiFi calls, so the state machine is host-tested. It is also the only way out
+// of a bad WiFi configuration that does not destroy the rest of the settings: the BOOT-hold
+// factory reset exists on every board (see docs/hardware.md) but wipes everything, and on the
+// RS485-CAN it gives no LED or buzzer feedback while it counts down. So this logic had better
+// be right -- it is what turns "the router changed" into a recoverable afternoon rather than a
+// re-provisioning from scratch.
 
 #pragma once
 

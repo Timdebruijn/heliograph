@@ -149,7 +149,11 @@ async function askAuth(){
     p.value='';d.returnValue='';
     d.onclose=()=>{
       const ok=d.returnValue==='ok'&&p.value!=='';
-      if(ok)sessionStorage.setItem('sb_auth',btoa(u+':'+p.value));
+      // UTF-8, not btoa()'s default. btoa() only throws above U+00FF, so it would silently emit
+      // Latin-1 for é/ë/ü/ö/ç -- and the firmware compares against the UTF-8 bytes it stored,
+      // so such a password could never authenticate here (review, 2026-07-25).
+      if(ok)sessionStorage.setItem('sb_auth',
+        btoa(String.fromCharCode(...new TextEncoder().encode(u+':'+p.value))));
       p.value='';
       resolve(ok);
     };

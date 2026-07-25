@@ -303,8 +303,12 @@ static void test_driver_options_are_opaque_to_the_config_model() {
 static const DriverDescriptor* fakeLookup(const std::string& id) {
     static const DriverDescriptor alpha = [] {
         DriverDescriptor d;
-        d.id      = "alpha";
-        d.options = {DriverOption{"layout", "Layout", "", "", {}}};
+        d.id = "alpha";
+        // Two options, one of them an enum with a default: a single-option driver could not tell
+        // "keeps the others" from "replaces the map", and the enum is what the value-healing
+        // rule below is judged against.
+        d.options = {DriverOption{"layout", "Layout", "", "auto", {"auto", "single", "dual"}},
+                     DriverOption{"note", "Note", "", "", {}}};
         return d;
     }();
     static const DriverDescriptor beta = [] {
@@ -381,6 +385,49 @@ static void test_a_typo_d_driver_id_destroys_no_options() {
     TEST_ASSERT_EQUAL_STRING("dual", c.driver.options["layout"].c_str());
 }
 
+// A declared key can hold a value the driver no longer accepts without anyone editing it -- a
+// firmware update that renames or drops a choice is enough, and the growatt `profile` option
+// takes its allowed values from the generated profile list. validateDriverOptions then refuses
+// every later PATCH, including ones touching nothing driver-related: the same lockout as an
+// orphan, so it heals the same way, back to the declared default.
+static void test_a_value_the_driver_no_longer_accepts_is_healed_to_the_default() {
+    Configuration c;
+    ConfigError   e;
+    c.driver.id                = "alpha";
+    c.driver.options["layout"] = "triple";  // no longer in allowedValues
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"bridge_name":"iets anders"})", c, e, fakeLookup));
+    TEST_ASSERT_EQUAL_STRING("auto", c.driver.options["layout"].c_str());
+}
+
+// A value this patch genuinely asserts is left alone, so the REST layer reports the mistake
+// rather than this code silently correcting it.
+static void test_a_bad_value_supplied_by_the_patch_is_left_for_the_validator() {
+    Configuration c;
+    ConfigError   e;
+    c.driver.id = "alpha";
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"driver":{"options":{"layout":"triple"}}})", c, e,
+                                      fakeLookup));
+    TEST_ASSERT_EQUAL_STRING("triple", c.driver.options["layout"].c_str());
+}
+
+// Echoing back what was just read is the obvious read-modify-write script, and it asserts
+// nothing. Treating it as an assertion would let a broken stored value pin itself forever.
+static void test_echoing_a_stored_bad_value_still_heals() {
+    Configuration c;
+    ConfigError   e;
+    c.driver.id                = "alpha";
+    c.driver.options["layout"] = "triple";
+    c.driver.options["stale"]  = "x";  // orphan, echoed back too
+
+    TEST_ASSERT_TRUE(applyConfigPatch(
+        R"({"driver":{"options":{"layout":"triple","stale":"x"}}})", c, e, fakeLookup));
+
+    TEST_ASSERT_EQUAL_STRING("auto", c.driver.options["layout"].c_str());
+    TEST_ASSERT_TRUE(c.driver.options.find("stale") == c.driver.options.end());
+}
+
 // An empty id means "let the firmware pick", so there is no descriptor to judge against and
 // nothing may be dropped.
 static void test_an_empty_driver_id_keeps_the_options() {
@@ -400,10 +447,12 @@ static void test_patching_one_option_keeps_the_others_on_the_same_driver() {
     ConfigError   e;
     c.driver.id                = "alpha";
     c.driver.options["layout"] = "dual";
+    c.driver.options["note"]   = "keep me";
 
     TEST_ASSERT_TRUE(applyConfigPatch(R"({"driver":{"options":{"layout":"single"}}})", c, e,
                                       fakeLookup));
     TEST_ASSERT_EQUAL_STRING("single", c.driver.options["layout"].c_str());
+    TEST_ASSERT_EQUAL_STRING("keep me", c.driver.options["note"].c_str());
 
     // Without a lookup nothing is ever dropped -- the pre-existing behaviour is untouched.
     Configuration d;
@@ -994,6 +1043,9 @@ int main(int, char**) {
     RUN_TEST(test_an_option_orphaned_by_a_driver_change_is_dropped);
     RUN_TEST(test_an_existing_orphan_is_dropped_even_without_a_driver_change);
     RUN_TEST(test_an_unknown_option_supplied_by_the_patch_survives_to_be_reported);
+    RUN_TEST(test_a_value_the_driver_no_longer_accepts_is_healed_to_the_default);
+    RUN_TEST(test_a_bad_value_supplied_by_the_patch_is_left_for_the_validator);
+    RUN_TEST(test_echoing_a_stored_bad_value_still_heals);
     RUN_TEST(test_a_typo_d_driver_id_destroys_no_options);
     RUN_TEST(test_an_empty_driver_id_keeps_the_options);
     RUN_TEST(test_patching_one_option_keeps_the_others_on_the_same_driver);
