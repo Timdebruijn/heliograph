@@ -348,6 +348,8 @@ async function loadLogs(){
 // ---------------- Discovery wizard (§28: 7 steps) ----------------
 let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null, wizSavedSerial=null,
     wizOptions={};
+// What the bridge already has configured, so step 5 can offer it back instead of overwriting it.
+let wizStoredDriverId=null, wizStoredOptions={};
 const STEPS=['Interface','Mode','Probing','Candidates','Confirm','Test poll','Save'];
 
 function stepBar(){
@@ -409,7 +411,9 @@ function renderWizard(){
     never the model, so a driver that ships several register maps cannot pick one for you.</p>
     <label for="wd">Driver</label><select id="wd" onchange="wizRenderOpts()"></select>
     <div id="wizopts"></div>
-    <button onclick="wizCapture();wizStep=6;renderWizard();testPoll()">Confirm and test</button>
+    <div id="wizoptnote" class="msg err" style="display:none">Pick a register map first — it
+    cannot be detected, and the wrong one produces believable numbers.</div>
+    <button id="wizconfirm" onclick="wizCapture();wizStep=6;renderWizard();testPoll()">Confirm and test</button>
     <button onclick="wizStep=4;renderWizard()" style="background:none;border:1px solid var(--line);color:var(--fg)">Back</button></div>`;
   } else if(wizStep===6){
     h+=`<div class="card"><b>Step 6 — Test poll</b><div id="tp" class="dim">Polling…</div></div>`;
@@ -435,9 +439,15 @@ function renderWizard(){
   $('#wiz').innerHTML=h;
 
   if(wizStep===5){
-    fetch('/api/v1/drivers').then(r=>r.json()).then(d=>{
+    // Both, before rendering: the option fields must offer what is stored, not blow it away.
+    Promise.all([fetch('/api/v1/drivers').then(r=>r.json()),
+                 fetch('/api/v1/config').then(r=>r.json()).catch(()=>null)])
+    .then(([d,cfg])=>{
       cfgDrivers=d;
-      const sel=$('#wd');sel.innerHTML='';
+      if(cfg&&cfg.driver){wizStoredDriverId=cfg.driver.id;wizStoredOptions=cfg.driver.options||{}}
+      const sel=$('#wd');
+      if(!sel)return;  // the user left step 5 while this was in flight
+      sel.innerHTML='';
       (d.drivers||[]).forEach(x=>{
         const o=document.createElement('option');
         o.value=x.id;o.textContent=`${x.display_name} (${x.support_level})`;
@@ -543,19 +553,48 @@ function wizRenderOpts(){
   const id=($('#wd')||{}).value;
   const drv=((cfgDrivers&&cfgDrivers.drivers)||[]).find(x=>x.id===id);
   const opts=(drv&&drv.options)||[];
-  if(!opts.length){box.innerHTML='';return}
+  if(!opts.length){box.innerHTML='';wizGateConfirm();return}
   box.innerHTML=opts.map(o=>{
-    const cur=o.default_value??'';
+    // Seeded from what is STORED when this is the driver already configured, exactly as the
+    // settings page does. Rendering declared defaults unconditionally meant re-running the
+    // wizard -- which the bring-up docs tell you to do when the line speed is wrong -- silently
+    // rewrote a working {profile:"mic_tl_x", unit_id:"3"} back to the defaults and reported
+    // success. Every rendered key is asserted in the PATCH, so nothing survives by omission.
+    const stored=(id===wizStoredDriverId)?(wizStoredOptions||{})[o.key]:undefined;
+    const cur=stored??o.default_value??'';
     const hint=o.description?`<div class="dim" style="font-size:12px">${esc(o.description)}</div>`:'';
     if(o.allowed_values&&o.allowed_values.length){
+      // An empty entry among the allowed values is the driver saying "unset means my own
+      // default". In Settings that is fine -- you are editing a device you already set up.
+      // Here it is not: this is the screen where the register map gets decided, and an unlabeled
+      // blank line that silently resolves to whichever map is marked default is precisely the
+      // failure this change exists to remove. Labelled, and left unselected so the step cannot
+      // be completed until someone has actually chosen.
+      const hasBlank=o.allowed_values.includes('');
+      const needs=hasBlank&&cur==='';
       return `<label for="wopt_${esc(o.key)}">${esc(o.display_name)}</label>
-        <select id="wopt_${esc(o.key)}" data-opt="${esc(o.key)}">${
-          o.allowed_values.map(v=>`<option value="${esc(v)}" ${v===cur?'selected':''}>${esc(v)}</option>`).join('')
+        <select id="wopt_${esc(o.key)}" data-opt="${esc(o.key)}" ${hasBlank?'data-mustpick="1"':''}
+          onchange="wizGateConfirm()">${
+          o.allowed_values.map(v=>`<option value="${esc(v)}" ${v===cur&&!needs?'selected':''}>${
+            v===''?'— choose —':esc(v)}</option>`).join('')
         }</select>${hint}`;
     }
     return `<label for="wopt_${esc(o.key)}">${esc(o.display_name)}</label>
       <input id="wopt_${esc(o.key)}" data-opt="${esc(o.key)}" value="${esc(cur)}">${hint}`;
   }).join('');
+  wizGateConfirm();
+}
+
+// Blocks "Confirm and test" while any option the driver marked as ambiguous-when-empty is still
+// empty. Cheaper than letting someone click through and discover months later that the numbers
+// came from the wrong table.
+function wizGateConfirm(){
+  const btn=$('#wizconfirm');
+  if(!btn)return;
+  const missing=[...document.querySelectorAll('#wizopts [data-mustpick]')].some(e=>e.value==='');
+  btn.disabled=missing;
+  const note=$('#wizoptnote');
+  if(note)note.style.display=missing?'block':'none';
 }
 
 async function saveDriver(){
