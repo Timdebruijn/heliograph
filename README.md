@@ -143,16 +143,16 @@ where the 120 Ω termination goes (two places, not one per device), and why each
 own address before you connect them together.
 
 > **Several inverters on one bus are polled in turn**, up to eight, each with its own address.
-> The first is configured under *Settings → Driver*; **the rest have no settings screen yet** and
-> are set over the API:
+> The first is configured under *Settings → Driver*, the rest under *Settings → Extra devices* —
+> one row per inverter, each with its own driver and address. Save, then restart.
+>
+> Over the API it is one field, and sending the array **replaces** it:
 >
 > ```
 > curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
 >   -H 'Content-Type: application/json' \
 >   -d '{"additional_devices":[{"driver_id":"growatt_modbus","options":{"unit_id":"2"}}]}'
 > ```
->
-> Sending the array **replaces** it, so list every extra unit in one call. Then restart.
 >
 > Three more things before wiring three: discovery probes only the default address, so the
 > others must be added by hand; **Modbus TCP and Prometheus still carry the first device only**

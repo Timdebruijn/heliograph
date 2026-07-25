@@ -228,6 +228,7 @@ function render(s){
   $('#ver').textContent='v'+b.firmware_version;
   // Boards without relays never send the field; the settings card keys off this.
   window.g_relayCount=(b.relays||[]).length;
+  window.g_maxDevices=b.max_devices||window.g_maxDevices;
   const g=id=>m[id]?m[id].value:null;
   if(tab==='dash'){
     $('#tiles').innerHTML=
@@ -709,7 +710,8 @@ async function renderConfig(){
   // than caching a card-less form for the whole session.
   if(window.g_relayCount===undefined){
     try{const s=await(await fetch('/api/v1/status')).json();
-      window.g_relayCount=(s.bridge.relays||[]).length}
+      window.g_relayCount=(s.bridge.relays||[]).length;
+      window.g_maxDevices=s.bridge.max_devices||window.g_maxDevices}
     catch(e){window.g_relayCount=0}
   }
 
@@ -788,6 +790,66 @@ async function renderConfig(){
     }).join('');
   };
   window.reloadDriverOpts=()=>{$('#drvopts').innerHTML=optsFor($('#c_drv').value)};
+
+  // --- extra devices -------------------------------------------------------------------
+  // Rendered from an array rather than from the DOM, so adding, removing and re-rendering a
+  // row cannot get out of step with what will be saved. Every row carries a driver id and that
+  // driver's declared options at their stored-or-declared values -- the same generic mechanism
+  // the Driver card uses, so a new driver's options appear here with no change either.
+  //
+  // Deliberately NOT pre-filled with anything when a row is added: an extra device that names
+  // no driver is refused by the firmware, and an address silently defaulting to the same one
+  // the primary uses would collide and be skipped at boot with only a log line to say so.
+  let xdevs = ((c.additional_devices)||[]).map(d=>({id:d.driver_id||'',options:{...(d.options||{})}}));
+
+  const xdevOptionFields=(row,index)=>{
+    const drv=(cfgDrivers.drivers||[]).find(x=>x.id===row.id);
+    return ((drv&&drv.options)||[]).map(o=>{
+      const cur=row.options[o.key]??o.default_value??'';
+      if(o.allowed_values&&o.allowed_values.length){
+        return `<label for="xd${index}_${esc(o.key)}">${esc(o.display_name)}</label>
+          <select id="xd${index}_${esc(o.key)}" onchange="setExtraOption(${index},'${esc(o.key)}',this.value)">${
+            o.allowed_values.map(v=>`<option value="${esc(v)}" ${v===cur?'selected':''}>${
+              v===''?'(driver default)':esc(v)}</option>`).join('')}</select>`;
+      }
+      return `<label for="xd${index}_${esc(o.key)}">${esc(o.display_name)}</label>
+        <input id="xd${index}_${esc(o.key)}" value="${esc(cur)}"
+          oninput="setExtraOption(${index},'${esc(o.key)}',this.value)">`;
+    }).join('');
+  };
+
+  window.renderExtraDevices=()=>{
+    const box=$('#xdevs');
+    if(!box)return;
+    box.innerHTML=xdevs.map((row,i)=>`
+      <div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <b>Device ${i+2}</b>
+          <a href="#" onclick="removeExtraDevice(${i});return false">Remove</a></div>
+        <label for="xd${i}_drv">Driver</label>
+        <select id="xd${i}_drv" onchange="setExtraDriver(${i},this.value)">
+          <option value="" ${row.id?'':'selected'}>— choose —</option>${
+          (cfgDrivers.drivers||[]).map(d=>
+            `<option value="${esc(d.id)}" ${d.id===row.id?'selected':''}>${esc(d.display_name)}</option>`).join('')}
+          ${row.id&&!(cfgDrivers.drivers||[]).some(d=>d.id===row.id)?
+            `<option value="${esc(row.id)}" selected>${esc(row.id)} — not recognised</option>`:''}
+        </select>
+        ${xdevOptionFields(row,i)}
+      </div>`).join('')||
+      '<div class="dim" style="font-size:12px;margin-top:8px">None. This bridge polls one inverter.</div>';
+    const add=$('#xdevadd');
+    if(add)add.disabled=xdevs.length+1>=(window.g_maxDevices||8);
+  };
+  window.addExtraDevice=()=>{xdevs.push({id:'',options:{}});renderExtraDevices()};
+  window.removeExtraDevice=i=>{xdevs.splice(i,1);renderExtraDevices()};
+  window.setExtraDriver=(i,id)=>{
+    // Options belong to a driver, so switching driver drops the old one's values rather than
+    // carrying keys the new driver never declared -- which the firmware would refuse anyway.
+    xdevs[i]={id,options:{}};
+    renderExtraDevices();
+  };
+  window.setExtraOption=(i,key,value)=>{xdevs[i].options[key]=value};
+  window.extraDevicesBody=()=>xdevs.map(d=>({driver_id:d.id,options:{...d.options}}));
   const driverOpts=`<span id="drvopts">${optsFor(c.driver.id)}</span>`;
 
   $('#cfgform').innerHTML=`
@@ -855,6 +917,18 @@ async function renderConfig(){
       `<option value="${esc(d.id)}" ${d.id===c.driver.id?'selected':''}>${esc(d.display_name)} (${esc(d.support_level)})</option>`).join('')}</select>
     ${driverOpts}
   </div>
+  <div class="card"><b>Extra devices</b> <span class="tag" style="font-weight:400">needs restart</span>
+    <div class="dim" style="font-size:12px">More inverters on the SAME RS485 bus, polled in
+    turn after the one above. Each needs its own address — set that in the device's own menu
+    first, and give it the driver's address option here. Up to ${window.g_maxDevices||8} devices
+    in total, this card holds the rest.</div>
+    <div id="xdevs"></div>
+    <button type="button" id="xdevadd" onclick="addExtraDevice()"
+      style="background:none;border:1px solid var(--line);color:var(--fg);margin-top:10px">Add a device</button>
+    <div class="dim" style="font-size:12px;margin-top:8px">Removing one here does not remove
+    what it already published: its Home Assistant entities stay behind showing their last
+    value. See docs/mqtt.md.</div>
+  </div>
   ${window.g_relayCount>0?`<div class="card"><b>Relays</b> <span class="tag" style="font-weight:400">applied immediately</span>
     ${chk('c_rle','Enabled',(c.relays||{}).enabled)}
     <!-- The second gate, named where it bites. Enabling relays while read-only mode is still
@@ -917,6 +991,9 @@ async function renderConfig(){
     <button style="background:var(--bad)" onclick="factoryReset()">Erase and restart</button>
   </div>`;
 
+  // After the card exists in the DOM, not before: renderExtraDevices() writes into #xdevs.
+  renderExtraDevices();
+
   // Keep the Relays card's gate warning in step with both checkboxes as they are clicked --
   // the user is told the combination is dead before saving it, not after wondering why the
   // relays are silent.
@@ -977,6 +1054,10 @@ async function saveConfig(){
   // half-finished choices into the active driver's config.
   document.querySelectorAll('#cfgform [data-opt]')
     .forEach(e=>body.driver.options[e.dataset.opt]=e.value);
+  // The whole list, always: the API replaces the array rather than merging, and there is no
+  // stable key to merge on. Sent even when empty, because that is how a device is REMOVED --
+  // omitting the key would leave the stored list untouched and the removal would do nothing.
+  if(window.extraDevicesBody)body.additional_devices=window.extraDevicesBody();
 
   // Send only what actually changed. This form may have been open for hours; PATCHing every
   // field would write its stale copy over anything changed elsewhere in the meantime (another
@@ -1007,6 +1088,12 @@ async function saveConfig(){
   if(same(body.driver.id,cfgBefore.driver.id)&&!optsTouched)delete body.driver.options;
   for(const sect of Object.keys(body)){
     if(typeof body[sect]!=='object')continue;
+    // An ARRAY section is replaced wholesale by the API, so there is nothing to diff -- and
+    // diffing it is actively harmful: Object.keys() on an array yields indices, so an unchanged
+    // element got `delete`d, leaving a hole that JSON.stringify writes as `null`. The firmware
+    // then refuses the whole patch with "expected an object". Found by driving the real page
+    // against a stub, which is the only reason it did not ship.
+    if(Array.isArray(body[sect]))continue;
     for(const k of Object.keys(body[sect])){
       // Credential-like keys (passwords, both usernames) and driver options are only in the
       // body when the user acted; GET never returns them, so there is nothing to diff against

@@ -61,6 +61,9 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     b["id"]                 = bridge.bridgeId;
     b["name"]               = bridge.name;
     b["firmware_version"]   = bridge.firmwareVersion;
+    // A firmware constant, not configuration: the settings page needs it to stop offering an
+    // "Add a device" button past the point the bridge would refuse the save.
+    b["max_devices"]        = static_cast<unsigned>(kMaxDevices);
     b["uptime_seconds"]     = bridge.uptimeSeconds;
     b["wifi_connected"]     = bridge.wifiConnected;
     if (bridge.wifiConnected) {
