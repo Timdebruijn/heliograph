@@ -114,9 +114,15 @@ authenticate must ask the user for it rather than read it back; the factory valu
 }
 ```
 
-`PATCH` accepts `"password": "..."` / `"username": "..."` to set either, and `null` to clear
-it. An omitted field stays unchanged. Passwords and the username never appear in logs, in
-SSE, in MQTT, or in Prometheus.
+`PATCH` accepts `"password": "..."` / `"username": "..."` to set either. An omitted field stays
+unchanged. Credentials never appear in logs, in SSE, in MQTT, or in Prometheus.
+
+**`null` clears a password, but not a username.** Passwords go through `patchSecret`, which
+distinguishes an absent key from an explicit `null` and clears on the latter. Usernames go
+through `patchString`, where `null` is indistinguishable from absent and therefore does
+nothing — `PATCH {"mqtt":{"username":null}}` returns `200` and leaves the stored value in place.
+Send `""` to clear the MQTT username. `security.admin_username` cannot be cleared at all:
+`validate()` refuses an empty one.
 
 ## Applying changes: `reboot_required`
 

@@ -68,7 +68,8 @@ button:disabled{opacity:.5;cursor:default}
          unauthenticated -- so this page's convenience was the reason every LAN reader was
          handed half of the bridge's login. Defaults to the factory value. -->
     <label for="curuser">Admin username</label>
-    <input id="curuser" autocomplete="username" value="admin">
+    <input id="curuser" autocomplete="username" autocapitalize="none" autocorrect="off"
+           spellcheck="false" value="admin">
     <label for="cur">Admin password</label>
     <input id="cur" type="password" autocomplete="current-password">
     <div class="hint">This bridge is already set up, so changing its network needs the admin
@@ -186,7 +187,9 @@ $('f').onsubmit=async e=>{
       // ö, ç. The firmware compares against the bytes it stored from the setup POST, which are
       // UTF-8, so those passwords would never match and the owner would be locked out of their
       // own recovery with "password not accepted" (review, 2026-07-25).
-      const raw=($('curuser').value||'admin')+':'+$('cur').value;
+      // Trimmed: Basic auth compares bytes, and this page is most often opened in a phone's
+      // captive-portal browser, where a stray autocorrect space is easy and invisible.
+      const raw=($('curuser').value.trim()||'admin')+':'+$('cur').value;
       headers['Authorization']='Basic '+btoa(String.fromCharCode(...new TextEncoder().encode(raw)));
     }else{
       body.security={admin_password:$('admin').value};

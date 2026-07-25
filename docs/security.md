@@ -14,7 +14,7 @@ the same LAN", not "someone holding the PCB in their hands".
 | REST PATCH/POST | HTTP Basic required; **rejected** without a configured password, not left open |
 | OTA | Same auth + firmware magic check (0xE9) before the first byte hits flash |
 | Completing setup | Refuses without an admin password |
-| Secrets in logs/REST/MQTT/Prometheus | Never. `serializeConfig()` omits every password **and the MQTT username** (not masked, absent); `serializeConfigForStorage()` is the only one that writes them |
+| Secrets in logs/REST/MQTT/Prometheus | Never. `serializeConfig()` omits every password **and both usernames** — the MQTT one and `security.admin_username` (not masked, absent); `serializeConfigForStorage()` is the only one that writes them |
 | Rate limiting | 1 req/s on `/actions/*` |
 | Request size | 4096 bytes, rejected with 413 |
 | String lengths | Bounded in `validate()`; SSID 32 and PSK 64 are the 802.11/WPA2 limits |
@@ -52,9 +52,13 @@ the bridge already has one.
 listens on every interface, so anyone joining the failure-portal AP reaches the same
 unauthenticated read endpoints a LAN user does: `/api/v1/status`, `/devices`, `/diagnostics`,
 `/discovery`, `/drivers`, `/config` (GET) and `/metrics`. Between them that is live production
-data, the inverter's model and serial number, your WiFi SSID and hostname, the MQTT host, port
-and base topic, and the relay roles. The Modbus TCP server on port 502 is reachable from that AP
-too, and Modbus has no authentication at all.
+data and the inverter's model and serial number, plus everything `GET /config` carries: your
+WiFi SSID and hostname, the MQTT host, port, base topic, discovery prefix and QoS, the Modbus
+port and unit ids, the bridge name, the poll interval, the NTP server and timezone, the log
+level, the driver id **and its options**, the relay roles, the `*_set` booleans saying which
+credentials exist — and `security.read_only_mode`, which tells a stranger whether the relay/DRM
+write gate is currently open. The Modbus TCP server on port 502 is reachable from that AP too,
+and Modbus has no authentication at all.
 
 None of it is a secret — no password is served anywhere (see the table above) — and none of it
 grants control. But "an open AP that appears for a few minutes when your WiFi drops" is a
@@ -63,14 +67,31 @@ disclosure surface worth knowing about.
 **`security.admin_username` used to be in that list and no longer is.** It is half of a login
 that has no brute-force protection, and serving it turned guessing the credentials into guessing
 only the password. It is now omitted from `GET /api/v1/config` exactly as `mqtt.username` always
-was. The practical consequence: the web UI can no longer pre-fill it, so the sign-in dialog asks
-for a username (defaulting to `admin`, remembered for the tab) and the settings field behaves
-like the other credential fields — blank means keep. If you renamed the admin account, you now
-type that name once per browser session.
+was.
 
-This is defence in depth, not a fix for a hole: HTTP Basic over plain HTTP already puts the
-password itself on the wire, so anyone positioned to sniff had both halves regardless. What it
-removes is the far lower bar of a single unauthenticated GET.
+Be clear-eyed about the size of this. Almost every install keeps the factory `admin`, and for
+those an attacker guesses right on the first try either way — the search space only shrinks for
+someone who renamed the account. That is also exactly who pays the cost below. The change is
+consistency with how the broker credential is already treated, not a meaningful second factor,
+and on a device whose Modbus port has no authentication at all it would be silly to claim more.
+
+It is defence in depth rather than a hole closed: HTTP Basic over plain HTTP puts the password
+itself on the wire, so a listener who catches someone signing in has had both halves all along.
+What goes away is the much lower bar of one unauthenticated GET — no timing, no waiting for an
+admin to appear, and on a bridge nobody ever signs into, that GET was the *only* way to get the
+username.
+
+> **If you change the admin username, write it down.** There is no way to read it back — that
+> is the whole point of the change — and it is not in the logs, the API, MQTT or Prometheus. A
+> forgotten username costs a factory reset (BOOT held ~5 s), which erases WiFi, MQTT, the driver
+> selection, relay roles and the timezone along with it. Forgetting the *password* always cost
+> that; forgetting the username now does too.
+
+The everyday cost is smaller: the sign-in dialog has a username field defaulting to `admin`, and
+the settings field behaves like the other credential fields — blank means keep. The dialog
+remembers the last username the bridge actually accepted, but only for that tab and that origin,
+so `http://heliograph.local` and `http://192.168.1.50` each ask once, and a second tab asks
+again.
 
 **The gate has a cost of its own: authenticating over that AP puts the admin password on the
 air.** HTTP Basic is base64, not encryption, so a passive listener in radio range of the open
