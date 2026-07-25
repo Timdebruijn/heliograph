@@ -148,7 +148,8 @@ static void test_no_discovery_entity_for_an_unsupported_declared_channel() {
                                           "Battery SoC");
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     TEST_ASSERT_NULL(findEntity(entities, "heliograph-a1b2c3_battery_soc"));
 }
@@ -437,7 +438,8 @@ static void test_discovery_creates_an_entity_per_supported_measurement() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     TEST_ASSERT_NOT_NULL(findEntity(entities, "heliograph-a1b2c3_ac_power_total"));
     TEST_ASSERT_NOT_NULL(findEntity(entities, "heliograph-a1b2c3_energy_total"));
@@ -452,7 +454,8 @@ static void test_discovery_metadata_matches_the_measurement_type() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     auto power = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
     TEST_ASSERT_EQUAL_STRING("power", power["device_class"]);
@@ -479,7 +482,8 @@ static void test_value_template_reads_the_right_key() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     TEST_ASSERT_EQUAL_STRING("{{ value_json.measurements['ac.power.total'].value }}",
@@ -494,7 +498,8 @@ static void test_availability_tracks_the_bridge_not_the_inverter() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/availability", doc["availability_topic"]);
@@ -507,7 +512,8 @@ static void test_inverter_is_a_separate_device_behind_the_bridge() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     TEST_ASSERT_EQUAL_STRING("heliograph-a1b2c3_inverter", doc["device"]["identifiers"][0]);
@@ -522,7 +528,8 @@ static void test_the_inverter_device_is_named_after_its_model_not_its_manufactur
     auto bridge      = makeBridge();
     bridge.name      = "Heliograph";
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     // The manufacturer is already its own field. Repeating it in the name gave Home Assistant
@@ -540,7 +547,8 @@ static void test_an_inverter_without_a_model_still_gets_a_usable_name() {
     auto bridge = makeBridge();
     bridge.name = "Heliograph";
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
     auto doc = parse(findEntity(entities, "heliograph-a1b2c3_ac_power_total")->payload);
 
     // Falling back to the manufacturer is the one case where the repetition is acceptable:
@@ -561,8 +569,8 @@ static void test_every_entity_on_a_device_has_a_distinct_display_name() {
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
     const auto entities =
-        buildDiscoveryEntities(*store.snapshot(), bridge, topics, kDefaultDiscoveryPrefix,
-                               bridge.bridgeId);
+        buildDiscoveryEntities(*store.snapshot(), bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     // Home Assistant derives the entity id from the display name and silently disambiguates
     // duplicates with _2/_3 -- a suffix that carries no meaning and reorders itself whenever a
@@ -585,7 +593,8 @@ static void test_no_control_entities_for_a_read_only_driver() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     // Nothing that can be commanded: no number, switch or select component anywhere.
     for (const auto& e : entities) {
@@ -601,7 +610,8 @@ static void test_config_topics_are_well_formed() {
     const auto state  = r.poll();
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
-    const auto entities = buildDiscoveryEntities(state, bridge, topics, kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     const auto* e = findEntity(entities, "heliograph-a1b2c3_ac_power_total");
     TEST_ASSERT_EQUAL_STRING("homeassistant/sensor/heliograph-a1b2c3/ac_power_total/config",
@@ -626,8 +636,8 @@ static void test_the_mock_hybrid_gets_battery_and_phase_entities_for_free() {
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
     const auto entities =
-        buildDiscoveryEntities(*store.snapshot(), bridge, topics, kDefaultDiscoveryPrefix,
-                               bridge.bridgeId);
+        buildDiscoveryEntities(*store.snapshot(), bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     TEST_ASSERT_NOT_NULL(findEntity(entities, "heliograph-a1b2c3_battery_soc"));
     TEST_ASSERT_NOT_NULL(findEntity(entities, "heliograph-a1b2c3_ac_phase_l3_voltage"));
@@ -845,15 +855,31 @@ static void test_reset_forces_the_next_publish() {
 
 // --- several inverters on one bus ---------------------------------------------------------
 
-// The whole back-compat contract of this change in one assertion: the FIRST device keeps the
-// topics it has always published on. Moving it would change every Home Assistant entity's
-// unique_id, and an existing install would lose its recorder history for a feature it is not
-// even using.
-static void test_the_first_device_keeps_the_bridge_scoped_topics() {
-    const MqttTopics legacy(kDefaultBaseTopic, "heliograph-a1b2c3");
-    const MqttTopics first(kDefaultBaseTopic, "heliograph-a1b2c3", "");
-    TEST_ASSERT_EQUAL_STRING(legacy.state().c_str(), first.state().c_str());
-    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/state", first.state().c_str());
+// The back-compat contract, asserted against the functions that MAKE the decision rather than
+// against the MqttTopics constructor. The previous version of this test compared
+// MqttTopics(b, id) with MqttTopics(b, id, "") -- the same call via its default argument -- so
+// it would have passed with the primary rule inverted. The rule itself lived inside MqttOutput,
+// which is compiled only for ESP32 and therefore unreachable from any test (review).
+static void test_the_primary_device_keeps_the_bridge_scoped_identity() {
+    const std::string bridgeId = "heliograph-a1b2c3";
+    TEST_ASSERT_EQUAL_STRING("", deviceTopicKey(true, "eversolar_legacy-10").c_str());
+    TEST_ASSERT_EQUAL_STRING(bridgeId.c_str(),
+                             deviceUniqueBase(true, bridgeId, "eversolar_legacy-10").c_str());
+
+    const MqttTopics primary(kDefaultBaseTopic, bridgeId,
+                             deviceTopicKey(true, "eversolar_legacy-10"));
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/state", primary.state().c_str());
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/availability",
+                             primary.availability().c_str());
+}
+
+// ...and a NON-primary device gets its own everything. Both halves matter: this is the pair a
+// wrong branch would swap.
+static void test_a_non_primary_device_gets_its_own_identity() {
+    const std::string bridgeId = "heliograph-a1b2c3";
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", deviceTopicKey(false, "growatt_modbus-2").c_str());
+    TEST_ASSERT_EQUAL_STRING("heliograph-a1b2c3_growatt_modbus-2",
+                             deviceUniqueBase(false, bridgeId, "growatt_modbus-2").c_str());
 }
 
 static void test_further_devices_get_their_own_subtree() {
@@ -867,6 +893,62 @@ static void test_further_devices_get_their_own_subtree() {
 // Two inverters must not land on each other's entities. Before the unique base existed, every
 // unique_id was built from the bridge id alone, so three identical inverters announced three
 // times over the SAME entity -- and Home Assistant merged them into one.
+// Every entity on devices 2..N announced an availability topic that NOTHING publishes -- the
+// device's own, rather than the bridge's -- so Home Assistant held all of them at `unavailable`
+// forever, with no retained value to recover from on restart. The measurements were on the
+// broker and invisible in HA: the whole feature, silently not working (review).
+static void test_every_device_tracks_the_bridge_availability_topic() {
+    Rig               r;
+    const DeviceState state  = r.poll();
+    const BridgeInfo  bridge = makeBridge();
+
+    const MqttTopics primary(kDefaultBaseTopic, bridge.bridgeId);
+    const MqttTopics second(kDefaultBaseTopic, bridge.bridgeId, "growatt_modbus-2");
+    const auto entities = buildDiscoveryEntities(state, bridge, second, primary.availability(),
+                                                 kDefaultDiscoveryPrefix,
+                                                 bridge.bridgeId + "_growatt_modbus-2");
+    TEST_ASSERT_TRUE(!entities.empty());
+    for (const auto& e : entities) {
+        JsonDocument doc;
+        TEST_ASSERT_EQUAL(DeserializationError::Ok, deserializeJson(doc, e.payload).code());
+        TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/availability",
+                                 doc["availability_topic"]);
+        // ...while the state it reads still comes from its OWN subtree.
+        if (!doc["state_topic"].isNull()) {
+            TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/device/growatt_modbus-2/state",
+                                     doc["state_topic"]);
+        }
+    }
+}
+
+// Three identical inverters report the same model and no serial, so without the address in the
+// name Home Assistant lists three devices called exactly the same thing.
+static void test_devices_beyond_the_first_carry_their_address_in_the_name() {
+    Rig         r;
+    DeviceState state          = r.poll();
+    state.identity.instanceKey = "2";
+    const BridgeInfo bridge    = makeBridge();
+
+    const MqttTopics t1(kDefaultBaseTopic, bridge.bridgeId);
+    const MqttTopics t2(kDefaultBaseTopic, bridge.bridgeId, "growatt_modbus-2");
+    const auto first  = buildDiscoveryEntities(state, bridge, t1, t1.availability(),
+                                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto second = buildDiscoveryEntities(state, bridge, t2, t1.availability(),
+                                               kDefaultDiscoveryPrefix,
+                                               bridge.bridgeId + "_growatt_modbus-2");
+
+    JsonDocument a;
+    JsonDocument b;
+    deserializeJson(a, first.front().payload);
+    deserializeJson(b, second.front().payload);
+    const std::string nameA = a["device"]["name"].as<std::string>();
+    const std::string nameB = b["device"]["name"].as<std::string>();
+    TEST_ASSERT_TRUE(nameA != nameB);
+    TEST_ASSERT_TRUE(nameB.find("#2") != std::string::npos);
+    // The primary's name is untouched -- same reasoning as its topics.
+    TEST_ASSERT_TRUE(nameA.find('#') == std::string::npos);
+}
+
 static void test_two_devices_produce_distinct_unique_ids_and_ha_devices() {
     Rig               r;
     const DeviceState state  = r.poll();
@@ -874,9 +956,10 @@ static void test_two_devices_produce_distinct_unique_ids_and_ha_devices() {
 
     const MqttTopics t1(kDefaultBaseTopic, bridge.bridgeId);
     const MqttTopics t2(kDefaultBaseTopic, bridge.bridgeId, "growatt_modbus-2");
-    const auto       first  = buildDiscoveryEntities(state, bridge, t1, kDefaultDiscoveryPrefix,
-                                                     bridge.bridgeId);
-    const auto       second = buildDiscoveryEntities(state, bridge, t2, kDefaultDiscoveryPrefix,
+    const auto       first  = buildDiscoveryEntities(state, bridge, t1, t1.availability(),
+                                                     kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto       second = buildDiscoveryEntities(state, bridge, t2, t1.availability(),
+                                                     kDefaultDiscoveryPrefix,
                                                      bridge.bridgeId + "_growatt_modbus-2");
 
     TEST_ASSERT_TRUE(!first.empty() && first.size() == second.size());
@@ -891,7 +974,10 @@ static void test_two_devices_produce_distinct_unique_ids_and_ha_devices() {
 
 int main(int, char**) {
     UNITY_BEGIN();
-    RUN_TEST(test_the_first_device_keeps_the_bridge_scoped_topics);
+    RUN_TEST(test_the_primary_device_keeps_the_bridge_scoped_identity);
+    RUN_TEST(test_a_non_primary_device_gets_its_own_identity);
+    RUN_TEST(test_every_device_tracks_the_bridge_availability_topic);
+    RUN_TEST(test_devices_beyond_the_first_carry_their_address_in_the_name);
     RUN_TEST(test_further_devices_get_their_own_subtree);
     RUN_TEST(test_two_devices_produce_distinct_unique_ids_and_ha_devices);
     RUN_TEST(test_topics_are_built_consistently);

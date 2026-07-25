@@ -58,6 +58,25 @@ private:
     std::string prefix_;
 };
 
+/// Which topic subtree a device publishes on, and what prefixes its Home Assistant ids.
+///
+/// Pure and host-testable on purpose: this pair of decisions IS the back-compat contract of
+/// multi-device MQTT, and it used to live inside MqttOutput -- which is compiled only for
+/// ESP32, so no test could reach it. The tests that "pinned the contract" were exercising the
+/// MqttTopics constructor instead, and would have passed with this rule inverted (review).
+///
+/// `primary` marks the device that keeps the bridge-scoped tree it has always used. Exactly
+/// one device may be primary, and none may be: when the configured first device fails to
+/// start, nobody inherits its topics, its unique ids or its recorder history.
+inline std::string deviceTopicKey(bool primary, const std::string& deviceId) {
+    return primary ? std::string{} : deviceId;
+}
+
+inline std::string deviceUniqueBase(bool primary, const std::string& bridgeId,
+                                    const std::string& deviceId) {
+    return primary ? bridgeId : bridgeId + "_" + deviceId;
+}
+
 inline constexpr const char* kPayloadOnline  = "online";
 inline constexpr const char* kPayloadOffline = "offline";
 

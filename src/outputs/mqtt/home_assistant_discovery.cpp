@@ -119,7 +119,19 @@ void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIde
     const std::string& descriptor = !identity.model.empty()          ? identity.model
                                     : !identity.manufacturer.empty() ? identity.manufacturer
                                                                      : kUnknownInverterName;
-    device["name"] = bridge.name.empty() ? descriptor : bridge.name + " - " + descriptor;
+    std::string name = bridge.name.empty() ? descriptor : bridge.name + " - " + descriptor;
+    // Three identical inverters on one bus produce three identical model strings and no serial
+    // number, so without this Home Assistant lists three devices called exactly the same thing
+    // and twelve entities each called "AC Power". The address is the only thing that tells them
+    // apart, and the driver already put it in the identity.
+    //
+    // Only for devices 2..N: the primary keeps the name it has always had, like its topics and
+    // its unique ids. Same reasoning, same test.
+    const bool primary = uniqueBase == bridge.bridgeId;
+    if (!primary && !identity.instanceKey.empty()) {
+        name += " #" + identity.instanceKey;
+    }
+    device["name"] = name;
     if (!identity.manufacturer.empty()) {
         device["manufacturer"] = identity.manufacturer;
     }
@@ -201,6 +213,7 @@ uint64_t stringListFingerprint(const std::vector<std::string>& items) {
 std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
                                                     const BridgeInfo&  bridge,
                                                     const MqttTopics&  topics,
+                                                    const std::string& availabilityTopic,
                                                     const std::string& discoveryPrefix,
                                                     const std::string& uniqueBase) {
     std::vector<DiscoveryEntity> entities;
@@ -225,7 +238,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         // than as a reading of 0.
         e["value_template"] =
             std::string("{{ value_json.measurements['") + m.id + "'].value }}";
-        e["availability_topic"]  = topics.availability();
+        e["availability_topic"]  = availabilityTopic;
         e["payload_available"]   = kPayloadOnline;
         e["payload_not_available"] = kPayloadOffline;
 
@@ -264,7 +277,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         e["name"]           = "Status";
         e["state_topic"]    = topics.state();
         e["value_template"] = "{{ value_json.status_text }}";
-        e["availability_topic"] = topics.availability();
+        e["availability_topic"] = availabilityTopic;
         e["icon"]           = "mdi:information-outline";
         addDeviceBlock(e, bridge, state.identity, false, uniqueBase);
 
@@ -285,7 +298,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         e["name"]           = "Inverter Online";
         e["state_topic"]    = topics.state();
         e["value_template"] = "{{ 'ON' if value_json.inverter_online else 'OFF' }}";
-        e["availability_topic"] = topics.availability();
+        e["availability_topic"] = availabilityTopic;
         e["device_class"]   = "connectivity";
         e["entity_category"] = "diagnostic";
         addDeviceBlock(e, bridge, state.identity, false, uniqueBase);

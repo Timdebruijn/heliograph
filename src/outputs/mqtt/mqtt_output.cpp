@@ -142,21 +142,22 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
 
 bool MqttOutput::connected() const { return started_ && g_client.connected(); }
 
-MqttOutput::Channel& MqttOutput::channelFor(const DeviceId& id, const BridgeInfo& bridge) {
+MqttOutput::Channel& MqttOutput::channelFor(const DeviceView& view, const BridgeInfo& bridge) {
     for (auto& c : channels_) {
-        if (c.id == id) {
+        if (c.id == view.id) {
             return c;
         }
     }
-    // The first channel is the bridge-scoped one, which is what every install had before this
-    // became plural: same topics, same unique_ids, same Home Assistant entities and history.
-    const bool  first = channels_.empty();
-    Channel     c{id,
-                  MqttTopics(config_.baseTopic, bridge.bridgeId, first ? std::string{} : id),
-                  first ? bridge.bridgeId : bridge.bridgeId + "_" + id,
-                  PublishThrottle(publishPolicy_),
-                  false,
-                  0};
+    // The primary device keeps the bridge-scoped tree every install had before this became
+    // plural: same topics, same unique ids, same Home Assistant entities and history. Which
+    // device that is comes from the caller, not from arrival order -- see DeviceView::primary.
+    Channel c{view.id,
+              MqttTopics(config_.baseTopic, bridge.bridgeId,
+                         deviceTopicKey(view.primary, view.id)),
+              deviceUniqueBase(view.primary, bridge.bridgeId, view.id),
+              PublishThrottle(publishPolicy_),
+              false,
+              0};
     channels_.push_back(std::move(c));
     return channels_.back();
 }
@@ -168,13 +169,17 @@ void MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
     }
     // Purely derived from measurements and capabilities. Nothing in here knows which device
     // it is talking to; a driver reporting a battery gets battery entities for free.
+    // topics_ for availability, deliberately: it is the BRIDGE's liveness, and it is the only
+    // availability topic anything publishes.
     for (const auto& e : buildDiscoveryEntities(state, bridge, channel.topics,
-                                                config_.discoveryPrefix, channel.uniqueBase)) {
+                                                topics_.availability(), config_.discoveryPrefix,
+                                                channel.uniqueBase)) {
         g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
     }
-    // Bridge entities belong to the bridge and are announced once, with the first device --
-    // publishing them per device would create N copies of the same RSSI sensor.
-    if (&channel == &channels_.front()) {
+    // Bridge entities belong to the bridge and are announced once -- publishing them per
+    // device would create N copies of the same RSSI sensor. Tied to the bridge-scoped channel
+    // rather than to whichever channel happens to be first in the vector.
+    if (channel.uniqueBase == bridge.bridgeId) {
         for (const auto& e :
              buildBridgeDiagnosticEntities(bridge, topics_, config_.discoveryPrefix)) {
             g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
@@ -270,7 +275,7 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
             continue;
         }
         const DeviceState& state   = *view.state;
-        Channel&           channel = channelFor(view.id, bridge);
+        Channel&           channel = channelFor(view, bridge);
 
         const auto signature = discoverySignature(state);
         if (!channel.discoveryPublished || signature != channel.discoveredSignature) {
@@ -298,9 +303,11 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         if (bridge.relaysEnabled != lastRelaysEnabled_ || rolesSig != lastRelayRolesSig_) {
             lastRelaysEnabled_  = bridge.relaysEnabled;
             lastRelayRolesSig_  = rolesSig;
-            // Relay entities ride along with the first device's announcement.
-            if (!channels_.empty()) {
-                channels_.front().discoveryPublished = false;
+            // Relay entities ride along with the bridge-scoped channel's announcement.
+            for (auto& c : channels_) {
+                if (c.uniqueBase == bridge.bridgeId) {
+                    c.discoveryPublished = false;
+                }
             }
             relayStateForced_ = true;
         }
@@ -360,7 +367,7 @@ void MqttOutput::stop() { started_ = false; }
 bool MqttOutput::connected() const { return false; }
 void MqttOutput::onConnected(Channel&, const DeviceState&, const BridgeInfo&) {}
 void MqttOutput::publishDiscovery(Channel&, const DeviceState&, const BridgeInfo&) {}
-MqttOutput::Channel& MqttOutput::channelFor(const DeviceId&, const BridgeInfo&) {
+MqttOutput::Channel& MqttOutput::channelFor(const DeviceView&, const BridgeInfo&) {
     static Channel unused{"", MqttTopics("", ""), "", PublishThrottle({}), false, 0};
     return unused;
 }

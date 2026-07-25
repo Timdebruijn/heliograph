@@ -39,9 +39,25 @@ bridge, not any inverter. Availability tracking the bridge is also why a sleepin
 not make its entities unavailable at night.
 
 Each device gets its own Home Assistant device block, its own `unique_id`s and its own retained
-discovery config topics. `<device_id>` is the same id REST uses: the serial number when the
-driver reports one, otherwise the driver id plus the configured address, e.g.
-`growatt_modbus-2`.
+discovery config topics. Devices beyond the first also carry their address in the HA device name
+(`… #2`), because identical inverters report an identical model and no serial number.
+
+`<device_id>` is the id REST uses, frozen at boot: the driver id plus the configured address,
+e.g. `growatt_modbus-2`. It is **not** the serial number even for drivers that report one — the
+serial arrives during the first poll, long after the id is needed.
+
+> **Removing or re-addressing a device leaves its entities behind.** The discovery configs and
+> the last state are retained on the broker, and nothing publishes an empty payload to clear
+> them, so Home Assistant keeps re-creating those entities — and because availability is
+> bridge-scoped they stay *available*, showing the last value ever read. A template or
+> automation summing your inverters will keep counting the ghost. Clear them by hand
+> (`mosquitto_pub -r -n -t <topic>`) or delete the entities in Home Assistant. The relay
+> entities do have an automatic removal path; devices do not, yet.
+
+> **Which device is "first" comes from the configuration, not from boot order.** It is the
+> `driver` entry. If it fails to start, no device takes over the bridge-scoped topics — that is
+> deliberate, so a bad boot cannot transplant one inverter's history onto another. But moving a
+> different inverter into the `driver` slot *does* hand it those topics and that history.
 
 **Last Will and Testament:** topic `availability`, payload `offline`, retained, QoS 1. On a
 clean shutdown, the bridge publishes `offline` itself.

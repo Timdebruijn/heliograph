@@ -58,6 +58,11 @@ public:
     struct DeviceView {
         DeviceId           id;
         const DeviceState* state;
+        /// True for the device that keeps the bridge-scoped topics and unique ids. Decided by
+        /// the caller from the CONFIGURED order, not by arrival: keying it on "first one seen"
+        /// meant that a boot where device 1 failed to start handed device 2 its topics, its
+        /// entities and its recorder history (review, 2026-07-25). At most one, possibly none.
+        bool primary = false;
     };
 
     /// Drives reconnects and publishing. Call regularly from the MQTT task; never blocks.
@@ -87,10 +92,9 @@ public:
     void setDrmCommandHandler(DrmCommandFn handler) { drmCommand_ = std::move(handler); }
 
 private:
-    /// Everything that is per-inverter rather than per-bridge. Keyed by device id and created
-    /// on first sight, so a device appearing later (a driver that only registers at sunrise)
-    /// gets its own throttle and its own discovery announcement rather than inheriting
-    /// another's.
+    /// Everything that is per-inverter rather than per-bridge, keyed by device id. Every
+    /// channel is created in the first loop() pass -- the device list is fixed at boot -- but
+    /// keying by id rather than by position means nothing depends on that staying true.
     struct Channel {
         DeviceId        id;
         MqttTopics      topics;
@@ -100,7 +104,7 @@ private:
         uint64_t        discoveredSignature = 0;
     };
 
-    Channel& channelFor(const DeviceId& id, const BridgeInfo& bridge);
+    Channel& channelFor(const DeviceView& view, const BridgeInfo& bridge);
 
     void onConnected(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
     void publishDiscovery(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);

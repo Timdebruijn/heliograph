@@ -660,12 +660,10 @@ void rs485Task(void* /*arg*/) {
                 break;
             }
         }
-        // FIRST DEVICE ONLY, deliberately and for now. MQTT, Home Assistant, Modbus TCP and
-        // Prometheus all take a single DeviceState: their topic trees, register map and metric
-        // names have no device dimension yet. Polling several devices without saying so would
-        // put two more inverters in the REST device list and silently nowhere else, so this is
-        // stated here, in docs/architecture.md, and in the REST status payload rather than left
-        // for someone to discover from a missing entity.
+        // MQTT/Home Assistant take every device; Modbus TCP and Prometheus still take one --
+        // the register map holds a single device's registers and the metric names have no
+        // device label. Stated here, in docs/architecture.md, docs/rest-api.md, docs/mqtt.md
+        // and the README rather than left to be found from a missing entity.
         if (g_state) {
             const auto bridge = bridgeInfo();
             const auto diag   = g_diagnostics.snapshot();
