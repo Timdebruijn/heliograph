@@ -233,6 +233,16 @@ ProbeResult GrowattDriver::probe() {
         result.responded = true;
         result.confidenceScore += 20;
         result.evidence.push_back("Modbus device answered with an exception (wrong register?)");
+    } else if (r == ReadResult::Crc) {
+        // Bytes DID come back, they just did not survive the CRC. Deliberately still
+        // responded=false: the discovery engine stops sweeping the remaining serial profiles as
+        // soon as a candidate responds, and garbage that happens to frame up as a bad-CRC reply
+        // is entirely normal at the wrong line speed -- claiming a device here would abort the
+        // sweep before the right baud rate is ever tried. Only the wording changes, and that
+        // wording is shown to the user verbatim in the wizard.
+        result.evidence.push_back(
+            "replies arrived but failed their checksum: wrong line speed, or a noisy bus "
+            "(check ground, termination and cable routing)");
     } else {
         result.evidence.push_back("no Modbus reply at this unit id and line speed");
     }

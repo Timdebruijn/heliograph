@@ -41,13 +41,20 @@ static PollResult failureFor(modbus::ReadStatus status) {
             return PollResult::Timeout;
         case modbus::ReadStatus::TransportError:
             return PollResult::TransportError;
-        case modbus::ReadStatus::Exception:
         case modbus::ReadStatus::Protocol:
+            // An intact frame that was not ours: a neighbour on the multidrop bus answering, or
+            // a short reply. Addressing or a device quirk -- which is exactly what
+            // docs/prometheus.md defines invalid frames as, and what the Growatt driver already
+            // reports for the same status. Reporting NotRegistered here instead left the two
+            // Modbus drivers describing identical bus conditions differently.
+            return PollResult::InvalidFrame;
+        case modbus::ReadStatus::Exception:
         case modbus::ReadStatus::Ok:
             break;
     }
-    // An exception or a malformed reply both mean the device is present and talking, just not
-    // giving us this range. Not InvalidFrame: nothing is wrong with the wire.
+    // An exception means the device is present, addressed correctly, and refusing this range.
+    // Nothing is wrong with the wire and no frame was malformed, so neither error counter
+    // should move.
     return PollResult::NotRegistered;
 }
 
@@ -73,11 +80,19 @@ bool SunspecDriver::walkChain(PollResult& outFailure) {
     }
 
     uint16_t cursor = static_cast<uint16_t>(options_.baseAddress + 2);
+    // Why the walk stopped, for the case where it stopped before mapping anything at all.
+    // Silence there is a device that answered the marker and then went quiet; a CRC failure is
+    // a bad wire; an exception is a device refusing the range. Left unset, the caller's default
+    // reported all three as Timeout -- the exact mislabel this change exists to remove.
+    modbus::ReadStatus stoppedBecause = modbus::ReadStatus::Timeout;
     for (size_t i = 0; i < kMaxChainEntries; ++i) {
-        uint16_t header[2] = {};
-        if (read(cursor, kHeaderRegisters, header, 2).status != modbus::ReadStatus::Ok) {
+        uint16_t   header[2]  = {};
+        const auto headerRead = read(cursor, kHeaderRegisters, header, 2);
+        if (headerRead.status != modbus::ReadStatus::Ok) {
             // A chain that stops answering is not a broken device: several vendors simply do
-            // not serve the terminator. Keep whatever was mapped so far.
+            // not serve the terminator. Keep whatever was mapped so far -- but remember why,
+            // because if nothing was mapped this is the only clue we will have.
+            stoppedBecause = headerRead.status;
             break;
         }
         if (header[0] == kEndOfChain) {
@@ -101,6 +116,9 @@ bool SunspecDriver::walkChain(PollResult& outFailure) {
     }
 
     if (chain_.empty()) {
+        // The marker was there, so something SunSpec-shaped is on the bus, but not one model
+        // could be read. Report the reason the walk stopped rather than a blanket Timeout.
+        outFailure = failureFor(stoppedBecause);
         return false;
     }
     // Resolved now that the vector is final and cannot reallocate under these pointers.

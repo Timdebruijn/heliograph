@@ -305,6 +305,20 @@ static void test_a_corrupt_reply_is_reported_as_a_checksum_error() {
     TEST_ASSERT_EQUAL(PollResult::ChecksumError, d.poll(state));
 }
 
+// The marker is there, so something SunSpec-shaped is on the bus, but the very first model
+// header is refused. Nothing gets mapped. The reason the walk stopped used to be discarded
+// here, so the caller's default won and this reported Timeout -- accusing the wiring of a
+// fault on a device that is demonstrably answering (review, 2026-07-25).
+static void test_a_marker_with_no_readable_models_is_not_reported_as_a_timeout() {
+    Rig r;
+    r.device.placeMarker();  // marker only; every later register earns an exception
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::NotRegistered, d.poll(state));
+}
+
 static void test_a_silent_device_does_not_poll() {
     Rig r;
     buildTypical(r.device);
@@ -343,6 +357,7 @@ int main(int, char**) {
     RUN_TEST(test_an_unreadable_device_is_not_reported_as_line_corruption);
     RUN_TEST(test_a_device_without_the_marker_is_not_reported_as_a_timeout);
     RUN_TEST(test_a_corrupt_reply_is_reported_as_a_checksum_error);
+    RUN_TEST(test_a_marker_with_no_readable_models_is_not_reported_as_a_timeout);
     RUN_TEST(test_a_silent_device_does_not_poll);
     RUN_TEST(test_the_driver_is_read_only);
     return UNITY_END();

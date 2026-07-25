@@ -110,11 +110,27 @@ A quiet night on a solar inverter produces timeouts and no checksum errors, and 
 the inverter powers down after dark. That asymmetry is exactly why the alert below watches
 checksum errors rather than timeouts.
 
-> Until 0.13.0 a Modbus driver could not raise the checksum counter at all: the shared read
-> transaction folded CRC failures into a generic protocol error, so on a Growatt or SunSpec
-> install this metric was structurally always zero and the alert could never fire. The PMU
-> drivers (EverSolar, SolaX) were unaffected. If you have been running a Modbus device on an
-> earlier version, a flat zero there was not evidence of a clean bus.
+> **A flat zero on the checksum counter is weaker evidence than it looks, on a Modbus device.**
+>
+> Until 0.13.0 a Modbus driver could not raise it at all: the shared read transaction folded CRC
+> failures into a generic protocol error, so on a Growatt or SunSpec install the metric was
+> structurally always zero and the alert could never fire. The PMU drivers (EverSolar, SolaX)
+> were unaffected.
+>
+> Even after that fix it still under-counts, in two ways worth knowing before you trust it:
+>
+> - A Growatt poll reads several register blocks and reports success as soon as **one** of them
+>   decodes. So a bus corrupting, say, a third of its frames usually still has a good block per
+>   poll, the poll returns Ok, and the checksum error is logged but never counted. The metric
+>   therefore catches a bus that is *failing*, not one that is *degrading* — which is the
+>   opposite of what an early-warning counter should do. Fixing that means decoupling the
+>   counter from the poll verdict; it is tracked and not done yet.
+> - Line noise that damages a length or byte-count field makes the frame un-parseable rather
+>   than merely wrong, and that surfaces as a **timeout**, not a checksum error.
+>
+> Treat a non-zero value as a definite problem, and a zero as "no proof either way". The log at
+> `trace` level is the reliable source while the above stands: a corrupt block says so on the
+> line it happens.
 
 ### Bridge health
 
