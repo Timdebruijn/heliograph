@@ -48,6 +48,25 @@ th{color:var(--dim);font-weight:500;font-size:12px;text-transform:uppercase}
 td.n{text-align:right;font-variant-numeric:tabular-nums}
 .dim{color:var(--dim)}.hide{display:none}
 .tag{font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+/* Settings layout. The cards carry no margin of their own -- deliberately, because the
+   dashboard packs them into a .grid that owns its own gap -- so on the settings tab, where
+   they are stacked instead, they used to touch: twelve blocks with 0 px between them read as
+   one undifferentiated wall. The spacing lives here, scoped to #cfgform, rather than as a
+   margin on .card that would then have to be undone for the grid.
+   Two scales on purpose: 12 px between cards that belong to one subject, 26 px between
+   subjects, so the grouping is visible without a single border. */
+#cfgform{display:flex;flex-direction:column;gap:26px}
+.cfgsec{display:flex;flex-direction:column;gap:12px}
+.cfgsec>h3{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}
+/* The gap already separates it. Without this the global button margin stacks on top of the
+   flex gap and Save floats a long way from the settings it saves. */
+.cfgsave>button{margin-top:0}
+#cfgform code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg)}
+/* Last row of a table inside a card: the card's own padding is the bottom edge, so the row
+   rule underneath it draws a line to nowhere. Scoped to this tab rather than to .card, which
+   the dashboard and the Device tab also use -- they have the same dangling rule, but changing
+   how they look is not what this is about. */
+#cfgform .card table tr:last-child td{border-bottom:0}
 dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:20px;width:90%;max-width:340px}
 dialog::backdrop{background:#000a}
 .err{background:#f8514922;border:1px solid var(--bad);padding:10px;border-radius:8px;margin-bottom:12px}
@@ -1182,6 +1201,7 @@ async function renderConfig(){
   const driverOpts=`<span id="drvopts">${optsFor(c.driver.id)}</span>`;
 
   $('#cfgform').innerHTML=`
+  <section class="cfgsec"><h3>Network</h3>
   <div class="card"><b>Bridge</b> <span class="tag" style="font-weight:400">name applied immediately</span>${txt('c_name','Name',c.bridge_name,
       'Display name: shown in Home Assistant and on this dashboard. Spaces are fine.')}
     ${txt('c_host','Hostname',c.wifi.hostname,
@@ -1194,16 +1214,6 @@ async function renderConfig(){
     <select id="c_ssidpick" style="display:none;margin-top:6px"
       onchange="if(this.value){document.querySelector('#c_ssid').value=this.value}"></select>
     ${pw('c_wpw','Password',c.wifi.password_set)}</div>
-  <div class="card"><b>MQTT</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_mqe','Enabled',c.mqtt.enabled)}
-    ${txt('c_mqh','Broker host',c.mqtt.host)}${num('c_mqp','Port',c.mqtt.port)}
-    ${credtxt('c_mqu','Username',c.mqtt.username_set,'Leave blank to keep. Not shown here; send an empty string via the API to clear it (null is a no-op for usernames).')}${pw('c_mqpw','Password',c.mqtt.password_set)}
-    ${txt('c_mqt','Base topic',c.mqtt.base_topic)}
-    ${chk('c_mqd','Home Assistant discovery',c.mqtt.discovery_enabled)}</div>
-  <div class="card"><b>Modbus TCP</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_mbe','Enabled',c.modbus.enabled)}
-    ${num('c_mbp','Port',c.modbus.port)}${num('c_mbu','Unit ID',c.modbus.unit_id)}
-    <div class="dim" style="font-size:12px;margin-top:8px">Writing is permanently disabled:
-    no driver in this build can write to an inverter.</div></div>
-  <div class="card"><b>Polling</b> <span class="tag" style="font-weight:400">needs restart</span>${num('c_pi','Interval (seconds)',c.polling.interval_seconds)}</div>
   <div class="card"><b>Time (NTP)</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_ntpe','Enabled',c.ntp.enabled)}
     ${chk('c_ntpd','Use NTP server from DHCP',c.ntp.use_dhcp)}
     ${txt('c_ntps','NTP server (fallback)',c.ntp.server)}
@@ -1216,6 +1226,40 @@ async function renderConfig(){
     </span>
     <div class="dim" style="font-size:12px;margin-top:8px">A DHCP-provided server wins; the
     fallback is used when the network offers none.</div></div>
+  </section>
+  <section class="cfgsec"><h3>MQTT &amp; Home Assistant</h3>
+  <div class="card"><b>MQTT</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_mqe','Enabled',c.mqtt.enabled)}
+    ${txt('c_mqh','Broker host',c.mqtt.host)}${num('c_mqp','Port',c.mqtt.port)}
+    ${credtxt('c_mqu','Username',c.mqtt.username_set,'Leave blank to keep. Not shown here; send an empty string via the API to clear it (null is a no-op for usernames).')}${pw('c_mqpw','Password',c.mqtt.password_set)}
+    ${txt('c_mqt','Base topic',c.mqtt.base_topic)}
+    ${chk('c_mqd','Home Assistant discovery',c.mqtt.discovery_enabled)}</div>
+  </section>
+  <section class="cfgsec"><h3>Modbus TCP</h3>
+  <div class="card"><b>Modbus TCP</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_mbe','Enabled',c.modbus.enabled)}
+    ${num('c_mbp','Port',c.modbus.port)}${num('c_mbu','Unit ID',c.modbus.unit_id)}
+    <div class="dim" style="font-size:12px;margin-top:8px">Writing is permanently disabled:
+    no driver in this build can write to an inverter.</div></div>
+  </section>
+  <section class="cfgsec"><h3>REST &amp; Prometheus</h3>
+  <!-- Read-only by necessity: neither output has a setting. Both are always on, both listen on
+       the web server's own port, and neither can be turned off short of a rebuild. Saying so in
+       one card beats an empty section under a heading the user came looking for -- and it is the
+       only place that answers "what do I point my scraper at". -->
+  <div class="card"><b>Endpoints</b> <span class="tag" style="font-weight:400">no settings</span>
+    <div class="dim" style="font-size:12px;margin-top:10px">Always available on this bridge's
+    address, on the same port as this page. Nothing here to configure.</div>
+    <table style="margin-top:10px"><tbody>
+    <tr><td>Prometheus</td><td><code>/metrics</code></td></tr>
+    <tr><td>REST</td><td><code>/api/v1/status</code>, <code>/devices</code>,
+      <code>/diagnostics</code>, <code>/config</code></td></tr>
+    <tr><td>Live updates</td><td><code>/api/v1/events</code> (SSE)</td></tr>
+    </tbody></table>
+    <div class="dim" style="font-size:12px;margin-top:8px">Reads need no password — the
+    threat model is a trusted LAN. Everything that <i>changes</i> something does. See
+    docs/security.md and docs/prometheus.md.</div></div>
+  </section>
+  <section class="cfgsec"><h3>Device &amp; driver</h3>
+  <div class="card"><b>Polling</b> <span class="tag" style="font-weight:400">needs restart</span>${num('c_pi','Interval (seconds)',c.polling.interval_seconds)}</div>
   <div class="card"><b>RS485 line</b> <span class="tag" style="font-weight:400">needs restart</span>
     ${chk('c_ser','Override the line settings the driver chooses',c.serial.override)}
     <div class="dim" style="font-size:12px;margin-top:6px">Off, the driver configures the line
@@ -1258,7 +1302,9 @@ async function renderConfig(){
     its address — does not remove what it already published: the old entities stay in Home
     Assistant, <b>available</b>, showing their last value. See docs/mqtt.md.</div>
   </div>
-  ${window.g_relayCount>0?`<div class="card"><b>Relays</b> <span class="tag" style="font-weight:400">applied immediately</span>
+  </section>
+  ${window.g_relayCount>0?`<section class="cfgsec"><h3>Relays &amp; DRM</h3>
+  <div class="card"><b>Relays</b> <span class="tag" style="font-weight:400">applied immediately</span>
     ${chk('c_rle','Enabled',(c.relays||{}).enabled)}
     <!-- The second gate, named where it bites. Enabling relays while read-only mode is still
          on is a silent dead end: the card looks configured, the switches appear in Home
@@ -1276,7 +1322,9 @@ async function renderConfig(){
     below) being off.
     Disabling releases every relay. Roles name the switches in Home Assistant and build
     the DRM Mode select; see docs/drm.md for the wiring rules (failsafe: a dead bridge
-    must leave the inverter running).</div></div>`:''}
+    must leave the inverter running).</div></div>
+  </section>`:''}
+  <section class="cfgsec"><h3>Security &amp; logging</h3>
   <div class="card"><b>Security</b> <span class="tag" style="font-weight:400">applied immediately</span>${credtxt('c_au','Admin username',true,'Leave blank to keep. Not shown here — it is half of the login and this page is readable without one. <b>Write down anything other than “admin”: it cannot be read back, and a forgotten username needs a factory reset.</b>')}
     ${pw('c_ap','Admin password',c.security.password_set)}
     <!-- !==false, not a plain truthiness test: a missing field must render as ON. If GET ever
@@ -1295,9 +1343,16 @@ async function renderConfig(){
   <div class="card"><b>Logging</b> <span class="tag" style="font-weight:400">applied immediately</span>
     <label for="c_lg">Level</label><select id="c_lg">${['error','warn','info','debug','trace'].map(l=>
       `<option ${l===c.logging.level?'selected':''}>${l}</option>`).join('')}</select></div>
-  <button onclick="saveConfig()">Save settings</button>
-  <div id="cm" class="msg" style="display:none"></div>
-  <div class="card" style="margin-top:20px"><b>Firmware update (OTA)</b>
+  </section>
+  <!-- Save applies everything above it and nothing below: OTA, restart and factory reset each
+       act the moment their own button is pressed. Keeping it out of the last card, rather than
+       inside one, is what makes that boundary visible. -->
+  <div class="cfgsave">
+    <button onclick="saveConfig()">Save settings</button>
+    <div id="cm" class="msg" style="display:none"></div>
+  </div>
+  <section class="cfgsec"><h3>Firmware &amp; recovery</h3>
+  <div class="card"><b>Firmware update (OTA)</b>
     <label for="c_fw">Firmware image (.bin)</label>
     <input id="c_fw" type="file" accept=".bin">
     <button id="ob" onclick="otaUpload()">Upload and install</button>
@@ -1306,19 +1361,20 @@ async function renderConfig(){
     <div id="om" class="msg" style="display:none"></div>
     <div class="dim" style="font-size:12px;margin-top:8px">The image is verified before the
     boot partition switches; a rejected upload leaves the running firmware untouched.</div></div>
-  <div class="card" style="margin-top:20px">
+  <div class="card">
     <b>Restart</b>
     <p class="dim">Reboots the bridge; all settings are kept. Polling resumes by itself and
     the dashboard reconnects in ~30 seconds.</p>
     <button onclick="rebootFromSettings()">Restart bridge</button>
   </div>
-  <div class="card" style="margin-top:20px;border-color:var(--bad)">
+  <div class="card" style="border-color:var(--bad)">
     <b>Factory reset</b>
     <p class="dim">Erases everything, including WiFi and passwords, and restarts into the setup
     portal. The board's physical RESET button only reboots — this page is the way back from a
     bad configuration, as long as you can still reach it.</p>
     <button style="background:var(--bad)" onclick="factoryReset()">Erase and restart</button>
-  </div>`;
+  </div>
+  </section>`;
 
   // After the card exists in the DOM, not before: renderExtraDevices() writes into #xdevs.
   renderExtraDevices();
