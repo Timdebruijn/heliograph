@@ -69,10 +69,13 @@ namespace {
 // polls several inverters on one bus and carries every one of them into every output; 0.13.1
 // stops the boot log opening in UTC after a warm reset; 0.13.2 is the cleanup sweep -- every
 // warning our own code emitted, the dead symbols, the duplication that had one point of truth
-// to move to, and a traceHex() that printed stack bytes when asked to dump zero of them.
+// to move to, and a traceHex() that printed stack bytes when asked to dump zero of them;
+// 0.14.0 makes the configuration something you can carry off the board (backup, previewed
+// restore, and an undo), records a raw bus for a device no driver can name, and gives the
+// settings page the grouping and the spacing it never had.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 13
-#define HELIOGRAPH_VERSION_PATCH 2
+#define HELIOGRAPH_VERSION_MINOR 14
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
