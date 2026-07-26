@@ -34,6 +34,7 @@ const DriverDescriptor& descriptor() {
         x.supportsMultipleDevices = false;
         x.supportsRead            = true;
         x.supportsWrite           = false;
+        x.addressOptionKey        = "unit_id";
         x.options                 = {
             DriverOption{"unit_id", "Modbus unit id",
                                          "Slave address of the inverter on the RS485 bus. Range 1-247.", "1", {},

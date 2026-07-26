@@ -546,6 +546,8 @@ let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null, wizSavedSerial=null
     wizOptions={};
 // What the bridge already has configured, so step 5 can offer it back instead of overwriting it.
 let wizStoredDriverId=null, wizStoredOptions={};
+/// The options the chosen candidate actually answered at, carried from step 4 into step 5.
+let wizFound={};
 const STEPS=['Interface','Mode','Probing','Candidates','Confirm','Test poll','Save'];
 
 function stepBar(){
@@ -580,13 +582,21 @@ function renderWizard(){
     const c=(wizReport&&wizReport.candidates)||[];
     h+=`<div class="card"><b>Step 4 — Candidates</b>
     <p class="dim">${esc(wizReport?wizReport.reason:'')}</p>`;
-    if(!c.length){h+='<p class="dim">Nothing answered. The quick scan only tries each driver’s default line speed — run the <b>extended scan</b> to try all of them. Also check the wiring: A/B swapped is the most common cause, then termination.</p>'}
+    if(!c.length){h+='<p class="dim">Nothing answered. The quick scan only tries each driver’s default line speed and default address — run the <b>extended scan</b> to try all of them, and addresses 1–8. Also check the wiring: A/B swapped is the most common cause, then termination.</p>'}
+    // One card per DEVICE now, not per driver: an extended scan sweeps addresses, so three
+    // identical inverters are three candidates sharing a driver id. Saying how many answered
+    // is the difference between "here is your inverter" and "here is your bus" (#37).
+    if(c.length>1){
+      const swept=(wizReport&&wizReport.swept_addresses)||[];
+      h+=`<p class="dim">${c.length} devices answered${swept.length?` (addresses ${esc(swept[0])}–${esc(swept[swept.length-1])} and each driver’s own default were tried)`:''}. The wizard configures one — add the rest afterwards under <b>Settings → Extra devices</b>, using the addresses below.</p>`;
+    }
     c.forEach(x=>{
       h+=`<div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:10px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <b>${esc(x.display_name)}</b><span class="tag">${x.confidence}/100</span></div>
       <table style="margin-top:8px">
       <tr><td class="dim">Driver</td><td>${esc(x.driver_id)} <span class="tag">${esc(x.support_level)}</span></td></tr>
+      <tr><td class="dim">Bus address</td><td>${x.address==null?'<span class="dim">assigned by the protocol</span>':'<b>'+esc(x.address)+'</b>'}</td></tr>
       <tr><td class="dim">Serial profile tried</td><td>${x.serial_profile?`${x.serial_profile.baud_rate} ${x.serial_profile.data_bits}${esc(x.serial_profile.parity[0].toUpperCase())}${x.serial_profile.stop_bits}, timeout ${x.serial_profile.response_timeout_ms} ms`:'—'}</td></tr>
       <tr><td class="dim">Response found</td><td>${x.responded?'yes':'no'}</td></tr>
       <tr><td class="dim">Checksum valid</td><td>${x.checksum_valid?'yes':'no'}</td></tr>
@@ -595,7 +605,9 @@ function renderWizard(){
       <tr><td class="dim">Serial number</td><td>${esc(x.serial_number||'—')}</td></tr>
       <tr><td class="dim">Evidence</td><td>${(x.evidence||[]).map(e=>'· '+esc(e)).join('<br>')||'—'}</td></tr>
       </table>
-      <button onclick="wizChosen='${esc(x.driver_id)}';wizStep=5;renderWizard()">Choose this driver</button>
+      <!-- The options travel as JSON through esc(), not as a hand-built string: they come from
+           the device, and every other value on this page goes through the same escape. -->
+      <button onclick="wizChosen=${esc(JSON.stringify(x.driver_id))};wizFound=${esc(JSON.stringify(x.options||{}))};wizStep=5;renderWizard()">Choose this device</button>
       </div>`;
     });
     h+=`<button onclick="wizStep=2;renderWizard()" style="background:none;border:1px solid var(--line);color:var(--fg)">Back</button></div>`;
@@ -764,7 +776,12 @@ function wizRenderOpts(){
     // rewrote a working {profile:"mic_tl_x", unit_id:"3"} back to the defaults and reported
     // success. Every rendered key is asserted in the PATCH, so nothing survives by omission.
     const stored=(id===wizStoredDriverId)?(wizStoredOptions||{})[o.key]:undefined;
-    const cur=stored??o.default_value??'';
+    // What the device ANSWERED at wins over both. Only ever the bus address -- discovery
+    // reports the options it probed with, and it only ever varies that one -- and it is the
+    // whole point of sweeping: finding an inverter at address 3 and then offering to configure
+    // address 1 would be a worse answer than not looking (#37).
+    const found=(id===wizChosen)?(wizFound||{})[o.key]:undefined;
+    const cur=found??stored??o.default_value??'';
     const hint=o.description?`<div class="dim" style="font-size:12px">${esc(o.description)}</div>`:'';
     if(o.allowed_values&&o.allowed_values.length){
       // An empty entry among the allowed values is the driver saying "unset means my own

@@ -695,7 +695,10 @@ void rs485Task(void* /*arg*/) {
         // Discovery first, and instead of polling this cycle: probing re-registers every
         // inverter on the bus, so the two must never interleave. This task owns the bus, which
         // is why the web handler only ever *requests* a run.
-        if (g_discovery.runIfRequested(g_transport)) {
+        // The watchdog is fed per PROBE, not once per iteration: an extended run now sweeps
+        // eight addresses per driver per profile, and on a silent bus every one of those is a
+        // response timeout. The one feed above covered a run that was a handful of probes long.
+        if (g_discovery.runIfRequested(g_transport, [] { esp_task_wdt_reset(); })) {
             Serial.printf("[discovery] %s\n", g_discovery.report().outcome.reason.c_str());
             // The probe left the bus re-registered; make the driver pick that up rather than
             // poll a stale address.

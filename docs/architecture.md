@@ -95,7 +95,9 @@ preempt the higher-priority `rs485Task`; the MQTT payload building that runs on 
 itself is microseconds of pure CPU against a protocol with second-scale timeouts.
 
 Watchdog: `esp_task_wdt` with a 120 s timeout (an extended discovery scan legitimately runs
-many back-to-back 3 s transactions between feeds); `rs485Task` and `loopTask` register with
+many back-to-back 3 s transactions between feeds — since the address sweep it is fed **per
+probe** rather than once per cycle, because a full sweep is dozens of them inside one
+iteration); `rs485Task` and `loopTask` register with
 it, the library tasks do not. `rs485Task` calls `esp_task_wdt_reset()` every cycle, even when
 the poll fails — an unreachable inverter must never cause a reset.
 
@@ -250,7 +252,11 @@ EverSolar:
 Only **one** serial profile for this driver: 9600 8N1 is hardcoded in the reference. We do not
 try other combinations — that would be blind brute-forcing. Drivers whose protocol genuinely
 allows more list them, and extended discovery tries each in turn (quick discovery only tries the
-first).
+first). The same distinction governs bus addresses: a driver names the option that selects
+*which* device on the bus it talks to (`addressOptionKey`), and extended discovery sweeps it
+over 1–8 plus the driver's own default. Nothing is inferred — a driver that names no such
+option is probed once, and a range the driver does not declare is never tried. See
+`docs/rest-api.md`.
 
 The driver's list is not the last word at runtime. `config.serial` stores an optional line
 override: off by default, and set by the discovery wizard when a device answers at a profile the

@@ -31,6 +31,7 @@ const DriverDescriptor& descriptor() {
         x.supportsMultipleDevices = false;
         x.supportsRead            = true;
         x.supportsWrite           = false;
+        x.addressOptionKey        = "address";
         x.options                 = {DriverOption{
             "address", "Assigned bus address",
             "Address handed to the inverter at registration (reference default 10 = 0x0A). "

@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "transport/serial_profile.h"
@@ -91,6 +92,28 @@ struct DriverDescriptor {
 
     /// Settings this driver understands. See DriverOption.
     std::vector<DriverOption> options;
+
+    /// The option that selects WHICH device on a shared bus this driver talks to, if the user
+    /// picks it: "unit_id" for Modbus, "address" for a protocol that assigns one.
+    ///
+    /// Named rather than inferred, because there is no safe convention to infer from: a driver
+    /// may have several numeric options (SunSpec has a base register too) and probing the wrong
+    /// one at eight values is eight pointless transactions on someone's live bus. Empty means
+    /// the driver has no such option -- a protocol where the bridge registers devices itself
+    /// addresses them itself, and there is nothing to sweep.
+    ///
+    /// Extended discovery sweeps this option; nothing else reads it.
+    std::string addressOptionKey;
+
+    /// The declared bounds of addressOptionKey, or {0,0} when there is no such option.
+    std::pair<long, long> addressRange() const {
+        for (const auto& o : options) {
+            if (o.key == addressOptionKey && o.isNumeric()) {
+                return {o.minValue, o.maxValue};
+            }
+        }
+        return {0, 0};
+    }
 
     /// Looks up an option value, falling back to the declared default.
     std::string optionOr(const DriverOptions& values, const std::string& key) const {

@@ -39,7 +39,8 @@ bool DiscoveryRunner::request(bool extended) {
     return true;
 }
 
-bool DiscoveryRunner::runIfRequested(Transport& transport) {
+bool DiscoveryRunner::runIfRequested(Transport& transport,
+                                     const std::function<void()>& onProbe) {
     DiscoveryMode mode;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -53,8 +54,8 @@ bool DiscoveryRunner::runIfRequested(Transport& transport) {
 
     // The engine runs outside the lock: it takes seconds, and report() must stay answerable
     // for the web UI polling for progress the whole time.
-    DiscoveryEngine engine(registry_, transport);
-    DiscoveryOutcome outcome = engine.run(mode);
+    DiscoveryEngine  engine(registry_, transport);
+    DiscoveryOutcome outcome = engine.run(mode, DiscoveryConfig{}, onProbe);
 
     {
         std::lock_guard<std::mutex> lock(mutex_);

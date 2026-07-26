@@ -468,10 +468,32 @@ bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::s
                 profile["stop_bits"] = p.stopBits;
                 profile["response_timeout_ms"] = p.responseTimeoutMs;
             }
+            // The options it answered at -- the bus address, in practice. Handed over as a map
+            // so the wizard can apply them verbatim rather than re-deriving an address from a
+            // driver id, and `address` separately because that is the one the UI shows.
+            JsonObject options = e["options"].to<JsonObject>();
+            for (const auto& [key, value] : c.matchedOptions) {
+                options[key] = value;
+            }
+            if (c.address().empty()) {
+                e["address"] = nullptr;  // this protocol has no address the user picks
+            } else {
+                e["address"] = c.address();
+            }
             JsonArray evidence = e["evidence"].to<JsonArray>();
             for (const auto& line : c.probe.evidence) {
                 evidence.add(line);
             }
+        }
+        JsonObject selectedOptions = doc["selected_options"].to<JsonObject>();
+        for (const auto& [key, value] : report.outcome.selectedOptions) {
+            selectedOptions[key] = value;
+        }
+        // Always present, empty in Quick mode: "nothing else answered" and "nothing else was
+        // asked" are different results and a client must be able to tell them apart.
+        JsonArray swept = doc["swept_addresses"].to<JsonArray>();
+        for (const int address : report.outcome.sweptAddresses) {
+            swept.add(address);
         }
     }
     return finish(doc, out, maxBytes);

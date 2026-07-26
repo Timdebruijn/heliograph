@@ -112,6 +112,231 @@ static void addDriver(DriverRegistry& r, const DriverDescriptor& d, FakeDriver::
                      });
 }
 
+// --- a bus with several devices on it --------------------------------------------------------
+//
+// Discovery created every candidate driver with no options, so every Modbus driver probed at
+// its declared default unit id and nothing else. On a chain of identical inverters the wizard's
+// answer to "which inverters are on this bus" was "there is one at address 1" (#37).
+
+/// A bus where devices sit at fixed addresses. The driver is built with the options the engine
+/// probed with, so a probe only answers when something is actually at that address.
+struct AddressBus {
+    std::vector<std::string> occupied;
+    /// Every address probed, in order. The cost of a sweep is a property worth pinning: this
+    /// runs on a live RS485 bus with the poll loop stopped.
+    std::vector<std::string> probed;
+    /// Same serial at every address, for the one-device-two-addresses case.
+    bool sharedSerial = false;
+};
+
+class AddressedDriver : public InverterDriver {
+public:
+    AddressedDriver(DriverDescriptor d, AddressBus* bus, std::string address)
+        : descriptor_(std::move(d)), bus_(bus), address_(std::move(address)) {}
+
+    const DriverDescriptor& descriptor() const override { return descriptor_; }
+    bool                    begin(Transport&) override { return true; }
+
+    ProbeResult probe() override {
+        if (!counted_) {
+            bus_->probed.push_back(address_);
+            counted_ = true;  // the consistency re-probe is the same address, not a new one
+        }
+        ProbeResult r;
+        r.responded = std::find(bus_->occupied.begin(), bus_->occupied.end(), address_) !=
+                      bus_->occupied.end();
+        if (!r.responded) {
+            return r;
+        }
+        r.checksumValid   = true;
+        r.confidenceScore = 95;
+        r.detectedModel   = "MIC-TL-X";
+        r.serialNumber    = bus_->sharedSerial ? "SHARED" : "SER-" + address_;
+        return r;
+    }
+
+    PollResult           poll(DeviceState&) override { return PollResult::Ok; }
+    DeviceIdentity       identity() const override { return {}; }
+    InverterCapabilities capabilities() const override { return {}; }
+    BusErrorCounts       busErrors() const override { return {}; }
+    CommandResult        execute(const InverterCommand&) override { return CommandResult::Ok; }
+
+private:
+    DriverDescriptor descriptor_;
+    AddressBus*      bus_;
+    std::string      address_;
+    bool             counted_ = false;
+};
+
+static DriverDescriptor addressedDesc(const std::string& id, const std::string& defaultAddress,
+                                      long minValue = 1, long maxValue = 247) {
+    DriverDescriptor d      = desc(id, 10);
+    d.addressOptionKey      = "unit_id";
+    d.options               = {DriverOption{"unit_id", "Unit id", "", defaultAddress, {},
+                                            minValue, maxValue}};
+    return d;
+}
+
+static void addAddressedDriver(DriverRegistry& r, const DriverDescriptor& d, AddressBus* bus) {
+    r.registerDriver(d, [d, bus](Transport&,
+                                 const DriverOptions& options) -> std::unique_ptr<InverterDriver> {
+        const auto it = options.find("unit_id");
+        return std::make_unique<AddressedDriver>(d, bus,
+                                                 it == options.end() ? std::string{} : it->second);
+    });
+}
+
+static void test_extended_discovery_finds_devices_at_other_addresses() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied = {"1", "2", "3"};  // three identical inverters, the bus this exists for
+    addAddressedDriver(reg, addressedDesc("growatt_like", "1"), &bus);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(3, out.candidates.size());
+    std::vector<std::string> found;
+    for (const auto& c : out.candidates) {
+        found.push_back(c.address());
+    }
+    std::sort(found.begin(), found.end());
+    TEST_ASSERT_EQUAL_STRING("1", found[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("2", found[1].c_str());
+    TEST_ASSERT_EQUAL_STRING("3", found[2].c_str());
+    // And the option map is what the wizard configures, so it has to carry the address.
+    TEST_ASSERT_EQUAL_STRING("1", out.selectedOptions.at("unit_id").c_str());
+}
+
+// Quick mode is the one that runs by default and on a bus that may already be in service.
+// Its cost must not change: one probe per driver, at the driver's own default.
+static void test_quick_discovery_still_probes_only_the_default_address() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied = {"1", "2", "3"};
+    addAddressedDriver(reg, addressedDesc("growatt_like", "1"), &bus);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Quick);
+
+    TEST_ASSERT_EQUAL_size_t(1, out.candidates.size());
+    TEST_ASSERT_EQUAL_size_t(1, bus.probed.size());
+    TEST_ASSERT_EQUAL_STRING("1", bus.probed[0].c_str());
+    TEST_ASSERT_TRUE(out.sweptAddresses.empty());
+}
+
+// The driver's own default is always tried, whatever the sweep set says. SolaX registers at 10,
+// which is outside 1..8 -- a wizard that stopped finding the device it used to find would be a
+// regression dressed as a feature.
+static void test_the_drivers_own_default_is_probed_even_outside_the_sweep() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied = {"10"};
+    addAddressedDriver(reg, addressedDesc("solax_like", "10"), &bus);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(1, out.candidates.size());
+    TEST_ASSERT_EQUAL_STRING("10", out.candidates[0].address().c_str());
+    TEST_ASSERT_EQUAL_STRING("10", bus.probed[0].c_str());  // its own default first
+}
+
+// The option bounds are the protocol's. Probing outside them is transactions the driver would
+// refuse anyway, on someone's live bus.
+static void test_the_sweep_stays_inside_the_declared_bounds() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied = {"2"};
+    addAddressedDriver(reg, addressedDesc("small_range", "1", 1, 3), &bus);
+
+    DiscoveryEngine e(reg, t);
+    e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(3, bus.probed.size());  // 1, 2, 3 -- not 1..8
+    TEST_ASSERT_EQUAL_STRING("3", bus.probed.back().c_str());
+}
+
+// A protocol that addresses devices itself has nothing to sweep, and must not be probed eight
+// times to establish that.
+static void test_a_driver_without_an_address_option_is_probed_once() {
+    DriverRegistry     reg;
+    MockTransport      t;
+    FakeDriver::Script s;
+    s.score = 97;
+    addDriver(reg, desc("eversolar_like", 10), &s);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(1, out.candidates.size());
+    TEST_ASSERT_TRUE(out.candidates[0].address().empty());
+    TEST_ASSERT_TRUE(out.candidates[0].matchedOptions.empty());
+}
+
+// The margin rule guards against ambiguity about which PROTOCOL a device speaks. Three
+// inverters of the same make are not ambiguous -- and reading them as "too close to call" would
+// have made the sweep defeat auto-selection on exactly the bus it was built for.
+static void test_identical_inverters_do_not_block_auto_selection() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied = {"1", "2", "3"};
+    addAddressedDriver(reg, addressedDesc("growatt_like", "1"), &bus);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_TRUE(out.autoSelected);
+    TEST_ASSERT_EQUAL_STRING("growatt_like", out.selectedDriverId.c_str());
+    // ...and the owner is told the other two exist, because the wizard configures one device.
+    TEST_ASSERT_TRUE(out.reason.find("3 devices answered") != std::string::npos);
+}
+
+// Two addresses, one serial number: an inverter mid-reconfiguration, or one still answering on
+// an address it was moved off. Two entries would have the owner configure it twice, and two
+// configured devices resolving to one physical inverter is the collision the boot loop refuses.
+static void test_one_device_answering_at_two_addresses_is_reported_once() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied     = {"1", "5"};
+    bus.sharedSerial = true;
+    addAddressedDriver(reg, addressedDesc("growatt_like", "1"), &bus);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(1, out.candidates.size());
+    TEST_ASSERT_EQUAL_STRING("1", out.candidates[0].address().c_str());
+    bool mentioned = false;
+    for (const auto& line : out.candidates[0].probe.evidence) {
+        mentioned = mentioned || line.find("also answered at address 5") != std::string::npos;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(mentioned, "the second address has to be reported, not dropped");
+}
+
+// The watchdog reason for the callback: an extended sweep is dozens of response timeouts inside
+// one rs485Task iteration, and the task watchdog does not care that the delay is legitimate.
+static void test_every_probe_ticks_the_caller() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied = {"4"};
+    addAddressedDriver(reg, addressedDesc("growatt_like", "1"), &bus);
+
+    int             ticks = 0;
+    DiscoveryEngine e(reg, t);
+    e.run(DiscoveryMode::Extended, DiscoveryConfig{}, [&ticks] { ++ticks; });
+
+    // Eight addresses, plus the consistency re-probe of the one that answered.
+    TEST_ASSERT_EQUAL_INT(9, ticks);
+}
+
 // --- the happy path ------------------------------------------------------------------------
 
 static void test_single_convincing_match_is_auto_selected() {
@@ -492,6 +717,14 @@ int main(int, char**) {
     RUN_TEST(test_extended_mode_is_carried_through);
     RUN_TEST(test_timings_are_recorded_for_the_wizard);
     RUN_TEST(test_the_runner_never_executes_a_command);
+    RUN_TEST(test_extended_discovery_finds_devices_at_other_addresses);
+    RUN_TEST(test_quick_discovery_still_probes_only_the_default_address);
+    RUN_TEST(test_the_drivers_own_default_is_probed_even_outside_the_sweep);
+    RUN_TEST(test_the_sweep_stays_inside_the_declared_bounds);
+    RUN_TEST(test_a_driver_without_an_address_option_is_probed_once);
+    RUN_TEST(test_identical_inverters_do_not_block_auto_selection);
+    RUN_TEST(test_one_device_answering_at_two_addresses_is_reported_once);
+    RUN_TEST(test_every_probe_ticks_the_caller);
     RUN_TEST(test_single_convincing_match_is_auto_selected);
     RUN_TEST(test_clear_winner_over_a_weak_match_is_auto_selected);
     RUN_TEST(test_two_close_candidates_are_never_auto_selected);

@@ -53,6 +53,7 @@ const DriverDescriptor& descriptor() {
         // No write path is wired yet. This is the read-only bring-up build; battery control is
         // the deliberate next step, gated on the map being confirmed.
         x.supportsWrite = false;
+        x.addressOptionKey = "unit_id";
         x.options       = {
             // Bounded here, not only in optionsFrom(): the parser's fallback is silent by the
             // time it runs, and on a bus of identical inverters the value it falls back to is
