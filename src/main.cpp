@@ -249,6 +249,10 @@ BridgeInfo bridgeInfo() {
     info.freeHeapBytes    = ESP.getFreeHeap();
     info.minFreeHeapBytes = ESP.getMinFreeHeap();
     info.maxAllocHeapBytes = ESP.getMaxAllocHeap();
+    // Separate from the three above, which are MALLOC_CAP_INTERNAL. Both accessors are guarded
+    // by psramFound() inside the core, so a board without PSRAM reports 0 rather than failing.
+    info.psramSizeBytes    = ESP.getPsramSize();
+    info.psramFreeBytes    = ESP.getFreePsram();
     info.resetReason      = static_cast<uint16_t>(esp_reset_reason());
     info.wifiConnected    = g_wifi.connected();
     info.wifiRssiDbm      = g_wifi.rssi();

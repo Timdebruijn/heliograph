@@ -56,6 +56,18 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
     doc["free_heap_bytes"]           = bridge.freeHeapBytes;
     doc["minimum_free_heap_bytes"]   = bridge.minFreeHeapBytes;
     doc["max_alloc_heap_bytes"]      = bridge.maxAllocHeapBytes;
+
+    // Absent, not zero, when the board has none -- and 0 is a legitimate reading for
+    // psram_free_bytes on a board that HAS PSRAM and has exhausted it, so the two must not
+    // collapse onto the same value. Reported at all because the three heap figures above are
+    // MALLOC_CAP_INTERNAL and say nothing about it (audit, 2026-07-26).
+    if (bridge.psramSizeBytes > 0) {
+        doc["psram_size_bytes"] = bridge.psramSizeBytes;
+        doc["psram_free_bytes"] = bridge.psramFreeBytes;
+    } else {
+        doc["psram_size_bytes"] = nullptr;
+        doc["psram_free_bytes"] = nullptr;
+    }
     doc["reset_reason"]              = bridge.resetReason;
     doc["ota_image_state"]           = bridge.otaImageState;
     doc["wifi_connected"]            = bridge.wifiConnected;

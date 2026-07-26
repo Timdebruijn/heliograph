@@ -203,6 +203,18 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
                "Largest allocatable heap block (fragmentation signal)", "gauge");
     appendValue(out, "heliograph_max_alloc_heap_bytes",
                 static_cast<unsigned long>(bridge.maxAllocHeapBytes));
+    // The three gauges above are MALLOC_CAP_INTERNAL and exclude PSRAM entirely, so on an 8 MB
+    // board they describe ~300 KB of the RAM that exists. Emitted only when there IS PSRAM:
+    // a flat 0 on the Relay-6CH, which has none, would look like exhaustion to an alert rule
+    // -- the same reasoning as the RSSI and stack gauges (audit, 2026-07-26).
+    if (bridge.psramSizeBytes > 0) {
+        appendHelp(out, "heliograph_psram_size_bytes", "Total external PSRAM", "gauge");
+        appendValue(out, "heliograph_psram_size_bytes",
+                    static_cast<unsigned long>(bridge.psramSizeBytes));
+        appendHelp(out, "heliograph_psram_free_bytes", "Free external PSRAM", "gauge");
+        appendValue(out, "heliograph_psram_free_bytes",
+                    static_cast<unsigned long>(bridge.psramFreeBytes));
+    }
     // Omitted until the first sample, like the RSSI gauge above: 0 would read as an
     // exhausted stack to any alerting rule.
     if (d.rs485StackFreeBytes > 0) {

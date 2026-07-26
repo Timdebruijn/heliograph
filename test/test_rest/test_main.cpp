@@ -1389,6 +1389,35 @@ static void test_diagnostics_report_stack_marks_and_fragmentation() {
     TEST_ASSERT_EQUAL_UINT32(65536, doc["max_alloc_heap_bytes"].as<uint32_t>());
 }
 
+// The three heap figures are MALLOC_CAP_INTERNAL and exclude PSRAM, so without these two an
+// 8 MB board reported ~300 KB of RAM and a board whose PSRAM never trained looked identical
+// to one where it worked (audit, 2026-07-26).
+static void test_psram_is_reported_when_the_board_has_it() {
+    Rig  r;
+    auto bridge            = makeBridge();
+    bridge.psramSizeBytes  = 8 * 1024 * 1024;
+    bridge.psramFreeBytes  = 7 * 1024 * 1024;
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(8388608, doc["psram_size_bytes"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(7340032, doc["psram_free_bytes"].as<uint32_t>());
+}
+
+// Null, not 0. Zero free is a real reading on a board that HAS PSRAM and has exhausted it;
+// collapsing that onto "no PSRAM fitted" would hide the more alarming of the two.
+static void test_psram_is_null_on_a_board_without_it() {
+    Rig  r;
+    auto bridge           = makeBridge();
+    bridge.psramSizeBytes = 0;  // Relay-6CH: ESP32-S3-WROOM-1U-N8, no PSRAM
+    bridge.psramFreeBytes = 0;
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["psram_size_bytes"].isNull());
+    TEST_ASSERT_TRUE(doc["psram_free_bytes"].isNull());
+}
+
 static void test_stack_marks_are_null_before_the_first_sample() {
     // 0 would read as an exhausted stack to any alerting rule; before the tasks have
     // sampled themselves the honest answer is "unknown".
@@ -1436,6 +1465,26 @@ static void test_prometheus_stack_and_fragmentation_gauges() {
     TEST_ASSERT_TRUE(text.find("heliograph_rs485_stack_free_bytes 2500\n") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_loop_stack_free_bytes 4100\n") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_max_alloc_heap_bytes 65536\n") != std::string::npos);
+}
+
+// Omitted rather than zero on a board with no PSRAM, like the RSSI and stack gauges: a flat 0
+// would read as exhaustion to an alerting rule.
+static void test_prometheus_reports_psram_only_when_present() {
+    Rig        r;
+    const auto state = r.poll();
+
+    auto without = makeBridge();
+    without.psramSizeBytes = 0;
+    auto text = metricsOf(state, without, r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_psram_size_bytes") == std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_psram_free_bytes") == std::string::npos);
+
+    auto with_ = makeBridge();
+    with_.psramSizeBytes = 8388608;
+    with_.psramFreeBytes = 7340032;
+    text = metricsOf(state, with_, r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_psram_size_bytes 8388608\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_psram_free_bytes 7340032\n") != std::string::npos);
 }
 
 static void test_prometheus_exports_current_readings() {
@@ -1905,6 +1954,9 @@ int main(int, char**) {
     RUN_TEST(test_drivers_payload_drives_the_wizard);
     RUN_TEST(test_diagnostics_payload_has_no_secrets);
     RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);
+    RUN_TEST(test_psram_is_reported_when_the_board_has_it);
+    RUN_TEST(test_psram_is_null_on_a_board_without_it);
+    RUN_TEST(test_prometheus_reports_psram_only_when_present);
     RUN_TEST(test_stack_marks_are_null_before_the_first_sample);
     RUN_TEST(test_oversized_response_is_refused);
     RUN_TEST(test_prometheus_stack_and_fragmentation_gauges);

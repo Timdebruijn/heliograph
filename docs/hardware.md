@@ -47,12 +47,34 @@ authoritative pin record for all of them (Relay-1CH: 1 relay + RTC; Relay-6CH: 6
 | Fact | Value | Relevance |
 |---|---|---|
 | Flash | **16 MB** | Dual-app OTA partitions + headroom (`partitions_16mb_ota.csv`) |
-| PSRAM | 8 MB | `-DBOARD_HAS_PSRAM` |
+| PSRAM | 8 MB, octal | `-DBOARD_HAS_PSRAM` + `memory_type = qio_opi`. Reported as `psram_size_bytes` / `psram_free_bytes` — see below |
 | USB | native USB-C, no CH340 | `-DARDUINO_USB_CDC_ON_BOOT=1`; attaching USB power-cycles a USB-powered board |
 | Power | USB-C or 7–36 V DC terminal | The DC terminal allows powering from the inverter side of the room |
 | Isolation | power + optocoupler, RS485 **and** CAN | `SGND` is NOT `GND` — never bridge them |
 | Termination | 120 Ω jumper per bus | Fit only when the bridge is physically at the end of the RS485 bus |
 | Buttons | BOOT + RESET | RESET reboots. BOOT held ~5 s **while running** factory-resets; held **at power-on** it enters USB download mode instead (GPIO0 strapping) — see Recovery |
+
+## Reading the memory figures
+
+The bridge reports five memory numbers, and they do not all measure the same pool.
+
+| Field | Covers |
+|---|---|
+| `free_heap_bytes`, `minimum_free_heap_bytes`, `max_alloc_heap_bytes` | **Internal SRAM only** (~320 KB total) |
+| `psram_size_bytes`, `psram_free_bytes` | **External PSRAM only** (8 MB here, absent on the Relay-6CH) |
+
+This is not a naming quirk, it is what the Arduino core does: `ESP.getFreeHeap()`,
+`getMinFreeHeap()` and `getMaxAllocHeap()` are all `heap_caps_*(MALLOC_CAP_INTERNAL)`. So a free
+heap of ~150 KB on this board is healthy, not alarming — it is 150 KB of 320 KB, not of 8 MB.
+
+The PSRAM pair is `null` in JSON, absent from Prometheus and `0xFFFFFFFF` in the Modbus
+registers on a board that has none. That is also how you tell, from the network alone, that
+PSRAM failed to initialise on a board that should have it: the fields go absent. Before these
+existed there was no way to see that at all (audit, 2026-07-26).
+
+Note that the IDF is configured with `CONFIG_SPIRAM_USE_MALLOC` and a 4096-byte threshold, so
+allocations above 4 KB already land in PSRAM through plain `malloc` without any code asking for
+it. `psram_free_bytes` moving is normal and expected.
 
 ## RS485 direction control
 
