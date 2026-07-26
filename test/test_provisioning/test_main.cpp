@@ -3,6 +3,7 @@
 
 #include <unity.h>
 
+#include <cstring>
 #include <string>
 
 #include "config/configuration_store.h"

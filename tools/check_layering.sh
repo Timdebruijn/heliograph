@@ -138,6 +138,26 @@ else
     echo "OK"
 fi
 
+echo "==> 7. A test using std::str*/std::mem* includes <cstring>"
+# Twice now a test has used std::strstr with no <cstring>: clang on macOS pulls it in through
+# another header, GCC on the CI runner does not. It compiles locally, fails in CI, and the
+# fix is one line -- which is exactly the kind of round trip worth spending ten lines to avoid.
+missing=""
+for f in test/*/test_main.cpp test/support/*.h; do
+    [ -f "$f" ] || continue
+    if grep -qE 'std::(strstr|strlen|strcmp|strncmp|memcpy|memcmp|memset)\(' "$f" &&
+       ! grep -q '#include <cstring>' "$f"; then
+        missing="$missing $f"
+    fi
+done
+if [ -n "$missing" ]; then
+    echo "FAIL: uses std::str*/std::mem* without including <cstring>:"
+    for hit in $missing; do echo "      $hit"; done
+    status=1
+else
+    echo "OK"
+fi
+
 echo
 if [ $status -eq 0 ]; then
     echo "RESULT: PASS"
