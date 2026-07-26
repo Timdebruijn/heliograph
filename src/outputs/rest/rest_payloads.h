@@ -141,16 +141,23 @@ bool buildLogsPayload(const std::vector<std::string>& lines, uint32_t totalLines
 /// truth about a redacted backup: those credentials show as unchanged because leaving them
 /// alone is what applying it will actually do.
 ///
-/// `rollbackAvailable` is whether an undo will exist afterwards. Shown up front rather than
-/// discovered later, because on a nearly-full NVS the answer is no and that changes whether
-/// someone wants to press the button at all.
+/// `rollbackExists` is whether an undo point is stored RIGHT NOW, from an earlier restore.
+///
+/// Not "will an undo exist afterwards", which is what this field claimed until a review caught
+/// it: that cannot be known before the copy is attempted, because the attempt is the only thing
+/// that discovers whether it fits. The result payload's `rollback_stored` answers that, after
+/// the fact, truthfully.
+///
+/// What this one is for is the case where an undo point already exists: applying is about to
+/// REPLACE it, so the way back becomes this configuration rather than the older one. That is a
+/// thing someone can get wrong, and nothing else says it.
 ///
 /// A separate response bound: a restore that touches every setting produces a long table, and
 /// truncating the one screen the operator is using to decide would defeat it.
 inline constexpr size_t kMaxRestorePreviewBytes = 16384;
 bool buildRestorePreviewPayload(const BackupContents& backup,
                                 const std::vector<ConfigDiffEntry>& diff, bool rebootRequired,
-                                bool rollbackAvailable, std::string& out,
+                                bool rollbackExists, std::string& out,
                                 size_t maxBytes = kMaxRestorePreviewBytes);
 
 /// The outcome of an applied restore. `rollbackStored` false means the undo copy did not fit;

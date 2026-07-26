@@ -121,6 +121,18 @@ private:
     /// suit the one that needs it would loosen the heap guarantee everywhere else.
     bool collectBody(AsyncWebServerRequest* request, const uint8_t* data, size_t len, size_t index,
                      size_t total, std::string*& out, size_t maxBytes = kMaxRequestBytes);
+
+    /// True when collectBody already answered this request (413 too large, 409 busy).
+    ///
+    /// The request handler MUST return without sending when this is true. The body handler runs
+    /// first but the request handler runs anyway, and send() replaces any previously stored
+    /// response -- so the unconditional "a JSON body is required" that every one of these
+    /// handlers falls through to was overwriting the real reason. Upload a file one byte over
+    /// the limit and the API said the body was missing.
+    ///
+    /// Same lesson the OTA route learned with its _tempObject marker, arrived at from the
+    /// other direction: there it was the specific error being replaced by a generic one.
+    bool bodyAlreadyAnswered(AsyncWebServerRequest* request);
     void releaseBody();
 
     RestContext context_;
@@ -138,6 +150,10 @@ private:
     // corrupting this one.
     std::string                  bodyBuffer_;
     const void*                  bodyOwner_ = nullptr;
+    /// The request collectBody has already answered with an error. Compared by pointer and
+    /// never dereferenced; cleared as soon as it is read, and whenever a new body starts, so a
+    /// recycled request address cannot inherit it.
+    const void*                  bodyRejected_ = nullptr;
 };
 
 /// Minimum spacing between /actions/* calls, per the security model.

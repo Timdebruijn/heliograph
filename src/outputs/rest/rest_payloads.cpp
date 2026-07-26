@@ -550,7 +550,7 @@ bool buildLogsPayload(const std::vector<std::string>& lines, uint32_t totalLines
 
 bool buildRestorePreviewPayload(const BackupContents& backup,
                                 const std::vector<ConfigDiffEntry>& diff, bool rebootRequired,
-                                bool rollbackAvailable, std::string& out, size_t maxBytes) {
+                                bool rollbackExists, std::string& out, size_t maxBytes) {
     JsonDocument doc;
     // Describe the FILE first: which bridge and which firmware wrote it is half of deciding
     // whether to apply it, and it is the half a diff of field values cannot show.
@@ -564,7 +564,7 @@ bool buildRestorePreviewPayload(const BackupContents& backup,
 
     doc["change_count"]       = diff.size();
     doc["reboot_required"]    = rebootRequired;
-    doc["rollback_available"] = rollbackAvailable;
+    doc["rollback_exists"] = rollbackExists;
     JsonArray changes         = doc["changes"].to<JsonArray>();
     for (const auto& entry : diff) {
         JsonObject e = changes.add<JsonObject>();

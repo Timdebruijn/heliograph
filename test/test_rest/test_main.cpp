@@ -1227,7 +1227,7 @@ static void test_restore_preview_carries_the_file_and_the_changes() {
     TEST_ASSERT_FALSE(doc["backup"]["includes_secrets"].as<bool>());
     TEST_ASSERT_EQUAL_INT(2, doc["change_count"].as<int>());
     TEST_ASSERT_TRUE(doc["reboot_required"].as<bool>());
-    TEST_ASSERT_TRUE(doc["rollback_available"].as<bool>());
+    TEST_ASSERT_TRUE(doc["rollback_exists"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("mqtt.host", doc["changes"][0]["field"]);
     TEST_ASSERT_EQUAL_STRING("old.broker", doc["changes"][0]["before"]);
     TEST_ASSERT_EQUAL_STRING("new.broker", doc["changes"][0]["after"]);
@@ -1245,7 +1245,7 @@ static void test_restore_preview_omits_an_absent_export_date() {
     TEST_ASSERT_TRUE(doc["backup"]["exported_at"].isNull());
     TEST_ASSERT_TRUE(doc["backup"]["firmware_version"].isNull());
     TEST_ASSERT_EQUAL_INT(0, doc["change_count"].as<int>());
-    TEST_ASSERT_FALSE(doc["rollback_available"].as<bool>());
+    TEST_ASSERT_FALSE(doc["rollback_exists"].as<bool>());
 }
 
 /// The preview is rendered in a browser and is exactly the sort of screen that ends up in a

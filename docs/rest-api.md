@@ -402,7 +402,7 @@ open WiFi network), not a redaction, and the two are told apart by whether the k
               "exported_at": "2026-07-26T12:00:00Z", "includes_secrets": false },
   "change_count": 2,
   "reboot_required": true,
-  "rollback_available": true,
+  "rollback_exists": true,
   "changes": [
     { "field": "mqtt.host", "before": "old.broker", "after": "new.broker" },
     { "field": "polling.interval_seconds", "before": "10", "after": "30" }
@@ -419,6 +419,12 @@ added later is redacted before anyone has to remember it should be.
 Nothing is staged on the bridge between the two calls. The apply re-sends the file rather than
 confirming a token, so there is no server-side session to expire, to be raced by a second
 browser tab, or to apply something other than what was on screen.
+
+`rollback_exists` says whether an undo point is stored **right now**, from an earlier restore —
+applying replaces it, so the way back becomes the configuration the bridge has at this moment
+rather than the older one. It deliberately does *not* claim that an undo will exist afterwards:
+that cannot be known before the copy is attempted, because attempting it is the only thing that
+discovers whether it fits. `rollback_stored` in the result answers that, after the fact.
 
 Dropping `?dry_run=true` applies it and reboots when `reboot_required`:
 

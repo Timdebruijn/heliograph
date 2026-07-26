@@ -60,16 +60,22 @@ bool RestApi::collectBody(AsyncWebServerRequest* request, const uint8_t* data, s
         // would have kept saying 4096 after the constant moved.
         sendError(request, {413, "body_too_large",
                             "request body exceeds " + std::to_string(maxBytes) + " bytes"});
+        bodyRejected_ = request;  // or the request handler replaces this with "empty body"
         return false;
     }
     if (index == 0) {
         if (bodyOwner_ != nullptr && bodyOwner_ != request) {
             sendError(request, {409, "busy", "another request is already being processed"});
+            bodyRejected_ = request;
             return false;
         }
-        bodyOwner_ = request;
+        // A fresh body from a different request: whatever the previous rejection referred to
+        // is over, and keeping a stale pointer risks a recycled address matching it.
+        bodyRejected_ = nullptr;
+        bodyOwner_    = request;
         bodyBuffer_.clear();
         bodyBuffer_.reserve(total);
+
         // A client that vanishes mid-body (WiFi drop on the setup AP is the realistic case)
         // never reaches the request handler, so nothing would release the buffer: every later
         // body-carrying request then answered 409 "busy" until a reboot. Same lesson the OTA
@@ -92,8 +98,17 @@ bool RestApi::collectBody(AsyncWebServerRequest* request, const uint8_t* data, s
     return true;
 }
 
+bool RestApi::bodyAlreadyAnswered(AsyncWebServerRequest* request) {
+    if (bodyRejected_ != request) {
+        return false;
+    }
+    bodyRejected_ = nullptr;  // consumed: this request has now been dealt with
+    return true;
+}
+
 void RestApi::releaseBody() {
-    bodyOwner_ = nullptr;
+    bodyOwner_    = nullptr;
+    bodyRejected_ = nullptr;
     bodyBuffer_.clear();
     bodyBuffer_.shrink_to_fit();
 }
@@ -214,6 +229,12 @@ bool RestApi::begin() {
         [this, authorised](AsyncWebServerRequest* request) {
             // The request handler forms the response; the body handler only collects. If the
             // body never completed, nothing was queued and this is a genuinely empty POST.
+            // collectBody may already have answered (413 too large, 409 busy). send()
+            // replaces the stored response, so falling through to the generic error below
+            // would overwrite the real reason with "a JSON body is required".
+            if (bodyAlreadyAnswered(request)) {
+                return;
+            }
             if (bodyOwner_ != request) {
                 sendError(request, {400, "empty_body", "a JSON body is required"});
                 return;
@@ -494,6 +515,12 @@ bool RestApi::begin() {
                 releaseBody();
                 return;
             }
+            // collectBody may already have answered (413 too large, 409 busy). send()
+            // replaces the stored response, so falling through to the generic error below
+            // would overwrite the real reason with "a JSON body is required".
+            if (bodyAlreadyAnswered(request)) {
+                return;
+            }
             if (bodyOwner_ != request) {
                 sendError(request, {400, "empty_body", "a JSON body is required"});
                 return;
@@ -665,6 +692,12 @@ bool RestApi::begin() {
                 releaseBody();
                 return;  // authorised() stored the 401
             }
+            // collectBody may already have answered (413 too large, 409 busy). send()
+            // replaces the stored response, so falling through to the generic error below
+            // would overwrite the real reason with "a backup file is required".
+            if (bodyAlreadyAnswered(request)) {
+                return;
+            }
             if (bodyOwner_ != request) {
                 sendError(request, {400, "empty_body", "a backup file is required"});
                 return;
@@ -720,10 +753,12 @@ bool RestApi::begin() {
                                 request->getParam("dry_run")->value() == "true";
             if (dryRun) {
                 std::string body;
-                if (!buildRestorePreviewPayload(
-                        contents, diff, rebootRequired,
-                        context_.stashRollback != nullptr && context_.hasRollback != nullptr,
-                        body)) {
+                // Actually asked, not inferred from the callbacks being wired -- which is what
+                // this argument used to be, making the field a report on our own plumbing.
+                const bool rollbackExists =
+                    context_.hasRollback != nullptr && context_.hasRollback();
+                if (!buildRestorePreviewPayload(contents, diff, rebootRequired, rollbackExists,
+                                                body)) {
                     sendError(request, {500, "payload_too_large",
                                         "the restore preview exceeded its bound"});
                     return;
@@ -1127,8 +1162,11 @@ bool RestApi::collectBody(AsyncWebServerRequest*, const uint8_t*, size_t, size_t
     out = nullptr;
     return false;
 }
+bool RestApi::bodyAlreadyAnswered(AsyncWebServerRequest*) { return false; }
+
 void RestApi::releaseBody() {
-    bodyOwner_ = nullptr;
+    bodyOwner_    = nullptr;
+    bodyRejected_ = nullptr;
     bodyBuffer_.clear();
 }
 

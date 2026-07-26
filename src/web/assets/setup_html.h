@@ -322,9 +322,14 @@ async function applyRestore(){
   if(!out)return;
   rsPending=null;
   $('rm').className='msg ok';
-  $('rm').innerHTML='Restored '+(out.data.changed_fields||0)+' setting(s). The bridge is '+
-    'restarting and joining the network from the backup — this setup network disappears. '+
-    'Give it ~30 seconds.';
+  // Whether it restarts is the firmware's call, not an assumption: a restore that touched only
+  // live-applied settings does not reboot, and promising a restart that never comes leaves
+  // someone waiting for a bridge that is already back.
+  $('rm').innerHTML='Restored '+(out.data.changed_fields||0)+' setting(s). '+
+    (out.data.reboot_required
+      ? 'The bridge is restarting and joining the network from the backup — this setup network '+
+        'disappears. Give it ~30 seconds.'
+      : 'No restart was needed, so this setup network is still up.');
 }
 </script></body></html>)HTML";
 

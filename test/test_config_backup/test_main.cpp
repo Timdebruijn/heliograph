@@ -379,6 +379,22 @@ static void test_diff_reports_a_changed_list_as_one_entry() {
 
 /// A restore that REMOVES a device is a change the operator needs to see. Walking only the
 /// incoming side would miss it entirely.
+/// The removal sweep, exercised for real. Every other field exists on both sides -- both
+/// documents come from the same serialiser -- so driver options are the ONLY place a key can
+/// genuinely disappear, which happens whenever the driver changes. Walking the incoming side
+/// alone would show nothing at all here.
+static void test_diff_reports_a_driver_option_the_restore_drops() {
+    Configuration after = populated();
+    after.driver.options.erase("unit_id");
+
+    std::vector<ConfigDiffEntry> diff;
+    TEST_ASSERT_TRUE(diffConfigurations(populated(), after, diff));
+    const ConfigDiffEntry* dropped = find(diff, "driver.options.unit_id");
+    TEST_ASSERT_NOT_NULL(dropped);
+    TEST_ASSERT_EQUAL_STRING("3", dropped->before.c_str());
+    TEST_ASSERT_EQUAL_STRING("(absent)", dropped->after.c_str());
+}
+
 static void test_diff_reports_a_removed_extra_device() {
     Configuration after = populated();
     after.additionalDevices.clear();
@@ -441,6 +457,7 @@ int main() {
     RUN_TEST(test_diff_names_the_field_and_both_values);
     RUN_TEST(test_diff_never_renders_a_password_value);
     RUN_TEST(test_diff_reports_a_changed_list_as_one_entry);
+    RUN_TEST(test_diff_reports_a_driver_option_the_restore_drops);
     RUN_TEST(test_diff_reports_a_removed_extra_device);
     RUN_TEST(test_preview_of_a_redacted_restore_shows_no_credential_change);
     RUN_TEST(test_timestamp_is_iso_utc);

@@ -1360,9 +1360,13 @@ async function renderConfig(){
     <div class="dim" style="font-size:12px;margin-top:4px"><b>Off by default, and think before
     turning it on.</b> With it on the file holds those passwords <b>in plain text</b>, and it
     will sit in your downloads folder, sync to whatever cloud drive is watching it, and be the
-    obvious thing to attach to a bug report. With it off the file is safe to keep anywhere, and
+    obvious thing to attach to a bug report. With it off there is no password in the file, and
     restoring it onto <i>this</i> bridge still works — an absent password means “keep the one
     the bridge already has”. Only a factory-reset board needs them typed again.</div>
+    <div class="dim" style="font-size:12px;margin-top:4px">Even without passwords the file is
+    not nothing: it holds your WiFi network name, the broker address and both usernames —
+    including the admin one, which this bridge deliberately never serves over the API. Treat it
+    as private either way.</div>
     <button type="button" onclick="downloadBackup()">Download backup</button>
     <div id="bkm" class="msg" style="display:none"></div></div>
   <div class="card"><b>Restore from a backup</b>
@@ -1681,8 +1685,7 @@ async function previewRestore(){
       <td class="dim">${esc(c.before)}</td><td><b>${esc(c.after)}</b></td></tr>`).join('')}</tbody></table>
     <div class="dim" style="font-size:12px;margin-top:10px">${d.change_count} setting(s) would
     change.${d.reboot_required?' The bridge <b>restarts</b> afterwards — some of these only take effect at boot.':''}
-    ${d.rollback_available?' The configuration it has now is kept, so this can be undone.'
-      :' <b>No undo will be stored</b> — the flash had no room for a second copy.'}</div>
+    ${d.rollback_exists?' You already have an undo point from an earlier restore; this <b>replaces</b> it, so undoing afterwards comes back to the configuration the bridge has right now.':''}</div>
     <button type="button" onclick="applyRestore()">Apply these ${d.change_count} change(s)</button>`;
 }
 
