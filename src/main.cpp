@@ -134,6 +134,16 @@ size_t g_devicesConfigured = 0;
 /// boot alongside the log lines, so the same facts reach a screen instead of only a ring buffer.
 std::vector<std::string> g_deviceProblems;
 
+/// The started device at each CONFIGURED position, empty where one did not start.
+///
+/// This is what the Modbus unit ids are keyed on, and it exists because g_deviceIds is
+/// compacted: a device that fails to start is simply absent from it, so keying unit ids on that
+/// list would silently move every later inverter down one unit id. A client reading unit 2
+/// would get inverter 3's watts with no way to notice, and unit ids are a wire contract nobody
+/// re-derives after bring-up. Keyed on the configuration instead, an unstarted device's unit id
+/// answers "offline, no data" -- which is the truth, and the same thing the Devices tab shows.
+std::vector<DeviceId> g_configSlotIds;
+
 bool g_outputsStarted = false;
 
 /// Guards g_config against the one cross-task hazard it has: the AsyncTCP task replacing
@@ -518,10 +528,11 @@ void startOutputs() {
         // Never from configuration: no driver in this build can write, so offering the switch
         // would advertise something untrue. validate() rejects it too.
         cfg.writeEnabled = false;
-        // One unit id per started device, consecutively from modbus.unit_id. Started, not
-        // configured: a unit id that answers with a map of NaN is worse than one that answers
-        // nothing, because a client cannot tell the two apart.
-        cfg.deviceCount = static_cast<uint8_t>(g_deviceIds.size());
+        // One unit id per CONFIGURED device, consecutively from modbus.unit_id. Configured, not
+        // started: the unit id has to be a function of the settings page, or a device that
+        // fails to start renumbers every inverter after it. A slot with no device answers
+        // offline with no readings, which is the truth and matches what the Devices tab shows.
+        cfg.deviceCount = static_cast<uint8_t>(g_devicesConfigured);
         g_modbus.setConfig(cfg);
         const bool listening = g_modbus.begin();
         if (g_modbus.servedDevices() <= 1) {
@@ -532,13 +543,28 @@ void startOutputs() {
                       listening ? "listening" : "failed to start", cfg.port, cfg.inverterUnitId,
                       g_modbus.unitIdFor(g_modbus.servedDevices() - 1));
         }
-        if (g_modbus.servedDevices() < g_deviceIds.size()) {
-            log::warn("modbus: only %u of %u devices are reachable over Modbus TCP -- the unit "
-                      "ids would run past 247 or into the diagnostics unit (%u). Lower "
-                      "modbus.unit_id.",
+        // Which unit is which inverter, once, at boot. Without it the only way to find out is
+        // to read modbus.unit_id, fetch /api/v1/devices and count positions -- and on a bus of
+        // identical inverters the per-device lines above are indistinguishable (review).
+        for (size_t i = 0; i < g_configSlotIds.size() && i < g_modbus.servedDevices(); ++i) {
+            log::info("modbus: unit %u -> %s", static_cast<unsigned>(g_modbus.unitIdFor(i)),
+                      g_configSlotIds[i].empty() ? "(configured device did not start)"
+                                                 : g_configSlotIds[i].c_str());
+        }
+        if (g_modbus.servedDevices() < g_devicesConfigured) {
+            // Which of the two limits was hit, because the fix differs: lowering the base is no
+            // help at all when the diagnostics unit is sitting inside the run (validate() only
+            // stops it equalling unit_id, not landing a few above it).
+            const int firstUnserved = cfg.inverterUnitId + g_modbus.servedDevices();
+            log::warn("modbus: only %u of %u configured devices are reachable over Modbus TCP -- "
+                      "unit %d is %s. %s",
                       static_cast<unsigned>(g_modbus.servedDevices()),
-                      static_cast<unsigned>(g_deviceIds.size()),
-                      static_cast<unsigned>(cfg.diagnosticsUnitId));
+                      static_cast<unsigned>(g_devicesConfigured), firstUnserved,
+                      firstUnserved == cfg.diagnosticsUnitId ? "the diagnostics unit"
+                                                             : "past 247, the last valid address",
+                      firstUnserved == cfg.diagnosticsUnitId
+                          ? "Move modbus.diagnostics_unit_id out of the range."
+                          : "Lower modbus.unit_id.");
         }
     }
 
@@ -607,6 +633,15 @@ void startRestApi() {
     };
     ctx.bridgeInfo  = bridgeInfo;
     ctx.clock       = nowMs;
+    // Configuration slot -> unit id, which is the mapping only this file knows.
+    ctx.modbusUnitIdFor = [](const DeviceId& id) -> uint8_t {
+        for (size_t i = 0; i < g_configSlotIds.size(); ++i) {
+            if (g_configSlotIds[i] == id) {
+                return g_modbus.running() ? g_modbus.unitIdFor(i) : 0;
+            }
+        }
+        return 0;
+    };
     ctx.saveConfig  = [](const Configuration& c) { return g_store.save(c); };
     // Request only -- the poll itself runs on rs485Task, exactly like discovery. Running
     // pollOnce() here executed a seconds-long bus transaction inside an AsyncTCP callback and
@@ -779,10 +814,9 @@ void rs485Task(void* /*arg*/) {
                 break;
             }
         }
-        // MQTT/Home Assistant take every device; Modbus TCP and Prometheus still take one --
-        // the register map holds a single device's registers and the metric names have no
-        // device label. Stated here, in docs/architecture.md, docs/rest-api.md, docs/mqtt.md
-        // and the README rather than left to be found from a missing entity.
+        // Every output takes every device: MQTT/Home Assistant by topic subtree, REST by device
+        // id, Modbus TCP by unit id, Prometheus by a `device` label. docs/architecture.md has
+        // the table of what each one did about backwards compatibility for device 1.
         if (g_state) {
             const auto bridge = bridgeInfo();
             const auto diag   = g_diagnostics.snapshot();
@@ -802,23 +836,22 @@ void rs485Task(void* /*arg*/) {
                 }
             }
             const auto first = g_state->snapshot();
-            // Every device, one Modbus unit id each: index i is served at inverterUnitId + i,
-            // so unit 1 and the first Home Assistant device are the same inverter (#36).
+            // Every device, one Modbus unit id each: configuration slot i is served at
+            // inverterUnitId + i (#36).
             //
-            // Built by POSITION in g_deviceIds, with a null for anything without a snapshot --
-            // not by walking `views`, which skips such a device and would shift every later
-            // one down an index. A Modbus unit id is a wire contract: a client that reads
-            // inverter 3's watts believing they are inverter 2's has no way to notice. Today
-            // the skip cannot happen (state() only returns null for an unregistered id, and
-            // nothing unregisters), so this is a positional guarantee rather than a fix -- but
-            // the alternative depends on a filter never filtering, and that is not a property
-            // worth resting a wire protocol on. refresh() leaves a null entry's map untouched.
+            // Keyed on g_configSlotIds -- the CONFIGURED positions -- not on g_deviceIds, which
+            // is compacted. A device that failed to start is absent from the latter, so keying
+            // on it moved every later inverter down a unit id: a client reading unit 2 would
+            // get inverter 3's watts with no way to notice, and a unit id is a wire contract
+            // nobody re-derives after bring-up. A slot with no device is passed as null;
+            // refresh() leaves its map at the constructed sentinels, so that unit answers
+            // offline with no readings rather than someone else's.
             std::vector<const DeviceState*> modbusDevices;
-            modbusDevices.reserve(g_deviceIds.size());
-            for (const auto& id : g_deviceIds) {
+            modbusDevices.reserve(g_configSlotIds.size());
+            for (const auto& slotId : g_configSlotIds) {
                 const auto it = std::find_if(views.begin(), views.end(),
-                                             [&id](const mqtt::MqttOutput::DeviceView& v) {
-                                                 return v.id == id;
+                                             [&slotId](const mqtt::MqttOutput::DeviceView& v) {
+                                                 return !slotId.empty() && v.id == slotId;
                                              });
                 modbusDevices.push_back(it == views.end() ? nullptr : it->state);
             }
@@ -967,6 +1000,9 @@ void setup() {
         planned.push_back({d.id, &d.options});
     }
     g_devicesConfigured = planned.size();
+    // One slot per CONFIGURED device, filled in as each one starts. The Modbus unit ids are
+    // keyed on this, not on the compacted g_deviceIds -- see the declaration.
+    g_configSlotIds.assign(planned.size(), DeviceId{});
     if (planned.empty()) {
         log::warn("no driver configured and none compiled in; nothing will be polled");
     }
@@ -1016,6 +1052,7 @@ void setup() {
         g_contexts.push_back(std::make_unique<DeviceContext>(*driver, *store, g_diagnostics,
                                                              nowMs, policy));
         g_deviceIds.push_back(id);
+        g_configSlotIds[plannedIndex] = id;
         // `planned` is in configuration order and `p` is the entry being started, so this is
         // true only for the first configured device -- never for a later one that starts first.
         if (&p == &planned.front()) {

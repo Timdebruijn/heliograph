@@ -332,6 +332,11 @@ bool RestApi::begin() {
                 fleet.push_back(rest::summariseDevice(*snapshot, id, now));
             } else if (StateHandle h = context_.devices->state(id)) {
                 fleet.push_back(rest::summariseDevice(*h, id, now));
+            } else {
+                continue;
+            }
+            if (context_.modbusUnitIdFor) {
+                fleet.back().modbusUnitId = context_.modbusUnitIdFor(id);
             }
         }
         std::string body;

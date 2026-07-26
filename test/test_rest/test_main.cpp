@@ -3,6 +3,9 @@
 
 #include <unity.h>
 
+#include <cmath>
+#include <cstring>
+
 #include <ArduinoJson.h>
 
 #include <string>
@@ -1710,6 +1713,79 @@ static void test_the_run_stops_at_the_diagnostics_unit() {
 
 // One map per served device -- not one per possible device. 900 registers is 1.8 KB apiece, so
 // reserving eight on a one-inverter bridge would be 14 KB of heap for nothing.
+// The routing itself, not just the arithmetic. Until readUnit() existed, "unit base+i returns
+// device i" lived in a worker inside #if defined(ESP32) -- so the one thing this feature is
+// about could only ever be checked by pointing a real Modbus client at real hardware (review).
+static void test_each_unit_id_reads_its_own_devices_registers() {
+    modbus::ModbusTcpServer server(serverConfig(1, 3));
+    Rig                     r;
+    DeviceState             a = r.poll();
+    DeviceState             b = a;
+    DeviceState             c = a;
+    // Distinct AC power per device, so a wrong map is visible rather than plausible.
+    b.measurements.set(measurement_id::kAcPowerTotal, 100.0, g_now);
+    c.measurements.set(measurement_id::kAcPowerTotal, 200.0, g_now);
+    server.refresh({&a, &b, &c}, makeBridge(), r.diagnostics.snapshot(), g_now);
+
+    const auto watts = [&server](uint8_t unit) {
+        uint16_t raw[2] = {0, 0};
+        TEST_ASSERT_TRUE(server.readUnit(unit, modbus::reg::kAcPowerTotal, 2, raw));
+        const uint32_t bits = (static_cast<uint32_t>(raw[0]) << 16) | raw[1];
+        float          f    = 0.0f;
+        std::memcpy(&f, &bits, sizeof(f));
+        return f;
+    };
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 1842.0f, watts(1));
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 100.0f, watts(2));
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 200.0f, watts(3));
+    // The diagnostics unit reads device 1, as it always has.
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 1842.0f, watts(250));
+}
+
+// A client with no unit-id field of its own sends 0 or 255. Both read device 1, so a
+// configuration copied from a single-inverter example works instead of erroring.
+static void test_unit_zero_and_255_read_the_first_device() {
+    modbus::ModbusTcpServer server(serverConfig(1, 2));
+    TEST_ASSERT_EQUAL_UINT32(0, server.mapIndexFor(0));
+    TEST_ASSERT_EQUAL_UINT32(0, server.mapIndexFor(255));
+    TEST_ASSERT_EQUAL_UINT32(0, server.mapIndexFor(250));  // diagnostics, unchanged
+    TEST_ASSERT_EQUAL_UINT32(1, server.mapIndexFor(2));
+}
+
+// A unit below the base has no map at all rather than falling back to device 1 -- silently
+// serving inverter 1 to a client that asked for something else is the failure to avoid.
+static void test_a_unit_below_the_base_has_no_map() {
+    modbus::ModbusTcpServer server(serverConfig(10, 2));
+    TEST_ASSERT_EQUAL_UINT32(modbus::ModbusTcpServer::kNoMap, server.mapIndexFor(9));
+    uint16_t raw[2] = {0, 0};
+    TEST_ASSERT_FALSE(server.readUnit(9, modbus::reg::kAcPowerTotal, 2, raw));
+    TEST_ASSERT_FALSE(server.readUnit(12, modbus::reg::kAcPowerTotal, 2, raw));  // past the run
+}
+
+// A configured device that did not start keeps its unit id, and that unit reports nothing
+// rather than the next inverter's readings. This is the whole reason the ids are keyed on the
+// configuration: skipping it would move every later inverter down one.
+static void test_a_slot_with_no_device_answers_with_no_readings() {
+    modbus::ModbusTcpServer server(serverConfig(1, 3));
+    Rig                     r;
+    const DeviceState       a = r.poll();
+    DeviceState             c = a;
+    c.measurements.set(measurement_id::kAcPowerTotal, 200.0, g_now);
+    // Device 2 did not start.
+    server.refresh({&a, nullptr, &c}, makeBridge(), r.diagnostics.snapshot(), g_now);
+
+    uint16_t raw[2] = {0, 0};
+    TEST_ASSERT_TRUE(server.readUnit(2, modbus::reg::kAcPowerTotal, 2, raw));
+    const uint32_t bits = (static_cast<uint32_t>(raw[0]) << 16) | raw[1];
+    float          f    = 0.0f;
+    std::memcpy(&f, &bits, sizeof(f));
+    TEST_ASSERT_TRUE_MESSAGE(std::isnan(f), "an unstarted slot must not serve a reading");
+    TEST_ASSERT_TRUE(server.readUnit(3, modbus::reg::kAcPowerTotal, 2, raw));
+    const uint32_t bits3 = (static_cast<uint32_t>(raw[0]) << 16) | raw[1];
+    std::memcpy(&f, &bits3, sizeof(f));
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 200.0f, f);  // device 3 did NOT move down to unit 2
+}
+
 static void test_maps_are_allocated_per_served_device() {
     modbus::ModbusTcpServer three(serverConfig(1, 3));
     TEST_ASSERT_EQUAL_UINT32(3, three.registerMapCount());
@@ -1859,6 +1935,10 @@ int main(int, char**) {
     RUN_TEST(test_one_device_is_unchanged_at_the_configured_unit_id);
     RUN_TEST(test_the_run_stops_at_the_diagnostics_unit);
     RUN_TEST(test_the_run_stops_at_the_last_valid_slave_address);
+    RUN_TEST(test_each_unit_id_reads_its_own_devices_registers);
+    RUN_TEST(test_unit_zero_and_255_read_the_first_device);
+    RUN_TEST(test_a_unit_below_the_base_has_no_map);
+    RUN_TEST(test_a_slot_with_no_device_answers_with_no_readings);
     RUN_TEST(test_maps_are_allocated_per_served_device);
     RUN_TEST(test_the_diagnostics_unit_keeps_a_map_when_no_inverter_started);
     RUN_TEST(test_reconfiguring_does_not_accumulate_maps);

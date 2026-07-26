@@ -90,6 +90,19 @@ public:
     /// unit reads map 0, and a bridge with nothing polling is exactly when it gets scraped.
     size_t registerMapCount() const { return maps_.size(); }
 
+    /// Reads as a client would, by unit id. False when the unit has no map or the range falls
+    /// outside it -- the server turns that into an exception.
+    ///
+    /// Exists so the whole unit-id-to-device routing is reachable from a host test. The worker
+    /// that used to do this arithmetic is inside `#if defined(ESP32)`, which left the one thing
+    /// this feature is about -- unit `base+i` returning device `i` -- testable only by pointing
+    /// a real Modbus client at real hardware (review, 2026-07-26).
+    bool readUnit(uint8_t unitId, uint16_t address, uint16_t count, uint16_t* out) const;
+
+    /// Index into the maps for a unit id, or kNoMap. Public for the same reason as readUnit().
+    static constexpr size_t kNoMap = static_cast<size_t>(-1);
+    size_t                  mapIndexFor(uint8_t unitId) const;
+
     uint16_t activeClients() const;
 
     /// Optional: lets the server bump modbus client counters.

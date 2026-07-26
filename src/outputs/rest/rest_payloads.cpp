@@ -209,6 +209,12 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
         o["online"]     = f.online;
         o["data_valid"] = f.dataValid;
         o["data_stale"] = f.dataStale;
+        // 0 means "not served over Modbus" -- Modbus disabled, or past the end of the run.
+        if (f.modbusUnitId != 0) {
+            o["modbus_unit_id"] = f.modbusUnitId;
+        } else {
+            o["modbus_unit_id"] = nullptr;
+        }
         if (f.everPolled) {
             o["last_successful_poll_seconds_ago"] = f.lastPollSecondsAgo;
         } else {

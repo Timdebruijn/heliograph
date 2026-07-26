@@ -20,9 +20,13 @@ namespace heliograph::prometheus {
 
 /// One inverter, as /metrics sees it.
 struct DeviceMetrics {
-    /// The registered device id -- the same string REST serves at /api/v1/devices and MQTT
-    /// uses in its topics. One id per inverter across every interface, so a Grafana panel and
-    /// a Home Assistant entity can be lined up without a lookup table.
+    /// The registered device id -- the same string REST serves at /api/v1/devices, and the same
+    /// one in the MQTT topic subtree for devices 2..N.
+    ///
+    /// Not for device 1: it keeps the bridge-scoped MQTT topics, so its device id appears
+    /// nowhere in MQTT, and the Home Assistant device is named after the model rather than the
+    /// id. Lining a Grafana panel up with an HA entity is therefore a short lookup, not a
+    /// string match -- an earlier version of this comment claimed otherwise (review).
     std::string        id;
     const DeviceState* state = nullptr;
 };

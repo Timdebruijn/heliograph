@@ -104,7 +104,9 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
 
     // One build_info series per device: the firmware and board are the bridge's, the driver is
     // the device's, and on a mixed bus those differ.
-    appendHelp(out, "heliograph_build_info", "Firmware build information", "gauge");
+    if (!devices.empty()) {
+        appendHelp(out, "heliograph_build_info", "Firmware build information", "gauge");
+    }
     for (const auto& dev : devices) {
         out += "heliograph_build_info{device=\"" + escapeLabel(dev.id) + "\",version=\"" +
                escapeLabel(bridge.firmwareVersion) + "\",driver=\"" +
@@ -112,13 +114,19 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
                escapeLabel(bridge.boardName) + "\"} 1\n";
     }
 
-    appendHelp(out, "heliograph_inverter_online", "1 if the inverter is responding", "gauge");
-    for (const auto& dev : devices) {
-        appendDeviceFlag(out, "heliograph_inverter_online", dev.id, dev.state->inverterOnline);
-    }
-    appendHelp(out, "heliograph_data_stale", "1 if the last reading is too old to trust", "gauge");
-    for (const auto& dev : devices) {
-        appendDeviceFlag(out, "heliograph_data_stale", dev.id, dev.state->dataStale);
+    // Headers only when there is a series to put under them -- the same rule as the gauges
+    // below. With an empty device list these three used to emit a bare HELP/TYPE pair and no
+    // samples, which is exactly the shape the lazy header exists to avoid (review).
+    if (!devices.empty()) {
+        appendHelp(out, "heliograph_inverter_online", "1 if the inverter is responding", "gauge");
+        for (const auto& dev : devices) {
+            appendDeviceFlag(out, "heliograph_inverter_online", dev.id, dev.state->inverterOnline);
+        }
+        appendHelp(out, "heliograph_data_stale", "1 if the last reading is too old to trust",
+                   "gauge");
+        for (const auto& dev : devices) {
+            appendDeviceFlag(out, "heliograph_data_stale", dev.id, dev.state->dataStale);
+        }
     }
 
     // HELP/TYPE once per family, then one line per device that actually has the channel. The

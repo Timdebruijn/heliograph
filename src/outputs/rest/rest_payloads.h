@@ -48,6 +48,11 @@ bool buildProvisionPayload(const std::string& hostname, std::string& out,
 /// report energy must not contribute a zero to a total.
 struct DeviceSummary {
     std::string id;
+    /// The Modbus TCP unit id this device is served at, or 0 when Modbus is off or this device
+    /// is past the end of the served run. Reported because otherwise the only way to learn it
+    /// is to read modbus.unit_id, fetch the device list and count positions -- and on a bus of
+    /// identical inverters that is exactly the sum nobody wants to do twice (review).
+    uint8_t     modbusUnitId = 0;
     bool        online    = false;
     bool        dataValid = false;
     bool        dataStale = false;

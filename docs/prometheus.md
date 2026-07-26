@@ -53,8 +53,8 @@ control to do it for you. See [security.md](security.md).
 ## Several inverters: the `device` label
 
 Every inverter series carries a **`device`** label holding the device id — the same string
-`/api/v1/devices` serves and MQTT uses in its topics, e.g. `growatt_modbus-2`. So one bus of
-three inverters is three series per metric:
+`/api/v1/devices` serves, e.g. `growatt_modbus-2`. So one bus of three inverters is three series
+per metric:
 
 ```
 heliograph_inverter_ac_power_watts{device="growatt_modbus-1"} 1240.000
@@ -81,10 +81,22 @@ What actually breaks, and what does not:
 | `heliograph_inverter_ac_power_watts` | one series | one series **per inverter** — a graph gains lines |
 | `sum(heliograph_inverter_ac_power_watts)` | the one inverter | the whole bus — usually what you wanted |
 | a recording rule expecting a single series | fine | **fix it**: add `sum(...)` or `{device="…"}` |
+| `heliograph_build_info` | one series | one **per inverter**, and it gains `device` too — a `group_left` join on it now fans out |
 | any bridge-wide series | unchanged | unchanged |
 
-With one inverter nothing changes except that a label appears. Existing panels keep working;
-they just gain a legend entry.
+With one inverter the only visible change is that a label appears, and existing panels keep
+working. One thing to expect at the upgrade itself, on any number of inverters: adding a label
+**changes the series identity**, so Prometheus ends the old series and starts a new one. Gauges
+graph straight across the gap, but `rate()`, `increase()` or `resets()` over the boundary — and
+an alert with a long `for:` — will see a discontinuity once.
+
+### Matching it up with Home Assistant
+
+The `device` label matches `/api/v1/devices`, and matches the MQTT subtree for devices 2..N.
+It does **not** match what Home Assistant displays: device 1 keeps the bridge-scoped MQTT topics,
+so its id appears nowhere in MQTT, and HA names the devices after the model (`… - Growatt MIC
+TL-X`, `… #2`, `… #3`). Lining a Grafana panel up with an HA entity is a short lookup rather than
+a string match.
 
 ## What is exported
 
@@ -133,6 +145,14 @@ temperature sensor has no temperature series. That is not a fault.
 | `heliograph_wifi_reconnects_total` | counter | WiFi reconnections |
 | `heliograph_modbus_client_connections_total` | counter | Modbus TCP connections accepted |
 | `heliograph_modbus_clients` | gauge | Modbus TCP clients connected right now |
+
+**None of these carry a `device` label, and on a bus with several inverters that is a real
+limitation, not just a naming choice.** The counters live in one place for the whole bus, so
+when one of three inverters starts corrupting frames the checksum counter climbs and all three
+look equally guilty. What *is* per device is
+`heliograph_inverter_online{device="…"}` — so a unit that drops out entirely is identifiable; a
+unit with intermittent, sub-timeout faults is not. Per-device counters would mean changing the
+diagnostics model, which is tracked separately.
 
 The distinction matters when something is wrong, and it is three-way rather than two:
 

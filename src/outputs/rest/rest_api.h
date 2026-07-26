@@ -53,6 +53,10 @@ struct RestContext {
     std::function<void(const Configuration&)> applyConfig;
     std::function<BridgeInfo()>       bridgeInfo;
     std::function<uint64_t()>         clock;
+    /// The Modbus TCP unit id a device is served at, or 0 when it is not served. Injected
+    /// because only main knows the mapping from configuration slot to device, and because
+    /// otherwise the only way to learn it is to count positions in the device list.
+    std::function<uint8_t(const DeviceId&)> modbusUnitIdFor;
     /// Persist the configuration. Returns false if it could not be written.
     std::function<bool(const Configuration&)> saveConfig;
     /// Force an immediate poll. Returns false if the bus is busy.
