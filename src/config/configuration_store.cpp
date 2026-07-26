@@ -383,6 +383,44 @@ bool ConfigurationStore::save(const Configuration& config) {
     return backend_.write(kStorageKeyConfig, blob);
 }
 
+std::vector<mqtt::AnnouncedDevice> ConfigurationStore::announcedDevices() {
+    std::lock_guard<std::mutex>        lock(mutex_);
+    std::vector<mqtt::AnnouncedDevice> out;
+    std::string                        raw;
+    if (!backend_.read(kStorageKeyAnnounced, raw) || raw.empty()) {
+        return out;
+    }
+    JsonDocument doc;
+    if (deserializeJson(doc, raw) != DeserializationError::Ok || !doc.is<JsonArray>()) {
+        return out;  // unreadable bookkeeping is simply forgotten, never fatal
+    }
+    for (JsonVariantConst v : doc.as<JsonArrayConst>()) {
+        // A bare string is the shape this key had before it carried the topic tree. Read as
+        // non-primary, which is what it always meant: the flag was added when the primary's
+        // tree turned out to need different handling, not to reinterpret old entries.
+        if (v.is<const char*>()) {
+            out.push_back({v.as<const char*>(), false});
+        } else if (v.is<JsonObjectConst>() && v["id"].is<const char*>()) {
+            out.push_back({v["id"].as<const char*>(), v["primary"].as<bool>()});
+        }
+    }
+    return out;
+}
+
+bool ConfigurationStore::setAnnouncedDevices(const std::vector<mqtt::AnnouncedDevice>& devices) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    JsonDocument doc;
+    JsonArray    arr = doc.to<JsonArray>();
+    for (const auto& d : devices) {
+        JsonObject o  = arr.add<JsonObject>();
+        o["id"]       = d.id;
+        o["primary"]  = d.primary;
+    }
+    std::string raw;
+    serializeJson(doc, raw);
+    return backend_.write(kStorageKeyAnnounced, raw);
+}
+
 bool ConfigurationStore::factoryReset() {
     std::lock_guard<std::mutex> lock(mutex_);
     return backend_.erase();

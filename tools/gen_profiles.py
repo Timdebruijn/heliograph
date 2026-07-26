@@ -105,11 +105,20 @@ def load_vocabulary() -> dict[str, str]:
     one source of truth; a renamed constant shows up here immediately.
     """
     text = MEASUREMENT_H.read_text(encoding="utf-8")
-    block = re.search(r"namespace measurement_id \{(.*?)\}", text, re.DOTALL)
+    # Bounded by the namespace's own closing comment, not by the first `}` in it: kAll's
+    # initializer brace comes first, so the loose form silently stopped parsing there and a
+    # constant declared after kAll would have been invisible here while check_measurement_ids.py
+    # still saw it -- a profile mapping it would be rejected as "unknown measurement".
+    block = re.search(
+        r"namespace measurement_id \{(.*?)\}\s*//\s*namespace measurement_id",
+        text,
+        re.DOTALL,
+    )
     if not block:
         raise SystemExit(f"could not find namespace measurement_id in {MEASUREMENT_H}")
     pairs = re.findall(
-        r'inline constexpr const char\*\s+(k\w+)\s*=\s*"([^"]+)"', block.group(1)
+        r'(?:inline\s+)?constexpr\s+const\s+char\s*\*\s*(k\w+)\s*=\s*"([^"]+)"',
+        block.group(1),
     )
     if not pairs:
         raise SystemExit(f"no measurement ids parsed from {MEASUREMENT_H}")

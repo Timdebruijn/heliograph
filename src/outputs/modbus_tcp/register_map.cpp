@@ -268,15 +268,17 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
     }
 
     // --- battery and grid: empty for a driver without them, and that is visible ---
-    publishMeasurement(state, "battery.soc", reg::kBatterySoc, ValidityBit::BatterySoc);
-    publishMeasurement(state, "battery.voltage", reg::kBatteryVoltage, ValidityBit::BatteryVoltage);
-    publishMeasurement(state, "battery.charge_power", reg::kBatteryChargePower,
+    publishMeasurement(state, measurement_id::kBatterySoc, reg::kBatterySoc,
+                       ValidityBit::BatterySoc);
+    publishMeasurement(state, measurement_id::kBatteryVoltage, reg::kBatteryVoltage,
+                       ValidityBit::BatteryVoltage);
+    publishMeasurement(state, measurement_id::kBatteryChargePower, reg::kBatteryChargePower,
                        ValidityBit::BatteryChargePower);
-    publishMeasurement(state, "battery.discharge_power", reg::kBatteryDischargePower,
+    publishMeasurement(state, measurement_id::kBatteryDischargePower, reg::kBatteryDischargePower,
                        ValidityBit::BatteryDischargePower);
-    publishMeasurement(state, "grid.import_power", reg::kGridImportPower,
+    publishMeasurement(state, measurement_id::kGridImportPower, reg::kGridImportPower,
                        ValidityBit::GridImportPower);
-    publishMeasurement(state, "grid.export_power", reg::kGridExportPower,
+    publishMeasurement(state, measurement_id::kGridExportPower, reg::kGridExportPower,
                        ValidityBit::GridExportPower);
 
     // --- capabilities ---

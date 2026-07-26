@@ -14,6 +14,7 @@
 #include <string>
 
 #include "configuration.h"
+#include "outputs/mqtt/announced_devices.h"
 
 namespace heliograph {
 
@@ -82,6 +83,18 @@ public:
     /// Wipes everything, including credentials. Used by the provisioning reset.
     bool factoryReset();
 
+    /// Bookkeeping the firmware keeps about itself, kept OUT of Configuration on purpose: it is
+    /// not something a user sets, it must never appear in GET /config, and it must not take
+    /// part in the change-diff that decides whether a save needs a reboot.
+    ///
+    /// Currently one thing: which devices have been announced to Home Assistant, and on which
+    /// topic tree. Discovery configs are retained on the broker, so a device that is removed or
+    /// re-addressed leaves its entities behind -- and because availability is bridge-scoped they
+    /// report ONLINE forever with their last value, straight into an energy dashboard. Clearing
+    /// them needs the one fact nothing else survives a reboot with: what we announced last time.
+    std::vector<mqtt::AnnouncedDevice> announcedDevices();
+    bool setAnnouncedDevices(const std::vector<mqtt::AnnouncedDevice>& devices);
+
 private:
     KeyValueBackend&   backend_;
     KeyValueBackend*   legacy_;
@@ -103,5 +116,8 @@ inline constexpr const char* kStorageNamespace = "heliograph";
 /// migration source; never written to.
 inline constexpr const char* kLegacyStorageNamespace = "solarbridge";
 inline constexpr const char* kStorageKeyConfig = "config";
+/// Separate key, not a field in the config blob: bookkeeping must not be able to make a user's
+/// configuration unloadable, and a factory reset should take it with everything else.
+inline constexpr const char* kStorageKeyAnnounced = "announced";
 
 }  // namespace heliograph
