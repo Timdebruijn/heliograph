@@ -174,9 +174,29 @@ function authHeader(){
 // `retry` is true when this prompt follows a 401. That case has to say so: a wrong USERNAME and
 // a wrong PASSWORD are now both possible and they fail identically, so an unexplained second
 // dialog reads as "bad password" and the user retypes the password forever.
+// Only ONE prompt may be in flight, and every later caller shares it.
+//
+// Without this the password box could not be filled in at all. refresh() runs on a 5 s timer and
+// calls loadLogs(), which calls authFetch, which calls this -- and the timer does not wait for
+// the dialog to be answered. So every five seconds a SECOND askAuth ran while the first was
+// still open, and its first act was to overwrite un.value and blank p.value: the user's typing
+// was wiped mid-word, forever. Two more consequences hid behind it -- d.onclose was reassigned,
+// orphaning the first promise so it never resolved, and showModal() on an already-open dialog
+// throws InvalidStateError.
+//
+// It bit the Logs tab specifically because Settings fetches its config once
+// (`!$('#cfgform').innerHTML`) while Logs re-fetches on every refresh. Reported from hardware
+// 2026-07-26: signing in on Settings first was the only way through.
+let authPrompt=null;
 async function askAuth(retry){
+  if(authPrompt){
+    // A later caller may know something the open prompt does not -- that the credentials were
+    // just refused. Surface that without touching the fields being typed into.
+    if(retry){const e=$('#autherr');if(e)e.style.display='block'}
+    return authPrompt;
+  }
   const remembered=sessionStorage.getItem('sb_user');
-  return new Promise(resolve=>{
+  authPrompt=new Promise(resolve=>{
     const d=$('#authdlg'),p=$('#authpw'),un=$('#authu'),err=$('#autherr');
     un.value=remembered||'admin';
     err.style.display=retry?'block':'none';
@@ -204,6 +224,10 @@ async function askAuth(retry){
     };
     d.showModal();
   });
+  // Cleared before the value is handed back, so the next 401 opens a fresh prompt rather than
+  // handing every future caller this one's answer. finally, not a plain assignment: a throw in
+  // showModal() must not leave the guard latched with no dialog on screen.
+  try{return await authPrompt}finally{authPrompt=null}
 }
 // Promotes the username that was just proven to work. Anything else stays pending, so the next
 // prompt offers the last name the device actually accepted rather than the last one typed.

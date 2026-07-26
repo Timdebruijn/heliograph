@@ -54,7 +54,9 @@ def main() -> int:
                 status = 1
                 continue
             if name.endswith("index_html.h"):
-                status |= check_version_compare(path.read_text(), scratch)
+                script = path.read_text()
+                status |= check_version_compare(script, scratch)
+                status |= check_auth_prompt_reentrancy(script, scratch)
     return status
 
 
@@ -90,8 +92,15 @@ VERSION_CASES = [
 
 
 def extract_function(source, name):
-    """Pulls one top-level `function name(...){...}` out by brace matching."""
-    start = source.find(f"function {name}(")
+    """Pulls one top-level `function name(...){...}` out by brace matching.
+
+    Keeps an `async` prefix when there is one -- without it the extracted body still contains
+    `await` and node refuses to parse it, which would read as "the check is broken" rather than
+    "the function is async".
+    """
+    start = source.find(f"async function {name}(")
+    if start < 0:
+        start = source.find(f"function {name}(")
     if start < 0:
         return None
     depth = 0
@@ -132,6 +141,85 @@ process.exit(bad === 0 ? 0 : 1);
     path.write_text(harness)
     result = subprocess.run(["node", str(path)], capture_output=True, text=True)
     print(f"version comparison: {'OK' if result.returncode == 0 else 'FAIL'}")
+    if result.returncode != 0:
+        print(result.stdout + result.stderr)
+        return 1
+    return 0
+
+
+def check_auth_prompt_reentrancy(script, scratch):
+    """A second askAuth() while one is open must not disturb what is being typed.
+
+    refresh() runs on a 5 s timer and several tabs call authFetch from it, so a second prompt
+    IS requested while the first is still open -- that is normal operation, not an edge case.
+    Until 0.15.2 the second call reset the username field and blanked the password field, so
+    on the Logs tab the box emptied itself every five seconds and could not be filled in at
+    all (reported from hardware 2026-07-26). Asserted here rather than left to review because
+    the failure needs a stopwatch and an unauthenticated session to see by hand.
+    """
+    body = extract_function(script, "askAuth")
+    if body is None:
+        print("FAIL: askAuth() not found in index_html.h; this check needs updating")
+        return 1
+    harness = f"""
+// Minimal DOM: only what askAuth touches.
+const els = {{
+  '#authdlg': {{returnValue:'', onclose:null, open:false,
+                showModal(){{ if(this.open) throw new Error('InvalidStateError'); this.open=true }},
+                close(v){{ this.open=false; this.returnValue=v; this.onclose && this.onclose() }}}},
+  '#authpw': {{value:''}}, '#authu': {{value:''}}, '#autherr': {{style:{{display:'none'}}}},
+}};
+const $ = s => els[s];
+const store = {{}};
+const sessionStorage = {{getItem:k=>k in store?store[k]:null, setItem:(k,v)=>{{store[k]=v}},
+                         removeItem:k=>{{delete store[k]}}}};
+const btoa = s => Buffer.from(s, 'binary').toString('base64');
+let authPrompt = null;
+{body}
+
+let bad = 0;
+const fail = m => {{ console.error(m); bad++; }};
+
+(async () => {{
+  const first = askAuth(false);
+  await null;                       // let the prompt open
+  // The user starts typing.
+  $('#authu').value = 'beheerder';
+  $('#authpw').value = 'halfway-typed';
+
+  // The 5 s refresh fires while they are mid-word.
+  const second = askAuth(false);
+  await null;
+
+  if ($('#authpw').value !== 'halfway-typed') fail('password field was wiped by a second askAuth');
+  if ($('#authu').value !== 'beheerder') fail('username field was reset by a second askAuth');
+  if (!$('#authdlg').open) fail('dialog was closed by a second askAuth');
+
+  // A third, this time signalling a refusal: allowed to show the error, not to touch the fields.
+  askAuth(true);
+  await null;
+  if ($('#authpw').value !== 'halfway-typed') fail('retry=true wiped the password field');
+
+  // Finishing the dialog must resolve EVERY waiter, not only the last one.
+  $('#authdlg').close('ok');
+  const results = await Promise.all([first, second]);
+  if (!results.every(r => r === true)) fail('not every caller received the answer: ' + JSON.stringify(results));
+  if (store['sb_auth'] !== btoa('beheerder:halfway-typed')) fail('wrong credentials stored: ' + store['sb_auth']);
+
+  // And the guard must release, so a later 401 can prompt again.
+  const later = askAuth(false);
+  await null;
+  if (!$('#authdlg').open) fail('a later askAuth did not reopen the dialog');
+  $('#authdlg').close('');
+  await later;
+
+  process.exit(bad === 0 ? 0 : 1);
+}})();
+"""
+    path = pathlib.Path(scratch) / "auth_prompt.js"
+    path.write_text(harness)
+    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    print(f"auth prompt re-entrancy: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
         return 1
