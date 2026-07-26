@@ -29,7 +29,7 @@ struct PollPolicy {
 class DeviceContext {
 public:
     DeviceContext(InverterDriver& driver, StateStore& store, Diagnostics& diagnostics,
-                  ClockFn clock, PollPolicy policy = {});
+                  ClockFn clock, const PollPolicy& policy = {});
 
     /// One poll attempt. Publishes a new snapshot either way, so that consumers always see
     /// current liveness even while the device is unreachable.

@@ -49,7 +49,7 @@ struct MqttConfig {
 
 class MqttOutput {
 public:
-    MqttOutput(MqttConfig config, PublishPolicy publishPolicy = {});
+    explicit MqttOutput(MqttConfig config, PublishPolicy publishPolicy = {});
 
     /// Sets up the client and starts connecting. Non-blocking.
     bool begin(const BridgeInfo& bridge);

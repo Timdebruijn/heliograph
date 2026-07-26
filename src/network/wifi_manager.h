@@ -25,7 +25,7 @@ namespace heliograph {
 
 class WifiManager {
 public:
-    WifiManager(ProvisioningPolicy policy = {});
+    explicit WifiManager(const ProvisioningPolicy& policy = {});
 
     void setDiagnostics(Diagnostics* diagnostics) { diagnostics_ = diagnostics; }
 
