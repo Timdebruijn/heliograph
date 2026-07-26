@@ -74,6 +74,40 @@ else
     echo "OK"
 fi
 
+echo "==> 5. setup() applies TZ before it writes its first stamped log line"
+# formatLogTimestamp renders through localtime_r, so a log:: call made while TZ is still unset
+# comes out in UTC with nothing marking it as such. It shipped that way in 0.13.0: the config
+# line was written eleven lines above the tzset(), which nobody noticed because a COLD start
+# has no valid clock there and falls back to an uptime stamp. A warm reset (OTA reboot) keeps
+# the clock, so every OTA log opened with one line an hour or two in the past.
+#
+# Line order in setup() is the whole invariant, hence a positional check rather than a unit
+# test: main.cpp is not host-compilable, and the pure formatter is already covered in
+# test/test_logging.
+setup_start=$(grep -n '^void setup()' src/main.cpp | head -1 | cut -d: -f1)
+setup_end=$(grep -n '^void loop()' src/main.cpp | head -1 | cut -d: -f1)
+if [ -z "$setup_start" ] || [ -z "$setup_end" ]; then
+    echo "FAIL: could not locate setup()/loop() in src/main.cpp; this check needs updating"
+    status=1
+else
+    # Comment lines are stripped first: prose about log:: calls is not a log:: call.
+    tz_line=$(awk -v a="$setup_start" -v b="$setup_end" \
+        'NR>a && NR<b && $0 !~ /^[[:space:]]*\/\// && /tzset\(\)/ {print NR; exit}' src/main.cpp)
+    log_line=$(awk -v a="$setup_start" -v b="$setup_end" \
+        'NR>a && NR<b && $0 !~ /^[[:space:]]*\/\// && /log::(trace|debug|info|warn|error)\(/ {print NR; exit}' \
+        src/main.cpp)
+    if [ -z "$tz_line" ]; then
+        echo "FAIL: no tzset() in setup(); every stamped boot line would render in UTC"
+        status=1
+    elif [ -n "$log_line" ] && [ "$log_line" -lt "$tz_line" ]; then
+        echo "FAIL: src/main.cpp:$log_line logs before the tzset() on line $tz_line;"
+        echo "      that line renders in UTC after a warm reset, unmarked"
+        status=1
+    else
+        echo "OK"
+    fi
+fi
+
 echo
 if [ $status -eq 0 ]; then
     echo "RESULT: PASS"
