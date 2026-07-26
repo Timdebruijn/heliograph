@@ -11,6 +11,7 @@
 
 #include "diagnostics/log_buffer.h"
 #include "diagnostics/log_timestamp.h"
+#include "diagnostics/logger.h"
 
 using heliograph::log::formatIsoLocalTime;
 using heliograph::log::formatLogTimestamp;
@@ -158,6 +159,50 @@ static void test_a_null_line_is_ignored() {
     TEST_ASSERT_EQUAL_size_t(0, heliograph::log::recentLines(10).size());
 }
 
+// A hex dump of nothing is the empty dump, not whatever was on the stack. Rs485Transport::write
+// hands traceHex the byte count it actually wrote, which is 0 when the UART write fails -- so
+// the one caller that does not pre-check for emptiness is also the one that reaches it on a
+// fault. The buffer used to be filled only by the formatting loop, which at len == 0 never
+// runs.
+static void test_trace_hex_of_zero_bytes_prints_no_bytes() {
+    const auto previous = heliograph::log::level();
+    heliograph::log::setLevel(heliograph::LogLevel::Trace);
+    heliograph::log::clearLines();
+
+    const uint8_t data[1] = {0xAB};
+    heliograph::log::traceHex("EMPTY", data, 0);
+
+    const auto lines = heliograph::log::recentLines(1);
+    TEST_ASSERT_EQUAL_size_t(1, lines.size());
+    TEST_ASSERT_EQUAL_STRING("[T] EMPTY ", lines[0].c_str());
+
+    heliograph::log::setLevel(previous);
+}
+
+static void test_trace_hex_is_bounded_and_marks_truncation() {
+    const auto previous = heliograph::log::level();
+    heliograph::log::setLevel(heliograph::LogLevel::Trace);
+    heliograph::log::clearLines();
+
+    // One byte past the 64-byte cap: a corrupted length must not turn into unbounded output,
+    // and the reader has to be told the dump is partial.
+    uint8_t data[65];
+    for (size_t i = 0; i < sizeof(data); ++i) {
+        data[i] = static_cast<uint8_t>(i);
+    }
+    heliograph::log::traceHex("LONG", data, sizeof(data));
+
+    const auto lines = heliograph::log::recentLines(1);
+    TEST_ASSERT_EQUAL_size_t(1, lines.size());
+    // "[T] LONG " + 64 * "XX " + "..."
+    TEST_ASSERT_EQUAL_size_t(9 + 64 * 3 + 3, lines[0].size());
+    TEST_ASSERT_TRUE(lines[0].rfind("...") == lines[0].size() - 3);
+    TEST_ASSERT_TRUE(lines[0].find("3F ") != std::string::npos);   // byte 63, the last kept one
+    TEST_ASSERT_TRUE(lines[0].find(" 40 ") == std::string::npos);  // byte 64, dropped
+
+    heliograph::log::setLevel(previous);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_lines_come_back_oldest_first);
@@ -166,6 +211,8 @@ int main(int, char**) {
     RUN_TEST(test_total_counts_overwritten_lines_too);
     RUN_TEST(test_an_overlong_line_is_truncated_not_overflowing);
     RUN_TEST(test_a_null_line_is_ignored);
+    RUN_TEST(test_trace_hex_of_zero_bytes_prints_no_bytes);
+    RUN_TEST(test_trace_hex_is_bounded_and_marks_truncation);
     RUN_TEST(test_iso_local_time_formats_in_the_configured_zone);
     RUN_TEST(test_synced_formats_local_wallclock);
     RUN_TEST(test_synced_honours_timezone_and_dst);
