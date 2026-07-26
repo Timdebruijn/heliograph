@@ -121,6 +121,20 @@ static void test_a_null_chunk_is_ignored_not_hashed() {
                              h.finishHex().c_str());
 }
 
+// --- hex rendering ------------------------------------------------------------------------
+
+/// Lowercase, two characters per byte, leading zeroes kept. A renderer that dropped the high
+/// nibble of 0x0f would produce a 63-character string that no comparison could ever match, and
+/// the OTA error message would show a digest that is not the one that was computed.
+static void test_hex_renders_every_byte_as_two_lowercase_characters() {
+    const uint8_t bytes[] = {0x00, 0x0f, 0xa5, 0xff};
+    TEST_ASSERT_EQUAL_STRING("000fa5ff", heliograph::ota::toHex(bytes, sizeof(bytes)).c_str());
+    TEST_ASSERT_EQUAL_STRING("", heliograph::ota::toHex(bytes, 0).c_str());
+    // The length is honoured, not the array: OtaManager renders a 32-byte digest out of a
+    // buffer it sizes itself, and a renderer that ignored len would read past it.
+    TEST_ASSERT_EQUAL_STRING("000f", heliograph::ota::toHex(bytes, 2).c_str());
+}
+
 // --- the comparison ---------------------------------------------------------------------------
 
 static void test_a_matching_hex_digest_compares_equal() {
@@ -177,6 +191,7 @@ int main() {
     RUN_TEST(test_every_length_across_two_blocks_is_self_consistent);
     RUN_TEST(test_reset_makes_the_object_reusable);
     RUN_TEST(test_a_null_chunk_is_ignored_not_hashed);
+    RUN_TEST(test_hex_renders_every_byte_as_two_lowercase_characters);
     RUN_TEST(test_a_matching_hex_digest_compares_equal);
     RUN_TEST(test_a_malformed_expectation_is_refused);
     RUN_TEST(test_one_wrong_bit_is_refused);

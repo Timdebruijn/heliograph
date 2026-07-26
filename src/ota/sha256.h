@@ -49,6 +49,11 @@ private:
     size_t   buffered_ = 0;
 };
 
+/// Lowercase hex of a byte range. Separate from Sha256 because the OTA path needs both forms
+/// of the same digest -- the bytes, to compare against what was promised, and the text, to put
+/// in an error message and the status payload -- and finish() may only be called once.
+std::string toHex(const uint8_t* data, size_t len);
+
 /// Compares a user-supplied hex digest against a computed one, case-insensitively.
 ///
 /// False on any length other than 64 or any non-hex character, so a truncated or malformed
