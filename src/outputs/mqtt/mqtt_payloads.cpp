@@ -39,7 +39,11 @@ bool buildStatePayload(const DeviceState& state, std::string& out, size_t maxByt
         }
         writeMeasurement(measurements[m.id].to<JsonObject>(), m);
     }
-    writeDeviceStatus(root, state);
+    // Re-taken rather than reusing `root` from above: `root` was captured before the whole
+    // measurements object was built, and whether a JsonObject handle survives the document
+    // growing is an ArduinoJson internal nobody should have to be sure about to read this.
+    // Re-taking costs nothing and matches what the REST builder does.
+    writeDeviceStatus(doc.as<JsonObject>(), state);
 
     return finish(doc, out, maxBytes);
 }

@@ -39,15 +39,22 @@ std::vector<std::string> addressesFor(const DriverDescriptor& descriptor, Discov
     if (mode != DiscoveryMode::Extended || !descriptor.hasSweepableAddress()) {
         return {std::string{}};
     }
-    const std::string        def = descriptor.optionOr(DriverOptions{}, descriptor.addressOptionKey);
     const auto               bounds = descriptor.addressRange();
     std::vector<std::string> out;
     // The driver's own default first -- but only if the driver would accept it. A default
     // outside its own declared bounds would be probed, reported, offered by the wizard, and
     // then refused by the PATCH gate: a dead end on the confirm step.
+    //
+    // The PARSED value is pushed, not the declared string. Same thing for every driver today
+    // ("1", "10", "40000"), but a default written "007" would otherwise be offered verbatim --
+    // and the PATCH gate refuses a padded number precisely so a typed value is never silently
+    // rewritten, so the wizard would propose an address the confirm step then rejects. That is
+    // the dead end the paragraph above exists to prevent. It also keeps the dedupe below
+    // honest: the sweep compares against std::to_string(address), so "007" and "7" would have
+    // been probed as two separate candidates for one address.
     long parsedDefault = 0;
     if (descriptor.numericOption(DriverOptions{}, descriptor.addressOptionKey, parsedDefault)) {
-        out.push_back(def);
+        out.push_back(std::to_string(parsedDefault));
     }
     for (const int address : config.sweepAddresses) {
         // Outside what the driver declares is not a gap in the sweep, it is a value the driver
