@@ -102,9 +102,47 @@ jobs:
           for board in rs485-can relay-1ch relay-6ch; do
             cp ".pio/build/waveshare-${board}/firmware.factory.bin" \
                "site/heliograph-${board}-factory.bin"
+            # The OTA image too, not just the factory one. The dashboard's update button
+            # fetches this with fetch(), and Pages is the only host in the chain that sends
+            # CORS headers -- the release asset redirects to one that does not, which is the
+            # same reason the flasher bin is served from here.
+            cp ".pio/build/waveshare-${board}/firmware.bin" \
+               "site/heliograph-${board}.bin"
             sed -e "s/__VERSION__/${VERSION}/" -e "s/__BOARD__/${board}/" \
               flasher/manifest.json > "site/manifest-${board}.json"
           done
+
+      # The update feed. Small, static, and on the one host that allows a cross-origin fetch
+      # from a dashboard served off a bridge on someone's LAN.
+      #
+      # The hash is computed from the very file that is published beside it, in the same step,
+      # so the two cannot drift. It is INTEGRITY, not authenticity: it catches a truncated
+      # download or a proxy that mangled the body, and it cannot tell you the image is one this
+      # project published -- anyone who could replace the binary could replace this file too.
+      # Said plainly in docs/security.md rather than implied by the presence of a checksum.
+      - name: Build update feed
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          {
+            printf '{\n'
+            printf '  "version": "%s",\n' "$VERSION"
+            printf '  "released": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf '  "notes_url": "%s/%s/releases/tag/%s",\n' \
+              "${{ github.server_url }}" "${{ github.repository }}" "${GITHUB_REF_NAME}"
+            printf '  "boards": {\n'
+            first=1
+            for board in rs485-can relay-1ch relay-6ch; do
+              file="heliograph-${board}.bin"
+              sha=$(sha256sum "site/${file}" | cut -d' ' -f1)
+              size=$(stat -c%s "site/${file}")
+              [ $first -eq 1 ] || printf ',\n'
+              first=0
+              printf '    "%s": { "file": "%s", "sha256": "%s", "size": %s }' \
+                "$board" "$file" "$sha" "$size"
+            done
+            printf '\n  }\n}\n'
+          } > site/latest.json
+          cat site/latest.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

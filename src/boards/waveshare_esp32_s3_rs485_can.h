@@ -20,6 +20,14 @@ namespace heliograph::board {
 
 inline constexpr const char* kName = "Waveshare ESP32-S3-RS485-CAN";
 
+/// Stable slug identifying this board to machines, as opposed to kName which is for people.
+///
+/// Deliberately the SAME string as the PlatformIO environment suffix and the release asset
+/// name (heliograph-<version>-{id}.bin), because that is what lets the update flow ask for the
+/// image built for this board rather than guessing from a display name. Changing it renames a
+/// release asset, so it does not change.
+inline constexpr const char* kId = "rs485-can";
+
 // --- RS485 ---------------------------------------------------------------------------------
 // Isolated transceiver (SP3485EN behind a pi163E31 isolator; schematic nets TXD1/RXD1/
 // RS485_EN). The EN pin is handed to the UART as its RTS line with

@@ -253,6 +253,7 @@ void applySerialOverride() {
 BridgeInfo bridgeInfo() {
     BridgeInfo info;
     info.boardName        = board::kName;
+    info.boardId          = board::kId;
     info.bridgeId         = g_wifi.bridgeId();
     {
         // bridgeInfo() runs on loop() and rs485Task; the AsyncTCP task can be replacing

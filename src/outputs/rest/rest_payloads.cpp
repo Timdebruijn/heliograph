@@ -81,6 +81,11 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     b["id"]                 = bridge.bridgeId;
     b["name"]               = bridge.name;
     b["firmware_version"]   = bridge.firmwareVersion;
+    // The board as a slug, not only as a display name. The update check needs to ask for the
+    // image built for THIS board: all three start with the same magic byte, so nothing
+    // downstream could otherwise tell a Relay-6CH image from an RS485-CAN one, and the wrong
+    // one runs happily on the wrong pins.
+    b["board_id"]           = bridge.boardId;
     // A firmware constant, not configuration: the settings page needs it to stop offering an
     // "Add a device" button past the point the bridge would refuse the save.
     b["max_devices"]        = static_cast<unsigned>(kMaxDevices);

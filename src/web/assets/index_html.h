@@ -48,6 +48,7 @@ th{color:var(--dim);font-weight:500;font-size:12px;text-transform:uppercase}
 td.n{text-align:right;font-variant-numeric:tabular-nums}
 .dim{color:var(--dim)}.hide{display:none}
 .tag{font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+a.tag{text-decoration:none;border-color:#2f81f7;color:#2f81f7}
 /* Settings layout. The cards carry no margin of their own -- deliberately, because the
    dashboard packs them into a .grid that owns its own gap -- so on the settings tab, where
    they are stacked instead, they used to touch: twelve blocks with 0 px between them read as
@@ -77,7 +78,12 @@ dialog::backdrop{background:#000a}
 </style></head><body>
 <header><h1>Heliograph</h1>
 <span id="hdr" class="dim">connecting…</span>
-<span style="flex:1"></span><span id="ver" class="tag"></span></header>
+<span style="flex:1"></span>
+<!-- Subtle on purpose: a quiet link, not a banner. It appears only when a newer release
+     actually exists, and clicking it goes to the card that can install it. -->
+<a id="updbadge" class="tag hide" href="#" onclick="return gotoUpdate()"
+   title="A newer firmware release is available">update available</a>
+<span id="ver" class="tag"></span></header>
 <nav>
 <button data-t="dash" class="on">Dashboard</button>
 <button data-t="dev">Device</button>
@@ -306,6 +312,15 @@ function fleetStrip(fleet){
 }
 
 function render(s){
+  // Kept for the update check, which needs the running version and the board slug. Set here
+  // rather than fetched again: this is the payload the page already has.
+  window.g_lastStatus=s;
+  // Once per page load, and only when it is switched on. Fired from here because this is the
+  // first moment the running version is actually known.
+  if(!window.g_updateChecked){
+    window.g_updateChecked=true;
+    updatesEnabled().then(on=>{if(on)checkForUpdate(false).then(()=>updRender())});
+  }
   const d=s.device,b=s.bridge,m=s.measurements||{};
   const dot=x=>x?'<span class="dot ok"></span>':'<span class="dot bad"></span>';
   const fleet=s.devices||[], tot=s.totals||{};
@@ -1528,6 +1543,16 @@ async function renderConfig(){
     <div id="rbm" class="msg" style="display:none"></div></div>
   </section>
   <section class="cfgsec"><h3>Firmware &amp; recovery</h3>
+  <div class="card" id="updcard"><b>Firmware release</b>
+    <div id="updbox"><div class="dim" style="font-size:12px">Checking…</div></div>
+    ${chk('c_upd','Check for new releases automatically',c.updates?c.updates.check_enabled!==false:true)}
+    <div class="dim" style="font-size:12px;margin-top:4px">The check runs in <b>this browser</b>,
+    not on the bridge — it fetches one small file from the project's GitHub Pages site and
+    compares it with the version this bridge reports. The bridge never opens a connection to
+    the internet for it. With this off nothing is fetched in the background; the button below
+    still works when you ask for it.</div>
+    <button type="button" style="background:none;border:1px solid var(--line);color:var(--fg)"
+      onclick="manualCheck()">Check now</button></div>
   <div class="card"><b>Firmware update (OTA)</b>
     <label for="c_fw">Firmware image (.bin)</label>
     <input id="c_fw" type="file" accept=".bin">
@@ -1554,6 +1579,9 @@ async function renderConfig(){
 
   // After the card exists in the DOM, not before: renderExtraDevices() writes into #xdevs.
   renderExtraDevices();
+  // Same reason: #updbox only exists now. Uses whatever the last check found, so opening
+  // Settings does not fire another request.
+  updRender();
 
   // Keep the Relays card's gate warning in step with both checkboxes as they are clicked --
   // the user is told the combination is dead before saving it, not after wondering why the
@@ -1596,6 +1624,7 @@ async function saveConfig(){
     serial:{override:b('c_ser'),baud_rate:n('c_serbaud'),parity:v('c_serpar'),
             data_bits:n('c_serdb'),stop_bits:n('c_sersb')},
     security:{read_only_mode:b('c_ro')},
+    updates:{check_enabled:b('c_upd')},
     logging:{level:v('c_lg')}};
   // A blank password field means "keep": sending "" would clear it, which is never what an
   // untouched field means.
@@ -1854,6 +1883,213 @@ async function undoRestore(){
   if(!r.ok){backupNote('#rbm','err',(d.error&&d.error.message)||httpWhy(r));return}
   backupNote('#rbm','ok','Rolled back.'+(d.rebooting?' The bridge is restarting — reload in ~30 seconds.'
     :' No restart needed.')+' Pressing this again returns to the restored configuration.');
+}
+
+// ---------------- Firmware update check ----------------
+// The check runs HERE, in your browser, never on the bridge. The bridge opens no outbound
+// connection for this and does not know the feed exists -- which is what keeps "works with no
+// internet at all" true for the device itself.
+//
+// The feed and the image both come from GitHub Pages rather than from the release assets.
+// Release downloads redirect to a host that sends no CORS headers at all (checked: not even a
+// preflight), so fetch() from this page cannot read them. Pages sends
+// `access-control-allow-origin: *`. The release workflow already publishes the flasher image
+// there for exactly this reason.
+const UPDATE_FEED='https://timdebruijn.github.io/heliograph/';
+
+// Deliberately NOT verified here with crypto.subtle. SubtleCrypto only exists in a secure
+// context, and this page is served over plain HTTP from a bridge on your LAN -- so on the one
+// device this ships on, window.crypto.subtle is undefined. The digest travels to the firmware
+// instead, which hashes what it actually wrote and refuses before the boot partition flips.
+// That is the better place for it anyway: it also covers the upload hop across the LAN, which
+// a check in this page could not.
+let updLatest=null;
+
+/// Reads the setting once per page load. Needed before the Settings tab has ever been opened,
+/// because the badge belongs in the header on the Dashboard.
+///
+/// A config read that FAILS means no check: the alternative is fetching from the internet
+/// because we could not find out whether we were allowed to, which is the wrong way round.
+async function updatesEnabled(){
+  if(window.g_updatesEnabled!==undefined)return window.g_updatesEnabled;
+  try{
+    const c=await (await fetch('/api/v1/config')).json();
+    window.g_updatesEnabled=!(c.updates&&c.updates.check_enabled===false);
+  }catch(e){ window.g_updatesEnabled=false; }
+  return window.g_updatesEnabled;
+}
+
+// The comparison lives here and only here, because here is where it runs -- the firmware never
+// needs to know what the latest release is. Take the leading semver, ignore the build stamp the
+// firmware appends to its own version, and refuse anything else rather than guessing.
+//
+// Not a string compare, and that is the whole point: "0.9.0" sorts ABOVE "0.14.0" as text, so
+// the naive version nags forever about a downgrade. Checked by tools/check_web_js.py, which
+// runs these two functions in node against exactly the cases that trap a hand-rolled parser.
+function semver(text){
+  const m=/^\s*v?(\d{1,5})\.(\d{1,5})\.(\d{1,5})(?!\d|\.\d)/.exec(String(text||''));
+  return m?[+m[1],+m[2],+m[3]]:null;
+}
+function isNewer(current,candidate){
+  const a=semver(current), b=semver(candidate);
+  if(!a||!b)return false;
+  for(let i=0;i<3;i++){ if(b[i]!==a[i])return b[i]>a[i]; }
+  return false;
+}
+
+/// Fetches the feed and updates the header badge. Silent on every failure: no internet, a
+/// captive portal, a blocked domain and a rewritten feed all mean "say nothing", never an
+/// error on a dashboard whose actual job is showing solar production.
+async function checkForUpdate(manual){
+  const st=window.g_lastStatus;
+  if(!st||!st.bridge)return null;
+  try{
+    const r=await fetch(UPDATE_FEED+'latest.json',{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(!semver(d.version))throw new Error('unrecognised feed');
+    updLatest=d;
+  }catch(e){
+    updLatest=null;
+    if(manual)return {error:e.message};
+    return null;
+  }
+  const newer=isNewer(st.bridge.firmware_version,updLatest.version);
+  const badge=$('#updbadge');
+  if(badge)badge.classList.toggle('hide',!newer);
+  return {newer,latest:updLatest.version};
+}
+
+function gotoUpdate(){
+  document.querySelectorAll('nav button').forEach(b=>{if(b.dataset.t==='cfg')b.click()});
+  setTimeout(()=>{const c=$('#updcard'); if(c)c.scrollIntoView({block:'center',behavior:'smooth'})},150);
+  return false;
+}
+
+function updRender(){
+  const box=$('#updbox'); if(!box)return;
+  const st=window.g_lastStatus||{};
+  const cur=(st.bridge&&st.bridge.firmware_version)||'unknown';
+  if(!updLatest){
+    box.innerHTML=`<div class="dim" style="font-size:12px">Running <b>${esc(cur)}</b>.
+      No release information — either the check is off, or this browser could not reach
+      github.io.</div>`;
+    return;
+  }
+  const board=(st.bridge&&st.bridge.board_id)||'';
+  const asset=(updLatest.boards||{})[board];
+  const newer=isNewer(cur,updLatest.version);
+  if(!newer){
+    box.innerHTML=`<div class="dim" style="font-size:12px">Running <b>${esc(cur)}</b>, which is
+      the latest release (<b>${esc(updLatest.version)}</b>).</div>`;
+    return;
+  }
+  if(!asset){
+    // A release that carries no image for this board. Says so rather than offering a button
+    // that would hand the bridge somebody else's firmware.
+    box.innerHTML=`<div class="msg err" style="display:block">Release
+      <b>${esc(updLatest.version)}</b> is available but carries no image for this board
+      (<code>${esc(board||'unknown')}</code>). Nothing to install from here.</div>`;
+    return;
+  }
+  box.innerHTML=`
+    <div class="msg ok" style="display:block"><b>${esc(updLatest.version)}</b> is available.
+      You are running ${esc(cur)}.
+      ${updLatest.notes_url?`<a href="${esc(updLatest.notes_url)}" target="_blank" rel="noopener noreferrer">Release notes</a>`:''}</div>
+    <div class="dim" style="font-size:12px;margin-top:8px">${Math.round((asset.size||0)/1024)} kB.
+      Your browser downloads it and hands it to the bridge, which checks it against the
+      checksum from the release before writing anything. That proves the image arrived intact
+      — it is not a signature, and does not prove who built it.</div>
+    <button id="updb" onclick="installUpdate()">Install ${esc(updLatest.version)}</button>
+    <div id="updpb" style="display:none;height:8px;max-width:420px;margin-top:12px;border:1px solid var(--line);border-radius:99px;overflow:hidden">
+      <div id="updpf" style="height:100%;width:0%;background:#2f81f7;transition:width .2s"></div></div>
+    <div id="updm" class="msg" style="display:none"></div>`;
+}
+
+async function manualCheck(){
+  const box=$('#updbox');
+  if(box)box.innerHTML='<div class="dim" style="font-size:12px">Checking…</div>';
+  const r=await checkForUpdate(true);
+  if(r&&r.error){
+    box.innerHTML=`<div class="msg err" style="display:block">Could not reach the release
+      feed: ${esc(r.error)}. This browser needs internet access for the check; the bridge
+      itself never makes this request.</div>`;
+    return;
+  }
+  updRender();
+}
+
+async function installUpdate(){
+  const st=window.g_lastStatus||{};
+  const board=(st.bridge&&st.bridge.board_id)||'';
+  const asset=(updLatest&&(updLatest.boards||{})[board])||null;
+  const m=$('#updm'), pb=$('#updpb'), pf=$('#updpf'), btn=$('#updb');
+  if(!asset)return;
+  m.style.display='block';m.className='msg';m.textContent='Downloading '+asset.file+'…';
+  btn.disabled=true;
+  let blob;
+  try{
+    const r=await fetch(UPDATE_FEED+asset.file,{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    blob=await r.blob();
+  }catch(e){
+    btn.disabled=false;m.className='msg err';
+    m.textContent='Could not download the image: '+e.message+' — nothing was sent to the bridge.';
+    return;
+  }
+  // Size is worth checking here even though the hash is checked on the device: it costs
+  // nothing and turns "the firmware refused it" into "the download was truncated", which is
+  // a different problem with a different fix.
+  if(asset.size&&blob.size!==asset.size){
+    btn.disabled=false;m.className='msg err';
+    m.textContent='Download is '+blob.size+' bytes, expected '+asset.size+
+      ' — truncated. Nothing was sent to the bridge.';
+    return;
+  }
+  if(!sessionStorage.getItem('sb_auth')&&!await askAuth()){
+    btn.disabled=false;m.className='msg err';m.textContent='Cancelled.';return;
+  }
+  const send=(mayRetry)=>{
+    const x=new XMLHttpRequest();
+    // board and sha256 both travel to the firmware: it refuses an image built for another
+    // board, and refuses one that does not hash to what the release promised -- before the
+    // boot partition flips, so a bad image is an error rather than a reboot into rollback.
+    x.open('POST','/api/v1/ota?board='+encodeURIComponent(board)+
+                  '&sha256='+encodeURIComponent(asset.sha256||''));
+    x.setRequestHeader('Authorization','Basic '+sessionStorage.getItem('sb_auth'));
+    x.upload.onprogress=e=>{
+      if(!e.lengthComputable)return;
+      const p=Math.round(e.loaded/e.total*100);
+      pf.style.width=p+'%';
+      m.textContent=p<100?'Uploading to the bridge… '+p+'%'
+                         :'Upload complete — verifying the checksum and writing flash…';
+    };
+    x.onload=()=>{
+      if(x.status===401&&mayRetry){
+        clearAuth();
+        askAuth().then(ok=>{if(ok)send(false);else{btn.disabled=false;m.className='msg err';m.textContent='Cancelled.'}});
+        return;
+      }
+      let d={};try{d=JSON.parse(x.responseText)}catch(e){}
+      pb.style.display='none';
+      if(x.status<200||x.status>=300){
+        btn.disabled=false;m.className='msg err';
+        m.textContent='Refused: '+((d.error&&d.error.message)||('HTTP '+x.status))+
+                      ' — the running firmware is untouched.';
+        return;
+      }
+      m.className='msg ok';
+      m.textContent='Verified and installed. Rebooting into '+updLatest.version+
+                    ' — reload this page in ~15 seconds.';
+    };
+    x.onerror=()=>{pb.style.display='none';btn.disabled=false;m.className='msg err';
+      m.textContent='Upload failed: network error — the running firmware is untouched.'};
+    m.className='msg';m.textContent='Uploading to the bridge… 0%';
+    pb.style.display='block';pf.style.width='0%';
+    const fd=new FormData();fd.append('firmware',blob,asset.file);
+    x.send(fd);
+  };
+  send(true);
 }
 
 async function otaUpload(){

@@ -21,6 +21,14 @@ namespace heliograph::board {
 
 inline constexpr const char* kName = "Waveshare ESP32-S3-Relay-1CH";
 
+/// Stable slug identifying this board to machines, as opposed to kName which is for people.
+///
+/// Deliberately the SAME string as the PlatformIO environment suffix and the release asset
+/// name (heliograph-<version>-{id}.bin), because that is what lets the update flow ask for the
+/// image built for this board rather than guessing from a display name. Changing it renames a
+/// release asset, so it does not change.
+inline constexpr const char* kId = "relay-1ch";
+
 // --- RS485 ---------------------------------------------------------------------------------
 // WS_GPIO.h: TXD1 17, RXD1 18, TXD1EN 21. Schematic: TXD1/RXD1 run through the pi131M31
 // isolator to the SP3485EN's DI/RO; EN handed to the UART as RTS

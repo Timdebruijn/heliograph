@@ -18,8 +18,30 @@ const char* otaResultName(OtaResult result) {
         case OtaResult::WriteFailed:    return "write_failed";
         case OtaResult::NotFinished:    return "not_finished";
         case OtaResult::NoPartition:    return "no_partition";
+        case OtaResult::HashMismatch:   return "hash_mismatch";
     }
     return "unknown";
+}
+
+OtaResult OtaManager::finishHash() {
+    uint8_t digest[32];
+    hasher_.finish(digest);
+    writtenSha256_.assign(64, '\0');
+    static const char kHex[] = "0123456789abcdef";
+    for (size_t i = 0; i < 32; ++i) {
+        writtenSha256_[i * 2]     = kHex[digest[i] >> 4];
+        writtenSha256_[i * 2 + 1] = kHex[digest[i] & 0x0F];
+    }
+    if (expectedSha_.empty()) {
+        return OtaResult::Ok;  // nothing was promised; a hand-picked file has nothing to check
+    }
+    if (!hexDigestEquals(expectedSha_, digest)) {
+        // Both digests in the message. "Checksum failed" with no numbers leaves nobody able to
+        // tell a corrupted download from having been handed the wrong file entirely.
+        lastError_ = "image hashes to " + writtenSha256_ + ", expected " + expectedSha_;
+        return OtaResult::HashMismatch;
+    }
+    return OtaResult::Ok;
 }
 
 bool looksLikeFirmware(const uint8_t* data, size_t len) {
@@ -71,7 +93,7 @@ const char* imageStateName() {
     }
 }
 
-OtaResult OtaManager::begin(size_t expectedSize) {
+OtaResult OtaManager::begin(size_t expectedSize, const std::string& expectedSha256) {
     if (running_) {
         return OtaResult::AlreadyRunning;
     }
@@ -87,6 +109,9 @@ OtaResult OtaManager::begin(size_t expectedSize) {
     magicChecked_ = false;
     written_      = 0;
     expected_     = expectedSize;
+    expectedSha_  = expectedSha256;
+    writtenSha256_.clear();
+    hasher_.reset();
     lastError_.clear();
     return OtaResult::Ok;
 }
@@ -118,6 +143,7 @@ OtaResult OtaManager::write(const uint8_t* data, size_t len) {
         abort();
         return OtaResult::WriteFailed;
     }
+    hasher_.update(data, len);
     written_ += len;
     return OtaResult::Ok;
 }
@@ -125,6 +151,14 @@ OtaResult OtaManager::write(const uint8_t* data, size_t len) {
 OtaResult OtaManager::end() {
     if (!running_) {
         return OtaResult::NotFinished;
+    }
+    // Before Update::end(), which is what flips the boot partition: a hash mismatch has to be
+    // a refusal, not a reboot into the rollback path. Update's own verify would catch a
+    // corrupt image too, but only by its internal accounting -- it cannot know this is not the
+    // image the release feed promised.
+    if (const OtaResult hashed = finishHash(); hashed != OtaResult::Ok) {
+        abort();
+        return hashed;
     }
     // Update::end(true) verifies the image and only then flips the boot partition. Until this
     // succeeds the currently running image stays the one that boots.
@@ -159,7 +193,7 @@ void confirmHealthyBoot() {}  // no bootloader/rollback off-device
 
 const char* imageStateName() { return "unknown"; }  // no otadata off-device
 
-OtaResult OtaManager::begin(size_t expectedSize) {
+OtaResult OtaManager::begin(size_t expectedSize, const std::string& expectedSha256) {
     if (running_) {
         return OtaResult::AlreadyRunning;
     }
@@ -167,6 +201,9 @@ OtaResult OtaManager::begin(size_t expectedSize) {
     magicChecked_ = false;
     written_      = 0;
     expected_     = expectedSize;
+    expectedSha_  = expectedSha256;
+    writtenSha256_.clear();
+    hasher_.reset();
     lastError_.clear();
     return OtaResult::Ok;
 }
@@ -188,6 +225,7 @@ OtaResult OtaManager::write(const uint8_t* data, size_t len) {
         abort();
         return OtaResult::TooLarge;
     }
+    hasher_.update(data, len);
     written_ += len;
     return OtaResult::Ok;
 }
@@ -199,6 +237,10 @@ OtaResult OtaManager::end() {
     if (!magicChecked_) {
         running_ = false;
         return OtaResult::NotFirmware;
+    }
+    if (const OtaResult hashed = finishHash(); hashed != OtaResult::Ok) {
+        running_ = false;
+        return hashed;
     }
     running_ = false;
     return OtaResult::Ok;

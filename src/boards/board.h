@@ -5,6 +5,9 @@
 //
 // Every board header provides the same constant set:
 //   kName                                  -- exact product name, shown in the UI and HA
+//   kId                                    -- stable machine slug; matches the PlatformIO
+//                                             env suffix AND the release asset name, which
+//                                             is how an update finds the image for THIS board
 //   kRs485Tx / kRs485Rx / kRs485De         -- kRs485De < 0 means "no direction pin":
 //                                             the transport then skips RTS configuration
 //   kRs485UartNum
