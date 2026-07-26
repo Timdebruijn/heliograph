@@ -32,6 +32,7 @@ class AsyncWebServerRequest;
 #include "device/command.h"
 #include "device/device_state.h"
 #include "diagnostics/diagnostics.h"
+#include "app/capture_runner.h"
 #include "app/discovery_runner.h"
 #include "drivers/driver_registry.h"
 #include "rest_payloads.h"
@@ -67,6 +68,11 @@ struct RestContext {
     std::function<bool(bool extended)> requestDiscovery;
     /// Current discovery report, for the wizard to poll.
     std::function<DiscoveryReport()> discoveryReport;
+    /// Start a passive bus capture. Returns false when one is already running -- or when
+    /// discovery is, since both take exclusive use of the same bus.
+    std::function<bool(const diag::CaptureConfig&, const SerialProfile&)> requestCapture;
+    /// The current capture report, for the wizard to poll and then download.
+    std::function<CaptureReport()> captureReport;
     /// Wipes stored configuration including credentials, then reboots into the setup portal.
     /// The same wipe the BOOT-hold performs, reached over the network instead of the button --
     /// which is what a user without physical access has when a config locks them out.

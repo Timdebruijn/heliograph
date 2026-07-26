@@ -1204,6 +1204,103 @@ static void test_modbus_write_stays_off_whatever_the_config_says() {
 
 // NTP feedback: before sync the API must say so honestly (null, never a 1970 date dressed
 // up as real); after sync it carries the local wall-clock and the last sync moment.
+// --- capture payload ------------------------------------------------------------------------
+
+static CaptureReport captureWithOneFrame() {
+    CaptureReport report;
+    report.status            = CaptureStatus::Done;
+    report.profile.baudRate  = 19200;
+    report.config.durationMs = 30000;
+    report.config.maxFrames  = 64;
+    report.idleGapMs         = 2;
+    report.startedMs         = 1000;
+    report.finishedMs        = 31000;
+    report.totalBytes        = 4;
+    report.modbusFrames      = 1;
+    diag::CapturedFrame frame;
+    frame.offsetMs       = 120;
+    frame.gapBeforeMs    = 33;
+    frame.bytes          = {0x01, 0x03, 0xC0, 0x0B};
+    frame.modbusCrcValid = true;
+    report.frames.push_back(frame);
+    return report;
+}
+
+/// Hex uppercase and space-separated, matching every protocol document and decoder example in
+/// docs/ -- so a captured frame can be held up against one by eye.
+static void test_capture_payload_renders_hex_the_way_the_docs_do() {
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildCapturePayload(captureWithOneFrame(), 31000, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_EQUAL_STRING("01 03 C0 0B", doc["frames"][0]["hex"]);
+    TEST_ASSERT_EQUAL_INT(4, doc["frames"][0]["length"].as<int>());
+    TEST_ASSERT_EQUAL_INT(120, doc["frames"][0]["offset_ms"].as<int>());
+    TEST_ASSERT_EQUAL_INT(33, doc["frames"][0]["gap_before_ms"].as<int>());
+    TEST_ASSERT_TRUE(doc["frames"][0]["modbus_crc_ok"].as<bool>());
+}
+
+/// The line is echoed in full because on an unidentified device it is a guess, and every
+/// number in the report is only meaningful against the guess that produced it.
+static void test_capture_payload_echoes_the_line_it_listened_at() {
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildCapturePayload(captureWithOneFrame(), 31000, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_EQUAL_STRING("done", doc["status"]);
+    TEST_ASSERT_EQUAL_INT(19200, doc["line"]["baud_rate"].as<int>());
+    TEST_ASSERT_EQUAL_STRING("none", doc["line"]["parity"]);
+    TEST_ASSERT_EQUAL_INT(2, doc["line"]["idle_gap_ms"].as<int>());
+    TEST_ASSERT_EQUAL_INT(30, doc["requested_seconds"].as<int>());
+    TEST_ASSERT_EQUAL_INT(30000, doc["elapsed_ms"].as<int>());
+    TEST_ASSERT_EQUAL_INT(1, doc["summary"]["modbus_crc_ok"].as<int>());
+    TEST_ASSERT_EQUAL_INT(4, doc["summary"]["bytes"].as<int>());
+    TEST_ASSERT_FALSE(doc["summary"]["truncated"].as<bool>());
+}
+
+/// A failure has to carry its reason. "failed" alone leaves the operator unable to tell a busy
+/// bus from line settings the UART refused.
+static void test_a_failed_capture_carries_its_reason() {
+    CaptureReport report;
+    report.status = CaptureStatus::Failed;
+    report.error  = "the RS485 bus was busy";
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildCapturePayload(report, 0, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_EQUAL_STRING("failed", doc["status"]);
+    TEST_ASSERT_EQUAL_STRING("the RS485 bus was busy", doc["error"]);
+}
+
+/// A capture filled to its byte ceiling must still serialise, because that is the case a
+/// contributor reaches on a busy bus -- and a 500 at the moment the artefact matters is exactly
+/// the failure this bound exists to prevent.
+///
+/// The ceiling is maxTotalBytes, deliberately, and not maxFrames x maxFrameBytes: the product
+/// of two independently chosen limits is not a bound on anything. 256 x 256 renders to about
+/// 220 KB of hex, which no board here can hold. Asserting on the reachable worst case rather
+/// than an unreachable one is the whole point.
+static void test_a_capture_filled_to_its_byte_ceiling_fits_in_the_response() {
+    const diag::CaptureConfig limits;  // the defaults the REST layer cannot exceed
+    CaptureReport             report;
+    report.status = CaptureStatus::Done;
+    size_t written = 0;
+    while (written < limits.maxTotalBytes) {
+        const size_t n = std::min(limits.maxFrameBytes, limits.maxTotalBytes - written);
+        diag::CapturedFrame frame;
+        frame.offsetMs    = 4294967295u;  // widest rendering of every numeric field
+        frame.gapBeforeMs = 4294967295u;
+        frame.bytes.assign(n, 0xA5);
+        report.frames.push_back(frame);
+        written += n;
+    }
+    report.totalBytes = static_cast<uint32_t>(written);
+
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildCapturePayload(report, 0, body));
+    TEST_ASSERT_TRUE(body.size() <= rest::kMaxCaptureResponseBytes);
+}
+
 // --- restore preview ----------------------------------------------------------------------
 
 /// The preview is the last thing between a wrong file and an applied configuration, so it has
@@ -2167,6 +2264,10 @@ int main(int, char**) {
     RUN_TEST(test_prometheus_build_info_carries_the_version);
     RUN_TEST(test_the_mock_hybrid_also_exports);
     RUN_TEST(test_status_payload_reports_clock_sync_state);
+    RUN_TEST(test_capture_payload_renders_hex_the_way_the_docs_do);
+    RUN_TEST(test_capture_payload_echoes_the_line_it_listened_at);
+    RUN_TEST(test_a_failed_capture_carries_its_reason);
+    RUN_TEST(test_a_capture_filled_to_its_byte_ceiling_fits_in_the_response);
     RUN_TEST(test_restore_preview_carries_the_file_and_the_changes);
     RUN_TEST(test_restore_preview_omits_an_absent_export_date);
     RUN_TEST(test_restore_preview_of_a_real_backup_leaks_no_password);
