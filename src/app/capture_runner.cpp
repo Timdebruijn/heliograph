@@ -76,8 +76,16 @@ bool CaptureRunner::runIfRequested(Transport& transport, const std::function<voi
             std::lock_guard<std::mutex> guard(mutex_);
             report_.status     = CaptureStatus::Failed;
             report_.error      = "those line settings could not be applied";
-            report_.finishedMs = clock_ ? clock_() : 0;
+            // A failed configure may still have half-applied something to the UART, so the
+            // driver's settings do have to go back on. The lock-failure path above is the one
+            // case where nothing was touched.
+            report_.lineReconfigured = true;
+            report_.finishedMs       = clock_ ? clock_() : 0;
             return true;
+        }
+        {
+            std::lock_guard<std::mutex> guard(mutex_);
+            report_.lineReconfigured = true;
         }
         // Anything already buffered predates the capture and belongs to whatever the driver was
         // doing; timestamping it as the first frame would put a lie at offset 0.
@@ -109,6 +117,7 @@ bool CaptureRunner::runIfRequested(Transport& transport, const std::function<voi
         report_.pmuFrames    = capture.pmuFrames();
         report_.truncated    = capture.truncated();
         report_.idleGapMs    = capture.idleGapMs();
+        report_.lineReconfigured = true;
         report_.status       = CaptureStatus::Done;
         report_.finishedMs   = clock_ ? clock_() : 0;
     }

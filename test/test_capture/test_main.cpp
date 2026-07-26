@@ -357,6 +357,36 @@ static void test_a_busy_bus_fails_the_capture_with_a_reason() {
     TEST_ASSERT_EQUAL(CaptureStatus::Failed, report.status);
     TEST_ASSERT_FALSE(report.error.empty());
     TEST_ASSERT_FALSE(runner.busy());  // and a retry is possible
+    TEST_ASSERT_EQUAL_INT(0, transport.configureCalls);
+    // The caller keys its recovery off this. Restoring a line that was never touched means
+    // calling begin() on every driver, which on the AA55 family is a registration handshake --
+    // real traffic, on a bus that has just reported itself busy.
+    TEST_ASSERT_FALSE(report.lineReconfigured);
+}
+
+/// The other failure. Here the UART may well have been half-reconfigured before it refused, so
+/// the driver's settings DO have to go back on -- the opposite answer to the case above, which
+/// is why one boolean carries it rather than the status.
+static void test_failing_line_settings_still_ask_for_the_line_back() {
+    CaptureRunner runner([] { return g_clock; });
+    MockTransport transport;
+    transport.configureSucceeds = false;
+
+    runner.request(shortWindow(), profileAt(9600));
+    runner.runIfRequested(transport);
+    TEST_ASSERT_EQUAL(CaptureStatus::Failed, runner.report().status);
+    TEST_ASSERT_TRUE(runner.report().lineReconfigured);
+}
+
+static void test_a_completed_capture_asks_for_the_line_back() {
+    CaptureRunner runner([] { return g_clock; });
+    MockTransport transport;
+    transport.msPerRead = 1;
+
+    runner.request(shortWindow(), profileAt(19200));
+    runner.runIfRequested(transport);
+    TEST_ASSERT_EQUAL(CaptureStatus::Done, runner.report().status);
+    TEST_ASSERT_TRUE(runner.report().lineReconfigured);
 }
 
 static void test_line_settings_that_will_not_apply_fail_rather_than_record_nothing() {
@@ -425,6 +455,8 @@ int main() {
     RUN_TEST(test_the_capture_owns_the_bus_and_sets_the_line);
     RUN_TEST(test_a_second_request_is_refused_while_one_is_pending);
     RUN_TEST(test_a_busy_bus_fails_the_capture_with_a_reason);
+    RUN_TEST(test_failing_line_settings_still_ask_for_the_line_back);
+    RUN_TEST(test_a_completed_capture_asks_for_the_line_back);
     RUN_TEST(test_line_settings_that_will_not_apply_fail_rather_than_record_nothing);
     RUN_TEST(test_the_tick_callback_fires_throughout_the_window);
     RUN_TEST(test_a_new_capture_discards_the_previous_result);

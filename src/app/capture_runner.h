@@ -49,6 +49,15 @@ struct CaptureReport {
     uint32_t modbusFrames  = 0;
     uint32_t pmuFrames     = 0;
     bool     truncated     = false;
+    /// True once the line has been reconfigured to `profile`, so the caller knows it has to put
+    /// the driver's own settings back.
+    ///
+    /// Not the same as "the capture ran". A run that could not take the bus never touched the
+    /// line, and restoring it anyway means calling begin() on every driver -- which for the
+    /// AA55 family is a registration handshake, i.e. real traffic on a bus that just reported
+    /// itself busy. Doing that as a reflex after a failure is how a capture that recorded
+    /// nothing still disturbs a working install.
+    bool     lineReconfigured = false;
     /// The idle gap actually used, in ms. Reported because it is derived from the baud rate and
     /// floored, so it is not something the operator can work out from what they asked for.
     uint32_t idleGapMs     = 0;

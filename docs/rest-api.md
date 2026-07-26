@@ -351,9 +351,10 @@ is the guide, this is the wire contract.
 | `data_bits` | 8 | 5–8 |
 | `stop_bits` | 1 | 1–2 |
 
-202 on acceptance; **409** when a capture or a discovery run is already using the bus. Both
-take it exclusively, and rs485Task runs discovery first, so a capture accepted alongside one
-would record the tail of the probe run.
+202 on acceptance; **409** when a capture or a discovery run is already using the bus. The guard
+is symmetric — `/actions/discover` refuses while a capture is pending or running too. It has to
+be: rs485Task checks discovery first, so a discovery accepted alongside a pending capture would
+jump the queue and the capture would then record the tail of the probe run.
 
 The capture runs on the task that owns the bus, **instead of** that cycle's poll — the same
 handover discovery uses. That is the concurrency answer: there is no iteration in which the bus

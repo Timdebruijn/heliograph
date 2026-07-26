@@ -714,7 +714,11 @@ bool RestApi::begin() {
         const bool extended = request->hasParam("extended") &&
                               request->getParam("extended")->value() == "true";
         if (!context_.requestDiscovery(extended)) {
-            sendError(request, {409, "already_running", "discovery is already in progress"});
+            // Not only discovery: a capture holds the same bus, and main refuses this while one
+            // is pending or running. Saying "discovery is already in progress" while the real
+            // reason was a capture sent the operator looking at the wrong tab.
+            sendError(request, {409, "bus_busy",
+                                "a discovery run or a capture is already using the bus"});
             return;
         }
         request->send(202, kJson, "{\"status\":\"accepted\"}");

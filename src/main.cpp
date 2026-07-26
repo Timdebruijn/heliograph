@@ -693,11 +693,19 @@ void startRestApi() {
         // Hand it to loop() instead, with enough time for the socket to flush.
         g_rebootAtMs = nowMs() + 1500;
     };
-    ctx.requestDiscovery    = [](bool extended) { return g_discovery.request(extended); };
+    // Symmetric with requestCapture below, and it has to be: rs485Task checks discovery FIRST,
+    // so a discovery accepted while a capture was merely pending would jump the queue and the
+    // capture would then record the tail of the probe run -- exactly what the guard on the
+    // other side exists to prevent. Guarding one direction only left that hole open.
+    ctx.requestDiscovery = [](bool extended) {
+        if (g_capture.busy()) {
+            return false;
+        }
+        return g_discovery.request(extended);
+    };
     ctx.discoveryReport     = [] { return g_discovery.report(); };
     // Refused while discovery is pending or running as well as while another capture is: both
-    // want exclusive use of the same bus, and rs485Task runs discovery first, so a capture
-    // accepted alongside one would sit queued and then record the tail of the probe run.
+    // want exclusive use of the same bus.
     ctx.requestCapture = [](const diag::CaptureConfig& config, const SerialProfile& profile) {
         if (g_discovery.busy()) {
             return false;
@@ -845,10 +853,15 @@ void rs485Task(void* /*arg*/) {
                       static_cast<unsigned>(report.frames.size()),
                       static_cast<unsigned>(report.totalBytes),
                       static_cast<unsigned>(report.modbusFrames));
-            // The capture listened at line settings the operator chose, which for an
-            // unidentified device is precisely NOT the driver's. Leaving them in place would
-            // silence a working inverter until the next reboot.
-            restoreDriverLine();
+            // Only when the line was actually changed. The capture listens at settings the
+            // operator chose, which for an unidentified device is precisely NOT the driver's,
+            // so leaving them in place would silence a working inverter until the next reboot.
+            // But a run that could not take the bus never got that far, and re-running begin()
+            // on every driver is a registration handshake on the AA55 family -- real traffic,
+            // on a bus that just said it was busy.
+            if (report.lineReconfigured) {
+                restoreDriverLine();
+            }
             vTaskDelay(pdMS_TO_TICKS(250));
             continue;
         }
