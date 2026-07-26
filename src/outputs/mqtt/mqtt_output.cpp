@@ -7,6 +7,7 @@
 
 #include "home_assistant_discovery.h"
 #include "mqtt_payloads.h"
+#include "outputs/json_util.h"
 #include "relays/drm.h"
 
 #include <cstring>
@@ -202,7 +203,7 @@ void MqttOutput::onConnected(Channel& channel, const DeviceState& state,
     if (buildIdentityPayload(state.identity, payload)) {
         g_client.publish(channel.topics.identity().c_str(), 1, true, payload.c_str());
     }
-    if (buildCapabilitiesPayload(state.capabilities, payload)) {
+    if (json_util::buildCapabilitiesPayload(state.capabilities, payload, kMaxPayloadBytes)) {
         g_client.publish(channel.topics.capabilities().c_str(), 1, true, payload.c_str());
     }
     publishDiscovery(channel, state, bridge);

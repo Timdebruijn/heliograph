@@ -63,6 +63,14 @@ enum class InverterCommandType : uint8_t {
 
 inline constexpr size_t kCommandTypeCount = static_cast<size_t>(InverterCommandType::_Count);
 
+/// Stable snake_case name for a capability, used in the MQTT and REST capabilities payloads.
+///
+/// Lives here, next to the enum, rather than in one of the output adapters. It spent a while in
+/// heliograph::mqtt, which meant the REST payload builder included outputs/mqtt/mqtt_payloads.h
+/// for nothing else -- an output adapter reaching into a sibling adapter to name a value out of
+/// the device model. Its two siblings, commandTypeName and unitSymbol, were always here.
+const char* capabilityName(InverterCapability capability);
+
 /// Bounds for a writable numeric property. Validated centrally by the dispatcher so that
 /// every driver gets range checking without implementing it.
 struct NumericCapability {

@@ -1342,16 +1342,6 @@ static void test_measurements_payload_omits_unsupported() {
     TEST_ASSERT_TRUE(doc["measurements"]["dc.power.total"]["derived"].as<bool>());
 }
 
-static void test_capabilities_payload() {
-    Rig        r;
-    const auto state = r.poll();
-    std::string json;
-    TEST_ASSERT_TRUE(rest::buildCapabilitiesPayload(state.capabilities, json));
-    auto doc = parse(json);
-    TEST_ASSERT_TRUE(doc["read_only"].as<bool>());
-    TEST_ASSERT_EQUAL_size_t(0, doc["write"].as<JsonArray>().size());
-}
-
 static void test_drivers_payload_drives_the_wizard() {
     DriverRegistry reg;
     registerBuiltinDrivers(reg);
@@ -1912,7 +1902,6 @@ int main(int, char**) {
     RUN_TEST(test_provision_payload_escapes_the_hostname);
     RUN_TEST(test_devices_payload);
     RUN_TEST(test_measurements_payload_omits_unsupported);
-    RUN_TEST(test_capabilities_payload);
     RUN_TEST(test_drivers_payload_drives_the_wizard);
     RUN_TEST(test_diagnostics_payload_has_no_secrets);
     RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);

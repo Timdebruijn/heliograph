@@ -6,29 +6,14 @@
 
 #include "outputs/json_util.h"
 #include "relays/drm.h"
-#include "outputs/mqtt/mqtt_payloads.h"  // capabilityName, shared vocabulary
 
 namespace heliograph::rest {
 namespace {
 
 using json_util::addOptional;
 using json_util::finish;
-
-/// One measurement, with the same null-not-zero rule the MQTT payload uses.
-void writeMeasurement(JsonObject entry, const Measurement& m) {
-    const bool usable = m.valid && !m.stale;
-    if (usable) {
-        entry["value"] = m.value;
-    } else {
-        entry["value"] = nullptr;
-    }
-    entry["unit"]  = unitSymbol(m.unit);
-    entry["valid"] = m.valid;
-    entry["stale"] = m.stale;
-    if (m.derived) {
-        entry["derived"] = true;
-    }
-}
+using json_util::writeDeviceStatus;
+using json_util::writeMeasurement;
 
 }  // namespace
 
@@ -176,25 +161,7 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
         writeMeasurement(measurements[m.id].to<JsonObject>(), m);
     }
 
-    const bool statusUsable = state.dataValid && !state.dataStale;
-    if (state.statusCodeSupported && statusUsable) {
-        doc["status_code"] = state.statusCode;
-        // Empty means the driver has no text for this protocol -- same rule as identity
-        // fields: absent-as-null, never an empty string the UI would render as a blank tile.
-        if (state.statusText.empty()) {
-            doc["status_text"] = nullptr;
-        } else {
-            doc["status_text"] = state.statusText;
-        }
-    } else {
-        doc["status_code"] = nullptr;
-        doc["status_text"] = nullptr;
-    }
-    if (state.errorCodeSupported && statusUsable) {
-        doc["error_code"] = state.errorCode;
-    } else {
-        doc["error_code"] = nullptr;
-    }
+    writeDeviceStatus(doc.as<JsonObject>(), state);
 
     // Every polled device, and the totals over them. The `device` block above is the first
     // device and stays that way for compatibility, but nothing that presents itself as the
@@ -331,44 +298,6 @@ bool buildMeasurementsPayload(const DeviceState& state, std::string& out, size_t
         entry["display_name"] = m.displayName;
         writeMeasurement(entry, m);
         entry["timestamp_ms"] = m.timestampMs;
-    }
-    return finish(doc, out, maxBytes);
-}
-
-bool buildCapabilitiesPayload(const InverterCapabilities& capabilities, std::string& out,
-                              size_t maxBytes) {
-    JsonDocument doc;
-    doc["read_only"]   = capabilities.isReadOnly();
-    doc["phase_count"] = capabilities.phaseCount;
-    doc["mppt_count"]  = capabilities.mpptCount;
-    doc["has_battery"] = capabilities.hasBattery;
-
-    JsonArray read = doc["read"].to<JsonArray>();
-    for (size_t i = 0; i < kCapabilityCount; ++i) {
-        if (capabilities.read.test(i)) {
-            read.add(mqtt::capabilityName(static_cast<InverterCapability>(i)));
-        }
-    }
-    JsonArray write = doc["write"].to<JsonArray>();
-    for (size_t i = 0; i < kCapabilityCount; ++i) {
-        if (capabilities.write.test(i)) {
-            write.add(mqtt::capabilityName(static_cast<InverterCapability>(i)));
-        }
-    }
-    // Numeric bounds, matching the MQTT capabilities payload -- so a REST/web client can render
-    // a writable driver's min/max/step for bring-up, not just discover the command exists.
-    JsonObject numeric = doc["numeric"].to<JsonObject>();
-    for (size_t i = 0; i < kCommandTypeCount; ++i) {
-        const NumericCapability& cap = capabilities.numeric[i];
-        if (!cap.supported) {
-            continue;
-        }
-        JsonObject entry  = numeric[commandTypeName(static_cast<InverterCommandType>(i))].to<JsonObject>();
-        entry["writable"] = cap.writable;
-        entry["minimum"]  = cap.minimum;
-        entry["maximum"]  = cap.maximum;
-        entry["step"]     = cap.step;
-        entry["unit"]     = unitSymbol(cap.unit);
     }
     return finish(doc, out, maxBytes);
 }

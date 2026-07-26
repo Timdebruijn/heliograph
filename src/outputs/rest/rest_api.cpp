@@ -14,6 +14,7 @@
 
 #include "diagnostics/log_buffer.h"
 #include "diagnostics/logger.h"
+#include "outputs/json_util.h"
 #include "outputs/prometheus/prometheus_metrics.h"
 #include "outputs/rest/rest_payloads.h"
 #include "config/configuration_store.h"
@@ -398,7 +399,8 @@ bool RestApi::begin() {
         } else if (sub == "measurements") {
             ok = buildMeasurementsPayload(*snapshot, body);
         } else if (sub == "capabilities") {
-            ok = buildCapabilitiesPayload(snapshot->capabilities, body);
+            ok = json_util::buildCapabilitiesPayload(snapshot->capabilities, body,
+                                                     kMaxResponseBytes);
         } else {
             sendError(request, {404, "not_found", "no such endpoint"});
             return;
