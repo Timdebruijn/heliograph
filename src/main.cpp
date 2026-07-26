@@ -81,10 +81,14 @@ namespace {
 // rate limiter, the digest-to-hex renderer, the relay safety gates), names the NVS cap that had
 // been a bare 3900, and adds two guards so the classes of rot it cleaned up cannot come back:
 // a layering rule against comments citing line numbers in our own files, and a test asserting
-// the two config documents differ only in their credentials.
+// the two config documents differ only in their credentials; 0.15.2 makes the admin password
+// box on the Logs tab fillable again -- the 5 s refresh re-opened the prompt while it was being
+// typed into and blanked the field, so the only way in was to sign in on Settings first (found
+// on hardware) -- and stops a late 401 from discarding credentials another request had just had
+// accepted.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 15
-#define HELIOGRAPH_VERSION_PATCH 1
+#define HELIOGRAPH_VERSION_PATCH 2
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
