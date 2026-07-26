@@ -26,6 +26,26 @@ espMqttClient g_client;
 
 }  // namespace
 
+/// publish() that notices a refusal.
+///
+/// espMqttClient returns a packet id, or 0 when it could not accept the message -- link down,
+/// or the outbox out of memory. Eleven of the twelve call sites in this file discarded that,
+/// so a message that never left looked exactly like one that did, on every output. A backed-up
+/// or wedged client reports connected the whole time, which is precisely the failure this
+/// counter makes visible (audit, 2026-07-26).
+///
+/// Returns the same bool the one careful call site already wanted, so forgetDevice keeps its
+/// existing semantics.
+bool MqttOutput::publishTracked(const char* topic, uint8_t qos, bool retain, const char* payload) {
+    if (g_client.publish(topic, qos, retain, payload) != 0) {
+        return true;
+    }
+    if (diagnostics_ != nullptr) {
+        diagnostics_->recordMqttPublishFailure();
+    }
+    return false;
+}
+
 MqttOutput::MqttOutput(MqttConfig config, PublishPolicy publishPolicy)
     : config_(std::move(config)),
       topics_(config_.baseTopic, "pending"),
@@ -176,7 +196,7 @@ void MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
     for (const auto& e : buildDiscoveryEntities(state, bridge, channel.topics,
                                                 topics_.availability(), config_.discoveryPrefix,
                                                 channel.uniqueBase)) {
-        g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
+        publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str());
     }
     // Bridge entities belong to the bridge and are announced once -- publishing them per
     // device would create N copies of the same RSSI sensor. Tied to the bridge-scoped channel
@@ -184,12 +204,12 @@ void MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
     if (channel.uniqueBase == bridge.bridgeId) {
         for (const auto& e :
              buildBridgeDiagnosticEntities(bridge, topics_, config_.discoveryPrefix)) {
-            g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
+            publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str());
         }
         // Relay switches -- or, when the feature is disabled on a relay board, empty retained
         // payloads that remove previously announced switches from Home Assistant.
         for (const auto& e : buildRelayEntities(bridge, topics_, config_.discoveryPrefix)) {
-            g_client.publish(e.configTopic.c_str(), 1, true, e.payload.c_str());
+            publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str());
         }
     }
     channel.discoveryPublished = true;
@@ -197,14 +217,14 @@ void MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
 
 void MqttOutput::onConnected(Channel& channel, const DeviceState& state,
                              const BridgeInfo& bridge) {
-    g_client.publish(topics_.availability().c_str(), 1, true, kPayloadOnline);
+    publishTracked(topics_.availability().c_str(), 1, true, kPayloadOnline);
 
     std::string payload;
     if (buildIdentityPayload(state.identity, payload)) {
-        g_client.publish(channel.topics.identity().c_str(), 1, true, payload.c_str());
+        publishTracked(channel.topics.identity().c_str(), 1, true, payload.c_str());
     }
     if (json_util::buildCapabilitiesPayload(state.capabilities, payload, kMaxPayloadBytes)) {
-        g_client.publish(channel.topics.capabilities().c_str(), 1, true, payload.c_str());
+        publishTracked(channel.topics.capabilities().c_str(), 1, true, payload.c_str());
     }
     publishDiscovery(channel, state, bridge);
 
@@ -288,7 +308,7 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         if (channel.throttle.shouldPublish(state, nowMs)) {
             std::string payload;
             if (buildStatePayload(state, payload)) {
-                g_client.publish(channel.topics.state().c_str(), config_.qos, true,
+                publishTracked(channel.topics.state().c_str(), config_.qos, true,
                                  payload.c_str());
                 channel.throttle.recordPublished(state, nowMs);
             }
@@ -317,7 +337,7 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
             bridge.relayMask != lastRelayMask_) {
             for (uint8_t i = 0; i < bridge.relayCount; ++i) {
                 const bool on = (bridge.relayMask >> i) & 1;
-                g_client.publish(topics_.relayState(i).c_str(), 1, true,
+                publishTracked(topics_.relayState(i).c_str(), 1, true,
                                  on ? "ON" : "OFF");
             }
             // The DRM mode is derived state over the same mask; ack it in the same breath
@@ -326,7 +346,7 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
             roles.resize(bridge.relayCount, "none");
             if (!drm::optionsFor(roles).empty()) {
                 const std::string mode = drm::modeFrom(roles, bridge.relayMask);
-                g_client.publish(topics_.drmState().c_str(), 1, true, mode.c_str());
+                publishTracked(topics_.drmState().c_str(), 1, true, mode.c_str());
             }
             lastRelayMask_    = bridge.relayMask;
             relayStateForced_ = false;
@@ -336,7 +356,7 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
     if (nowMs - lastDiagnosticsMs_ >= config_.diagnosticsIntervalMs) {
         std::string payload;
         if (buildDiagnosticsPayload(diagnostics, bridge, payload)) {
-            g_client.publish(topics_.diagnostics().c_str(), 0, true, payload.c_str());
+            publishTracked(topics_.diagnostics().c_str(), 0, true, payload.c_str());
         }
         lastDiagnosticsMs_ = nowMs;
     }
@@ -355,7 +375,7 @@ bool MqttOutput::forgetDevice(const DeviceId& id, const BridgeInfo& bridge) {
     // clear that never left must not be recorded as done (review, 2026-07-26).
     bool ok = true;
     const auto clear = [&](const std::string& topic) {
-        ok = (g_client.publish(topic.c_str(), 1, true, "") != 0) && ok;
+        ok = publishTracked(topic.c_str(), 1, true, "") && ok;
     };
 
     // The device's own retained payloads. Empty, retained: a subscriber that connects later
@@ -383,7 +403,7 @@ bool MqttOutput::forgetDevice(const DeviceId& id, const BridgeInfo& bridge) {
 void MqttOutput::stop() {
     if (started_) {
         // Say goodbye properly so subscribers do not have to wait for the will.
-        g_client.publish(topics_.availability().c_str(), 1, true, kPayloadOffline);
+        publishTracked(topics_.availability().c_str(), 1, true, kPayloadOffline);
         g_client.disconnect();
         started_ = false;
     }

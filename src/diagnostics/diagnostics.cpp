@@ -21,6 +21,7 @@ DiagnosticsSnapshot Diagnostics::snapshot() const {
     s.mqttReconnectTotal      = mqttReconnectTotal_.load(std::memory_order_relaxed);
     s.modbusClientConnections = modbusClientConnections_.load(std::memory_order_relaxed);
     s.restRequestTotal        = restRequestTotal_.load(std::memory_order_relaxed);
+    s.mqttPublishFailureTotal = mqttPublishFailureTotal_.load(std::memory_order_relaxed);
     s.lastSuccessfulPollMs    = lastSuccessfulPollMs_.load(std::memory_order_relaxed);
     s.rs485StackFreeBytes     = rs485StackFreeBytes_.load(std::memory_order_relaxed);
     s.loopStackFreeBytes      = loopStackFreeBytes_.load(std::memory_order_relaxed);
@@ -42,6 +43,7 @@ void Diagnostics::reset() {
     mqttReconnectTotal_.store(0);
     modbusClientConnections_.store(0);
     restRequestTotal_.store(0);
+    mqttPublishFailureTotal_.store(0);
     lastSuccessfulPollMs_.store(0);
     rs485StackFreeBytes_.store(0);
     loopStackFreeBytes_.store(0);

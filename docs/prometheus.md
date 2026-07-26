@@ -234,6 +234,7 @@ wiring and the addressing are fine:
 | `heliograph_psram_size_bytes` | gauge | Total external PSRAM — **absent on a board without it** |
 | `heliograph_psram_free_bytes` | gauge | Free external PSRAM — **absent on a board without it** |
 | `heliograph_coredump_present` | gauge | `1` when a crash dump is waiting in flash — **always emitted**, `0` is a fact |
+| `heliograph_mqtt_publish_failures_total` | counter | Publishes the MQTT client refused (link down, or outbox full) |
 | `heliograph_wifi_rssi_dbm` | gauge | Only present while WiFi is connected |
 | `heliograph_rs485_stack_free_bytes` | gauge | Only after the first sample |
 | `heliograph_loop_stack_free_bytes` | gauge | Only after the first sample |

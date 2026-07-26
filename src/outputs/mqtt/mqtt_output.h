@@ -138,6 +138,10 @@ private:
         uint64_t        discoveredSignature = 0;
     };
 
+    /// publish() whose refusals are counted. Every publish in this class goes through it --
+    /// see the definition for why discarding the return value was hiding a real failure mode.
+    bool publishTracked(const char* topic, uint8_t qos, bool retain, const char* payload);
+
     Channel& channelFor(const DeviceView& view, const BridgeInfo& bridge);
 
     void onConnected(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);

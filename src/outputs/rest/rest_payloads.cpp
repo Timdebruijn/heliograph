@@ -356,6 +356,7 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
     doc["mqtt_reconnect_total"]            = d.mqttReconnectTotal;
     doc["modbus_client_connections_total"] = d.modbusClientConnections;
     doc["rest_requests_total"]             = d.restRequestTotal;
+    doc["mqtt_publish_failure_total"] = d.mqttPublishFailureTotal;
     doc["last_successful_poll_ms"]         = d.lastSuccessfulPollMs;
     // Null until the first sample, not 0: a monitoring rule on "stack headroom == 0" must
     // not fire during the first seconds after boot.

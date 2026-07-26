@@ -1421,6 +1421,22 @@ static void test_psram_is_null_on_a_board_without_it() {
 // The dump has been written to flash on every panic since the OTA partition layout was
 // designed; nothing read it until 2026-07-26. These pin the reporting, not the reading -- the
 // esp_core_dump_* calls are ESP32-only and the summary reaches the builder as a plain struct.
+// Until this counter existed, publish() returning 0 -- link down, or the client's outbox out
+// of memory -- was discarded at eleven of its twelve call sites, so a message that never left
+// looked exactly like one that did. A wedged client reports connected the whole time, which is
+// why mqtt_connected alone was not enough.
+static void test_mqtt_publish_failures_are_counted_and_published() {
+    Rig r;
+    r.diagnostics.recordMqttPublishFailure();
+    r.diagnostics.recordMqttPublishFailure();
+    r.diagnostics.recordMqttPublishFailure();
+
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), makeBridge(), json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(3, doc["mqtt_publish_failure_total"].as<uint32_t>());
+}
+
 static void test_coredump_is_reported_when_one_is_stored() {
     Rig  r;
     auto bridge            = makeBridge();
@@ -1516,6 +1532,19 @@ static void test_prometheus_stack_and_fragmentation_gauges() {
 // would read as exhaustion to an alerting rule.
 // 0 is a fact here ("no crash stored"), not a missing sample, so unlike the PSRAM gauges this
 // one is always emitted -- it is the series an alert rule watches for going to 1.
+// A counter, so 0 is emitted from the start: a rate() rule needs the series to exist before
+// the first failure, not to appear at the moment things go wrong.
+static void test_prometheus_exports_the_publish_failure_counter() {
+    Rig        r;
+    const auto state = r.poll();
+    auto       text  = metricsOf(state, makeBridge(), r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_mqtt_publish_failures_total 0\n") != std::string::npos);
+
+    r.diagnostics.recordMqttPublishFailure();
+    text = metricsOf(state, makeBridge(), r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_mqtt_publish_failures_total 1\n") != std::string::npos);
+}
+
 static void test_prometheus_always_reports_the_coredump_flag() {
     Rig        r;
     const auto state = r.poll();
@@ -2019,6 +2048,8 @@ int main(int, char**) {
     RUN_TEST(test_psram_is_reported_when_the_board_has_it);
     RUN_TEST(test_psram_is_null_on_a_board_without_it);
     RUN_TEST(test_prometheus_reports_psram_only_when_present);
+    RUN_TEST(test_mqtt_publish_failures_are_counted_and_published);
+    RUN_TEST(test_prometheus_exports_the_publish_failure_counter);
     RUN_TEST(test_coredump_is_reported_when_one_is_stored);
     RUN_TEST(test_coredump_details_are_null_when_none_is_stored);
     RUN_TEST(test_a_nameless_coredump_still_reports_present);

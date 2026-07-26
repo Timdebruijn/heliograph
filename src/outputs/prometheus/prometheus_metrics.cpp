@@ -166,6 +166,10 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
     appendHelp(out, "heliograph_mqtt_reconnects_total", "MQTT reconnections", "counter");
     appendValue(out, "heliograph_mqtt_reconnects_total",
                 static_cast<unsigned long>(d.mqttReconnectTotal));
+    appendHelp(out, "heliograph_mqtt_publish_failures_total",
+               "Publishes the MQTT client refused (link down, or outbox full)", "counter");
+    appendValue(out, "heliograph_mqtt_publish_failures_total",
+                static_cast<unsigned long>(d.mqttPublishFailureTotal));
     appendHelp(out, "heliograph_wifi_reconnects_total", "WiFi reconnections", "counter");
     appendValue(out, "heliograph_wifi_reconnects_total",
                 static_cast<unsigned long>(d.wifiReconnectTotal));
