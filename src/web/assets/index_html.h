@@ -1351,6 +1351,40 @@ async function renderConfig(){
     <button onclick="saveConfig()">Save settings</button>
     <div id="cm" class="msg" style="display:none"></div>
   </div>
+  <section class="cfgsec"><h3>Backup &amp; restore</h3>
+  <div class="card"><b>Download a backup</b>
+    <div class="dim" style="font-size:12px;margin-top:10px">One file with every setting on this
+    page. Keep it somewhere other than this bridge — it is what turns a dead board into a
+    twenty-minute job instead of an evening of remembering what you configured.</div>
+    ${chk('bk_sec','Include passwords (WiFi, MQTT, admin)',false)}
+    <div class="dim" style="font-size:12px;margin-top:4px"><b>Off by default, and think before
+    turning it on.</b> With it on the file holds those passwords <b>in plain text</b>, and it
+    will sit in your downloads folder, sync to whatever cloud drive is watching it, and be the
+    obvious thing to attach to a bug report. With it off there is no password in the file, and
+    restoring it onto <i>this</i> bridge still works — an absent password means “keep the one
+    the bridge already has”. Only a factory-reset board needs them typed again.</div>
+    <div class="dim" style="font-size:12px;margin-top:4px">Even without passwords the file is
+    not nothing: it holds your WiFi network name, the broker address and both usernames —
+    including the admin one, which this bridge deliberately never serves over the API. Treat it
+    as private either way.</div>
+    <button type="button" onclick="downloadBackup()">Download backup</button>
+    <div id="bkm" class="msg" style="display:none"></div></div>
+  <div class="card"><b>Restore from a backup</b>
+    <div class="dim" style="font-size:12px;margin-top:10px">Nothing is applied until you have
+    seen exactly what would change and pressed the second button.</div>
+    <label for="rs_file">Backup file (.json)</label>
+    <input id="rs_file" type="file" accept=".json,application/json">
+    <button type="button" onclick="previewRestore()">Show what would change</button>
+    <div id="rsm" class="msg" style="display:none"></div>
+    <div id="rspv"></div></div>
+  <div class="card"><b>Undo the last restore</b>
+    <div class="dim" style="font-size:12px;margin-top:10px">The bridge keeps the configuration
+    it had immediately before the most recent restore, so a wrong file does not cost you a
+    factory reset. Only that one: an ordinary Save does not create a restore point.</div>
+    <button type="button" style="background:none;border:1px solid var(--line);color:var(--fg)"
+      onclick="undoRestore()">Go back to the previous configuration</button>
+    <div id="rbm" class="msg" style="display:none"></div></div>
+  </section>
   <section class="cfgsec"><h3>Firmware &amp; recovery</h3>
   <div class="card"><b>Firmware update (OTA)</b>
     <label for="c_fw">Firmware image (.bin)</label>
@@ -1571,6 +1605,115 @@ async function saveConfig(){
 
 // XMLHttpRequest, not fetch: fetch cannot report UPLOAD progress, and a minute of silent
 // "uploading…" reads as a hang. Auth mirrors authFetch (prompt once, retry once on 401).
+// ---------------- Backup and restore ----------------
+// The file never touches the server on the download path and never persists on the upload
+// path: a Blob built in the page, and a body posted straight from a FileReader. Nothing is
+// staged on the bridge between preview and apply, which is why the apply re-sends the file
+// rather than confirming a token -- there is no server-side session to expire, to be raced by
+// a second tab, or to apply something other than what was on screen.
+
+function backupNote(el,cls,text){const m=$(el);m.style.display='block';m.className='msg '+cls;m.textContent=text}
+
+async function downloadBackup(){
+  const withSecrets=$('#bk_sec').checked;
+  backupNote('#bkm','','Preparing…');
+  const r=await authFetch('/api/v1/config/backup'+(withSecrets?'?secrets=true':''));
+  // No null check: authFetch always answers with a response-shaped object, and the cancellation
+  // one is ok:false with cancelled:true, which httpWhy phrases properly. A `!r` guard here
+  // would silently return with nothing on screen -- the exact failure authCancelled exists to
+  // prevent.
+  if(!r.ok){backupNote('#bkm','err','Could not export: '+httpWhy(r));return}
+  const text=await r.text();
+  // Filename from the server's Content-Disposition when it survives the fetch, so the file is
+  // named after the bridge that wrote it rather than after the page that asked.
+  let name='heliograph-backup.json';
+  const cd=r.headers.get('Content-Disposition')||'';
+  const m=cd.match(/filename="([^"]+)"/);
+  if(m)name=m[1];
+  const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));
+  const a=document.createElement('a');a.href=url;a.download=name;
+  // In the DOM before the click: Firefox ignores a synthetic click on a detached anchor, so a
+  // download that works in Chrome does nothing at all there, silently.
+  document.body.appendChild(a);a.click();a.remove();
+  // Revoked on the next tick, not immediately: Safari has not started the download yet when
+  // click() returns, and freeing the object URL here cancels it.
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  backupNote('#bkm','ok','Downloaded '+name+(withSecrets?' — it contains passwords in plain text.'
+    :' — no passwords in it.'));
+}
+
+// Held between preview and apply so the confirm sends the bytes that were previewed, not a
+// re-read of a file input the user may have changed in between.
+let rsPending=null;
+
+async function readChosenBackup(){
+  const f=$('#rs_file').files[0];
+  if(!f){backupNote('#rsm','err','Choose a backup file first.');return null}
+  try{return await f.text()}
+  catch(e){backupNote('#rsm','err','Could not read that file: '+e.message);return null}
+}
+
+async function previewRestore(){
+  $('#rspv').innerHTML='';
+  const text=await readChosenBackup();
+  if(text===null)return;
+  backupNote('#rsm','','Checking the file…');
+  const r=await authFetch('/api/v1/config/restore?dry_run=true',
+    {method:'POST',headers:{'Content-Type':'application/json'},body:text});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){
+    backupNote('#rsm','err',(d.error&&d.error.message)||httpWhy(r));
+    return;
+  }
+  rsPending=text;
+  $('#rsm').style.display='none';
+  const b=d.backup||{};
+  const src=[b.firmware_version?'written by firmware '+esc(b.firmware_version):'',
+             b.exported_at?'on '+esc(b.exported_at.replace('T',' ').replace('Z',' UTC')):'',
+             b.includes_secrets?'<b>contains passwords</b>':'contains no passwords']
+            .filter(Boolean).join(' · ');
+  if(!d.change_count){
+    $('#rspv').innerHTML=`<div class="msg ok" style="display:block">This backup matches the
+      bridge's current configuration exactly — nothing would change.<div class="dim"
+      style="font-size:12px;margin-top:6px">${src}</div></div>`;
+    return;
+  }
+  $('#rspv').innerHTML=`
+    <div class="dim" style="font-size:12px;margin-top:12px">${src}</div>
+    <table style="margin-top:10px"><thead><tr><th>Setting</th><th>Now</th><th>After restore</th></tr></thead>
+    <tbody>${(d.changes||[]).map(c=>`<tr><td>${esc(c.field)}</td>
+      <td class="dim">${esc(c.before)}</td><td><b>${esc(c.after)}</b></td></tr>`).join('')}</tbody></table>
+    <div class="dim" style="font-size:12px;margin-top:10px">${d.change_count} setting(s) would
+    change.${d.reboot_required?' The bridge <b>restarts</b> afterwards — some of these only take effect at boot.':''}
+    ${d.rollback_exists?' You already have an undo point from an earlier restore; this <b>replaces</b> it, so undoing afterwards comes back to the configuration the bridge has right now.':''}</div>
+    <button type="button" onclick="applyRestore()">Apply these ${d.change_count} change(s)</button>`;
+}
+
+async function applyRestore(){
+  if(rsPending===null){backupNote('#rsm','err','Preview the file again before applying.');return}
+  $('#rspv').innerHTML='';
+  backupNote('#rsm','','Applying…');
+  const r=await authFetch('/api/v1/config/restore',
+    {method:'POST',headers:{'Content-Type':'application/json'},body:rsPending});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){backupNote('#rsm','err',(d.error&&d.error.message)||httpWhy(r));return}
+  rsPending=null;
+  backupNote('#rsm','ok','Restored '+(d.changed_fields||0)+' setting(s).'+
+    (d.reboot_required?' The bridge is restarting — reload this page in ~30 seconds.'
+                      :' No restart needed.')+
+    (d.rollback_stored?' You can undo this below.':' No undo was stored — the flash was full.'));
+}
+
+async function undoRestore(){
+  if(!confirm('Go back to the configuration this bridge had before the last restore?'))return;
+  backupNote('#rbm','','Rolling back…');
+  const r=await authFetch('/api/v1/actions/undo-restore',{method:'POST'});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){backupNote('#rbm','err',(d.error&&d.error.message)||httpWhy(r));return}
+  backupNote('#rbm','ok','Rolled back.'+(d.rebooting?' The bridge is restarting — reload in ~30 seconds.'
+    :' No restart needed.')+' Pressing this again returns to the restored configuration.');
+}
+
 async function otaUpload(){
   const f=$('#c_fw').files[0], m=$('#om'), pb=$('#opb'), pf=$('#opf'), btn=$('#ob');
   m.style.display='block';

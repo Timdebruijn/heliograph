@@ -548,4 +548,41 @@ bool buildLogsPayload(const std::vector<std::string>& lines, uint32_t totalLines
     return finish(doc, out, maxBytes);
 }
 
+bool buildRestorePreviewPayload(const BackupContents& backup,
+                                const std::vector<ConfigDiffEntry>& diff, bool rebootRequired,
+                                bool rollbackExists, std::string& out, size_t maxBytes) {
+    JsonDocument doc;
+    // Describe the FILE first: which bridge and which firmware wrote it is half of deciding
+    // whether to apply it, and it is the half a diff of field values cannot show.
+    JsonObject source          = doc["backup"].to<JsonObject>();
+    source["format_version"]   = backup.formatVersion;
+    source["includes_secrets"] = backup.includesSecrets;
+    // Absent, not empty string: an unsynced bridge writes no timestamp, and "" rendered in a
+    // date column reads as a bug rather than as "this file is undated".
+    if (!backup.firmwareVersion.empty()) source["firmware_version"] = backup.firmwareVersion;
+    if (!backup.exportedAt.empty()) source["exported_at"] = backup.exportedAt;
+
+    doc["change_count"]       = diff.size();
+    doc["reboot_required"]    = rebootRequired;
+    doc["rollback_exists"] = rollbackExists;
+    JsonArray changes         = doc["changes"].to<JsonArray>();
+    for (const auto& entry : diff) {
+        JsonObject e = changes.add<JsonObject>();
+        e["field"]   = entry.field;
+        e["before"]  = entry.before;
+        e["after"]   = entry.after;
+    }
+    return finish(doc, out, maxBytes);
+}
+
+bool buildRestoreResultPayload(size_t changedFields, bool rebootRequired, bool rollbackStored,
+                               std::string& out, size_t maxBytes) {
+    JsonDocument doc;
+    doc["status"]          = "restored";
+    doc["changed_fields"]  = changedFields;
+    doc["reboot_required"] = rebootRequired;
+    doc["rollback_stored"] = rollbackStored;
+    return finish(doc, out, maxBytes);
+}
+
 }  // namespace heliograph::rest

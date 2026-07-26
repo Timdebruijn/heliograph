@@ -318,6 +318,108 @@ static void test_an_invalid_config_is_never_persisted() {
     TEST_ASSERT_FALSE(backend.contains(kStorageKeyConfig));
 }
 
+// --- the rollback slot ------------------------------------------------------------------------
+
+static void test_nothing_to_roll_back_to_on_a_fresh_board() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    TEST_ASSERT_FALSE(store.hasRollback());
+    TEST_ASSERT_FALSE(store.stashRollback());
+    Configuration out;
+    TEST_ASSERT_EQUAL(LoadResult::NotFound, store.rollback(out));
+}
+
+static void test_stash_then_rollback_returns_the_earlier_configuration() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    auto               before = provisionedConfig();
+    before.bridgeName         = "before restore";
+    TEST_ASSERT_TRUE(store.save(before));
+
+    TEST_ASSERT_TRUE(store.stashRollback());
+    TEST_ASSERT_TRUE(store.hasRollback());
+
+    auto after       = provisionedConfig();
+    after.bridgeName = "after restore";
+    TEST_ASSERT_TRUE(store.save(after));
+
+    Configuration recovered;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.rollback(recovered));
+    TEST_ASSERT_EQUAL_STRING("before restore", recovered.bridgeName.c_str());
+
+    // ...and it is live, not merely returned: the next boot must find it too.
+    Configuration reloaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(reloaded));
+    TEST_ASSERT_EQUAL_STRING("before restore", reloaded.bridgeName.c_str());
+}
+
+/// The swap. Pressing undo twice returns to where you were, rather than doing nothing the
+/// second time with no way to explain why.
+static void test_rolling_back_twice_returns_to_the_restored_configuration() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    auto               before = provisionedConfig();
+    before.bridgeName         = "before restore";
+    store.save(before);
+    store.stashRollback();
+    auto after       = provisionedConfig();
+    after.bridgeName = "after restore";
+    store.save(after);
+
+    Configuration first;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.rollback(first));
+    TEST_ASSERT_EQUAL_STRING("before restore", first.bridgeName.c_str());
+
+    Configuration second;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.rollback(second));
+    TEST_ASSERT_EQUAL_STRING("after restore", second.bridgeName.c_str());
+}
+
+/// The safety net is allowed to fail. NVS here is 20 KB shared with the WiFi stack, so a
+/// second copy of the configuration is the first thing that will not fit -- and the restore
+/// must still be possible, with the caller told there is no undo.
+static void test_a_rollback_slot_that_does_not_fit_is_reported_not_fatal() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    store.save(provisionedConfig());
+    backend.writeFails = true;
+    TEST_ASSERT_FALSE(store.stashRollback());
+    backend.writeFails = false;
+    TEST_ASSERT_FALSE(store.hasRollback());
+}
+
+/// A rollback copy this firmware can no longer read must leave the live configuration alone.
+/// Whoever reaches for undo is already recovering from something; half-applying is worse than
+/// refusing.
+static void test_an_unreadable_rollback_leaves_the_live_config_untouched() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    auto               live = provisionedConfig();
+    live.bridgeName         = "still running";
+    store.save(live);
+    backend.write(kStorageKeyRollback, "{not json");
+
+    Configuration out;
+    TEST_ASSERT_EQUAL(LoadResult::Corrupt, store.rollback(out));
+
+    Configuration reloaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(reloaded));
+    TEST_ASSERT_EQUAL_STRING("still running", reloaded.bridgeName.c_str());
+}
+
+static void test_factory_reset_takes_the_rollback_slot_with_it() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    store.save(provisionedConfig());
+    TEST_ASSERT_TRUE(store.stashRollback());
+
+    TEST_ASSERT_TRUE(store.factoryReset());
+    TEST_ASSERT_FALSE(store.hasRollback());
+    // Explicitly: the stashed copy holds the WiFi and admin passwords too, so leaving it
+    // behind would make "erases everything, including passwords" untrue.
+    TEST_ASSERT_TRUE(backend.raw(kStorageKeyRollback).empty());
+}
+
 // --- corruption and versions ----------------------------------------------------------------
 
 static void test_corrupt_blob_falls_back_to_defaults() {
@@ -835,5 +937,11 @@ int main(int, char**) {
     RUN_TEST(test_ota_refuses_more_data_than_announced);
     RUN_TEST(test_ota_write_without_begin_is_refused);
     RUN_TEST(test_ota_end_without_any_data_is_refused);
+    RUN_TEST(test_nothing_to_roll_back_to_on_a_fresh_board);
+    RUN_TEST(test_stash_then_rollback_returns_the_earlier_configuration);
+    RUN_TEST(test_rolling_back_twice_returns_to_the_restored_configuration);
+    RUN_TEST(test_a_rollback_slot_that_does_not_fit_is_reported_not_fatal);
+    RUN_TEST(test_an_unreadable_rollback_leaves_the_live_config_untouched);
+    RUN_TEST(test_factory_reset_takes_the_rollback_slot_with_it);
     return UNITY_END();
 }

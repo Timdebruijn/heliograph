@@ -1204,6 +1204,90 @@ static void test_modbus_write_stays_off_whatever_the_config_says() {
 
 // NTP feedback: before sync the API must say so honestly (null, never a 1970 date dressed
 // up as real); after sync it carries the local wall-clock and the last sync moment.
+// --- restore preview ----------------------------------------------------------------------
+
+/// The preview is the last thing between a wrong file and an applied configuration, so it has
+/// to carry the three facts the decision rests on: what the file is, what changes, and whether
+/// there is a way back.
+static void test_restore_preview_carries_the_file_and_the_changes() {
+    BackupContents backup;
+    backup.formatVersion   = kBackupFormatVersion;
+    backup.firmwareVersion = "0.13.2";
+    backup.exportedAt      = "2026-07-26T12:00:00Z";
+    backup.includesSecrets = false;
+    const std::vector<ConfigDiffEntry> diff{{"mqtt.host", "old.broker", "new.broker"},
+                                            {"polling.interval_seconds", "10", "30"}};
+
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildRestorePreviewPayload(backup, diff, true, true, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_EQUAL_STRING("0.13.2", doc["backup"]["firmware_version"]);
+    TEST_ASSERT_EQUAL_STRING("2026-07-26T12:00:00Z", doc["backup"]["exported_at"]);
+    TEST_ASSERT_FALSE(doc["backup"]["includes_secrets"].as<bool>());
+    TEST_ASSERT_EQUAL_INT(2, doc["change_count"].as<int>());
+    TEST_ASSERT_TRUE(doc["reboot_required"].as<bool>());
+    TEST_ASSERT_TRUE(doc["rollback_exists"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("mqtt.host", doc["changes"][0]["field"]);
+    TEST_ASSERT_EQUAL_STRING("old.broker", doc["changes"][0]["before"]);
+    TEST_ASSERT_EQUAL_STRING("new.broker", doc["changes"][0]["after"]);
+}
+
+/// An undated backup renders as undated. Emitting "" would put an empty cell in a date column,
+/// which reads as a bug rather than as "the bridge that wrote this had no clock".
+static void test_restore_preview_omits_an_absent_export_date() {
+    BackupContents backup;
+    backup.formatVersion = kBackupFormatVersion;
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildRestorePreviewPayload(backup, {}, false, false, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_TRUE(doc["backup"]["exported_at"].isNull());
+    TEST_ASSERT_TRUE(doc["backup"]["firmware_version"].isNull());
+    TEST_ASSERT_EQUAL_INT(0, doc["change_count"].as<int>());
+    TEST_ASSERT_FALSE(doc["rollback_exists"].as<bool>());
+}
+
+/// The preview is rendered in a browser and is exactly the sort of screen that ends up in a
+/// support thread. diffConfigurations already redacts; this asserts the payload does not
+/// reintroduce a value on its way out.
+static void test_restore_preview_of_a_real_backup_leaks_no_password() {
+    Configuration before;
+    before.wifi.ssid              = "HomeNet";
+    before.wifi.password          = "before-secret";
+    before.security.adminPassword = "before-admin";
+
+    Configuration after           = before;
+    after.wifi.password           = "after-secret";
+    after.security.adminPassword  = "";
+    after.mqtt.host               = "broker.local";
+
+    std::vector<ConfigDiffEntry> diff;
+    TEST_ASSERT_TRUE(diffConfigurations(before, after, diff));
+
+    BackupContents backup;
+    backup.formatVersion = kBackupFormatVersion;
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildRestorePreviewPayload(backup, diff, false, true, body));
+    TEST_ASSERT_NULL(std::strstr(body.c_str(), "before-secret"));
+    TEST_ASSERT_NULL(std::strstr(body.c_str(), "after-secret"));
+    TEST_ASSERT_NULL(std::strstr(body.c_str(), "before-admin"));
+    TEST_ASSERT_NOT_NULL(std::strstr(body.c_str(), "(not set)"));
+}
+
+/// rollback_stored is reported separately from status on purpose: the restore succeeded AND
+/// there is no undo is a real combination on a full flash, and one field cannot say both.
+static void test_restore_result_reports_a_missing_undo_separately() {
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildRestoreResultPayload(7, true, false, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_EQUAL_STRING("restored", doc["status"]);
+    TEST_ASSERT_EQUAL_INT(7, doc["changed_fields"].as<int>());
+    TEST_ASSERT_TRUE(doc["reboot_required"].as<bool>());
+    TEST_ASSERT_FALSE(doc["rollback_stored"].as<bool>());
+}
+
 static void test_status_payload_reports_clock_sync_state() {
     Rig        r;
     const auto state = r.poll();
@@ -2083,5 +2167,9 @@ int main(int, char**) {
     RUN_TEST(test_prometheus_build_info_carries_the_version);
     RUN_TEST(test_the_mock_hybrid_also_exports);
     RUN_TEST(test_status_payload_reports_clock_sync_state);
+    RUN_TEST(test_restore_preview_carries_the_file_and_the_changes);
+    RUN_TEST(test_restore_preview_omits_an_absent_export_date);
+    RUN_TEST(test_restore_preview_of_a_real_backup_leaks_no_password);
+    RUN_TEST(test_restore_result_reports_a_missing_undo_separately);
     return UNITY_END();
 }
