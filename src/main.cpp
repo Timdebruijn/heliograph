@@ -1120,6 +1120,17 @@ void setup() {
     // 5 s default: an extended discovery scan legitimately runs many back-to-back 3 s
     // transactions between feeds, and the purpose here is catching forever-hangs, not
     // latency policing.
+    //
+    // Side effect worth naming: esp_task_wdt_reconfigure applies to EVERY watched task,
+    // including the core-0 idle task kept by idle_core_mask. So idle starvation on core 0,
+    // which the IDF default would have caught in 5 s, now takes two minutes to trip. The API
+    // has no per-task timeout, so the choice is this or no idle coverage at all; discovery
+    // needs the headroom more than idle starvation needs the faster trip.
+    //
+    // Not watched at all: the AsyncTCP task behind the web server and the task espMqttClient
+    // creates for itself. Registering a task whose blocking behaviour we do not control risks
+    // panicking a healthy device, so their liveness is reported through diagnostics instead
+    // (webLastServiceMs / mqttLastServiceMs) and left for a human or an alert to act on.
     esp_task_wdt_config_t wdtConfig = {
         .timeout_ms    = 120000,
         .idle_core_mask = 1 << 0,  // keep the idle-task coverage the sdkconfig had

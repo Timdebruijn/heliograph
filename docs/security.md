@@ -103,6 +103,24 @@ re-provision instead of authenticating over the air.
 **No brute-force protection on HTTP Basic.** Rate limiting is on `/actions/*`, not on the
 auth itself.
 
+**Nothing in the firmware generates a secret, and there is no random number generator in the
+tree at all.** The admin password is set by the operator, every request re-presents it, and
+there are no session tokens, cookies or nonces to mint. That is a deliberate absence, not an
+oversight — a 2026-07-26 audit confirmed no `esp_random`, `random()`, `rand()` or
+`mbedtls_ctr_drbg` call anywhere in `src/`.
+
+It is recorded here because the day that changes, the obvious reach is the wrong one. If a
+session token, a CSRF nonce, a pairing code or a generated first-boot password is ever added:
+
+- Use `esp_random()` / `esp_fill_random()`. **Never Arduino's `random()`**, which on ESP32 is a
+  seeded PRNG and predictable.
+- Do it after the RF subsystem is up. `esp_random()` is only a true hardware RNG while WiFi or
+  Bluetooth is active or the bootloader's entropy is still valid; during early boot with the
+  radio down — exactly when a first-boot password would be minted — the guarantee is weaker.
+- Remember that a generated secret has to reach the user somehow, and every channel this
+  bridge has (the open setup AP, plain HTTP, the serial console) is one of the exposures listed
+  above.
+
 **OTA images are not cryptographically signed.** The upload is gated by the admin password
 and checked for the ESP32 image magic (`0xE9`) before any byte reaches flash, and a bad image
 is rolled back by the bootloader — but the magic check only rejects a wrong *file* (a
