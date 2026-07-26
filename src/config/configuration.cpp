@@ -385,9 +385,12 @@ void writeCommon(JsonDocument& doc, const Configuration& config) {
 bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes,
                      const bool* rebootRequired) {
     JsonDocument doc;
-    // The API reports the version the configuration WAS LOADED AS, where the store writes the
-    // version it is being written in. The only field where the two documents disagree on the
-    // value rather than on the redaction, which is why it is not in writeCommon().
+    // Reads from the struct where serializeConfigForStorage writes kConfigVersion directly.
+    // In practice these are the same number -- Configuration::version defaults to
+    // kConfigVersion and deserializeConfigFromStorage stamps it back to kConfigVersion after a
+    // migration, so nothing can currently make them differ -- but the store must write the
+    // version it is WRITING regardless of what the struct happens to hold, so the two stay
+    // apart rather than being folded into writeCommon().
     doc["version"] = config.version;
     config_sections::writeCommon(doc, config);
 

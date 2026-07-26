@@ -55,8 +55,8 @@ public:
     /// and then up to 3 s for the reply, and holding a mutex across that would stall every other
     /// caller for seconds -- the same mistake the deferred-poll comment in main.cpp's REST
     /// action handler documents finding live in Phase 3, where a seconds-long bus transaction
-    /// ran inside an AsyncTCP callback. Bus exclusivity is
-    /// already the transport's job (Transport::lock), so this mutex does not need to provide it.
+    /// ran inside an AsyncTCP callback. Bus exclusivity is already the transport's job
+    /// (Transport::lock), so this mutex does not need to provide it.
     ///
     /// Consequence worth knowing: the kill switch is re-read immediately before execute() to
     /// narrow the window, but a command already on the bus cannot be recalled by switching to
@@ -66,7 +66,9 @@ public:
 private:
     bool allowedAsRelease(uint64_t nowMs);
 
-    ClockFn           clock_;
+    ClockFn clock_;
+    /// Backs the RELEASE track only. The ordinary track's copy lives inside limiter_; this one
+    /// stays because allowedAsRelease() needs the interval and is not a RateLimiter.
     RateLimitPolicy   rateLimit_;
     std::atomic<bool> readOnly_{true};
 

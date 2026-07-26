@@ -75,8 +75,9 @@ std::string MemoryBackend::raw(const std::string& key) const {
 
 bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     JsonDocument doc;
-    // The version this blob is being WRITTEN in, which is what the migration chain reads back.
-    // Not config.version, which records what it was last loaded as.
+    // kConfigVersion directly, not config.version: this records the version the blob is being
+    // WRITTEN in, which is what the migration chain reads back on the next boot. Reading it
+    // from the struct would make a corrupted or hand-set field able to mislabel the format.
     doc["version"] = kConfigVersion;
     config_sections::writeCommon(doc, config);
 

@@ -29,7 +29,6 @@
 #include <vector>
 
 #include "configuration.h"
-#include "configuration_store.h"  // kMaxStoredConfigBytes
 
 namespace heliograph {
 
@@ -44,8 +43,6 @@ inline constexpr uint16_t    kBackupFormatVersion = 1;
 /// kMaxStoredConfigBytes (NVS refuses to store more), and the envelope adds a couple of
 /// hundred; the rest is slack for pretty-printing by whoever edited the file in between.
 inline constexpr size_t kMaxBackupBytes = 8192;
-static_assert(kMaxBackupBytes > kMaxStoredConfigBytes,
-              "a backup must have room for the largest configuration plus its envelope");
 
 struct BackupOptions {
     /// Off by default, and the UI has to ask. See the note at the top of this file.

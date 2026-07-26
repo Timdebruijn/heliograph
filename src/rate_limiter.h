@@ -2,7 +2,7 @@
 //
 // Token-bucket throttle: a burst allowance that refills after a quiet period.
 //
-// WHY THIS IS SHARED, when the two users deliberately kept their own copies until 0.16.0.
+// WHY THIS IS SHARED, when the two users deliberately kept their own copies for three releases.
 // The comment on RelayController's copy argued that "two small, independently testable copies
 // beat a coupling between the inverter write path and the bridge actuator" -- and then, in the
 // same paragraph, recorded that the copies had drifted: the relay copy found two bugs that the
@@ -51,8 +51,6 @@ class RateLimiter {
 public:
     RateLimiter() = default;
     explicit RateLimiter(RateLimitPolicy policy) : policy_(policy) {}
-
-    void setPolicy(RateLimitPolicy policy) { policy_ = policy; }
 
     /// True if this call may proceed, and records it as accepted. False leaves the state
     /// untouched, so a refused call does not consume the allowance.
