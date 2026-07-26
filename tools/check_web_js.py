@@ -68,7 +68,7 @@ def main() -> int:
 # makes running them in isolation honest rather than a re-implementation.
 VERSION_CASES = [
     # (current, candidate, expected isNewer)
-    ("0.9.0", "0.14.0", True),    # the trap: as text, "0.9.0" sorts higher
+    ("0.9.0", "0.14.0", True),  # the trap: as text, "0.9.0" sorts higher
     ("0.14.0", "0.9.0", False),
     ("0.14.0", "0.14.1", True),
     ("0.14.0", "1.0.0", True),
