@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <string>
 
+#include "device/device_state.h"  // kMaxDevices, the bound on the instance option
 #include "diagnostics/logger.h"
 
 namespace heliograph::mock {
@@ -42,10 +43,16 @@ constexpr double kPeakDcWatts = 6000.0;
 /// Modbus unit off by one look exactly like correct output.
 ///
 /// A THIRTY-SECOND of a day apart, not a sixteenth. The cycle starts at midday and daylight
-/// runs a quarter-day either side, so at a sixteenth the eighth instance would be 7/16 behind
-/// and sit in the dark at boot -- a fleet where the last members report nothing is not the
-/// demonstration this is for. At 1/32 the whole run of kMaxDevices spans 7/32 of a day and
-/// every one of them is producing.
+/// runs a quarter-day either side, so at a sixteenth the eighth instance would already be dark
+/// the moment the bridge boots -- and a fleet whose last members report nothing from the outset
+/// is not the demonstration this is for. At 1/32 the whole run of kMaxDevices spans 7/32 of a
+/// day, which puts every one of them in daylight AT BOOT (1.0 down to 0.195 of peak).
+///
+/// They do NOT all stay there, and that is the second thing this buys. As the day advances they
+/// set one by one, last instance first, so a running fleet is a mix of producing and dark
+/// devices -- which is what exercises the rule that a total is null when no device reported the
+/// channel rather than 0, and the per-device online/stale handling underneath it. A fleet that
+/// rose and set in unison would never reach that state at all.
 ///
 /// Instance 1 gets no offset, so the single-mock case is bit-for-bit what it always was.
 double solarFraction(uint64_t nowMs, uint64_t dayLengthMs, uint8_t instance) {

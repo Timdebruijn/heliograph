@@ -507,6 +507,40 @@ static void test_instances_are_staggered_so_they_do_not_report_in_lockstep() {
     }
 }
 
+/// The second thing the stagger buys, and the reason it is not a nicety. Later in the day the
+/// fleet is a MIX of producing and dark devices, which is the only way to reach the rule that a
+/// total is null when no device reported the channel rather than 0. A fleet rising and setting
+/// in unison never produces that state.
+///
+/// Pinned because it is now a documented property. It also guards the geometry from the other
+/// side: a stagger wide enough to be interesting must not be so wide that instances are dark at
+/// boot, which the test above asserts.
+static void test_a_running_fleet_ends_up_part_producing_and_part_dark() {
+    const auto powerAt = [](uint64_t nowMs, uint8_t unit) {
+        mock::MockOptions options;
+        options.instance = unit;
+        mock::MockDriver driver([nowMs] { return nowMs; }, options);
+        test::MockTransport t;
+        driver.begin(t);
+        DeviceState state;
+        state.lastPollAttemptMs = 1;
+        TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
+        const auto* p = state.measurements.find(measurement_id::kAcPowerTotal);
+        TEST_ASSERT_NOT_NULL(p);
+        return p->value;
+    };
+
+    // A twentieth into the default ten-minute day: the run has begun to set from the far end.
+    const uint64_t later = (10ULL * 60 * 1000) / 20;
+    int producing = 0;
+    int dark      = 0;
+    for (uint8_t unit = 1; unit <= static_cast<uint8_t>(kMaxDevices); ++unit) {
+        (powerAt(later, unit) > 0.0 ? producing : dark)++;
+    }
+    TEST_ASSERT_TRUE(producing > 0);
+    TEST_ASSERT_TRUE(dark > 0);
+}
+
 /// The bound is the device table's, so a config that would not fit is refused at the option
 /// rather than discovered at boot.
 static void test_an_instance_beyond_the_device_table_is_refused() {
@@ -551,6 +585,7 @@ int main(int, char**) {
     RUN_TEST(test_a_mock_instance_carries_its_key_as_well_as_its_serial);
     RUN_TEST(test_instance_one_keeps_the_id_it_always_had);
     RUN_TEST(test_instances_are_staggered_so_they_do_not_report_in_lockstep);
+    RUN_TEST(test_a_running_fleet_ends_up_part_producing_and_part_dark);
     RUN_TEST(test_an_instance_beyond_the_device_table_is_refused);
     return UNITY_END();
 }
