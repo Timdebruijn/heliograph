@@ -250,11 +250,21 @@ const authCancelled=()=>({ok:false,status:0,cancelled:true,
 const httpWhy=r=>r.cancelled?'cancelled (admin password required)':'HTTP '+r.status;
 async function authFetch(url,opts={}){
   if(!sessionStorage.getItem('sb_auth')&&!await askAuth(false))return authCancelled();
+  // Which credentials THIS request is about to use, remembered for the 401 branch below.
+  const used=sessionStorage.getItem('sb_auth');
   let r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()}});
   if(r.status===401){
-    clearAuth();
-    // retry=true: the dialog explains that the username is a candidate too.
-    if(!await askAuth(true))return authCancelled();
+    // Only discard what this request actually used. Several tabs call authFetch from the same
+    // 5 s refresh, so two can be in flight with the same bad credentials at once: the first
+    // 401 prompts, the password is accepted and stored -- and then the second 401 arrives and
+    // used to clear those working credentials and ask for them all over again. Reads to the
+    // user as "I just signed in and it forgot". If they have already been replaced, retry with
+    // the new ones instead of prompting.
+    if(sessionStorage.getItem('sb_auth')===used){
+      clearAuth();
+      // retry=true: the dialog explains that the username is a candidate too.
+      if(!await askAuth(true))return authCancelled();
+    }
     r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()}});
   }
   if(r.status!==401)rememberUser();

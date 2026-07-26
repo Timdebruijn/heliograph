@@ -57,6 +57,7 @@ def main() -> int:
                 script = path.read_text()
                 status |= check_version_compare(script, scratch)
                 status |= check_auth_prompt_reentrancy(script, scratch)
+                status |= check_auth_fetch_race(script, scratch)
     return status
 
 
@@ -103,8 +104,25 @@ def extract_function(source, name):
         start = source.find(f"function {name}(")
     if start < 0:
         return None
+    # Walk the PARAMETER LIST to its closing paren first, then take the brace after it.
+    # Starting the brace match at the first `{` after the name is wrong for a default argument
+    # that is an object: `authFetch(url,opts={})` closed depth on the `}` of `{}` and returned
+    # a function cut off at its own signature, which node then reported as a syntax error two
+    # lines further down -- reading as "the page is broken" rather than "the extractor is".
     depth = 0
-    for i in range(source.index("{", start), len(source)):
+    body_start = None
+    for i in range(source.index("(", start), len(source)):
+        if source[i] == "(":
+            depth += 1
+        elif source[i] == ")":
+            depth -= 1
+            if depth == 0:
+                body_start = source.index("{", i)
+                break
+    if body_start is None:
+        return None
+    depth = 0
+    for i in range(body_start, len(source)):
         if source[i] == "{":
             depth += 1
         elif source[i] == "}":
@@ -220,6 +238,75 @@ const fail = m => {{ console.error(m); bad++; }};
     path.write_text(harness)
     result = subprocess.run(["node", str(path)], capture_output=True, text=True)
     print(f"auth prompt re-entrancy: {'OK' if result.returncode == 0 else 'FAIL'}")
+    if result.returncode != 0:
+        print(result.stdout + result.stderr)
+        return 1
+    return 0
+
+
+def check_auth_fetch_race(script, scratch):
+    """A late 401 must not throw away credentials another caller just got accepted.
+
+    Same root cause as the prompt bug: several tabs call authFetch from one 5 s refresh, so two
+    requests can be in flight carrying the same stale credentials. The first 401 prompts, the
+    password is accepted and stored -- and the second 401, arriving after, used to clear it and
+    prompt again. To the user that is "I just signed in and it forgot".
+    """
+    parts = []
+    for fn in ("authFetch", "askAuth"):
+        body = extract_function(script, fn)
+        if body is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(body)
+    harness = (
+        """
+const store = {};
+const sessionStorage = {getItem:k=>k in store?store[k]:null, setItem:(k,v)=>{store[k]=v},
+                        removeItem:k=>{delete store[k]}};
+const authHeader = () => store['sb_auth'] ? {'Authorization':'Basic '+store['sb_auth']} : {};
+const clearAuth = () => { delete store['sb_auth'] };
+const rememberUser = () => {};
+const authCancelled = () => ({ok:false,status:0,cancelled:true});
+const btoa = s => Buffer.from(s, 'binary').toString('base64');
+let authPrompt = null;
+let prompts = 0;
+
+// The dialog is not exercised here; askAuth is replaced so the race is the only variable.
+const realAskAuth = null;
+"""
+        + parts[0]
+        + """
+async function askAuth(retry){ prompts++; store['sb_auth'] = 'GOOD'; return true; }
+
+// 401 for anything that is not the good token; 200 once it is.
+let served = [];
+const fetch = async (url, opts) => {
+  const auth = (opts.headers||{})['Authorization'] || '';
+  served.push(auth);
+  return {status: auth === 'Basic GOOD' ? 200 : 401, ok: auth === 'Basic GOOD'};
+};
+
+let bad = 0;
+const fail = m => { console.error(m); bad++; };
+
+(async () => {
+  // Both callers start with the same stale credentials, exactly as two tabs on one refresh do.
+  store['sb_auth'] = 'STALE';
+  const [a, b] = await Promise.all([authFetch('/api/v1/logs'), authFetch('/api/v1/diagnostics')]);
+
+  if (!a.ok || !b.ok) fail(`both callers should end up authorised, got ${a.status} and ${b.status}`);
+  if (store['sb_auth'] !== 'GOOD') fail('the accepted credentials were cleared again: ' + store['sb_auth']);
+  if (prompts !== 1) fail(`the user was asked ${prompts} times; once is enough`);
+
+  process.exit(bad === 0 ? 0 : 1);
+})();
+"""
+    )
+    path = pathlib.Path(scratch) / "auth_fetch_race.js"
+    path.write_text(harness)
+    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    print(f"auth fetch race: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
         return 1
