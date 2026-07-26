@@ -64,10 +64,11 @@ namespace {
 // on hardware; 0.10.1 was defect-fixes from the full-codebase review; 0.11.0 added the generic
 // SunSpec Modbus driver and the shared Modbus transaction it runs on; 0.12.0 added a second
 // vendor register-map profile and made driver options validated rather than free-form; 0.13.0
-// polls several inverters on one bus and carries every one of them into every output.
+// polls several inverters on one bus and carries every one of them into every output; 0.13.1
+// stops the boot log opening in UTC after a warm reset.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 13
-#define HELIOGRAPH_VERSION_PATCH 0
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
