@@ -98,6 +98,43 @@ peripheral). No driver uses it today. It is recorded because battery BMS protoco
 commonly speak CAN, which makes this board a natural fit for a future battery-side
 source — a deliberate decision for later, not an accident waiting in a header file.
 
+## Step-debugging over the built-in USB-JTAG
+
+The S3 has a USB-Serial-JTAG peripheral on the chip. No external probe, no extra wiring, and
+the same USB-C cable that carries the serial console — JTAG and CDC are separate interfaces on
+the one USB device, so `ARDUINO_USB_CDC_ON_BOOT=1` does not get in the way.
+
+```bash
+pio debug -e debug-rs485-can --interface=gdb -x .pioinit
+```
+
+Or in an editor with the PlatformIO extension, pick the `debug-rs485-can` environment and start
+a debug session normally.
+
+`debug-rs485-can` is a separate environment (`build_type = debug`, `debug_tool = esp-builtin`)
+so the shipping images stay release builds. Debug drops the optimiser to `-Og`, which changes
+timing — and RS485 timing is the last thing that should shift underneath you unannounced. The
+image grows by roughly 130 KB, which the 6.25 MB app partition absorbs without noticing.
+
+**The watchdog will reset the board while you sit on a breakpoint.** A halted core stops feeding
+the task WDT, and its timeout is 120 s (`src/main.cpp`, `setup()`). For a long inspection,
+either work in short hops or temporarily raise the timeout in that call — and put it back before
+you commit.
+
+Three places where a breakpoint earns its keep, all of them things serial logging is bad at:
+
+- `Rs485Transport::read` / the driver's frame parser, to inspect a malformed buffer *at the
+  moment* it is rejected — logging it changes the timing you are trying to observe.
+- `applySerialOverride()` and driver `begin()`, for the boot path that runs once and is over
+  before you can attach a console.
+- Anything reached from the AsyncTCP task, where a `log::` call competes with the request it is
+  trying to describe.
+
+> If a PlatformIO-generated `.vscode/launch.json` predates 2026-07-22 it names
+> `waveshare-eversolar`, the environment renamed to `waveshare-rs485-can` in the board refactor,
+> and the session will fail on a path that no longer exists. Delete the file and let PlatformIO
+> regenerate it; it is gitignored, so nothing in the repo needs changing.
+
 ## Recovery — hold BOOT to factory-reset
 
 Holding **BOOT for ~5 seconds while the firmware is running** erases the stored
