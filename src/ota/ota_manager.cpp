@@ -26,12 +26,7 @@ const char* otaResultName(OtaResult result) {
 OtaResult OtaManager::finishHash() {
     uint8_t digest[32];
     hasher_.finish(digest);
-    writtenSha256_.assign(64, '\0');
-    static const char kHex[] = "0123456789abcdef";
-    for (size_t i = 0; i < 32; ++i) {
-        writtenSha256_[i * 2]     = kHex[digest[i] >> 4];
-        writtenSha256_[i * 2 + 1] = kHex[digest[i] & 0x0F];
-    }
+    writtenSha256_ = toHex(digest, sizeof(digest));
     if (expectedSha_.empty()) {
         return OtaResult::Ok;  // nothing was promised; a hand-picked file has nothing to check
     }

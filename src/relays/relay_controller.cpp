@@ -5,7 +5,7 @@
 namespace heliograph {
 
 RelayController::RelayController(ClockFn clock, RateLimitPolicy rateLimit)
-    : clock_(std::move(clock)), rateLimit_(rateLimit) {}
+    : clock_(std::move(clock)), limiter_(rateLimit) {}
 
 void RelayController::begin(uint8_t count, RelayApplyFn apply) {
     count_ = count > kMaxRelays ? kMaxRelays : count;
@@ -22,40 +22,29 @@ void RelayController::allOff() {
     }
 }
 
-// Same refill logic as CommandDispatcher::allowedByRateLimit. This copy found two problems
-// first and the dispatcher has since adopted both: "has ever accepted" as an explicit flag
-// rather than a lastAcceptedMs_ == 0 sentinel (millis() at boot IS near zero, so the sentinel
-// collides exactly when the device just started), and a clamped elapsed time so a clock that
-// moves backwards cannot wrap the subtraction into "ages ago" and refill the whole allowance.
-// Duplicated rather than shared through a base class by intent: two small, independently
-// testable copies beat a coupling between the inverter write path and the bridge actuator.
-bool RelayController::allowedByRateLimit(uint64_t nowMs) {
-    const uint64_t since = nowMs > lastAcceptedMs_ ? nowMs - lastAcceptedMs_ : 0;
-    if (everAccepted_ && since >= rateLimit_.minIntervalMs) {
-        burstUsed_ = 0;
-    }
-    if (burstUsed_ < rateLimit_.burst) {
-        ++burstUsed_;
-        everAccepted_   = true;
-        lastAcceptedMs_ = nowMs;
-        return true;
-    }
-    if (!everAccepted_ || since >= rateLimit_.minIntervalMs) {
-        everAccepted_   = true;
-        lastAcceptedMs_ = nowMs;
-        return true;
-    }
-    return false;
-}
-
-CommandResult RelayController::set(uint8_t index, bool energised) {
-    // 1. Global kill switch, before anything else -- identical position to the dispatcher.
+// Gates 1 and 2, in the order the dispatcher uses. One definition so a gate added later cannot
+// be added to set() and forgotten in applyPattern() -- the direction in which that mistake
+// fails is a relay that moves when it should have been refused.
+//
+//   1. Global kill switch, before anything else.
+//   2. Feature flag. A relay board with default settings must be inert.
+//
+// Gates 3 (what is being addressed) and 4 (the rate limit) differ per operation and stay with
+// their callers: an index versus a pattern width, one token versus one token for the whole
+// pattern.
+CommandResult RelayController::checkGates() const {
     if (readOnly_) {
         return CommandResult::ReadOnlyMode;
     }
-    // 2. Feature flag. A relay board with default settings must be inert.
     if (!enabled_) {
         return CommandResult::Rejected;
+    }
+    return CommandResult::Ok;
+}
+
+CommandResult RelayController::set(uint8_t index, bool energised) {
+    if (const CommandResult gate = checkGates(); gate != CommandResult::Ok) {
+        return gate;
     }
     // 3. Index validity.
     if (index >= count_) {
@@ -65,7 +54,7 @@ CommandResult RelayController::set(uint8_t index, bool energised) {
     // direction and must never wait behind a throttle.
     if (energised) {
         const uint64_t now = clock_ ? clock_() : 0;
-        if (!allowedByRateLimit(now)) {
+        if (!allowedToAssert(now)) {
             return CommandResult::RateLimited;
         }
     }
@@ -77,11 +66,8 @@ CommandResult RelayController::set(uint8_t index, bool energised) {
 }
 
 CommandResult RelayController::applyPattern(const std::vector<bool>& pattern) {
-    if (readOnly_) {
-        return CommandResult::ReadOnlyMode;
-    }
-    if (!enabled_) {
-        return CommandResult::Rejected;
+    if (const CommandResult gate = checkGates(); gate != CommandResult::Ok) {
+        return gate;
     }
     if (pattern.size() != static_cast<size_t>(count_)) {
         return CommandResult::OutOfRange;
@@ -97,7 +83,7 @@ CommandResult RelayController::applyPattern(const std::vector<bool>& pattern) {
     // pattern is the safe direction and passes unconditionally, like set(index, false).
     if (assertsAny) {
         const uint64_t now = clock_ ? clock_() : 0;
-        if (!allowedByRateLimit(now)) {
+        if (!allowedToAssert(now)) {
             return CommandResult::RateLimited;
         }
     }

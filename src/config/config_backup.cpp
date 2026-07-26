@@ -10,6 +10,14 @@
 #include "configuration_store.h"
 
 namespace heliograph {
+
+// The relationship between the two bounds, pinned here rather than in config_backup.h so that
+// header keeps its light include set -- rest_payloads.h pulls it in, and reaching for
+// kMaxStoredConfigBytes there would drag configuration_store.h's <map>, <mutex> and the MQTT
+// announced-devices header along behind it.
+static_assert(kMaxBackupBytes > kMaxStoredConfigBytes,
+              "a backup must have room for the largest configuration plus its envelope");
+
 namespace {
 
 /// Keys whose value must never be rendered or exported. A rule, not a list: a credential

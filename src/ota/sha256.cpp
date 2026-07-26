@@ -149,17 +149,21 @@ void Sha256::finish(uint8_t out[32]) {
     }
 }
 
+std::string toHex(const uint8_t* data, size_t len) {
+    static const char kHex[] = "0123456789abcdef";
+    std::string       out;
+    out.reserve(len * 2);
+    for (size_t i = 0; i < len; ++i) {
+        out.push_back(kHex[data[i] >> 4]);
+        out.push_back(kHex[data[i] & 0x0F]);
+    }
+    return out;
+}
+
 std::string Sha256::finishHex() {
     uint8_t digest[32];
     finish(digest);
-    static const char kHex[] = "0123456789abcdef";
-    std::string       out;
-    out.reserve(64);
-    for (unsigned char byte : digest) {
-        out.push_back(kHex[byte >> 4]);
-        out.push_back(kHex[byte & 0x0F]);
-    }
-    return out;
+    return toHex(digest, sizeof(digest));
 }
 
 bool hexDigestEquals(const std::string& expectedHex, const uint8_t digest[32]) {

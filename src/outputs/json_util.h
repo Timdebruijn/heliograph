@@ -9,6 +9,8 @@
 
 #include <string>
 
+#include "json_limits.h"
+
 #include "device/bridge_info.h"
 #include "device/capability.h"
 #include "device/command.h"
@@ -17,23 +19,9 @@
 
 namespace heliograph::json_util {
 
-/// Serialises and enforces the size ceiling. The document is built first and measured after:
-/// ArduinoJson v7 grows elastically, so the bound is applied here rather than by pre-sizing.
-/// Returns false (leaving `out` untouched) on overflow rather than truncating.
-inline bool finish(const JsonDocument& doc, std::string& out, size_t maxBytes) {
-    if (doc.overflowed()) {
-        return false;  // allocation failed under memory pressure
-    }
-    const size_t needed = measureJson(doc);
-    if (needed > maxBytes) {
-        return false;
-    }
-    std::string buffer;
-    buffer.resize(needed + 1);
-    buffer.resize(serializeJson(doc, buffer.data(), buffer.size()));
-    out = std::move(buffer);
-    return true;
-}
+/// Re-exported so the payload builders keep saying `finish(...)`. The definition lives in
+/// json_limits.h because config/ needs the same rule for the NVS blob.
+using json_limits::finish;
 
 /// Omit rather than emit "": absent means "this protocol does not report it".
 inline void addOptional(JsonObject obj, const char* key, const std::string& value) {

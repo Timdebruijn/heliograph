@@ -158,6 +158,39 @@ else
     echo "OK"
 fi
 
+echo "==> 8. No comment cites a line number in our own source"
+# A "see main.cpp:492" is correct on the day it is written and wrong on the next edit to that
+# file -- the reader then follows it to an unrelated line and either trusts the wrong code or
+# stops trusting the comments. Two had already rotted by 0.15.0: main.cpp:492 pointed at the
+# boot-button handler and not at the deferred-poll seam it meant. Name the function or the
+# concept instead; those move with the code.
+#
+# Only OUR files. A pointer into a pinned library (WebRequest.cpp:114 in rest_api.h) is
+# verifiable against a fixed version and does not drift under us, so it is allowed.
+#
+# Portability note: this deliberately avoids `find -printf` (GNU only -- it silently yields
+# nothing on the macOS BSD find every local run uses, which turned the filename alternation
+# into an empty group and matched every `{width:02X}` format spec in tools/).
+lineref=""
+for f in $(git ls-files 'src/*.cpp' 'src/*.h' 'test/*.cpp' 'test/*.h' 'tools/*.py' \
+           ':!:src/web/assets/*'); do
+    for cited in $(grep -oE '[A-Za-z_][A-Za-z0-9_]*\.(cpp|h|py|sh):[0-9]+' "$f" | sort -u); do
+        base=${cited%%:*}
+        # Ours only: a pointer into a pinned library is verifiable against a fixed version.
+        if git ls-files --error-unmatch "*/$base" >/dev/null 2>&1; then
+            lineref="$lineref
+      $f cites $cited"
+        fi
+    done
+done
+if [ -n "$lineref" ]; then
+    echo "FAIL: comment points at a line number in our own source, which will drift:"
+    printf '%s\n' "$lineref" | sed '/^[[:space:]]*$/d'
+    status=1
+else
+    echo "OK"
+fi
+
 echo
 if [ $status -eq 0 ]; then
     echo "RESULT: PASS"

@@ -2,6 +2,9 @@
 
 #include "configuration_store.h"
 
+#include "config_sections.h"
+#include "json_limits.h"
+
 #include <ArduinoJson.h>
 
 #include <cstring>
@@ -72,92 +75,25 @@ std::string MemoryBackend::raw(const std::string& key) const {
 
 bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     JsonDocument doc;
-    doc["version"]     = kConfigVersion;
-    doc["bridge_name"] = config.bridgeName;
+    // kConfigVersion directly, not config.version: this records the version the blob is being
+    // WRITTEN in, which is what the migration chain reads back on the next boot. Reading it
+    // from the struct would make a corrupted or hand-set field able to mislabel the format.
+    doc["version"] = kConfigVersion;
+    config_sections::writeCommon(doc, config);
 
-    JsonObject wifi = doc["wifi"].to<JsonObject>();
-    wifi["ssid"]     = config.wifi.ssid;
-    wifi["password"] = config.wifi.password;  // storage only, never a response body
-    wifi["hostname"] = config.wifi.hostname;
-
-    JsonObject mqtt = doc["mqtt"].to<JsonObject>();
-    mqtt["enabled"]           = config.mqtt.enabled;
-    mqtt["host"]              = config.mqtt.host;
-    mqtt["port"]              = config.mqtt.port;
-    mqtt["username"]          = config.mqtt.username;
-    mqtt["password"]          = config.mqtt.password;
-    mqtt["base_topic"]        = config.mqtt.baseTopic;
-    mqtt["discovery_prefix"]  = config.mqtt.discoveryPrefix;
-    mqtt["discovery_enabled"] = config.mqtt.discoveryEnabled;
-    mqtt["qos"]               = config.mqtt.qos;
-
-    JsonObject modbus = doc["modbus"].to<JsonObject>();
-    modbus["enabled"]             = config.modbus.enabled;
-    modbus["port"]                = config.modbus.port;
-    modbus["unit_id"]             = config.modbus.unitId;
-    modbus["diagnostics_unit_id"] = config.modbus.diagnosticsUnitId;
-    modbus["write_enabled"]       = config.modbus.writeEnabled;
-
-    doc["polling"]["interval_seconds"] = config.polling.intervalSeconds;
-    doc["relays"]["enabled"]           = config.relays.enabled;
-    JsonArray storedRoles              = doc["relays"]["roles"].to<JsonArray>();
-    for (const auto& role : config.relays.roles) {
-        storedRoles.add(role);
-    }
-
-    JsonObject driver     = doc["driver"].to<JsonObject>();
-    driver["id"]          = config.driver.id;
-    driver["auto_detect"] = config.driver.autoDetect;
-    JsonObject options    = driver["options"].to<JsonObject>();
-    for (const auto& [key, value] : config.driver.options) {
-        options[key] = value;
-    }
-
-
-    JsonObject ntp       = doc["ntp"].to<JsonObject>();
-    ntp["enabled"]       = config.ntp.enabled;
-    ntp["use_dhcp"]      = config.ntp.useDhcp;
-    ntp["server"]        = config.ntp.server;
-    ntp["timezone"]      = config.ntp.timezone;
-    ntp["timezone_name"] = config.ntp.timezoneName;
-
-    JsonArray extra = doc["additional_devices"].to<JsonArray>();
-    for (const auto& d : config.additionalDevices) {
-        JsonObject e   = extra.add<JsonObject>();
-        e["driver_id"] = d.id;
-        JsonObject o   = e["options"].to<JsonObject>();
-        for (const auto& [key, value] : d.options) {
-            o[key] = value;
-        }
-    }
-
-    JsonObject serial   = doc["serial"].to<JsonObject>();
-    serial["override"]  = config.serial.enabled;
-    serial["baud_rate"] = config.serial.profile.baudRate;
-    serial["parity"]    = parityName(config.serial.profile.parity);
-    serial["data_bits"] = config.serial.profile.dataBits;
-    serial["stop_bits"] = config.serial.profile.stopBits;
+    // The credentials, which is the whole of what this document has that the API view does not.
+    // Storage only, never a response body.
+    doc["wifi"]["password"] = config.wifi.password;
+    doc["mqtt"]["username"] = config.mqtt.username;
+    doc["mqtt"]["password"] = config.mqtt.password;
 
     JsonObject security        = doc["security"].to<JsonObject>();
     security["admin_username"] = config.security.adminUsername;
     security["admin_password"] = config.security.adminPassword;
     security["read_only_mode"] = config.security.readOnlyMode;
 
-    doc["updates"]["check_enabled"] = config.updates.checkEnabled;
-    doc["logging"]["level"]         = logLevelName(config.logLevel);
-
-    if (doc.overflowed()) {
-        return false;
-    }
-    // NVS caps a string entry at 4000 bytes. Refuse rather than write a truncated blob that
-    // would fail to parse on the next boot and look like corruption.
-    const size_t needed = measureJson(doc);
-    if (needed > 3900) {
-        return false;
-    }
-    out.resize(needed + 1);
-    out.resize(serializeJson(doc, out.data(), out.size()));
-    return true;
+    // Refuse rather than write a truncated blob -- see kMaxStoredConfigBytes.
+    return json_limits::finish(doc, out, kMaxStoredConfigBytes);
 }
 
 namespace {
