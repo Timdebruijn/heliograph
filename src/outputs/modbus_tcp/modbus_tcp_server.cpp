@@ -28,8 +28,12 @@ bool ModbusTcpServer::setConfig(const ModbusServerConfig& config) {
     config_        = config;
     // Sized here rather than in begin() so the mapping is settled -- and host-testable --
     // before any TCP stack is involved.
+    //
+    // At least one map even when no inverter started: the diagnostics unit reads maps_[0], and
+    // a bridge with nothing polling is exactly when someone scrapes it. Before this change a
+    // single map always existed, so refusing that read now would be a quiet regression.
     servedDevices_ = serveableDevices();
-    maps_.assign(servedDevices_, RegisterMap{});
+    maps_.assign(servedDevices_ > 0 ? servedDevices_ : 1, RegisterMap{});
     return true;
 }
 

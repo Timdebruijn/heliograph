@@ -86,6 +86,10 @@ public:
     /// The unit id device `index` is served at, or 0 when it is not served.
     uint8_t unitIdFor(size_t index) const;
 
+    /// How many register maps are allocated. Never zero, even with no inverter: the diagnostics
+    /// unit reads map 0, and a bridge with nothing polling is exactly when it gets scraped.
+    size_t registerMapCount() const { return maps_.size(); }
+
     uint16_t activeClients() const;
 
     /// Optional: lets the server bump modbus client counters.

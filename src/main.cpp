@@ -802,13 +802,25 @@ void rs485Task(void* /*arg*/) {
                 }
             }
             const auto first = g_state->snapshot();
-            // Every device, one Modbus unit id each, in the same order as g_deviceIds and as
-            // the views above -- so unit 1 and the first Home Assistant device are the same
-            // inverter. `held` keeps the snapshots alive across the call (#36).
+            // Every device, one Modbus unit id each: index i is served at inverterUnitId + i,
+            // so unit 1 and the first Home Assistant device are the same inverter (#36).
+            //
+            // Built by POSITION in g_deviceIds, with a null for anything without a snapshot --
+            // not by walking `views`, which skips such a device and would shift every later
+            // one down an index. A Modbus unit id is a wire contract: a client that reads
+            // inverter 3's watts believing they are inverter 2's has no way to notice. Today
+            // the skip cannot happen (state() only returns null for an unregistered id, and
+            // nothing unregisters), so this is a positional guarantee rather than a fix -- but
+            // the alternative depends on a filter never filtering, and that is not a property
+            // worth resting a wire protocol on. refresh() leaves a null entry's map untouched.
             std::vector<const DeviceState*> modbusDevices;
-            modbusDevices.reserve(views.size());
-            for (const auto& v : views) {
-                modbusDevices.push_back(v.state);
+            modbusDevices.reserve(g_deviceIds.size());
+            for (const auto& id : g_deviceIds) {
+                const auto it = std::find_if(views.begin(), views.end(),
+                                             [&id](const mqtt::MqttOutput::DeviceView& v) {
+                                                 return v.id == id;
+                                             });
+                modbusDevices.push_back(it == views.end() ? nullptr : it->state);
             }
             g_modbus.refresh(modbusDevices, bridge, diag, nowMs());
             if (g_mqtt) {

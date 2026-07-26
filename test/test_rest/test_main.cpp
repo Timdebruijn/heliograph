@@ -1708,6 +1708,32 @@ static void test_the_run_stops_at_the_diagnostics_unit() {
     TEST_ASSERT_EQUAL_UINT8(0, server.unitIdFor(2));
 }
 
+// One map per served device -- not one per possible device. 900 registers is 1.8 KB apiece, so
+// reserving eight on a one-inverter bridge would be 14 KB of heap for nothing.
+static void test_maps_are_allocated_per_served_device() {
+    modbus::ModbusTcpServer three(serverConfig(1, 3));
+    TEST_ASSERT_EQUAL_UINT32(3, three.registerMapCount());
+    modbus::ModbusTcpServer one(serverConfig(1, 1));
+    TEST_ASSERT_EQUAL_UINT32(1, one.registerMapCount());
+}
+
+// ...but never zero. The diagnostics unit reads map 0, and a bridge with nothing polling is
+// exactly when someone scrapes it for uptime and heap. Before the per-device maps a single map
+// always existed, so refusing that read would be a quiet regression.
+static void test_the_diagnostics_unit_keeps_a_map_when_no_inverter_started() {
+    modbus::ModbusTcpServer server(serverConfig(1, 0));
+    TEST_ASSERT_EQUAL_UINT8(0, server.servedDevices());
+    TEST_ASSERT_EQUAL_UINT32(1, server.registerMapCount());
+}
+
+// Re-applying a configuration replaces the maps rather than accumulating them.
+static void test_reconfiguring_does_not_accumulate_maps() {
+    modbus::ModbusTcpServer server(serverConfig(1, 3));
+    TEST_ASSERT_TRUE(server.setConfig(serverConfig(1, 2)));
+    TEST_ASSERT_EQUAL_UINT32(2, server.registerMapCount());
+    TEST_ASSERT_EQUAL_UINT8(2, server.servedDevices());
+}
+
 static void test_the_run_stops_at_the_last_valid_slave_address() {
     // 247 is the last valid Modbus slave address; 248 and up are reserved.
     modbus::ModbusTcpServer server(serverConfig(246, 4, 10));
@@ -1833,6 +1859,9 @@ int main(int, char**) {
     RUN_TEST(test_one_device_is_unchanged_at_the_configured_unit_id);
     RUN_TEST(test_the_run_stops_at_the_diagnostics_unit);
     RUN_TEST(test_the_run_stops_at_the_last_valid_slave_address);
+    RUN_TEST(test_maps_are_allocated_per_served_device);
+    RUN_TEST(test_the_diagnostics_unit_keeps_a_map_when_no_inverter_started);
+    RUN_TEST(test_reconfiguring_does_not_accumulate_maps);
     RUN_TEST(test_prometheus_build_info_carries_the_version);
     RUN_TEST(test_the_mock_hybrid_also_exports);
     RUN_TEST(test_status_payload_reports_clock_sync_state);
