@@ -2,6 +2,8 @@
 
 #include "configuration_store.h"
 
+#include "json_limits.h"
+
 #include <ArduinoJson.h>
 
 #include <cstring>
@@ -146,17 +148,8 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     doc["updates"]["check_enabled"] = config.updates.checkEnabled;
     doc["logging"]["level"]         = logLevelName(config.logLevel);
 
-    if (doc.overflowed()) {
-        return false;
-    }
     // Refuse rather than write a truncated blob -- see kMaxStoredConfigBytes.
-    const size_t needed = measureJson(doc);
-    if (needed > kMaxStoredConfigBytes) {
-        return false;
-    }
-    out.resize(needed + 1);
-    out.resize(serializeJson(doc, out.data(), out.size()));
-    return true;
+    return json_limits::finish(doc, out, kMaxStoredConfigBytes);
 }
 
 namespace {

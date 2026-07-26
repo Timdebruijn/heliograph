@@ -2,6 +2,7 @@
 
 #include "configuration.h"
 
+#include "json_limits.h"
 #include "relays/drm.h"
 
 #include <ArduinoJson.h>
@@ -15,20 +16,7 @@
 namespace heliograph {
 namespace {
 
-bool finish(const JsonDocument& doc, std::string& out, size_t maxBytes) {
-    if (doc.overflowed()) {
-        return false;
-    }
-    const size_t needed = measureJson(doc);
-    if (needed > maxBytes) {
-        return false;
-    }
-    std::string buffer;
-    buffer.resize(needed + 1);
-    buffer.resize(serializeJson(doc, buffer.data(), buffer.size()));
-    out = std::move(buffer);
-    return true;
-}
+using json_limits::finish;
 
 /// Applies a string field if present. Returns false only on a type error.
 bool patchString(JsonVariantConst v, std::string& target, const char* field, ConfigError& error) {
