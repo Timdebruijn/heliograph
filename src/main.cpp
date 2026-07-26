@@ -75,10 +75,16 @@ namespace {
 // settings page the grouping and the spacing it never had; 0.15.0 tells you in the dashboard
 // when a newer release exists and installs it in one click -- checked in the browser, never by
 // the bridge, and verified against the release checksum before the boot partition flips -- and
-// lets the mock driver be a whole simulated fleet instead of one inverter.
+// lets the mock driver be a whole simulated fleet instead of one inverter; 0.15.1 changes
+// nothing a user can see -- it collapses five duplications onto one point of truth each (the
+// config document that was written twice, the JSON size bound that existed three times, the
+// rate limiter, the digest-to-hex renderer, the relay safety gates), names the NVS cap that had
+// been a bare 3900, and adds two guards so the classes of rot it cleaned up cannot come back:
+// a layering rule against comments citing line numbers in our own files, and a test asserting
+// the two config documents differ only in their credentials.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 15
-#define HELIOGRAPH_VERSION_PATCH 0
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
