@@ -58,8 +58,9 @@ public:
     /// The lock covers ONLY the rate-limiter bookkeeping and is released before the driver runs.
     /// execute() on a real driver is an RS485 transaction that waits up to 2 s for the bus lock
     /// and then up to 3 s for the reply, and holding a mutex across that would stall every other
-    /// caller for seconds -- the same mistake main.cpp:492 documents finding live in Phase 3,
-    /// where a seconds-long bus transaction ran inside an AsyncTCP callback. Bus exclusivity is
+    /// caller for seconds -- the same mistake the deferred-poll comment in main.cpp's REST
+    /// action handler documents finding live in Phase 3, where a seconds-long bus transaction
+    /// ran inside an AsyncTCP callback. Bus exclusivity is
     /// already the transport's job (Transport::lock), so this mutex does not need to provide it.
     ///
     /// Consequence worth knowing: the kill switch is re-read immediately before execute() to
@@ -87,7 +88,7 @@ private:
 
     // Releases run on their own track: they are never blocked by restricting traffic, but they
     // still keep a minimum spacing so a loop cannot saturate the bus with them. See
-    // releasesRestriction() for why they are treated apart at all.
+    // changesRunState() for why they are treated apart at all.
     bool     everReleased_  = false;
     uint64_t lastReleaseMs_ = 0;
 };

@@ -4,7 +4,7 @@
 //
 // The file is deliberately NOT a new serialisation of the configuration. It is a thin envelope
 // around the document ConfigurationStore already writes to NVS, which means the field list has
-// exactly one point of truth (buildStorageDocument, via serializeConfigForStorage) and a
+// exactly one point of truth (serializeConfigForStorage) and a
 // setting added tomorrow lands in the backup without anyone remembering to add it here. The
 // alternative -- a second hand-maintained field list -- fails silently and is discovered by
 // someone whose restore quietly dropped a setting.
@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "configuration.h"
+#include "configuration_store.h"  // kMaxStoredConfigBytes
 
 namespace heliograph {
 
@@ -39,10 +40,12 @@ inline constexpr const char* kBackupFormat        = "heliograph-config-backup";
 /// envelope's own shape changes; the configuration within it versions itself.
 inline constexpr uint16_t    kBackupFormatVersion = 1;
 
-/// Upper bound on a backup we will accept. The configuration itself cannot exceed 3900 bytes
-/// (NVS refuses to store more), and the envelope adds a couple of hundred; the rest is slack
-/// for pretty-printing by whoever edited the file in between.
+/// Upper bound on a backup we will accept. The configuration itself cannot exceed
+/// kMaxStoredConfigBytes (NVS refuses to store more), and the envelope adds a couple of
+/// hundred; the rest is slack for pretty-printing by whoever edited the file in between.
 inline constexpr size_t kMaxBackupBytes = 8192;
+static_assert(kMaxBackupBytes > kMaxStoredConfigBytes,
+              "a backup must have room for the largest configuration plus its envelope");
 
 struct BackupOptions {
     /// Off by default, and the UI has to ask. See the note at the top of this file.

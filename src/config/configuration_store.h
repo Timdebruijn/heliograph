@@ -18,6 +18,16 @@
 
 namespace heliograph {
 
+/// Ceiling on the serialised configuration blob.
+///
+/// NVS caps a single string entry at 4000 bytes. This sits just under it so a config that has
+/// outgrown the store is REFUSED at serialise time rather than written truncated -- a truncated
+/// blob fails to parse on the next boot and presents as corruption, which is a much worse
+/// symptom than a save that says no. Named here because config_backup.h needs the same number
+/// to size its own envelope bound, and a value restated in prose in a second file is a value
+/// that will eventually be wrong in one of them.
+inline constexpr size_t kMaxStoredConfigBytes = 3900;
+
 /// Minimal key/value persistence. The whole configuration is stored as one JSON blob plus a
 /// version key -- simpler than a key per field, and migration becomes ordinary JSON work.
 class KeyValueBackend {

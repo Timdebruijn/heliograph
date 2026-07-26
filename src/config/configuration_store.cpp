@@ -149,10 +149,9 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     if (doc.overflowed()) {
         return false;
     }
-    // NVS caps a string entry at 4000 bytes. Refuse rather than write a truncated blob that
-    // would fail to parse on the next boot and look like corruption.
+    // Refuse rather than write a truncated blob -- see kMaxStoredConfigBytes.
     const size_t needed = measureJson(doc);
-    if (needed > 3900) {
+    if (needed > kMaxStoredConfigBytes) {
         return false;
     }
     out.resize(needed + 1);
