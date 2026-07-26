@@ -11,8 +11,6 @@
 using namespace heliograph::pmu;
 namespace fx = heliograph::fixtures;
 
-void setUp() {}
-void tearDown() {}
 
 // --- checksum ---------------------------------------------------------------------------
 
@@ -182,8 +180,7 @@ static void test_valid_response_passes_checksum() {
                       parseFrame(fx::kRespNormalInfoSingle, fx::kRespNormalInfoSingleLen, f));
 }
 
-int main(int, char**) {
-    UNITY_BEGIN();
+void run_eversolar_checksum() {
     RUN_TEST(test_checksum_is_plain_byte_sum);
     RUN_TEST(test_checksum_includes_the_header);
     RUN_TEST(test_checksum_wraps_at_16_bits);
@@ -200,5 +197,4 @@ int main(int, char**) {
     RUN_TEST(test_all_zero_frame_is_rejected);
     RUN_TEST(test_checksum_of_zero_is_valid_when_the_sum_wraps);
     RUN_TEST(test_valid_response_passes_checksum);
-    return UNITY_END();
 }

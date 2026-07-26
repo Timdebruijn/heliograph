@@ -12,8 +12,6 @@
 using namespace heliograph::eversolar;
 namespace fx = heliograph::fixtures;
 
-void setUp() {}
-void tearDown() {}
 
 static constexpr double kEps = 1e-9;
 static const Address    kInverter = inverterAddress(0x10);
@@ -433,8 +431,7 @@ static void test_model_is_anchored_on_the_manufacturer_field() {
     TEST_ASSERT_EQUAL_STRING("", modelFromIdString("", "Ever-Solar").c_str());
 }
 
-int main(int, char**) {
-    UNITY_BEGIN();
+void run_eversolar_parser() {
     RUN_TEST(test_expected_frame_length_needs_the_length_byte);
     RUN_TEST(test_expected_frame_length_is_overhead_plus_payload);
     RUN_TEST(test_partial_frame_is_incomplete_not_invalid);
@@ -478,5 +475,4 @@ int main(int, char**) {
     RUN_TEST(test_registration_ack_is_recognised);
     RUN_TEST(test_registration_nak_is_not_an_ack);
     RUN_TEST(test_inverter_id_is_extracted_verbatim);
-    return UNITY_END();
 }

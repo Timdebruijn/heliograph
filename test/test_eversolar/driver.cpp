@@ -23,8 +23,6 @@ using Payload = FakeEversolarDevice::Payload;
 static uint64_t g_now = 0;
 static uint64_t clockFn() { return g_now; }
 
-void setUp() { g_now = 1000; }
-void tearDown() {}
 
 /// A driver wired to a simulated inverter. Tests describe the device, not the byte script.
 struct Rig {
@@ -695,8 +693,7 @@ static void test_snapshots_are_immutable_and_independent() {
                               store.snapshot()->measurements.find(measurement_id::kAcPowerTotal)->value);
 }
 
-int main(int, char**) {
-    UNITY_BEGIN();
+void run_eversolar_driver() {
     RUN_TEST(test_begin_configures_the_only_known_profile);
     RUN_TEST(test_begin_broadcasts_re_register);
     RUN_TEST(test_begin_fails_when_the_line_cannot_be_configured);
@@ -738,5 +735,7 @@ int main(int, char**) {
     RUN_TEST(test_backoff_is_bounded);
     RUN_TEST(test_diagnostics_track_the_cycle_without_leaking_payload);
     RUN_TEST(test_snapshots_are_immutable_and_independent);
-    return UNITY_END();
 }
+
+// Reset the fake clock before each test, as the original per-suite setUp did.
+void eversolar_driver_reset() { g_now = 1000; }

@@ -12,8 +12,6 @@
 
 using namespace heliograph::modbus;
 
-void setUp() {}
-void tearDown() {}
 
 // --- CRC ----------------------------------------------------------------------------------
 
@@ -242,8 +240,7 @@ static void test_write_exception_is_reported() {
     TEST_ASSERT_EQUAL_HEX8(0x04, resp.exceptionCode);
 }
 
-int main(int, char**) {
-    UNITY_BEGIN();
+void run_modbus_rtu() {
     RUN_TEST(test_crc_matches_the_canonical_vector);
     RUN_TEST(test_crc_second_vector);
     RUN_TEST(test_read_request_is_framed_low_crc_byte_first);
@@ -262,5 +259,4 @@ int main(int, char**) {
     RUN_TEST(test_registers_overflowing_the_caller_buffer_are_refused);
     RUN_TEST(test_write_single_echo_is_validated);
     RUN_TEST(test_write_exception_is_reported);
-    return UNITY_END();
 }
