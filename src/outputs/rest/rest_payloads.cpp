@@ -548,4 +548,60 @@ bool buildLogsPayload(const std::vector<std::string>& lines, uint32_t totalLines
     return finish(doc, out, maxBytes);
 }
 
+bool buildCapturePayload(const CaptureReport& report, uint64_t nowMs, std::string& out,
+                         size_t maxBytes) {
+    JsonDocument doc;
+    doc["status"] = captureStatusName(report.status);
+    if (!report.error.empty()) {
+        doc["error"] = report.error;
+    }
+    // The line it actually listened at, echoed in full. On an unidentified device this is a
+    // guess, and every number below is only meaningful against the guess that produced it --
+    // a report that omitted it would be uninterpretable a day later.
+    JsonObject line   = doc["line"].to<JsonObject>();
+    line["baud_rate"] = report.profile.baudRate;
+    line["parity"]    = parityName(report.profile.parity);
+    line["data_bits"] = report.profile.dataBits;
+    line["stop_bits"] = report.profile.stopBits;
+    line["idle_gap_ms"] = report.idleGapMs;
+
+    doc["requested_seconds"] = report.config.durationMs / 1000;
+    doc["max_frames"]        = report.config.maxFrames;
+    if (report.startedMs != 0) {
+        const uint64_t end = report.finishedMs != 0 ? report.finishedMs : nowMs;
+        doc["elapsed_ms"]  = end - report.startedMs;
+    }
+
+    JsonObject summary       = doc["summary"].to<JsonObject>();
+    summary["frames"]        = report.frames.size();
+    summary["bytes"]         = report.totalBytes;
+    // THE number to read first. A capture at the wrong baud rate produces plenty of bytes and
+    // zero valid checksums, and without this the operator concludes the device is mute.
+    summary["modbus_crc_ok"] = report.modbusFrames;
+    summary["aa55_frames_ok"] = report.pmuFrames;
+    summary["truncated"]     = report.truncated;
+
+    JsonArray frames = doc["frames"].to<JsonArray>();
+    for (const auto& f : report.frames) {
+        JsonObject e        = frames.add<JsonObject>();
+        e["offset_ms"]      = f.offsetMs;
+        e["gap_before_ms"]  = f.gapBeforeMs;
+        e["length"]         = f.bytes.size();
+        e["modbus_crc_ok"]  = f.modbusCrcValid;
+        e["aa55_ok"]        = f.pmuFrameValid;
+        // Uppercase, space-separated: the form every protocol document and every decoder
+        // example in docs/ uses, so a captured frame can be compared against one by eye.
+        std::string hex;
+        hex.reserve(f.bytes.size() * 3);
+        for (size_t i = 0; i < f.bytes.size(); ++i) {
+            static const char kDigits[] = "0123456789ABCDEF";
+            if (i != 0) hex.push_back(' ');
+            hex.push_back(kDigits[f.bytes[i] >> 4]);
+            hex.push_back(kDigits[f.bytes[i] & 0x0F]);
+        }
+        e["hex"] = hex;
+    }
+    return finish(doc, out, maxBytes);
+}
+
 }  // namespace heliograph::rest

@@ -160,12 +160,85 @@ worked for the EverSolar driver:
    software/dongle talks to the device, or replaying a community implementation's
    sequence. Decode frame by frame before writing any code
    (`tools/decode_eversolar.py` is the working example of such a decoder).
+
+   **The bridge can do the tap itself** — see [§6](#6-capturing-an-unknown-device) below.
+   It is already wired to the bus, so you need no USB-RS485 adapter and no laptop within
+   cable reach of the inverter.
 2. Read `docs/eversolar-protocol.md` and `src/drivers/eversolar_legacy/` as the
    reference structure: framing/checksum in a parser (host-tested), sequencing in the
    driver, brand knowledge nowhere else.
 3. Open an issue early with your captures. Protocol sequencing has failure modes that
    only show on real hardware over days (our sunrise-recovery saga is the cautionary
    tale), so plan for a soak-test phase.
+
+## 6. Capturing an unknown device
+
+When the discovery wizard finishes and names nothing, it offers **"Record the raw bus"**.
+That is this feature, and it needs no working driver — which is the point, because the
+devices worth capturing are exactly the ones nothing here can talk to yet.
+
+It listens. The bridge transmits nothing for the whole window; on a protocol you do not
+understand, a stray write is the one thing that could actually disturb the device.
+
+**Make the other end talk while it runs.** A passive tap records nothing on a quiet bus.
+Start the vendor app, plug in the monitoring dongle, press whatever makes it poll — or
+just wait, if something already polls on a cycle.
+
+### Read the checksum count first
+
+The report leads with how many records carried a valid checksum, and that number answers
+the question that actually blocks you:
+
+| What you see | What it means |
+|---|---|
+| Bytes, and valid checksums | Right line speed. Go decode. |
+| Bytes, **no** valid checksums | Almost always the **wrong baud rate** — try the next one. Failing that, a protocol that is neither Modbus RTU nor AA55, in which case the hex is still exactly what you want. |
+| No bytes at all | Either nothing spoke while it ran, or the wiring is wrong. A/B swapped is the usual one, then termination. |
+
+The device's baud rate is part of what you do not know yet, so guess and iterate. 9600 is
+by far the most common; then 19200, then 115200.
+
+### What comes out
+
+A text file you can attach to an issue directly:
+
+```
+# Heliograph raw RS485 capture
+# line: 9600 baud, none parity, 8 data bits, 1 stop bits
+# frame boundaries cut on 4 ms of silence
+# 12 frames, 143 bytes, 12 valid Modbus CRC, 0 valid AA55
+#
+# time_ms  gap_ms  len  checksum  bytes
+       0       0    8  modbus    01 03 00 00 00 0A C5 CD
+      41      33   25  modbus    01 03 14 00 00 09 C4 ... 
+```
+
+**Write down what the device is and what was talking to it while this ran.** That context
+is the one part nobody can recover from the bytes, and it is the difference between a
+useful capture and a wall of hex.
+
+### One honest limit: framing above 19200
+
+There is no request/response structure to lean on the way a driver has, so records are cut
+on an idle gap — the Modbus t3.5 rule, 3.5 character times of silence. At 9600 and 19200
+that gap is 4 ms and 2 ms, comfortably wider than the read loop's resolution.
+
+**At 38400 and above the real gap is under a millisecond**, finer than anything polling a
+UART can observe, so adjacent frames may land in one record. The byte stream is still
+complete and in order; only the cut points are approximate. A merged record shows up as a
+failed checksum rather than as silence — so on a fast line, judge the capture by the hex,
+not by the checksum count.
+
+### Bounds worth knowing
+
+- Polling stops for the whole window, and the bus is held exclusively.
+- Maximum 300 seconds per run, 256 records, 256 bytes per record — and **12 KB of captured
+  bytes in total**, which is the bound that actually bites first. The other two are a product,
+  and a product of two independently chosen limits bounds nothing: 256 × 256 would render to
+  about 220 KB of hex, which no board here can hold.
+- **Full means stopped, not "oldest dropped".** For a handshake the interesting part is the
+  registration dance at the beginning, and a ring buffer would reliably discard exactly
+  that. A truncated capture says so.
 
 ## Why writes are dormant
 

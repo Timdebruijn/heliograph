@@ -720,6 +720,91 @@ bool RestApi::begin() {
         request->send(202, kJson, "{\"status\":\"accepted\"}");
     });
 
+    // Raw bus capture, for a device discovery could not name. Every parameter travels in the
+    // query: they are four numbers and an enum, and a JSON body would need the whole
+    // collectBody dance for that.
+    g_server->on("/api/v1/actions/capture", HTTP_POST,
+                 [this, authorised, rateLimited](AsyncWebServerRequest* request) {
+        if (!authorised(request) || rateLimited(request)) {
+            return;
+        }
+        if (context_.requestCapture == nullptr) {
+            sendError(request, {404, "no_capture", "this build cannot capture"});
+            return;
+        }
+        const auto number = [request](const char* name, long fallback) -> long {
+            if (!request->hasParam(name)) return fallback;
+            return std::strtol(request->getParam(name)->value().c_str(), nullptr, 10);
+        };
+
+        diag::CaptureConfig config;
+        const long seconds = number("seconds", 30);
+        if (seconds < 1 || seconds > static_cast<long>(kMaxCaptureSeconds)) {
+            // Bounded because a capture holds the bus for its whole window: this is also the
+            // longest one authenticated request can stop the inverter being polled.
+            sendError(request, {400, "invalid_parameter",
+                                "seconds must be between 1 and " +
+                                    std::to_string(kMaxCaptureSeconds)});
+            return;
+        }
+        config.durationMs = static_cast<uint32_t>(seconds) * 1000u;
+        const long frames = number("frames", 64);
+        if (frames < 1 || frames > 256) {
+            sendError(request, {400, "invalid_parameter", "frames must be between 1 and 256"});
+            return;
+        }
+        config.maxFrames = static_cast<size_t>(frames);
+
+        // The line to listen at. There is no driver to ask -- that is the whole situation this
+        // endpoint exists for -- so the operator supplies it, and a wrong guess shows up in the
+        // report as bytes with no valid checksums rather than as silence.
+        SerialProfile profile;
+        const long    baud = number("baud", 9600);
+        if (baud < 300 || baud > 921600) {
+            sendError(request, {400, "invalid_parameter", "baud must be between 300 and 921600"});
+            return;
+        }
+        profile.baudRate = static_cast<uint32_t>(baud);
+        if (request->hasParam("parity")) {
+            SerialParity parity{};
+            if (!parseParity(request->getParam("parity")->value().c_str(), parity)) {
+                sendError(request, {400, "invalid_parameter", "parity must be none, even or odd"});
+                return;
+            }
+            profile.parity = parity;
+        }
+        const long dataBits = number("data_bits", 8);
+        const long stopBits = number("stop_bits", 1);
+        if (dataBits < 5 || dataBits > 8 || stopBits < 1 || stopBits > 2) {
+            sendError(request, {400, "invalid_parameter",
+                                "data_bits must be 5-8 and stop_bits 1 or 2"});
+            return;
+        }
+        profile.dataBits = static_cast<uint8_t>(dataBits);
+        profile.stopBits = static_cast<uint8_t>(stopBits);
+
+        if (!context_.requestCapture(config, profile)) {
+            sendError(request, {409, "bus_busy",
+                                "a capture or discovery run is already using the bus"});
+            return;
+        }
+        request->send(202, kJson, "{\"status\":\"accepted\"}");
+    });
+
+    g_server->on("/api/v1/capture", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        context_.diagnostics->recordRestRequest();
+        if (context_.captureReport == nullptr) {
+            sendError(request, {404, "no_capture", "this build cannot capture"});
+            return;
+        }
+        std::string body;
+        if (!buildCapturePayload(context_.captureReport(), context_.clock(), body)) {
+            sendError(request, {500, "payload_too_large", "the capture exceeded its bound"});
+            return;
+        }
+        request->send(200, kJson, body.c_str());
+    });
+
     g_server->on("/api/v1/actions/factory-reset", HTTP_POST,
                  [this, authorised, rateLimited](AsyncWebServerRequest* request) {
         if (!authorised(request) || rateLimited(request)) {

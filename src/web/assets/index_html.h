@@ -550,6 +550,143 @@ let wizStoredDriverId=null, wizStoredOptions={};
 let wizFound={};
 const STEPS=['Interface','Mode','Probing','Candidates','Confirm','Test poll','Save'];
 
+// ---------------- Raw bus capture ----------------
+// Offered when discovery names nothing. Records what is actually on the wire without needing a
+// driver that understands it -- which is the point, because the devices worth capturing are
+// exactly the ones nothing here can talk to.
+
+let capTimer=null;
+
+function captureCard(){
+  return `<div class="card" style="margin-top:14px"><b>Still nothing? Record the raw bus</b>
+    <p class="dim">This listens to the RS485 line and writes down every byte, without needing a
+    driver that understands them. It is the first thing
+    <b>docs/adding-a-device.md</b> asks for when adding support for a new device — and if you
+    send the result with an issue, someone can work out the protocol from it.</p>
+    <p class="dim"><b>Polling stops for the whole recording</b>, and the bridge stays silent
+    throughout: it only listens. Make the other end talk while it runs — start the vendor app,
+    plug in the monitoring dongle, or just wait for its own poll cycle.</p>
+    <label for="cap_baud">Listen at</label>
+    <select id="cap_baud">${[9600,19200,38400,57600,115200].map(b=>
+      `<option ${b===9600?'selected':''}>${b}</option>`).join('')}</select>
+    <div class="dim" style="font-size:12px">The device's baud rate is part of what you do not
+    know yet. Guess, look at the result, and try another: a <b>wrong</b> rate gives plenty of
+    bytes and <b>no valid checksums</b>, which is exactly how you tell. 9600 first — it is by
+    far the most common.</div>
+    <label for="cap_par">Parity</label>
+    <select id="cap_par">${['none','even','odd'].map(p=>`<option>${p}</option>`).join('')}</select>
+    <label for="cap_secs">Record for (seconds)</label>
+    <input id="cap_secs" type="number" value="30" min="1" max="300">
+    <button onclick="startCapture()">Start recording</button>
+    <div id="capm" class="msg" style="display:none"></div>
+    <div id="capout"></div></div>`;
+}
+
+async function startCapture(){
+  const secs=Number($('#cap_secs').value)||30;
+  const q='?seconds='+secs+'&baud='+$('#cap_baud').value+'&parity='+$('#cap_par').value;
+  const m=$('#capm');m.style.display='block';m.className='msg';m.textContent='Starting…';
+  $('#capout').innerHTML='';
+  const r=await authFetch('/api/v1/actions/capture'+q,{method:'POST'});
+  if(!r.ok&&r.status!==202){
+    const d=await r.json().catch(()=>({}));
+    m.className='msg err';m.textContent=(d.error&&d.error.message)||httpWhy(r);
+    return;
+  }
+  m.textContent='Recording… make the other device talk now.';
+  // Polled rather than pushed: the capture runs on the bus task, and the only thing that
+  // knows it has finished is the report itself.
+  if(capTimer)clearInterval(capTimer);
+  capTimer=setInterval(pollCapture,1000);
+}
+
+async function pollCapture(){
+  // renderWizard() rebuilds #wiz wholesale, so a step change while a capture is running takes
+  // these elements with it. Stop rather than throw on a null every second for the rest of the
+  // session -- the report is still there to fetch when the card comes back.
+  if(!$('#capm')){clearInterval(capTimer);capTimer=null;return}
+  const r=await fetch('/api/v1/capture');
+  if(!r.ok)return;
+  const d=await r.json();
+  const m=$('#capm');
+  if(d.status==='requested'||d.status==='running'){
+    m.textContent='Recording… '+Math.round((d.elapsed_ms||0)/1000)+' of '+
+      (d.requested_seconds||0)+' s — '+(d.summary?d.summary.bytes:0)+' bytes so far.';
+    return;
+  }
+  clearInterval(capTimer);capTimer=null;
+  if(d.status==='failed'){m.className='msg err';m.textContent='Could not record: '+esc(d.error||'unknown');return}
+  if(d.status==='idle')return;
+  renderCapture(d);
+}
+
+function renderCapture(d){
+  const s=d.summary||{}, m=$('#capm');
+  const ok=(s.modbus_crc_ok||0)+(s.aa55_frames_ok||0);
+  // The verdict, stated rather than left to be inferred from a table of hex. Bytes with no
+  // valid checksum is the signature of a wrong baud rate, and that is a different problem
+  // from a silent bus -- telling them apart is most of the value of doing this at all.
+  if(!s.bytes){
+    m.className='msg err';
+    m.textContent='Nothing at all on the line at '+d.line.baud_rate+' baud. Either the device '+
+      'said nothing while this ran, or the wiring is wrong (A/B swapped is the usual one).';
+  }else if(!ok){
+    m.className='msg err';
+    m.textContent=s.bytes+' bytes, but not one valid checksum. That is what a wrong baud rate '+
+      'looks like — try another from the list. It can also mean a protocol neither Modbus RTU '+
+      'nor AA55, which the hex below is still worth keeping.';
+  }else{
+    m.className='msg ok';
+    m.textContent=s.frames+' frames, '+s.bytes+' bytes, '+ok+' with a valid checksum at '+
+      d.line.baud_rate+' baud. That is the right line speed.';
+  }
+  $('#capout').innerHTML=`
+    ${s.truncated?`<div class="msg err" style="display:block">Stopped early — the frame limit
+      was reached. The beginning is kept, which is the part a handshake needs.</div>`:''}
+    <table style="margin-top:10px"><thead><tr><th>Time</th><th>Gap</th><th>Len</th>
+      <th>Checksum</th><th>Bytes</th></tr></thead><tbody>
+      ${(d.frames||[]).map(f=>`<tr><td class="n">${f.offset_ms} ms</td>
+        <td class="n dim">${f.gap_before_ms} ms</td><td class="n">${f.length}</td>
+        <td>${f.modbus_crc_ok?'<span style="color:var(--ok)">Modbus</span>':
+             f.aa55_ok?'<span style="color:var(--ok)">AA55</span>':
+             '<span class="dim">—</span>'}</td>
+        <td style="font:12px/1.5 ui-monospace,Menlo,monospace;word-break:break-all">${esc(f.hex)}</td></tr>`).join('')}
+    </tbody></table>
+    <button onclick="downloadCapture()">Download as a text file</button>
+    <div class="dim" style="font-size:12px">Attach it to an issue. Note down what the device is
+    and what was talking to it while this ran — that context is the part nobody can recover
+    from the bytes.</div>`;
+  window.g_capture=d;
+}
+
+// Built here rather than served as a second format by the firmware: it is presentation, the
+// page already has the data, and a text renderer on the device would be flash spent on
+// something the browser does for nothing.
+function downloadCapture(){
+  const d=window.g_capture; if(!d)return;
+  const s=d.summary||{};
+  const lines=[
+    '# Heliograph raw RS485 capture',
+    '# line: '+d.line.baud_rate+' baud, '+d.line.parity+' parity, '+d.line.data_bits+
+      ' data bits, '+d.line.stop_bits+' stop bits',
+    '# frame boundaries cut on '+d.line.idle_gap_ms+' ms of silence',
+    '# '+s.frames+' frames, '+s.bytes+' bytes, '+(s.modbus_crc_ok||0)+' valid Modbus CRC, '+
+      (s.aa55_frames_ok||0)+' valid AA55'+(s.truncated?' (stopped at the frame limit)':''),
+    '#',
+    '# time_ms  gap_ms  len  checksum  bytes',
+    ...(d.frames||[]).map(f=>
+      String(f.offset_ms).padStart(8)+'  '+String(f.gap_before_ms).padStart(6)+'  '+
+      String(f.length).padStart(3)+'  '+
+      (f.modbus_crc_ok?'modbus  ':f.aa55_ok?'aa55    ':'-       ')+'  '+f.hex)];
+  const url=URL.createObjectURL(new Blob([lines.join('\n')+'\n'],{type:'text/plain'}));
+  const a=document.createElement('a');a.href=url;
+  a.download='heliograph-capture-'+d.line.baud_rate+'.txt';
+  // In the DOM before the click: Firefox ignores a synthetic click on a detached anchor, so a
+  // download that works in Chrome does nothing at all there, silently.
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
 function stepBar(){
   return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">'+
     STEPS.map((n,i)=>`<span class="tag" style="${i+1===wizStep?'border-color:#2f81f7;color:var(--fg)':''}">${i+1}. ${n}</span>`).join('')+
@@ -636,6 +773,11 @@ function renderWizard(){
       </div>`;
     });
     h+=`<button onclick="wizStep=2;renderWizard()" style="background:none;border:1px solid var(--line);color:var(--fg)">Back</button></div>`;
+    // The dead end this exists for. Discovery has finished and named nothing, and up to now
+    // the wizard's only remaining advice was "check your wiring". A raw capture is the next
+    // real step -- and it is the first step docs/adding-a-device.md asks a contributor for, so
+    // offering it here turns a failed scan into the start of a driver instead of a shrug.
+    if(!c.length)h+=captureCard();
   } else if(wizStep===5){
     h+=`<div class="card"><b>Step 5 — Confirm</b>
     <p class="dim">Nothing is saved until step 7. An uncertain match is never selected for you

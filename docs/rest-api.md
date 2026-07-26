@@ -21,6 +21,8 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | GET | `/api/v1/config` | — | Config **without secrets** |
 | PATCH | `/api/v1/config` | **✔** | Change config |
 | POST | `/api/v1/actions/discover` | **✔** | Start discovery |
+| POST | `/api/v1/actions/capture` | **✔** | Record raw RS485 traffic (`?seconds=&baud=&parity=&frames=`) |
+| GET | `/api/v1/capture` | — | The last capture, with per-frame hex and checksum verdicts |
 | POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
 | POST | `/api/v1/actions/reboot` | **✔** | Reboot |
 | POST | `/api/v1/actions/clear-coredump` | **✔** | Discard a stored crash dump (404 when there is none) |
@@ -333,6 +335,63 @@ There is no `response_timeout_ms` here. Read deadlines are per-driver compile-ti
 a field on this object would have been a knob that changed nothing.
 
 While the override is off these fields are stored but not validated — they configure nothing.
+
+## Capturing an unknown device
+
+`POST /api/v1/actions/capture` records raw RS485 traffic without needing a driver that
+understands it. Contributor-facing; [docs/adding-a-device.md](adding-a-device.md#6-capturing-an-unknown-device)
+is the guide, this is the wire contract.
+
+| Parameter | Default | Range |
+|---|---|---|
+| `seconds` | 30 | 1–300 |
+| `frames` | 64 | 1–256 |
+| `baud` | 9600 | 300–921600 |
+| `parity` | `none` | `none`, `even`, `odd` |
+| `data_bits` | 8 | 5–8 |
+| `stop_bits` | 1 | 1–2 |
+
+202 on acceptance; **409** when a capture or a discovery run is already using the bus. Both
+take it exclusively, and rs485Task runs discovery first, so a capture accepted alongside one
+would record the tail of the probe run.
+
+The capture runs on the task that owns the bus, **instead of** that cycle's poll — the same
+handover discovery uses. That is the concurrency answer: there is no iteration in which the bus
+is being listened to and polled, so the two cannot interleave. The bridge transmits nothing for
+the whole window.
+
+`GET /api/v1/capture` returns the report, poll it for progress:
+
+```json
+{
+  "status": "done",
+  "line": { "baud_rate": 9600, "parity": "none", "data_bits": 8, "stop_bits": 1,
+            "idle_gap_ms": 4 },
+  "requested_seconds": 30, "max_frames": 64, "elapsed_ms": 30012,
+  "summary": { "frames": 12, "bytes": 143, "modbus_crc_ok": 12, "aa55_frames_ok": 0,
+               "truncated": false },
+  "frames": [
+    { "offset_ms": 0, "gap_before_ms": 0, "length": 8, "modbus_crc_ok": true,
+      "aa55_ok": false, "hex": "01 03 00 00 00 0A C5 CD" }
+  ]
+}
+```
+
+**`summary.modbus_crc_ok` is the number to read first.** A capture at the wrong baud rate
+produces plenty of bytes and zero valid checksums, and without that count the operator
+concludes the device is mute when it is merely being listened to at the wrong speed.
+
+The line settings are echoed in full because on an unidentified device they are a *guess*, and
+every number in the report is only meaningful against the guess that produced it.
+
+Frames are cut on `idle_gap_ms` of silence, derived from the baud rate (Modbus t3.5) and
+floored at 2 ms. Above 19200 the true gap is finer than the read loop can resolve, so adjacent
+frames may merge into one record — the byte stream stays complete and ordered, only the cut
+points are approximate. Stated here rather than left to be discovered from confusing output.
+
+The report is bounded at 64 KB and the capture stops when full rather than dropping the oldest:
+for a handshake the interesting part is at the beginning, and a ring buffer would reliably
+discard exactly that. `summary.truncated` says which happened.
 
 ## Applying changes: `reboot_required`
 

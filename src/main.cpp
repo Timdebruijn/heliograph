@@ -23,6 +23,7 @@
 #include <mutex>
 #include <vector>
 
+#include "app/capture_runner.h"
 #include "app/discovery_runner.h"
 #include "boards/board.h"
 #include "config/configuration.h"
@@ -199,6 +200,9 @@ std::atomic<status::LedColor> g_statusLedColor{status::LedColor::Off};
 
 /// Owns discovery runs. The web handler requests; rs485Task runs, because it owns the bus.
 DiscoveryRunner g_discovery{g_registry, nowMs};
+
+/// Owns passive bus captures, on the same terms and for the same reason.
+CaptureRunner g_capture{nowMs};
 
 /// The configured driver, or the highest-priority one compiled in. No manufacturer name here.
 std::string selectedDriverId() {
@@ -691,6 +695,16 @@ void startRestApi() {
     };
     ctx.requestDiscovery    = [](bool extended) { return g_discovery.request(extended); };
     ctx.discoveryReport     = [] { return g_discovery.report(); };
+    // Refused while discovery is pending or running as well as while another capture is: both
+    // want exclusive use of the same bus, and rs485Task runs discovery first, so a capture
+    // accepted alongside one would sit queued and then record the tail of the probe run.
+    ctx.requestCapture = [](const diag::CaptureConfig& config, const SerialProfile& profile) {
+        if (g_discovery.busy()) {
+            return false;
+        }
+        return g_capture.request(config, profile);
+    };
+    ctx.captureReport = [] { return g_capture.report(); };
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
     // Clears a dump the operator has dealt with. Without it every later diagnostics read keeps
     // reporting the same old crash, and "is this new?" becomes unanswerable. The cached copy is
@@ -772,6 +786,26 @@ void reconcileAnnouncedDevices(const BridgeInfo& bridge) {
     g_announcedReconciled = true;
 }
 
+/// Puts every driver back on the bus and the line back where it belongs.
+///
+/// Needed after anything that took the bus away from the poll loop and left it changed.
+/// Discovery re-registers every inverter and resets the line to the driver's own first
+/// profile; a capture leaves the line on whatever the operator asked to listen at. Both end
+/// with a bus the driver no longer agrees with, so both end here.
+void restoreDriverLine() {
+    for (auto& d : g_drivers) {
+        d->begin(g_transport);
+    }
+    if (!g_drivers.empty()) {
+        // begin() has just put the line back on the driver's own first profile, exactly as it
+        // does at boot. Without this, running discovery from the web UI on a healthy bridge
+        // silently undid the stored override and the inverter went quiet until the next power
+        // cycle -- the same failure that override exists to prevent, on the one path that
+        // reconfigures the line at runtime.
+        applySerialOverride();
+    }
+}
+
 void rs485Task(void* /*arg*/) {
     for (;;) {
         // One feed per iteration. The 120 s budget covers a normal iteration; an extended
@@ -792,20 +826,29 @@ void rs485Task(void* /*arg*/) {
         // response timeout. The one feed above covered a run that was a handful of probes long.
         if (g_discovery.runIfRequested(g_transport, [] { esp_task_wdt_reset(); })) {
             Serial.printf("[discovery] %s\n", g_discovery.report().outcome.reason.c_str());
-            // The probe left the bus re-registered; make the driver pick that up rather than
-            // poll a stale address.
-            // Every device, not just the first: the probe re-registered the whole bus.
-            for (auto& d : g_drivers) {
-                d->begin(g_transport);
-            }
-            if (!g_drivers.empty()) {
-                // ...and begin() has just put the line back on the driver's own first profile,
-                // exactly as it does at boot. Without this, running discovery from the web UI
-                // on a healthy bridge silently undid the override and the inverter went quiet
-                // until the next power cycle -- the same failure this override exists to
-                // prevent, on the one path that reconfigures the line at runtime.
-                applySerialOverride();
-            }
+            // The probe left the bus re-registered and the line on the driver's default; make
+            // every device pick that up rather than poll a stale address.
+            restoreDriverLine();
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+        // A capture, on exactly the same terms: instead of this cycle's poll, not alongside it.
+        // That is the whole concurrency answer -- there is no iteration in which the bus is
+        // being listened to AND polled, so the two cannot interleave by construction.
+        //
+        // The watchdog is fed per read iteration, not once here: a window is tens of seconds
+        // inside this single iteration, which the 120 s budget above would not survive on its
+        // own at the maximum window length.
+        if (g_capture.runIfRequested(g_transport, [] { esp_task_wdt_reset(); })) {
+            const auto report = g_capture.report();
+            log::info("capture: %u frames, %u bytes, %u with a valid Modbus CRC",
+                      static_cast<unsigned>(report.frames.size()),
+                      static_cast<unsigned>(report.totalBytes),
+                      static_cast<unsigned>(report.modbusFrames));
+            // The capture listened at line settings the operator chose, which for an
+            // unidentified device is precisely NOT the driver's. Leaving them in place would
+            // silence a working inverter until the next reboot.
+            restoreDriverLine();
             vTaskDelay(pdMS_TO_TICKS(250));
             continue;
         }

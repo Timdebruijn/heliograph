@@ -26,6 +26,8 @@ echo "==> 2. The host-testable core must not depend on Arduino or ESP-IDF"
 core_paths=(
     src/device
     src/protocols/byte_order.h
+    src/diagnostics/frame_capture.h
+    src/diagnostics/frame_capture.cpp
     src/protocols/modbus/modbus_rtu.h
     src/protocols/modbus/modbus_rtu.cpp
     src/protocols/pmu/pmu_protocol.h

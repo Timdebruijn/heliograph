@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "app/capture_runner.h"
 #include "device/bridge_info.h"
 #include "device/device_state.h"
 #include "diagnostics/diagnostics.h"
@@ -132,5 +133,15 @@ inline constexpr size_t kMaxLogResponseBytes = 24576;
 bool buildLogsPayload(const std::vector<std::string>& lines, uint32_t totalLines,
                       const std::string& level, std::string& out,
                       size_t maxBytes = kMaxLogResponseBytes);
+
+/// A raw bus capture, for a device nothing in this build can identify.
+///
+/// Bounded separately and generously: this is hex, which is two characters per byte before JSON
+/// quoting, and the default 64x256 window can produce well over the 8 KB a normal response is
+/// held to. Truncating the one artefact a contributor is going to paste into an issue would
+/// defeat the feature.
+inline constexpr size_t kMaxCaptureResponseBytes = 65536;
+bool buildCapturePayload(const CaptureReport& report, uint64_t nowMs, std::string& out,
+                         size_t maxBytes = kMaxCaptureResponseBytes);
 
 }  // namespace heliograph::rest
