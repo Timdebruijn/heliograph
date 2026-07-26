@@ -115,6 +115,48 @@ static void test_firmware_version_registers_report_the_running_version() {
     TEST_ASSERT_EQUAL_UINT16(3, v);
 }
 
+// Registers 824-827. The all-ones sentinel distinguishes "this board has no PSRAM" from
+// "it has PSRAM and none is free" -- 0 would collapse the two, and only one of them is a
+// reason to page somebody. kDiagFreeHeap is MALLOC_CAP_INTERNAL and never covered this.
+static void test_psram_registers_report_size_and_free() {
+    EversolarRig r;
+    r.bridge.psramSizeBytes = 8388608;
+    r.bridge.psramFreeBytes = 7340032;
+    r.pollAndRender();
+    uint16_t v[2] = {0, 0};
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagPsramSize, 2, v));
+    TEST_ASSERT_EQUAL_UINT32(8388608u, (static_cast<uint32_t>(v[0]) << 16) | v[1]);
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagPsramFree, 2, v));
+    TEST_ASSERT_EQUAL_UINT32(7340032u, (static_cast<uint32_t>(v[0]) << 16) | v[1]);
+}
+
+static void test_psram_registers_carry_the_sentinel_without_psram() {
+    EversolarRig r;
+    r.bridge.psramSizeBytes = 0;  // Relay-6CH
+    r.bridge.psramFreeBytes = 0;
+    r.pollAndRender();
+    uint16_t v[2] = {0, 0};
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagPsramSize, 2, v));
+    TEST_ASSERT_EQUAL_UINT32(kInvalidU32, (static_cast<uint32_t>(v[0]) << 16) | v[1]);
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagPsramFree, 2, v));
+    TEST_ASSERT_EQUAL_UINT32(kInvalidU32, (static_cast<uint32_t>(v[0]) << 16) | v[1]);
+}
+
+static void test_coredump_register_flags_a_stored_dump() {
+    EversolarRig r;
+    r.bridge.coredumpPresent = true;
+    r.pollAndRender();
+    uint16_t v = 0;
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagCoredump, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(1, v);
+
+    EversolarRig clean;
+    clean.bridge.coredumpPresent = false;
+    clean.pollAndRender();
+    TEST_ASSERT_TRUE(clean.map.read(reg::kDiagCoredump, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(0, v);
+}
+
 // --- schema and framing --------------------------------------------------------------------
 
 static void test_schema_version_is_published() {
@@ -562,5 +604,8 @@ int main(int, char**) {
     RUN_TEST(test_validity_bits_fit_the_reserved_space);
     RUN_TEST(test_relay_registers_use_the_sentinel_without_hardware);
     RUN_TEST(test_firmware_version_registers_report_the_running_version);
+    RUN_TEST(test_psram_registers_report_size_and_free);
+    RUN_TEST(test_psram_registers_carry_the_sentinel_without_psram);
+    RUN_TEST(test_coredump_register_flags_a_stored_dump);
     return UNITY_END();
 }

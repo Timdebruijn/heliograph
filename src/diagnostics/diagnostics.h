@@ -23,6 +23,13 @@ struct DiagnosticsSnapshot {
     uint32_t mqttReconnectTotal        = 0;
     uint32_t modbusClientConnections   = 0;
     uint32_t restRequestTotal          = 0;
+    /// Publishes espMqttClient refused: disconnected, or its outbox out of memory.
+    ///
+    /// The symptom of an MQTT client that is wedged or falling behind while still reporting
+    /// connected. Until this existed the return value of publish() was discarded at eleven of
+    /// its twelve call sites, so a refused publish was indistinguishable from a delivered one
+    /// on every output (audit, 2026-07-26).
+    uint32_t mqttPublishFailureTotal   = 0;
     uint64_t lastSuccessfulPollMs      = 0;
     /// Lowest-ever free stack per application task, in bytes (ESP-IDF's xtensa port defines
     /// StackType_t as uint8_t, so uxTaskGetStackHighWaterMark already returns bytes). Each
@@ -66,6 +73,10 @@ public:
     void recordMqttReconnect() { mqttReconnectTotal_.fetch_add(1, std::memory_order_relaxed); }
     void recordModbusClient() { modbusClientConnections_.fetch_add(1, std::memory_order_relaxed); }
     void recordRestRequest() { restRequestTotal_.fetch_add(1, std::memory_order_relaxed); }
+    /// Called from the MQTT task, hence the atomic like every other counter here.
+    void recordMqttPublishFailure() {
+        mqttPublishFailureTotal_.fetch_add(1, std::memory_order_relaxed);
+    }
 
     /// Stack high-water marks, in bytes. Each task reports its OWN mark
     /// (uxTaskGetStackHighWaterMark(nullptr)) so no task handle ever crosses a boundary.
@@ -86,7 +97,6 @@ public:
     void setLastError(const std::string& message);
 
     DiagnosticsSnapshot snapshot() const;
-    void                reset();
 
 private:
     std::atomic<uint32_t> pollSuccessTotal_{0};
@@ -99,6 +109,7 @@ private:
     std::atomic<uint32_t> mqttReconnectTotal_{0};
     std::atomic<uint32_t> modbusClientConnections_{0};
     std::atomic<uint32_t> restRequestTotal_{0};
+    std::atomic<uint32_t> mqttPublishFailureTotal_{0};
     std::atomic<uint64_t> lastSuccessfulPollMs_{0};
     std::atomic<uint32_t> rs485StackFreeBytes_{0};
     std::atomic<uint32_t> loopStackFreeBytes_{0};

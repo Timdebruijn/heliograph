@@ -23,6 +23,7 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | POST | `/api/v1/actions/discover` | **✔** | Start discovery |
 | POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
 | POST | `/api/v1/actions/reboot` | **✔** | Reboot |
+| POST | `/api/v1/actions/clear-coredump` | **✔** | Discard a stored crash dump (404 when there is none) |
 | POST | `/api/v1/ota` | **✔** | Firmware upload |
 | GET | `/api/v1/events` | — | Server-Sent Events (live updates) |
 | GET | `/metrics` | — | Prometheus |

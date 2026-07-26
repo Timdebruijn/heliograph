@@ -29,6 +29,7 @@
 #include "config/configuration_store.h"
 #include "config/nvs_backend.h"
 #include "device/device_context.h"
+#include "diagnostics/coredump.h"
 #include "diagnostics/diagnostics.h"
 #include "diagnostics/log_timestamp.h"
 #include "diagnostics/logger.h"
@@ -174,6 +175,14 @@ std::atomic<bool> g_manualPollRequested{false};
 /// the log-timestamp provider.
 uint64_t nowMs() { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
 
+/// The crash dump the previous boot left behind, read ONCE in setup().
+///
+/// Not per request: reading it verifies a checksum over the whole stored image. It also cannot
+/// change while we run -- a new dump is only written by a panic, and a panic does not come back
+/// here -- so a cached copy is not merely an optimisation, it is the accurate model. Cleared in
+/// place when the erase action succeeds, which is the one thing that CAN change it.
+diag::CoredumpSummary g_coredump;
+
 /// The bridge's DRM relays (empty on boards without them). Commands arrive on two tasks
 /// (REST via AsyncTCP, MQTT via the client's task); g_relayMutex serialises them and the
 /// state reads in bridgeInfo(). The controller itself stays lock-free and host-testable.
@@ -249,6 +258,10 @@ BridgeInfo bridgeInfo() {
     info.freeHeapBytes    = ESP.getFreeHeap();
     info.minFreeHeapBytes = ESP.getMinFreeHeap();
     info.maxAllocHeapBytes = ESP.getMaxAllocHeap();
+    // Separate from the three above, which are MALLOC_CAP_INTERNAL. Both accessors are guarded
+    // by psramFound() inside the core, so a board without PSRAM reports 0 rather than failing.
+    info.psramSizeBytes    = ESP.getPsramSize();
+    info.psramFreeBytes    = ESP.getFreePsram();
     info.resetReason      = static_cast<uint16_t>(esp_reset_reason());
     info.wifiConnected    = g_wifi.connected();
     info.wifiRssiDbm      = g_wifi.rssi();
@@ -266,6 +279,9 @@ BridgeInfo bridgeInfo() {
     info.ntpServer        = ntpSource.server;
     info.ntpFromDhcp      = ntpSource.fromDhcp;
     info.otaImageState    = ota::imageStateName();
+    info.coredumpPresent  = g_coredump.present;
+    info.coredumpTask     = g_coredump.taskName;
+    info.coredumpPc       = g_coredump.programCounter;
     if (g_relays.count() > 0) {
         {
             std::lock_guard<std::mutex> lock(g_relayMutex);
@@ -676,6 +692,16 @@ void startRestApi() {
     ctx.requestDiscovery    = [](bool extended) { return g_discovery.request(extended); };
     ctx.discoveryReport     = [] { return g_discovery.report(); };
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
+    // Clears a dump the operator has dealt with. Without it every later diagnostics read keeps
+    // reporting the same old crash, and "is this new?" becomes unanswerable. The cached copy is
+    // updated in the same breath so the next payload agrees with the flash.
+    ctx.clearCoredump = [] {
+        if (!diag::eraseCoredump()) {
+            return false;
+        }
+        g_coredump = {};
+        return true;
+    };
     ctx.portalActive        = [] { return g_wifi.portalActive(); };
     ctx.scanNetworks        = scanNetworksJson;
     if (g_relays.count() > 0) {
@@ -924,6 +950,17 @@ void setup() {
     tzset();
 
     log::info("config: %s (log level %s)", loadResultName(loaded), logLevelName(g_config.logLevel));
+
+    // Once per boot, before anything else can panic on top of it. A dump here means the PREVIOUS
+    // run crashed; saying so in the boot log is half the value, because that log is what gets
+    // read after an unexplained reboot.
+    g_coredump = diag::readCoredumpSummary();
+    if (g_coredump.present) {
+        log::warn("coredump: previous boot crashed in task '%s' at pc 0x%08lX "
+                  "(clear it from Diagnostics once handled)",
+                  g_coredump.taskName.empty() ? "?" : g_coredump.taskName.c_str(),
+                  static_cast<unsigned long>(g_coredump.programCounter));
+    }
     if (loaded == LoadResult::Corrupt || loaded == LoadResult::FutureVersion) {
         // Defaults, so the device lands in the setup portal. Better than running on values we
         // could not parse or do not understand.
@@ -1120,6 +1157,17 @@ void setup() {
     // 5 s default: an extended discovery scan legitimately runs many back-to-back 3 s
     // transactions between feeds, and the purpose here is catching forever-hangs, not
     // latency policing.
+    //
+    // Side effect worth naming: esp_task_wdt_reconfigure applies to EVERY watched task,
+    // including the core-0 idle task kept by idle_core_mask. So idle starvation on core 0,
+    // which the IDF default would have caught in 5 s, now takes two minutes to trip. The API
+    // has no per-task timeout, so the choice is this or no idle coverage at all; discovery
+    // needs the headroom more than idle starvation needs the faster trip.
+    //
+    // Not watched at all: the AsyncTCP task behind the web server and the task espMqttClient
+    // creates for itself. Registering a task whose blocking behaviour we do not control risks
+    // panicking a healthy device, so their liveness is reported through diagnostics instead
+    // (webLastServiceMs / mqttLastServiceMs) and left for a human or an alert to act on.
     esp_task_wdt_config_t wdtConfig = {
         .timeout_ms    = 120000,
         .idle_core_mask = 1 << 0,  // keep the idle-task coverage the sdkconfig had

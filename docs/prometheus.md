@@ -231,6 +231,10 @@ wiring and the addressing are fine:
 | `heliograph_uptime_seconds` | gauge | Seconds since boot |
 | `heliograph_free_heap_bytes` | gauge | Free heap |
 | `heliograph_max_alloc_heap_bytes` | gauge | Largest single allocatable block |
+| `heliograph_psram_size_bytes` | gauge | Total external PSRAM — **absent on a board without it** |
+| `heliograph_psram_free_bytes` | gauge | Free external PSRAM — **absent on a board without it** |
+| `heliograph_coredump_present` | gauge | `1` when a crash dump is waiting in flash — **always emitted**, `0` is a fact |
+| `heliograph_mqtt_publish_failures_total` | counter | Publishes the MQTT client refused (link down, or outbox full) |
 | `heliograph_wifi_rssi_dbm` | gauge | Only present while WiFi is connected |
 | `heliograph_rs485_stack_free_bytes` | gauge | Only after the first sample |
 | `heliograph_loop_stack_free_bytes` | gauge | Only after the first sample |
@@ -266,6 +270,14 @@ This is what makes curtailment reviewable after the fact. Graphing
 `heliograph_relay_energised` beside `heliograph_inverter_ac_power_watts` shows the contact
 closing and the production dropping in the same picture — which is the evidence you want when
 deciding whether a curtailment rule is behaving.
+
+The three heap gauges are **internal SRAM only**. Arduino's `ESP.getFreeHeap()` and friends are
+`heap_caps_*(MALLOC_CAP_INTERNAL)`, so on the RS485-CAN and Relay-1CH — which carry 8 MB of
+external PSRAM — they describe roughly 300 KB of the RAM that exists. `heliograph_psram_*`
+covers the rest, and is **omitted entirely** on the Relay-6CH, which has none. Omitted rather
+than zero, for the same reason as the RSSI and stack gauges: a flat 0 reads as exhaustion to an
+alerting rule. Their absence is also the only way to tell from the network that PSRAM failed to
+initialise on a board that should have it.
 
 `max_alloc_heap_bytes` is the fragmentation signal, and it is the more useful of the two heap
 numbers on a device meant to run for months: free heap can look healthy while no allocation of

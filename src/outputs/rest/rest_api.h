@@ -70,6 +70,10 @@ struct RestContext {
     /// The same wipe the BOOT-hold performs, reached over the network instead of the button --
     /// which is what a user without physical access has when a config locks them out.
     std::function<bool()> requestFactoryReset;
+    /// Erases a stored crash dump. Returns false when there was none, or the flash refused.
+    /// Admin-gated and rate-limited like every other action -- it destroys diagnostic evidence,
+    /// which is exactly the sort of thing an unauthenticated caller must not be able to do.
+    std::function<bool()> clearCoredump;
     /// True while the setup portal is up: the API then serves the setup page and /provision.
     std::function<bool()> portalActive;
     /// Scans for networks; returns a JSON body. Portal only.

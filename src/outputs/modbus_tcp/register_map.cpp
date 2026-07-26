@@ -338,6 +338,17 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
     writeU16(reg::kDiagFirmwareMajor, bridge.firmwareMajor);
     writeU16(reg::kDiagFirmwareMinor, bridge.firmwareMinor);
     writeU16(reg::kDiagFirmwarePatch, bridge.firmwarePatch);
+    // Sentinel rather than 0 for a board with no PSRAM: 0 free is a real reading on a board
+    // that has it and has exhausted it, and a monitoring rule must be able to tell those
+    // apart. kDiagFreeHeap above is internal SRAM only and never included this.
+    if (bridge.psramSizeBytes > 0) {
+        writeU32(reg::kDiagPsramSize, bridge.psramSizeBytes);
+        writeU32(reg::kDiagPsramFree, bridge.psramFreeBytes);
+    } else {
+        writeU32(reg::kDiagPsramSize, kInvalidU32);
+        writeU32(reg::kDiagPsramFree, kInvalidU32);
+    }
+    writeU16(reg::kDiagCoredump, bridge.coredumpPresent ? 1 : 0);
     // Read-only observation of the bridge relays; the sentinel distinguishes "no relay
     // hardware" from "relays, none energised". Control never goes through Modbus.
     if (bridge.relayCount > 0) {

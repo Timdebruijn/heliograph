@@ -21,6 +21,7 @@ DiagnosticsSnapshot Diagnostics::snapshot() const {
     s.mqttReconnectTotal      = mqttReconnectTotal_.load(std::memory_order_relaxed);
     s.modbusClientConnections = modbusClientConnections_.load(std::memory_order_relaxed);
     s.restRequestTotal        = restRequestTotal_.load(std::memory_order_relaxed);
+    s.mqttPublishFailureTotal = mqttPublishFailureTotal_.load(std::memory_order_relaxed);
     s.lastSuccessfulPollMs    = lastSuccessfulPollMs_.load(std::memory_order_relaxed);
     s.rs485StackFreeBytes     = rs485StackFreeBytes_.load(std::memory_order_relaxed);
     s.loopStackFreeBytes      = loopStackFreeBytes_.load(std::memory_order_relaxed);
@@ -29,24 +30,6 @@ DiagnosticsSnapshot Diagnostics::snapshot() const {
         s.lastError = lastError_;
     }
     return s;
-}
-
-void Diagnostics::reset() {
-    pollSuccessTotal_.store(0);
-    pollFailureTotal_.store(0);
-    consecutivePollFailures_.store(0);
-    checksumErrorTotal_.store(0);
-    rs485TimeoutTotal_.store(0);
-    invalidFrameTotal_.store(0);
-    wifiReconnectTotal_.store(0);
-    mqttReconnectTotal_.store(0);
-    modbusClientConnections_.store(0);
-    restRequestTotal_.store(0);
-    lastSuccessfulPollMs_.store(0);
-    rs485StackFreeBytes_.store(0);
-    loopStackFreeBytes_.store(0);
-    std::lock_guard<std::mutex> lock(errorMutex_);
-    lastError_.clear();
 }
 
 }  // namespace heliograph

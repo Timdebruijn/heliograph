@@ -25,6 +25,20 @@ struct BridgeInfo {
     /// healthy while no allocation of consequence fits anymore, which is exactly the
     /// failure mode a months-uptime device grows into.
     uint32_t maxAllocHeapBytes = 0;
+    /// External PSRAM, reported separately because the three figures above do NOT include it.
+    ///
+    /// ESP.getFreeHeap(), getMinFreeHeap() and getMaxAllocHeap() are all
+    /// heap_caps_*(MALLOC_CAP_INTERNAL) in Arduino core 3.x -- internal SRAM only. So on a
+    /// board with 8 MB of PSRAM every heap number this struct carried described about 300 KB
+    /// of it, and a board where PSRAM failed to train looked exactly like one where it worked.
+    /// The RS485-CAN and Relay-1CH have 8 MB; the Relay-6CH is an N8 with none (audit,
+    /// 2026-07-26).
+    ///
+    /// `psramSizeBytes == 0` means this board has no PSRAM, or it did not initialise -- the two
+    /// are indistinguishable from software and both are worth seeing. Outputs report absent
+    /// rather than zero, per the house rule.
+    uint32_t psramSizeBytes    = 0;
+    uint32_t psramFreeBytes    = 0;
     uint16_t resetReason       = 0;
 
     bool    wifiConnected  = false;
@@ -51,6 +65,20 @@ struct BridgeInfo {
     /// The running image's otadata state ("pending_verify" until the healthy-boot
     /// confirmation, then "valid"). Makes the rollback window observable in diagnostics.
     std::string otaImageState = "unknown";
+
+    /// The crash dump waiting in the `coredump` partition, read once at boot.
+    ///
+    /// Same kind of fact as otaImageState above: a one-shot read of what the bootloader left
+    /// behind, carried here so the outputs never call an ESP-IDF function themselves. Reading
+    /// it verifies a checksum over the whole stored image, so it happens once in setup(), not
+    /// per request.
+    ///
+    /// `coredumpPresent` false is the normal state, and the state after an erase; the other
+    /// two are meaningless then and every output reports them absent rather than as task ""
+    /// at PC 0.
+    bool        coredumpPresent = false;
+    std::string coredumpTask;
+    uint32_t    coredumpPc      = 0;
 
     /// The board this firmware is running on. Reported to Home Assistant as the bridge
     /// device's model.

@@ -166,6 +166,10 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
     appendHelp(out, "heliograph_mqtt_reconnects_total", "MQTT reconnections", "counter");
     appendValue(out, "heliograph_mqtt_reconnects_total",
                 static_cast<unsigned long>(d.mqttReconnectTotal));
+    appendHelp(out, "heliograph_mqtt_publish_failures_total",
+               "Publishes the MQTT client refused (link down, or outbox full)", "counter");
+    appendValue(out, "heliograph_mqtt_publish_failures_total",
+                static_cast<unsigned long>(d.mqttPublishFailureTotal));
     appendHelp(out, "heliograph_wifi_reconnects_total", "WiFi reconnections", "counter");
     appendValue(out, "heliograph_wifi_reconnects_total",
                 static_cast<unsigned long>(d.wifiReconnectTotal));
@@ -203,6 +207,26 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
                "Largest allocatable heap block (fragmentation signal)", "gauge");
     appendValue(out, "heliograph_max_alloc_heap_bytes",
                 static_cast<unsigned long>(bridge.maxAllocHeapBytes));
+    // Always emitted, unlike the gauges below it: 0 means "no crash dump stored", which is a
+    // fact rather than a missing sample, and it is the value an alert rule wants to watch for
+    // going to 1. The task name and PC are not metric material -- read those from
+    // /api/v1/diagnostics once this fires.
+    appendHelp(out, "heliograph_coredump_present",
+               "1 when a crash dump is waiting in flash", "gauge");
+    appendValue(out, "heliograph_coredump_present",
+                static_cast<unsigned long>(bridge.coredumpPresent ? 1 : 0));
+    // The three gauges above are MALLOC_CAP_INTERNAL and exclude PSRAM entirely, so on an 8 MB
+    // board they describe ~300 KB of the RAM that exists. Emitted only when there IS PSRAM:
+    // a flat 0 on the Relay-6CH, which has none, would look like exhaustion to an alert rule
+    // -- the same reasoning as the RSSI and stack gauges (audit, 2026-07-26).
+    if (bridge.psramSizeBytes > 0) {
+        appendHelp(out, "heliograph_psram_size_bytes", "Total external PSRAM", "gauge");
+        appendValue(out, "heliograph_psram_size_bytes",
+                    static_cast<unsigned long>(bridge.psramSizeBytes));
+        appendHelp(out, "heliograph_psram_free_bytes", "Free external PSRAM", "gauge");
+        appendValue(out, "heliograph_psram_free_bytes",
+                    static_cast<unsigned long>(bridge.psramFreeBytes));
+    }
     // Omitted until the first sample, like the RSSI gauge above: 0 would read as an
     // exhausted stack to any alerting rule.
     if (d.rs485StackFreeBytes > 0) {

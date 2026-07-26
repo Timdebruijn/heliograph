@@ -241,6 +241,9 @@ there is no possible confusion with a valid value.
 | 816 | 2 | uint32 | REST requests |
 | 818 | 2 | uint32 | Invalid frames |
 | 820 | 3 | uint16[3] | Firmware version major/minor/patch |
+| 824 | 2 | uint32 | Total external PSRAM in bytes — `0xFFFFFFFF` = no PSRAM on this board |
+| 826 | 2 | uint32 | Free external PSRAM in bytes — `0xFFFFFFFF` = no PSRAM on this board |
+| 828 | 1 | uint16 | `1` = a crash dump is waiting in flash; read the task and PC from `/api/v1/diagnostics` |
 | 850 | 1 | uint16 | Relay count — `0xFFFF` = no relay hardware on this board |
 | 851 | 1 | uint16 | Relay state bitmask (bit *i* = relay *i* energised); `0xFFFF` without hardware |
 

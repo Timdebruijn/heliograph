@@ -127,6 +127,14 @@ inline constexpr uint16_t kDiagInvalidFrames = 818;  // uint32
 inline constexpr uint16_t kDiagFirmwareMajor = 820;  // uint16
 inline constexpr uint16_t kDiagFirmwareMinor = 821;  // uint16
 inline constexpr uint16_t kDiagFirmwarePatch = 822;  // uint16
+// External PSRAM. NOT part of kDiagFreeHeap/kDiagMinFreeHeap above, which are internal SRAM
+// only. All-ones = this board has no PSRAM (or it failed to initialise), distinct from a
+// board that has it and has run out.
+inline constexpr uint16_t kDiagPsramSize     = 824;  // uint32, 0xFFFFFFFF = no PSRAM
+inline constexpr uint16_t kDiagPsramFree     = 826;  // uint32, 0xFFFFFFFF = no PSRAM
+// 1 = a crash dump is waiting in the coredump partition. Read the task name and PC from
+// /api/v1/diagnostics; a Modbus client only needs to know whether to raise the alarm.
+inline constexpr uint16_t kDiagCoredump      = 828;  // uint16, 0 or 1
 // Bridge relays (DRM contacts). READ-ONLY here by design: relay control goes through the
 // admin-gated REST/MQTT paths with their safety gates; the unauthenticated Modbus surface
 // only ever observes. 0xFFFF sentinel on boards without relays (count 0 would claim

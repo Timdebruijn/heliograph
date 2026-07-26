@@ -2,6 +2,11 @@
 
 Audit date: **2026-07-26**, against `v0.13.2` (`96a2629`).
 
+> **Status: acted on.** Every quick win and both medium items are implemented — see the
+> plan at the bottom for what landed and what deliberately did not. One recommendation in
+> this document (L1) was **withdrawn after its justification turned out to be wrong**; the
+> correction is in §6 and is left visible rather than edited away.
+
 Scope: are the ESP32-S3-specific facilities that firmware projects commonly leave on the table
 actually being used here? Every claim below is backed by a `path:line` reference that was read
 during the audit, not recalled. Where the answer turned out to be "already handled", that is
@@ -359,11 +364,18 @@ Two distinct things:
    report it — not REST, not Prometheus, not the Modbus diagnostics block. The bridge would run
    on internal RAM with a quietly reduced ceiling. This is the one item in this section that is a
    present-tense defect in the monitoring, not a future opportunity.
-2. **Missed capability.** Every Prometheus scrape gap is permanent data loss, and every REST query
-   sees only *now*. With 8 MB available, a ring of per-device samples is nearly free: 8 devices ×
-   33 measurements × 8 bytes is ~2 KB per sample, so 24 hours at 10-second resolution is roughly
-   17 MB — too much, but 24 hours at 60-second resolution is ~2.8 MB, comfortably inside PSRAM
-   and well beyond anything internal SRAM could hold.
+2. **A possible capability, on a weaker basis than first stated.** Every REST query sees only
+   *now*, and with 8 MB available a ring of per-device samples would be nearly free: 24 hours at
+   60-second resolution is roughly 2.8 MB, well beyond anything internal SRAM could hold.
+
+   ⚠️ **The original version of this paragraph also claimed a device-side ring would stop
+   Prometheus scrape gaps from being permanent data loss. That is wrong, and the claim is
+   withdrawn.** Prometheus records one sample per series per scrape, at scrape time. The text
+   exposition format does allow an optional per-sample timestamp, but it cannot carry a *series*
+   of historical points for one metric in a single scrape, and our exporter emits none anyway
+   (`prometheus_metrics.cpp`, `appendValue`). So a missed scrape stays missed no matter what the
+   device remembers. Device-side history would serve REST and a dashboard curve — a feature —
+   and would do nothing for the monitoring gap it was justified by.
 
 ### Recommendation
 
@@ -481,7 +493,7 @@ already records as a known, reasoned position.
 
 ## Prioritised plan
 
-### Quick wins — hours, low risk
+### Quick wins — hours, low risk  ✅ all implemented
 
 | # | Item | Impact | Test |
 |---|---|---|---|
@@ -492,19 +504,19 @@ already records as a known, reasoned position.
 
 Q1 and Q4 are effectively free. Q2 is the one with real present-tense value.
 
-### Medium — a day or two each
+### Medium — a day or two each  ✅ both implemented (M2 in a different shape — see below)
 
 | # | Item | Impact | Test |
 |---|---|---|---|
 | M1 | Coredump surfacing: `esp_core_dump_image_check()` + `esp_core_dump_get_summary()` in diagnostics, admin-gated erase route, retrieval documented | Turns an unexplained night-time reboot into a named faulting task and PC, without a cable | The IDF calls are not host-compilable, so keep the presentation pure: a `CoredumpSummary` struct formatted by a host-tested payload builder, with the IDF call behind the same `#if defined(ESP32)` split the OTA manager already uses. Hardware: force a panic, reboot, confirm the summary appears and that erasing clears it |
-| M2 | Liveness heartbeats for the AsyncTCP and MQTT tasks in `Diagnostics` (age of last service), rather than registering library tasks with the WDT | Makes a stalled web server or MQTT client visible in Prometheus instead of silent; avoids the panic risk of watchdogging a task we do not control | Fully host-testable: the age calculation and its thresholds are pure. Hardware: block the broker with a firewall rule and confirm the MQTT heartbeat ages while polling continues |
+| M2 | ~~Liveness heartbeats~~ → **MQTT publish-failure counter** | Implementing the heartbeats showed both were the wrong shape. **The web server needs none:** a successful `/metrics` scrape is itself proof the AsyncTCP task is alive, so the field would be true exactly whenever you could read it. **MQTT needed something better:** `publish()` returns 0 when the client refuses a message (link down, outbox full), and eleven of twelve call sites discarded that — so an undelivered message looked delivered, while `mqtt_connected` stayed true. Now counted and exported | Two host tests. Hardware: block the broker and confirm the counter climbs while polling continues |
 
-### Larger — worth planning, not worth starting this week
+### Larger — L1 withdrawn, L2 deliberately deferred
 
 | # | Item | Impact | Test |
 |---|---|---|---|
-| L1 | PSRAM-backed measurement history ring + `?since=` on the measurements route | Prometheus scrape gaps stop being permanent data loss; the dashboard could show a real curve without Home Assistant | The ring itself is pure and belongs in `-e native` with a fake allocator: bounded capacity, wrap behaviour, eviction order, and the "no PSRAM → history disabled, everything else unchanged" path. Hardware: 24 h soak on the production bridge watching internal-heap free stay flat |
-| L2 | Blocking UART read replacing the `delay(1)` poll | Latency only, and only at 115200 with several devices | Measure before and after on the real Growatt bus. Do not start until that bus exists |
+| L1 | ~~PSRAM-backed measurement history ring~~ | **Withdrawn.** Its stated benefit — closing Prometheus scrape gaps — does not exist (see §6). What remains is a dashboard feature: a device-side curve without Home Assistant. Worth doing if that is wanted for its own sake, on its own design pass, and not justified by monitoring |
+| L2 | Blocking UART read replacing the `delay(1)` poll | Latency only, and only at 115200 with several devices | **Not done, on purpose.** It touches `Rs485Transport::read`, the one path that talks to a live inverter, for a benefit nobody can currently measure. The current loop returns as soon as any byte arrives and the caller reassembles frames; a naive blocking read would wait for a full buffer and stall on every short reply. Revisit when the Growatt bus exists to measure against |
 
 ### Explicitly not recommended
 

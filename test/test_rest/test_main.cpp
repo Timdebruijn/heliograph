@@ -1389,6 +1389,96 @@ static void test_diagnostics_report_stack_marks_and_fragmentation() {
     TEST_ASSERT_EQUAL_UINT32(65536, doc["max_alloc_heap_bytes"].as<uint32_t>());
 }
 
+// The three heap figures are MALLOC_CAP_INTERNAL and exclude PSRAM, so without these two an
+// 8 MB board reported ~300 KB of RAM and a board whose PSRAM never trained looked identical
+// to one where it worked (audit, 2026-07-26).
+static void test_psram_is_reported_when_the_board_has_it() {
+    Rig  r;
+    auto bridge            = makeBridge();
+    bridge.psramSizeBytes  = 8 * 1024 * 1024;
+    bridge.psramFreeBytes  = 7 * 1024 * 1024;
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(8388608, doc["psram_size_bytes"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(7340032, doc["psram_free_bytes"].as<uint32_t>());
+}
+
+// Null, not 0. Zero free is a real reading on a board that HAS PSRAM and has exhausted it;
+// collapsing that onto "no PSRAM fitted" would hide the more alarming of the two.
+static void test_psram_is_null_on_a_board_without_it() {
+    Rig  r;
+    auto bridge           = makeBridge();
+    bridge.psramSizeBytes = 0;  // Relay-6CH: ESP32-S3-WROOM-1U-N8, no PSRAM
+    bridge.psramFreeBytes = 0;
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["psram_size_bytes"].isNull());
+    TEST_ASSERT_TRUE(doc["psram_free_bytes"].isNull());
+}
+
+// The dump has been written to flash on every panic since the OTA partition layout was
+// designed; nothing read it until 2026-07-26. These pin the reporting, not the reading -- the
+// esp_core_dump_* calls are ESP32-only and the summary reaches the builder as a plain struct.
+// Until this counter existed, publish() returning 0 -- link down, or the client's outbox out
+// of memory -- was discarded at eleven of its twelve call sites, so a message that never left
+// looked exactly like one that did. A wedged client reports connected the whole time, which is
+// why mqtt_connected alone was not enough.
+static void test_mqtt_publish_failures_are_counted_and_published() {
+    Rig r;
+    r.diagnostics.recordMqttPublishFailure();
+    r.diagnostics.recordMqttPublishFailure();
+    r.diagnostics.recordMqttPublishFailure();
+
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), makeBridge(), json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(3, doc["mqtt_publish_failure_total"].as<uint32_t>());
+}
+
+static void test_coredump_is_reported_when_one_is_stored() {
+    Rig  r;
+    auto bridge            = makeBridge();
+    bridge.coredumpPresent = true;
+    bridge.coredumpTask    = "rs485";
+    bridge.coredumpPc      = 0x42011AF0;
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["coredump_present"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("rs485", doc["coredump_task"].as<const char*>());
+    TEST_ASSERT_EQUAL_UINT32(0x42011AF0u, doc["coredump_pc"].as<uint32_t>());
+}
+
+// Task "" at PC 0 is not a fact about anything, and coredump_present already carries the whole
+// message. Null keeps a dashboard from rendering a crash that did not happen.
+static void test_coredump_details_are_null_when_none_is_stored() {
+    Rig  r;
+    auto bridge            = makeBridge();
+    bridge.coredumpPresent = false;
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_FALSE(doc["coredump_present"].as<bool>());
+    TEST_ASSERT_TRUE(doc["coredump_task"].isNull());
+    TEST_ASSERT_TRUE(doc["coredump_pc"].isNull());
+}
+
+// A dump whose summary could not be parsed still says present -- the ELF is retrievable with
+// the host tool even when the on-device summariser cannot read it.
+static void test_a_nameless_coredump_still_reports_present() {
+    Rig  r;
+    auto bridge            = makeBridge();
+    bridge.coredumpPresent = true;
+    bridge.coredumpTask    = "";
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["coredump_present"].as<bool>());
+    TEST_ASSERT_TRUE(doc["coredump_task"].isNull());
+}
+
 static void test_stack_marks_are_null_before_the_first_sample() {
     // 0 would read as an exhausted stack to any alerting rule; before the tasks have
     // sampled themselves the honest answer is "unknown".
@@ -1436,6 +1526,56 @@ static void test_prometheus_stack_and_fragmentation_gauges() {
     TEST_ASSERT_TRUE(text.find("heliograph_rs485_stack_free_bytes 2500\n") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_loop_stack_free_bytes 4100\n") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_max_alloc_heap_bytes 65536\n") != std::string::npos);
+}
+
+// Omitted rather than zero on a board with no PSRAM, like the RSSI and stack gauges: a flat 0
+// would read as exhaustion to an alerting rule.
+// 0 is a fact here ("no crash stored"), not a missing sample, so unlike the PSRAM gauges this
+// one is always emitted -- it is the series an alert rule watches for going to 1.
+// A counter, so 0 is emitted from the start: a rate() rule needs the series to exist before
+// the first failure, not to appear at the moment things go wrong.
+static void test_prometheus_exports_the_publish_failure_counter() {
+    Rig        r;
+    const auto state = r.poll();
+    auto       text  = metricsOf(state, makeBridge(), r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_mqtt_publish_failures_total 0\n") != std::string::npos);
+
+    r.diagnostics.recordMqttPublishFailure();
+    text = metricsOf(state, makeBridge(), r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_mqtt_publish_failures_total 1\n") != std::string::npos);
+}
+
+static void test_prometheus_always_reports_the_coredump_flag() {
+    Rig        r;
+    const auto state = r.poll();
+
+    auto clean = makeBridge();
+    clean.coredumpPresent = false;
+    auto text = metricsOf(state, clean, r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_coredump_present 0\n") != std::string::npos);
+
+    auto crashed = makeBridge();
+    crashed.coredumpPresent = true;
+    text = metricsOf(state, crashed, r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_coredump_present 1\n") != std::string::npos);
+}
+
+static void test_prometheus_reports_psram_only_when_present() {
+    Rig        r;
+    const auto state = r.poll();
+
+    auto without = makeBridge();
+    without.psramSizeBytes = 0;
+    auto text = metricsOf(state, without, r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_psram_size_bytes") == std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_psram_free_bytes") == std::string::npos);
+
+    auto with_ = makeBridge();
+    with_.psramSizeBytes = 8388608;
+    with_.psramFreeBytes = 7340032;
+    text = metricsOf(state, with_, r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_psram_size_bytes 8388608\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_psram_free_bytes 7340032\n") != std::string::npos);
 }
 
 static void test_prometheus_exports_current_readings() {
@@ -1905,6 +2045,15 @@ int main(int, char**) {
     RUN_TEST(test_drivers_payload_drives_the_wizard);
     RUN_TEST(test_diagnostics_payload_has_no_secrets);
     RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);
+    RUN_TEST(test_psram_is_reported_when_the_board_has_it);
+    RUN_TEST(test_psram_is_null_on_a_board_without_it);
+    RUN_TEST(test_prometheus_reports_psram_only_when_present);
+    RUN_TEST(test_mqtt_publish_failures_are_counted_and_published);
+    RUN_TEST(test_prometheus_exports_the_publish_failure_counter);
+    RUN_TEST(test_coredump_is_reported_when_one_is_stored);
+    RUN_TEST(test_coredump_details_are_null_when_none_is_stored);
+    RUN_TEST(test_a_nameless_coredump_still_reports_present);
+    RUN_TEST(test_prometheus_always_reports_the_coredump_flag);
     RUN_TEST(test_stack_marks_are_null_before_the_first_sample);
     RUN_TEST(test_oversized_response_is_refused);
     RUN_TEST(test_prometheus_stack_and_fragmentation_gauges);

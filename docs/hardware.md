@@ -47,12 +47,34 @@ authoritative pin record for all of them (Relay-1CH: 1 relay + RTC; Relay-6CH: 6
 | Fact | Value | Relevance |
 |---|---|---|
 | Flash | **16 MB** | Dual-app OTA partitions + headroom (`partitions_16mb_ota.csv`) |
-| PSRAM | 8 MB | `-DBOARD_HAS_PSRAM` |
+| PSRAM | 8 MB, octal | `-DBOARD_HAS_PSRAM` + `memory_type = qio_opi`. Reported as `psram_size_bytes` / `psram_free_bytes` — see below |
 | USB | native USB-C, no CH340 | `-DARDUINO_USB_CDC_ON_BOOT=1`; attaching USB power-cycles a USB-powered board |
 | Power | USB-C or 7–36 V DC terminal | The DC terminal allows powering from the inverter side of the room |
 | Isolation | power + optocoupler, RS485 **and** CAN | `SGND` is NOT `GND` — never bridge them |
 | Termination | 120 Ω jumper per bus | Fit only when the bridge is physically at the end of the RS485 bus |
 | Buttons | BOOT + RESET | RESET reboots. BOOT held ~5 s **while running** factory-resets; held **at power-on** it enters USB download mode instead (GPIO0 strapping) — see Recovery |
+
+## Reading the memory figures
+
+The bridge reports five memory numbers, and they do not all measure the same pool.
+
+| Field | Covers |
+|---|---|
+| `free_heap_bytes`, `minimum_free_heap_bytes`, `max_alloc_heap_bytes` | **Internal SRAM only** (~320 KB total) |
+| `psram_size_bytes`, `psram_free_bytes` | **External PSRAM only** (8 MB here, absent on the Relay-6CH) |
+
+This is not a naming quirk, it is what the Arduino core does: `ESP.getFreeHeap()`,
+`getMinFreeHeap()` and `getMaxAllocHeap()` are all `heap_caps_*(MALLOC_CAP_INTERNAL)`. So a free
+heap of ~150 KB on this board is healthy, not alarming — it is 150 KB of 320 KB, not of 8 MB.
+
+The PSRAM pair is `null` in JSON, absent from Prometheus and `0xFFFFFFFF` in the Modbus
+registers on a board that has none. That is also how you tell, from the network alone, that
+PSRAM failed to initialise on a board that should have it: the fields go absent. Before these
+existed there was no way to see that at all (audit, 2026-07-26).
+
+Note that the IDF is configured with `CONFIG_SPIRAM_USE_MALLOC` and a 4096-byte threshold, so
+allocations above 4 KB already land in PSRAM through plain `malloc` without any code asking for
+it. `psram_free_bytes` moving is normal and expected.
 
 ## RS485 direction control
 
@@ -75,6 +97,75 @@ The second isolated terminal block is a CAN interface (GPIO15/16, ESP32-S3 TWAI
 peripheral). No driver uses it today. It is recorded because battery BMS protocols
 commonly speak CAN, which makes this board a natural fit for a future battery-side
 source — a deliberate decision for later, not an accident waiting in a header file.
+
+## After a crash — the core dump
+
+A panic writes a full ELF core dump to the `coredump` partition (64 KB, present in both
+partition tables; `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` is set in the prebuilt IDF config). It
+survives the reboot.
+
+The bridge now tells you it is there without a cable. The boot log carries a `coredump:` warn
+line naming the faulting task and PC, `GET /api/v1/diagnostics` reports
+`coredump_present` / `coredump_task` / `coredump_pc`, Prometheus exports
+`heliograph_coredump_present`, and Modbus register 828 carries the same flag. That is enough to
+know a crash happened, which task died, and roughly where — usually enough to decide whether it
+is worth going further.
+
+To go further, pull the dump itself:
+
+```bash
+python -m esp_coredump --chip esp32s3 --port /dev/tty.usbmodem* info_corefile .pio/build/waveshare-rs485-can/firmware.elf
+```
+
+The ELF you pass **must be the image that was running when it crashed**. Keep the build
+artifacts from the release you flashed, or rebuild from the exact tag — a dump decoded against
+a different binary produces confident nonsense.
+
+Once you have dealt with it, clear the dump so the next one is distinguishable from this one:
+
+```bash
+curl -u admin:PASSWORD -X POST http://heliograph.local/api/v1/actions/clear-coredump
+```
+
+A new crash overwrites the old one on its own (`CONFIG_ESP_COREDUMP_FLASH_NO_OVERWRITE` is not
+set), so clearing is about answering "is this new?", not about making room.
+
+## Step-debugging over the built-in USB-JTAG
+
+The S3 has a USB-Serial-JTAG peripheral on the chip. No external probe, no extra wiring, and
+the same USB-C cable that carries the serial console — JTAG and CDC are separate interfaces on
+the one USB device, so `ARDUINO_USB_CDC_ON_BOOT=1` does not get in the way.
+
+```bash
+pio debug -e debug-rs485-can --interface=gdb -x .pioinit
+```
+
+Or in an editor with the PlatformIO extension, pick the `debug-rs485-can` environment and start
+a debug session normally.
+
+`debug-rs485-can` is a separate environment (`build_type = debug`, `debug_tool = esp-builtin`)
+so the shipping images stay release builds. Debug drops the optimiser to `-Og`, which changes
+timing — and RS485 timing is the last thing that should shift underneath you unannounced. The
+image grows by roughly 130 KB, which the 6.25 MB app partition absorbs without noticing.
+
+**The watchdog will reset the board while you sit on a breakpoint.** A halted core stops feeding
+the task WDT, and its timeout is 120 s (`src/main.cpp`, `setup()`). For a long inspection,
+either work in short hops or temporarily raise the timeout in that call — and put it back before
+you commit.
+
+Three places where a breakpoint earns its keep, all of them things serial logging is bad at:
+
+- `Rs485Transport::read` / the driver's frame parser, to inspect a malformed buffer *at the
+  moment* it is rejected — logging it changes the timing you are trying to observe.
+- `applySerialOverride()` and driver `begin()`, for the boot path that runs once and is over
+  before you can attach a console.
+- Anything reached from the AsyncTCP task, where a `log::` call competes with the request it is
+  trying to describe.
+
+> If a PlatformIO-generated `.vscode/launch.json` predates 2026-07-22 it names
+> `waveshare-eversolar`, the environment renamed to `waveshare-rs485-can` in the board refactor,
+> and the session will fail on a path that no longer exists. Delete the file and let PlatformIO
+> regenerate it; it is gitignored, so nothing in the repo needs changing.
 
 ## Recovery — hold BOOT to factory-reset
 
