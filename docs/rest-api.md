@@ -230,6 +230,16 @@ single-inverter install.
 { "additional_devices": [ { "driver_id": "growatt_modbus", "options": { "unit_id": "2" } } ] }
 ```
 
+The mock driver takes the same `unit_id`, so a fleet can be simulated without hardware — each
+instance gets its own device id, topic subtree and Modbus unit, and its solar curve is staggered
+so the instances do not all report the same value at once:
+
+```json
+{ "driver": { "id": "mock_inverter", "options": { "unit_id": "1" } },
+  "additional_devices": [ { "driver_id": "mock_inverter", "options": { "unit_id": "2" } },
+                          { "driver_id": "mock_inverter", "options": { "unit_id": "3" } } ] }
+```
+
 Sending the array **replaces** it; omitting it leaves it alone. There is no per-element patch:
 the list has no stable key to merge on, and an index the caller believes is element 2 may not be
 after someone else's edit. `driver_id` may not be empty — for `driver` an empty id means "pick

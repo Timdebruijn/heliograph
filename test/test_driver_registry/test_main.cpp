@@ -423,6 +423,101 @@ static void test_an_unbounded_option_stays_free_form() {
     TEST_ASSERT_TRUE(validateDriverOptions(d, {{"note", "999999"}}, e));
 }
 
+// --- the mock as a fleet --------------------------------------------------------------------
+
+/// The defect this option exists to remove. Every mock reported one hardcoded serial, and
+/// deviceId() prefers the serial -- so a second mock under `additional_devices` resolved to the
+/// same id and was dropped at boot as a duplicate. The descriptor claimed
+/// supportsMultipleDevices while no two instances could differ in anything.
+static void test_two_mock_instances_get_different_device_ids() {
+    test::MockTransport transport;
+    DriverRegistry      registry;
+    registerBuiltinDrivers(registry);
+
+    auto a = registry.create("mock_inverter", transport, DriverOptions{{"unit_id", "1"}});
+    auto b = registry.create("mock_inverter", transport, DriverOptions{{"unit_id", "2"}});
+    TEST_ASSERT_NOT_NULL(a);
+    TEST_ASSERT_NOT_NULL(b);
+
+    TEST_ASSERT_EQUAL_STRING("mock_inverter-MOCK-0000000001", a->identity().deviceId().c_str());
+    TEST_ASSERT_EQUAL_STRING("mock_inverter-MOCK-0000000002", b->identity().deviceId().c_str());
+}
+
+/// Set as well as the serial. instanceKey is what identifies a device BEFORE its first poll,
+/// when the state-store keys are minted, and leaving it empty would make the mock the one
+/// driver that behaves differently at exactly that moment.
+static void test_a_mock_instance_carries_its_key_as_well_as_its_serial() {
+    test::MockTransport transport;
+    DriverRegistry      registry;
+    registerBuiltinDrivers(registry);
+    auto d = registry.create("mock_inverter", transport, DriverOptions{{"unit_id", "5"}});
+    TEST_ASSERT_EQUAL_STRING("5", d->identity().instanceKey.c_str());
+    TEST_ASSERT_EQUAL_STRING("MOCK-0000000005", d->identity().serialNumber.c_str());
+}
+
+/// The compatibility promise. Instance 1 must produce byte-for-byte the id every existing
+/// single-mock install already has, or upgrading orphans its retained MQTT topics and its Home
+/// Assistant entities.
+static void test_instance_one_keeps_the_id_it_always_had() {
+    TEST_ASSERT_EQUAL_STRING("MOCK-0000000001", mock::mockSerialNumber(1).c_str());
+    test::MockTransport transport;
+    DriverRegistry      registry;
+    registerBuiltinDrivers(registry);
+    // No unit_id at all: exactly what a config stored before this option existed looks like.
+    auto d = registry.create("mock_inverter", transport, DriverOptions{});
+    TEST_ASSERT_EQUAL_STRING("mock_inverter-MOCK-0000000001", d->identity().deviceId().c_str());
+}
+
+/// Different values at the same instant, which is the whole point. A fleet all reporting one
+/// identical number makes a shared store, a mislabelled Prometheus series or a Modbus unit off
+/// by one look exactly like correct output.
+static void test_instances_are_staggered_so_they_do_not_report_in_lockstep() {
+    test::MockTransport transport;
+    DriverRegistry      registry;
+    registerBuiltinDrivers(registry);
+
+    // Built directly with a FROZEN clock rather than through the factory, which uses
+    // steady_clock: the simulated day is only ten minutes long, so a real clock puts these
+    // three at an arbitrary point on the curve and the assertions below would pass or fail
+    // depending on when the suite happened to run.
+    const auto powerOf = [](uint8_t unit) {
+        mock::MockOptions options;
+        options.instance = unit;
+        mock::MockDriver driver([] { return uint64_t{0}; }, options);
+        test::MockTransport t;
+        driver.begin(t);
+        DeviceState state;
+        state.lastPollAttemptMs = 1;
+        TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
+        const auto* p = state.measurements.find(measurement_id::kAcPowerTotal);
+        TEST_ASSERT_NOT_NULL(p);
+        return p->value;
+    };
+
+    // The whole run the device table allows, not just a couple: the point of 1/32 is that even
+    // the last one is still in daylight.
+    double previous = 0.0;
+    for (uint8_t unit = 1; unit <= static_cast<uint8_t>(kMaxDevices); ++unit) {
+        const double power = powerOf(unit);
+        TEST_ASSERT_TRUE(power > 0.0);
+        if (unit > 1) {
+            TEST_ASSERT_TRUE(std::fabs(power - previous) > 1.0);
+        }
+        previous = power;
+    }
+}
+
+/// The bound is the device table's, so a config that would not fit is refused at the option
+/// rather than discovered at boot.
+static void test_an_instance_beyond_the_device_table_is_refused() {
+    DriverOptionError error;
+    TEST_ASSERT_FALSE(validateDriverOptions(mock::readOnlyDescriptor(),
+                                            DriverOptions{{"unit_id", "99"}}, error));
+    TEST_ASSERT_EQUAL_STRING("unit_id", error.key.c_str());
+    TEST_ASSERT_TRUE(validateDriverOptions(mock::readOnlyDescriptor(),
+                                           DriverOptions{{"unit_id", "8"}}, error));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_a_numeric_option_out_of_range_is_refused);
@@ -452,5 +547,10 @@ int main(int, char**) {
     RUN_TEST(test_numeric_option_falls_back_to_the_declared_default);
     RUN_TEST(test_numeric_option_refuses_unknown_and_non_numeric_keys);
     RUN_TEST(test_numeric_option_handles_a_range_starting_at_zero);
+    RUN_TEST(test_two_mock_instances_get_different_device_ids);
+    RUN_TEST(test_a_mock_instance_carries_its_key_as_well_as_its_serial);
+    RUN_TEST(test_instance_one_keeps_the_id_it_always_had);
+    RUN_TEST(test_instances_are_staggered_so_they_do_not_report_in_lockstep);
+    RUN_TEST(test_an_instance_beyond_the_device_table_is_refused);
     return UNITY_END();
 }
