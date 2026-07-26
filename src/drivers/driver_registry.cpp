@@ -49,13 +49,7 @@ const char* pollResultName(PollResult result) {
 bool validateDriverOptions(const DriverDescriptor& descriptor, const DriverOptions& values,
                            DriverOptionError& error) {
     for (const auto& [key, value] : values) {
-        const DriverOption* option = nullptr;
-        for (const auto& o : descriptor.options) {
-            if (o.key == key) {
-                option = &o;
-                break;
-            }
-        }
+        const DriverOption* option = descriptor.findOption(key);
         if (option == nullptr) {
             error = {key, "unknown option for driver '" + descriptor.id + "'"};
             return false;

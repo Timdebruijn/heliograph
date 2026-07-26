@@ -4,7 +4,6 @@
 #include "growatt_driver.h"
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 
 #include "diagnostics/logger.h"
@@ -46,17 +45,15 @@ void traceBlock(uint8_t unitId, RegSpace space, uint16_t start, uint16_t count,
 
 GrowattOptions optionsFrom(const heliograph::DriverOptions& values) {
     GrowattOptions o;
-    const std::string unit = descriptor().optionOr(values, "unit_id");
-    if (!unit.empty()) {
-        const long parsed = strtol(unit.c_str(), nullptr, 10);
-        if (parsed >= 1 && parsed <= 247) {  // valid Modbus unit id range
-            o.unitId = static_cast<uint8_t>(parsed);
-        } else {
-            // Config validation only length-checks option strings, so a typo lands here.
-            // Falling back silently would poll the wrong slave with no clue why it is silent.
-            log::warn("GROWATT unit_id '%s' invalid (want 1-247), using %u", unit.c_str(),
-                      static_cast<unsigned>(o.unitId));
-        }
+    // Range comes from the descriptor's own DriverOption, not from a literal repeated here.
+    long unit = 0;
+    if (descriptor().numericOption(values, "unit_id", unit)) {
+        o.unitId = static_cast<uint8_t>(unit);
+    } else {
+        // Falling back silently would poll the wrong slave with no clue why it is silent.
+        log::warn("GROWATT unit_id '%s' invalid, using %u",
+                  descriptor().optionOr(values, "unit_id").c_str(),
+                  static_cast<unsigned>(o.unitId));
     }
     const std::string profileId = descriptor().optionOr(values, "profile");
     if (!profileId.empty()) {

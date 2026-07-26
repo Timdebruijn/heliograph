@@ -45,8 +45,8 @@ std::vector<std::string> addressesFor(const DriverDescriptor& descriptor, Discov
     // The driver's own default first -- but only if the driver would accept it. A default
     // outside its own declared bounds would be probed, reported, offered by the wizard, and
     // then refused by the PATCH gate: a dead end on the confirm step.
-    const long parsedDefault = std::strtol(def.c_str(), nullptr, 10);
-    if (!def.empty() && parsedDefault >= bounds.first && parsedDefault <= bounds.second) {
+    long parsedDefault = 0;
+    if (descriptor.numericOption(DriverOptions{}, descriptor.addressOptionKey, parsedDefault)) {
         out.push_back(def);
     }
     for (const int address : config.sweepAddresses) {
