@@ -8,6 +8,7 @@
 #include "config/configuration_store.h"
 #include "network/provisioning_policy.h"
 #include "ota/ota_manager.h"
+#include "ota/sha256.h"
 
 using namespace heliograph;
 using heliograph::ota::looksLikeFirmware;
@@ -316,6 +317,44 @@ static void test_an_invalid_config_is_never_persisted() {
     c.polling.intervalSeconds = 0;  // out of range
     TEST_ASSERT_FALSE(store.save(c));
     TEST_ASSERT_FALSE(backend.contains(kStorageKeyConfig));
+}
+
+/// On by default, and it has to survive a reboot like anything else -- an operator who turned
+/// the check off did so for a reason, and a bridge that quietly starts asking github.io again
+/// after a power cut has ignored them.
+static void test_the_update_check_defaults_on_and_round_trips() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    auto               c = provisionedConfig();
+    TEST_ASSERT_TRUE(c.updates.checkEnabled);
+
+    ConfigError e;
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"updates":{"check_enabled":false}})", c, e));
+    TEST_ASSERT_FALSE(c.updates.checkEnabled);
+    TEST_ASSERT_TRUE(store.save(c));
+
+    ConfigurationStore reloaded(backend);
+    Configuration      after;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, reloaded.load(after));
+    TEST_ASSERT_FALSE(after.updates.checkEnabled);
+}
+
+/// A config stored before this setting existed has no `updates` key at all. It must come back
+/// as the default rather than as false, or every existing bridge silently opts out.
+static void test_a_config_without_the_setting_keeps_the_default() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    store.save(provisionedConfig());
+    // Strip the key, exactly as an older firmware's blob would look.
+    std::string blob = backend.raw(kStorageKeyConfig);
+    const size_t at  = blob.find(",\"updates\":{\"check_enabled\":true}");
+    TEST_ASSERT_TRUE(at != std::string::npos);
+    blob.erase(at, std::string(",\"updates\":{\"check_enabled\":true}").size());
+    backend.write(kStorageKeyConfig, blob);
+
+    Configuration after;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(after));
+    TEST_ASSERT_TRUE(after.updates.checkEnabled);
 }
 
 // --- the rollback slot ------------------------------------------------------------------------
@@ -820,6 +859,100 @@ static void test_ota_accepts_a_firmware_upload() {
     TEST_ASSERT_FALSE(ota.running());
 }
 
+static void test_a_matching_hash_is_accepted() {
+    ota::OtaManager ota;
+    const uint8_t   image[] = {0xE9, 0x01, 0x02, 0x03, 0x04, 0x05};
+    // Computed here rather than pasted, then fed back as the expectation: what this asserts is
+    // that the accept path works end to end, with the wrong-hash case below carrying the real
+    // weight.
+    ota::Sha256 h;
+    h.update(image, sizeof(image));
+    const std::string digest = h.finishHex();
+
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(sizeof(image), digest));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.write(image, sizeof(image)));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.end());
+    TEST_ASSERT_EQUAL_STRING(digest.c_str(), ota.writtenSha256().c_str());
+}
+
+/// The case the whole feature turns on: every byte arrived, the flash was happy, and the image
+/// is not the one that was promised. It must not reach end().
+static void test_a_wrong_hash_is_refused() {
+    ota::OtaManager ota;
+    const uint8_t   image[] = {0xE9, 0x01, 0x02, 0x03, 0x04, 0x05};
+    const std::string wrong(64, 'a');
+
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(sizeof(image), wrong));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.write(image, sizeof(image)));
+    TEST_ASSERT_EQUAL(ota::OtaResult::HashMismatch, ota.end());
+    TEST_ASSERT_FALSE(ota.running());
+    // Both digests named, so a corrupted download can be told from the wrong file entirely.
+    TEST_ASSERT_NOT_NULL(std::strstr(ota.lastError().c_str(), ota.writtenSha256().c_str()));
+    TEST_ASSERT_NOT_NULL(std::strstr(ota.lastError().c_str(), wrong.c_str()));
+}
+
+/// One flipped bit in the middle of a multi-chunk upload -- what a mangled LAN transfer looks
+/// like, as opposed to a wholesale substitution.
+static void test_a_single_corrupted_chunk_is_caught() {
+    const uint8_t good[] = {0xE9, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
+    ota::Sha256   h;
+    h.update(good, sizeof(good));
+    const std::string expected = h.finishHex();
+
+    uint8_t corrupted[sizeof(good)];
+    std::memcpy(corrupted, good, sizeof(good));
+    corrupted[4] ^= 0x01;
+
+    ota::OtaManager ota;
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(sizeof(corrupted), expected));
+    // Chunked, because that is how a body arrives and a hash that only worked on one big
+    // buffer would pass every test and fail on a real upload.
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.write(corrupted, 3));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.write(corrupted + 3, 5));
+    TEST_ASSERT_EQUAL(ota::OtaResult::HashMismatch, ota.end());
+}
+
+/// A hand-picked file from the settings page has nothing to compare against, and must keep
+/// working exactly as before.
+static void test_no_expected_hash_means_no_check() {
+    ota::OtaManager ota;
+    const uint8_t   image[] = {0xE9, 0x01, 0x02, 0x03};
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(sizeof(image)));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.write(image, sizeof(image)));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.end());
+    // Still reported, so the settings page can show what it just flashed.
+    TEST_ASSERT_EQUAL_size_t(64, ota.writtenSha256().size());
+}
+
+/// A malformed expectation is a refusal, not a comparison that happens to fail. An empty-ish
+/// or truncated hash field must never mean "close enough".
+static void test_a_malformed_expected_hash_refuses_the_image() {
+    ota::OtaManager ota;
+    const uint8_t   image[] = {0xE9, 0x01, 0x02, 0x03};
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(sizeof(image), "not-a-digest"));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.write(image, sizeof(image)));
+    TEST_ASSERT_EQUAL(ota::OtaResult::HashMismatch, ota.end());
+}
+
+/// begin() has to clear the previous run's state. Without the reset a second upload would hash
+/// the first one's bytes as well and fail for a reason nothing could explain.
+static void test_a_second_upload_starts_from_a_clean_hash() {
+    ota::OtaManager ota;
+    const uint8_t   first[]  = {0xE9, 0xAA, 0xBB};
+    const uint8_t   second[] = {0xE9, 0x01, 0x02, 0x03};
+
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(sizeof(first)));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.write(first, sizeof(first)));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.end());
+
+    ota::Sha256 h;
+    h.update(second, sizeof(second));
+    const std::string expected = h.finishHex();
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(sizeof(second), expected));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.write(second, sizeof(second)));
+    TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.end());
+}
+
 static void test_ota_refuses_a_second_concurrent_upload() {
     ota::OtaManager ota;
     TEST_ASSERT_EQUAL(ota::OtaResult::Ok, ota.begin(1024));
@@ -933,10 +1066,18 @@ int main(int, char**) {
     RUN_TEST(test_ota_rejects_a_non_firmware_upload_before_writing);
     RUN_TEST(test_ota_accepts_a_firmware_upload);
     RUN_TEST(test_ota_refuses_a_second_concurrent_upload);
+    RUN_TEST(test_a_matching_hash_is_accepted);
+    RUN_TEST(test_a_wrong_hash_is_refused);
+    RUN_TEST(test_a_single_corrupted_chunk_is_caught);
+    RUN_TEST(test_no_expected_hash_means_no_check);
+    RUN_TEST(test_a_malformed_expected_hash_refuses_the_image);
+    RUN_TEST(test_a_second_upload_starts_from_a_clean_hash);
     RUN_TEST(test_turning_modbus_off_leaves_mqtt_running_after_a_restart);
     RUN_TEST(test_ota_refuses_more_data_than_announced);
     RUN_TEST(test_ota_write_without_begin_is_refused);
     RUN_TEST(test_ota_end_without_any_data_is_refused);
+    RUN_TEST(test_the_update_check_defaults_on_and_round_trips);
+    RUN_TEST(test_a_config_without_the_setting_keeps_the_default);
     RUN_TEST(test_nothing_to_roll_back_to_on_a_fresh_board);
     RUN_TEST(test_stash_then_rollback_returns_the_earlier_configuration);
     RUN_TEST(test_rolling_back_twice_returns_to_the_restored_configuration);

@@ -143,7 +143,8 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     security["admin_password"] = config.security.adminPassword;
     security["read_only_mode"] = config.security.readOnlyMode;
 
-    doc["logging"]["level"] = logLevelName(config.logLevel);
+    doc["updates"]["check_enabled"] = config.updates.checkEnabled;
+    doc["logging"]["level"]         = logLevelName(config.logLevel);
 
     if (doc.overflowed()) {
         return false;
@@ -306,6 +307,10 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
         if (security["admin_username"].is<const char*>()) parsed.security.adminUsername = security["admin_username"].as<const char*>();
         if (security["admin_password"].is<const char*>()) parsed.security.adminPassword = security["admin_password"].as<const char*>();
         if (security["read_only_mode"].is<bool>()) parsed.security.readOnlyMode = security["read_only_mode"].as<bool>();
+    }
+    if (JsonObjectConst updates = doc["updates"]; !updates.isNull()) {
+        if (updates["check_enabled"].is<bool>())
+            parsed.updates.checkEnabled = updates["check_enabled"].as<bool>();
     }
     if (JsonObjectConst logging = doc["logging"]; !logging.isNull()) {
         if (logging["level"].is<const char*>()) {

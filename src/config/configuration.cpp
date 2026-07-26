@@ -404,7 +404,8 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     security["password_set"]   = !config.security.adminPassword.empty();
     security["read_only_mode"] = config.security.readOnlyMode;
 
-    doc["logging"]["level"] = logLevelName(config.logLevel);
+    doc["updates"]["check_enabled"] = config.updates.checkEnabled;
+    doc["logging"]["level"]         = logLevelName(config.logLevel);
 
     // PATCH response only: tells a non-UI client whether the change it just made is waiting
     // on a restart. Absent from GET (nothing was changed there).
@@ -422,8 +423,10 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
     //
     // Deliberately NOT here (applied live by ctx.applyConfig): bridge_name (read fresh on
     // every status), relays.* (gates re-applied immediately), security.* (read per request),
-    // logging.level (setLevel called from applyConfig). timezone_name and write_enabled carry
-    // no runtime effect. This set mirrors RESTART_NEEDED in the web UI.
+    // logging.level (setLevel called from applyConfig), updates.check_enabled (the dashboard
+    // reads it when it renders, and the check runs in the browser -- the firmware never acts on
+    // it). timezone_name and write_enabled carry no runtime effect. This set mirrors
+    // RESTART_NEEDED in the web UI.
     return a.wifi.ssid != b.wifi.ssid || a.wifi.password != b.wifi.password ||
            a.wifi.hostname != b.wifi.hostname || a.mqtt.enabled != b.mqtt.enabled ||
            a.mqtt.host != b.mqtt.host || a.mqtt.port != b.mqtt.port ||
@@ -719,6 +722,14 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
         if (!patchBool(security["read_only_mode"], merged.security.readOnlyMode, "security.read_only_mode", error)) return false;
     }
 
+    if (JsonObjectConst updates = doc["updates"]; !updates.isNull()) {
+        // Into `merged`, like every other section here, and through the same helper. Writing
+        // to `config` directly looks equivalent and is not: the merged copy is assigned over
+        // it once validation passes, so the value would be silently discarded.
+        if (!patchBool(updates["check_enabled"], merged.updates.checkEnabled,
+                       "updates.check_enabled", error))
+            return false;
+    }
     if (JsonObjectConst logging = doc["logging"]; !logging.isNull()) {
         if (JsonVariantConst level = logging["level"]; !level.isNull()) {
             if (!level.is<const char*>() || !parseLogLevel(level.as<const char*>(), merged.logLevel)) {

@@ -112,6 +112,21 @@ struct RelaySettings {
     std::vector<std::string> roles;
 };
 
+/// Whether the dashboard looks for a newer firmware release.
+///
+/// The check runs in the BROWSER, not on the bridge: the page fetches a small JSON from the
+/// project's GitHub Pages site and compares it with the version this bridge reports. The device
+/// itself never opens an outbound connection, which is what keeps "runs entirely on your own
+/// network" true even with this on.
+///
+/// On by default, because an update nobody hears about is an update nobody installs -- and the
+/// request comes from a browser that is already on the internet. Off means the dashboard shows
+/// nothing and asks nobody; the manual "check now" button still works, because that is a
+/// deliberate act rather than something happening in the background.
+struct UpdateSettings {
+    bool checkEnabled = true;
+};
+
 struct SecuritySettings {
     std::string adminUsername = "admin";
     std::string adminPassword;  ///< never serialised, never logged; empty = mutations refused
@@ -161,6 +176,7 @@ struct Configuration {
     std::vector<DriverSettings> additionalDevices;
     RelaySettings    relays;
     NtpSettings      ntp;
+    UpdateSettings   updates;
     SerialOverride   serial;
     SecuritySettings security;
     LogLevel         logLevel = LogLevel::Info;

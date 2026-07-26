@@ -29,7 +29,7 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
 | POST | `/api/v1/actions/reboot` | **✔** | Reboot |
 | POST | `/api/v1/actions/clear-coredump` | **✔** | Discard a stored crash dump (404 when there is none) |
-| POST | `/api/v1/ota` | **✔** | Firmware upload |
+| POST | `/api/v1/ota` | **✔** | Firmware upload (`?board=` and `?sha256=` optional; both refuse a mismatch) |
 | GET | `/api/v1/events` | — | Server-Sent Events (live updates) |
 | GET | `/metrics` | — | Prometheus |
 
@@ -519,6 +519,37 @@ exclusive to first boot. It returns on an already-configured bridge after repeat
 (a router reboot reaches that in about two minutes) and its AP is open. So the gate is "does an
 admin password exist yet", not "is the portal up": open on a factory-fresh board, authenticated
 afterwards.
+
+## Firmware updates
+
+`GET /api/v1/status` carries `bridge.board_id` — a stable slug (`rs485-can`, `relay-1ch`,
+`relay-6ch`) matching the PlatformIO environment suffix and the release asset name. The display
+name in `board_name` is for people and may be reworded; this one is what a client keys on to ask
+for the right image.
+
+`POST /api/v1/ota` takes two optional query parameters:
+
+| Parameter | Effect |
+|---|---|
+| `board` | Refused with 400 `wrong_board` when it does not match this bridge's `board_id` |
+| `sha256` | The image must hash to this, or the upload is refused with `hash_mismatch` **before** the boot partition flips |
+
+Both are optional because a hand-picked `.bin` from the settings page has nothing to compare
+against. The dashboard's one-click update supplies both.
+
+`hash_mismatch` is told apart from `write_failed` deliberately: the latter means the flash
+refused, the former means the flash did as it was told and the bytes were wrong. The error
+message carries both digests, so a corrupted download can be told from the wrong file entirely.
+
+The board check is on metadata, not on the binary — it stops a stale link or a UI bug, not a
+client sending whatever it likes. The hash is **integrity, not authenticity**; see
+[docs/security.md](security.md).
+
+The check for a newer release runs in the browser, not on the bridge, against the project's
+GitHub Pages site. Release assets could not be used: their download redirects to a host that
+sends no CORS headers at all, so `fetch()` from a page served off the bridge cannot read them.
+Pages sends `access-control-allow-origin: *`, which is also why the web flasher's image is
+served from there.
 
 ## Auth
 

@@ -1114,7 +1114,32 @@ bool RestApi::begin() {
                     failed();  // authorised() stored the 401
                     return;
                 }
-                const auto begun = g_ota.begin(request->contentLength());
+                // The board the image was built for, checked against this one. All three
+                // images start with the same magic byte, so nothing else in this path could
+                // tell a Relay-6CH image from an RS485-CAN one -- and the wrong one boots
+                // happily on the wrong pins, which the rollback net does NOT catch because
+                // the bridge looks healthy. A metadata check, not a property of the binary:
+                // it stops the realistic accident (a stale link, a UI bug), not a determined
+                // client sending whatever it likes.
+                if (request->hasParam("board")) {
+                    const std::string want = request->getParam("board")->value().c_str();
+                    const std::string have = context_.bridgeInfo().boardId;
+                    if (want != have) {
+                        sendError(request, {400, "wrong_board",
+                                            "that image is for '" + want + "'; this bridge is a '" +
+                                                have + "'"});
+                        failed();
+                        return;
+                    }
+                }
+                // Optional: a hand-picked file from the settings page has nothing to compare
+                // against. When the dashboard installs a release it passes the digest from the
+                // release feed, and the image is refused before the boot partition flips.
+                const std::string expectedSha =
+                    request->hasParam("sha256")
+                        ? std::string(request->getParam("sha256")->value().c_str())
+                        : std::string{};
+                const auto begun = g_ota.begin(request->contentLength(), expectedSha);
                 if (begun != ota::OtaResult::Ok) {
                     sendError(request, {409, ota::otaResultName(begun), g_ota.lastError()});
                     failed();

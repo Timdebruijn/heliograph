@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <string>
 
+#include "sha256.h"
+
 namespace heliograph::ota {
 
 /// First byte of every ESP32 firmware image.
@@ -32,6 +34,10 @@ enum class OtaResult : uint8_t {
     WriteFailed,
     NotFinished,
     NoPartition,
+    /// Every byte arrived and the image hashes to something other than what was promised.
+    /// Told apart from WriteFailed on purpose: that one means the flash refused, this one
+    /// means the flash did as it was told and the bytes were wrong.
+    HashMismatch,
 };
 
 const char* otaResultName(OtaResult result);
@@ -79,7 +85,20 @@ const char* imageStateName();
 class OtaManager {
 public:
     /// `expectedSize` may be 0 when the client did not send Content-Length.
-    OtaResult begin(size_t expectedSize);
+    ///
+    /// `expectedSha256` is the digest the image must hash to, lowercase or uppercase hex.
+    /// Empty means "do not check", which is what a hand-picked file from the settings page
+    /// still does -- there is nothing to compare it against.
+    ///
+    /// Checking here rather than trusting the sender is the point. The dashboard already
+    /// verifies the download against the release feed before it uploads, so this catches what
+    /// that cannot: a mangled upload across the LAN, a proxy in between, a half-written flash.
+    /// And it fails BEFORE end() flips the boot partition, so a bad image is a clean error
+    /// rather than a reboot into the rollback path.
+    ///
+    /// Integrity, not authenticity: the hash travels with the binary, so it cannot tell you
+    /// the image is one this project published. See docs/security.md.
+    OtaResult begin(size_t expectedSize, const std::string& expectedSha256 = {});
 
     /// Feeds a chunk. The first chunk is checked for the image magic before anything is
     /// written.
@@ -95,7 +114,17 @@ public:
     /// Last failure, for the REST response and diagnostics. Never contains a credential.
     const std::string& lastError() const { return lastError_; }
 
+    /// The digest of what was actually written, once end() has run. Reported so a mismatch can
+    /// say what arrived as well as what was wanted -- "checksum failed" with no numbers leaves
+    /// nobody able to tell a corrupted download from the wrong file entirely.
+    const std::string& writtenSha256() const { return writtenSha256_; }
+
 private:
+    /// Computes the digest of everything written and compares it with what was promised.
+    /// Defined once, outside the ESP32/host split, so the host tests exercise the decision the
+    /// device actually makes rather than a parallel one.
+    OtaResult finishHash();
+
     // Atomic by codebase convention for anything a second task could observe. Today every
     // call site lives on the single AsyncTCP task, so this is belt-and-braces -- but that
     // single-task property is an implicit library detail, not something this class enforces,
@@ -105,6 +134,9 @@ private:
     size_t      written_    = 0;
     size_t      expected_   = 0;
     std::string lastError_;
+    std::string expectedSha_;
+    std::string writtenSha256_;
+    Sha256      hasher_;
 };
 
 }  // namespace heliograph::ota

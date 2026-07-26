@@ -85,6 +85,14 @@ struct BridgeInfo {
     /// Set by main from board::kName; the default only serves host tests, which have no
     /// board header.
     std::string boardName = "Waveshare ESP32-S3-RS485-CAN";
+    /// The same board as a stable machine slug ("rs485-can"), from board::kId.
+    ///
+    /// Separate from boardName because the update flow has to ask for the image built for THIS
+    /// board, and a display name is the wrong thing to key that on: it is written for people,
+    /// it can be reworded, and matching on it would silently offer the wrong firmware the day
+    /// somebody fixes a capital letter. This one matches the PlatformIO env suffix and the
+    /// release asset name, and is therefore not free to change.
+    std::string boardId = "rs485-can";
 
     /// Bridge-local relays (DRM curtailment contacts on relay boards). Count 0 = the board
     /// has none, and every output omits the topic/field entirely -- absent, not zero, per

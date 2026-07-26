@@ -144,6 +144,28 @@ configuration, secrets included, in the same unencrypted NVS. A factory reset cl
 namespace and takes it along — which is what keeps "erases everything, including passwords"
 true.
 
+**The update check is integrity-checked, not authenticated.** The dashboard can offer a newer
+release and install it in one click. The release feed publishes a SHA-256 per image; the browser
+passes it to the bridge with the upload, and the firmware hashes what it actually wrote and
+refuses before the boot partition flips.
+
+Be clear about what that buys. It catches a truncated download, a proxy that mangled the body, a
+mangled upload across your LAN, a half-written flash. It does **not** prove the image is one this
+project published: the hash travels beside the binary on the same host, so anyone able to replace
+one can replace the other. It is a checksum, not a signature.
+
+Two smaller guards ride along. The upload carries the board slug and the firmware refuses an
+image built for a different board — all three images start with the same magic byte, so nothing
+else in the chain could tell them apart, and the wrong one boots happily on the wrong pins
+without the rollback net noticing. And SubtleCrypto is deliberately not used in the page: it
+only exists in a secure context, and this dashboard is served over plain HTTP, so a check there
+would silently not run. The firmware is the right place for it anyway — it also covers the hop
+the page cannot see.
+
+**The bridge itself makes no outbound connection for this.** The check runs in your browser,
+against the project's GitHub Pages site. Turning it off in *Settings → Firmware release* stops
+the background request; the "check now" button still works, because that is a deliberate act.
+
 **OTA images are not cryptographically signed.** The upload is gated by the admin password
 and checked for the ESP32 image magic (`0xE9`) before any byte reaches flash, and a bad image
 is rolled back by the bootloader — but the magic check only rejects a wrong *file* (a
