@@ -3,12 +3,24 @@
 > A heliograph signalled messages with sunlight. This one translates what your solar
 > inverter is saying into languages the rest of your network speaks.
 
-Heliograph is open-source firmware for a small, cheap box that sits next to your solar
-inverter and talks to it over its own communication port. It **reads** the inverter and hands
-the data to whatever you already use — **Home Assistant, MQTT, Modbus TCP, a REST/JSON API, or
+<p align="center">
+  <a href="https://github.com/Timdebruijn/heliograph/releases/latest"><img src="https://img.shields.io/github/v/release/Timdebruijn/heliograph?sort=semver&color=brightgreen" alt="Latest release"></a>
+  <a href="https://github.com/Timdebruijn/heliograph/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Timdebruijn/heliograph/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/runs%20on-ESP32--S3-informational" alt="Runs on ESP32-S3">
+</p>
+
+**Your solar inverter, finally yours.** Whether it is fifteen years old and abandoned by its
+manufacturer or fresh out of the box, Heliograph is open-source firmware for a small, cheap box
+that sits next to it and speaks its native protocol. It **reads** the inverter and hands the
+data to whatever you already use — **Home Assistant, MQTT, Modbus TCP, a REST/JSON API, or
 Prometheus** — and on the relay boards it can also **turn the inverter down** when you want it
-to produce less. New Modbus inverters can be added as a **TOML data file** — no C++, no
-firmware fork. It runs entirely on your own network. No account, no cloud, no subscription.
+to produce less. New Modbus inverters go in as a **TOML data file** — no C++, no firmware fork.
+It runs entirely on your own network. No account, no cloud, no subscription.
+
+<p align="center">
+  <a href="https://timdebruijn.github.io/heliograph/"><strong>⚡ Flash it from your browser — nothing to install →</strong></a>
+</p>
 
 <p align="center">
   <img src="docs/images/dashboard.png" width="480" alt="Heliograph's built-in web dashboard showing live production from a long-unsupported EverSolar inverter">
@@ -85,10 +97,14 @@ Full walkthrough: [docs/adding-a-device.md](docs/adding-a-device.md).
 
 ---
 
-## Will this work for my inverter?
+## Which inverters work today?
 
-**Start here.** This is the question that decides whether the rest is worth your time, and
-the honest answer today is: only if your inverter is in this table.
+**Start here** — this is the question that decides whether the rest is worth your time. One
+inverter family is in daily production use; several more are implemented and waiting for their
+first real-world confirmation. And if yours is not on the list yet, you are not stuck: adding a
+Modbus inverter is a data file, not a code change (see
+[Help support your own inverter](#help-support-your-own-inverter)). The honest, per-family
+picture:
 
 | Inverter family | Connection | Status |
 |---|---|---|
