@@ -337,12 +337,12 @@ scale are unknown.
 
 The reference reads `OP_MODE` and publishes it as a raw number, without a value table.
 No table is invented here — but two codes have now been **measured** on a real
-TL3000-20 (day/night cycle via HA history, 2026-07-19 through 2026-07-22):
+TL3000-20 (day/night cycle via HA history, 2026-07-19 through 2026-07-26):
 
 | Code | Meaning (measured) | Evidence |
 |---|---|---|
 | 1 | Grid-connected (normal) | Full production days show code 1; independently confirmed by the calibrated Zeversolar 2000s capture (ha-zeversolar-modbus) |
-| 0 | Standby (not feeding) | Four independent events: dusk on July 19/20/21 (last minutes before shutdown show code 0) and dawn on July 22 at 06:01 (four minutes of code 0, then code 1 at first production) |
+| 0 | Standby (not feeding) | Five independent events: dusk on July 19/20/21 (last minutes before shutdown show code 0) and two dawns — July 22 at 06:01 (four minutes of code 0, then code 1 at first production) and July 26 at 06:20:42 (≈5 minutes of code 0, then code 1 at 06:25:46, AC power 0 W→7 W then ramping). The July 26 dawn is a clean self-recovery on firmware 0.12.0: `unknown` straight to code 0 the moment the inverter re-registered, no stuck `poll: timeout` in between — the failure the sunrise-registration fix targets (see `eversolar_driver.h`, the 2026-07-21 note). |
 
 Mapping in `eversolar_parser.cpp::opModeText()`; every other code honestly remains
 `"Unknown (<n>)"` until it has actually been observed (candidate: an error code during a
