@@ -402,8 +402,15 @@ bool MqttOutput::forgetDevice(const DeviceId& id, const BridgeInfo& bridge) {
 
 void MqttOutput::stop() {
     if (started_) {
-        // Say goodbye properly so subscribers do not have to wait for the will.
-        publishTracked(topics_.availability().c_str(), 1, true, kPayloadOffline);
+        // Say goodbye properly so subscribers do not have to wait for the will -- but only if
+        // there is a link to say it on. Unguarded, stopping while the broker is already gone
+        // (a config change during an outage is the realistic case, and stop() is not only the
+        // reboot path) charges the publish-failure counter for a message that was never going
+        // to be accepted. One spurious count is enough to send somebody looking for a fault
+        // that is not there, which defeats a counter whose whole value is that it stays at 0.
+        if (g_client.connected()) {
+            publishTracked(topics_.availability().c_str(), 1, true, kPayloadOffline);
+        }
         g_client.disconnect();
         started_ = false;
     }

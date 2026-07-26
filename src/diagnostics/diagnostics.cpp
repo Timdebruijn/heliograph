@@ -32,23 +32,4 @@ DiagnosticsSnapshot Diagnostics::snapshot() const {
     return s;
 }
 
-void Diagnostics::reset() {
-    pollSuccessTotal_.store(0);
-    pollFailureTotal_.store(0);
-    consecutivePollFailures_.store(0);
-    checksumErrorTotal_.store(0);
-    rs485TimeoutTotal_.store(0);
-    invalidFrameTotal_.store(0);
-    wifiReconnectTotal_.store(0);
-    mqttReconnectTotal_.store(0);
-    modbusClientConnections_.store(0);
-    restRequestTotal_.store(0);
-    mqttPublishFailureTotal_.store(0);
-    lastSuccessfulPollMs_.store(0);
-    rs485StackFreeBytes_.store(0);
-    loopStackFreeBytes_.store(0);
-    std::lock_guard<std::mutex> lock(errorMutex_);
-    lastError_.clear();
-}
-
 }  // namespace heliograph

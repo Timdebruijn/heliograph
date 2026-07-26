@@ -97,7 +97,6 @@ public:
     void setLastError(const std::string& message);
 
     DiagnosticsSnapshot snapshot() const;
-    void                reset();
 
 private:
     std::atomic<uint32_t> pollSuccessTotal_{0};

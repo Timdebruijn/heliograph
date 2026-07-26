@@ -75,13 +75,15 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
     // and `coredump_present` false already carries the whole message. The partition and the
     // IDF support have existed since the OTA layout was designed; nothing read them until now.
     doc["coredump_present"] = bridge.coredumpPresent;
-    if (bridge.coredumpPresent) {
-        doc["coredump_task"] = bridge.coredumpTask.empty() ? nullptr
-                                                           : JsonString(bridge.coredumpTask.c_str());
-        doc["coredump_pc"]   = bridge.coredumpPc;
+    if (bridge.coredumpPresent && !bridge.coredumpTask.empty()) {
+        doc["coredump_task"] = bridge.coredumpTask;  // std::string: copied into the document
     } else {
         doc["coredump_task"] = nullptr;
-        doc["coredump_pc"]   = nullptr;
+    }
+    if (bridge.coredumpPresent) {
+        doc["coredump_pc"] = bridge.coredumpPc;
+    } else {
+        doc["coredump_pc"] = nullptr;
     }
     doc["wifi_connected"]            = bridge.wifiConnected;
     // Only meaningful while associated; 0 dBm would look like an excellent signal.
