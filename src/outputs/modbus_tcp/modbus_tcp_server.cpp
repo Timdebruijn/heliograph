@@ -4,6 +4,100 @@
 
 #include "modbus_tcp_server.h"
 
+#include <algorithm>
+
+// Everything that is not eModbus lives here, once, for both builds: the unit-id mapping is the
+// part worth testing and the host build is where it gets tested.
+namespace heliograph::modbus {
+
+ModbusTcpServer::ModbusTcpServer(ModbusServerConfig config) { setConfig(config); }
+
+void ModbusTcpServer::refresh(const std::vector<const DeviceState*>& devices,
+                              const BridgeInfo& bridge, const DiagnosticsSnapshot& diagnostics,
+                              uint64_t nowMs) {
+    std::lock_guard<std::mutex> lock(mapMutex_);
+    for (size_t i = 0; i < maps_.size() && i < devices.size(); ++i) {
+        if (devices[i] != nullptr) {
+            maps_[i].update(*devices[i], bridge, diagnostics, nowMs);
+        }
+    }
+}
+
+bool ModbusTcpServer::setConfig(const ModbusServerConfig& config) {
+    if (started_) {
+        return false;  // workers are already registered against the old unit ids
+    }
+    // Under the map lock, because this REALLOCATES. rs485Task is created in setup() and starts
+    // calling refresh() -- which writes maps_[i] -- before loop() ever reaches startOutputs()
+    // and this call. It preempts loop() too, being the higher priority of the two, so an
+    // unlocked assign() here frees a buffer another task may be writing into: a heap
+    // write-after-free that shows up once, as an unreproducible panic. On main this was a plain
+    // POD assignment and the hazard did not exist; the per-device maps created it (review).
+    std::lock_guard<std::mutex> lock(mapMutex_);
+    config_        = config;
+    // Sized here rather than in begin() so the mapping is settled -- and host-testable --
+    // before any TCP stack is involved.
+    //
+    // One map per CONFIGURED device, not per started one, and at least one always: the
+    // diagnostics unit reads maps_[0], and a bridge with nothing polling is exactly when
+    // someone scrapes it for uptime and heap.
+    servedDevices_ = serveableDevices();
+    maps_.assign(servedDevices_ > 0 ? servedDevices_ : 1, RegisterMap{});
+    return true;
+}
+
+bool ModbusTcpServer::readUnit(uint8_t unitId, uint16_t address, uint16_t count,
+                               uint16_t* out) const {
+    if (count == 0 || count > kMaxRegistersPerRead) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(mapMutex_);
+    const size_t index = mapIndexFor(unitId);
+    if (index >= maps_.size()) {
+        return false;
+    }
+    return maps_[index].read(address, count, out);
+}
+
+size_t ModbusTcpServer::mapIndexFor(uint8_t unitId) const {
+    // The diagnostics unit, and the two ids a client sends when it has no unit field to set,
+    // all read device 1's map. 0 and 255 are what the MB/TCP spec calls "unused" for a server
+    // that is not a gateway, and plenty of clients still send them -- Home Assistant's Modbus
+    // integration defaults to 0. Answering them with device 1 costs nothing and is the
+    // difference between a copied-in configuration working and returning an exception.
+    if (unitId == config_.diagnosticsUnitId || unitId == 0 || unitId == 255) {
+        return 0;
+    }
+    if (unitId < config_.inverterUnitId) {
+        return kNoMap;
+    }
+    return static_cast<size_t>(unitId - config_.inverterUnitId);
+}
+
+uint8_t ModbusTcpServer::serveableDevices() const {
+    uint8_t served = 0;
+    for (uint8_t i = 0; i < config_.deviceCount; ++i) {
+        const int unit = static_cast<int>(config_.inverterUnitId) + i;
+        // Consecutive or not at all. Skipping a taken id and carrying on would leave a hole a
+        // client cannot derive: the whole point of unit-id-per-device is that a client works
+        // out device N's address by adding, so the run has to be unbroken.
+        if (unit > 247 || unit == static_cast<int>(config_.diagnosticsUnitId)) {
+            break;  // 247 is the last valid Modbus slave address
+        }
+        served = static_cast<uint8_t>(i + 1);
+    }
+    return served;
+}
+
+uint8_t ModbusTcpServer::unitIdFor(size_t index) const {
+    if (index >= servedDevices_) {
+        return 0;
+    }
+    return static_cast<uint8_t>(config_.inverterUnitId + index);
+}
+
+}  // namespace heliograph::modbus
+
 #if defined(ESP32)
 
 #include <ModbusServerTCPasync.h>
@@ -17,23 +111,7 @@ ModbusServerTCPasync g_server;
 
 }  // namespace
 
-ModbusTcpServer::ModbusTcpServer(ModbusServerConfig config) : config_(config) {}
-
 ModbusTcpServer::~ModbusTcpServer() { stop(); }
-
-void ModbusTcpServer::refresh(const DeviceState& state, const BridgeInfo& bridge,
-                              const DiagnosticsSnapshot& diagnostics, uint64_t nowMs) {
-    std::lock_guard<std::mutex> lock(mapMutex_);
-    map_.update(state, bridge, diagnostics, nowMs);
-}
-
-bool ModbusTcpServer::setConfig(const ModbusServerConfig& config) {
-    if (started_) {
-        return false;  // workers are already registered against the old unit ids
-    }
-    config_ = config;
-    return true;
-}
 
 uint16_t ModbusTcpServer::activeClients() const {
     return started_ ? g_server.activeClients() : 0;
@@ -61,13 +139,10 @@ bool ModbusTcpServer::begin() {
             return response;
         }
 
+        // Which inverter, and the read itself, both in readUnit() -- the same code path a host
+        // test exercises, rather than arithmetic that only runs on hardware.
         uint16_t values[kMaxRegistersPerRead];
-        bool     ok = false;
-        {
-            std::lock_guard<std::mutex> lock(mapMutex_);
-            ok = map_.read(address, words, values);
-        }
-        if (!ok) {
+        if (!readUnit(request.getServerID(), address, words, values)) {
             // Out of range. Note the official eModbus example sets this error and then falls
             // through into building a normal response anyway; returning here is deliberate.
             response.setError(request.getServerID(), request.getFunctionCode(),
@@ -92,7 +167,24 @@ bool ModbusTcpServer::begin() {
         return response;
     };
 
-    for (const uint8_t unitId : {config_.inverterUnitId, config_.diagnosticsUnitId}) {
+    std::vector<uint8_t> units;
+    units.reserve(static_cast<size_t>(servedDevices_) + 3);
+    for (uint8_t i = 0; i < servedDevices_; ++i) {
+        units.push_back(static_cast<uint8_t>(config_.inverterUnitId + i));
+    }
+    units.push_back(config_.diagnosticsUnitId);
+    // A client with no unit-id field of its own sends 0 or 255 -- the MB/TCP spec calls the
+    // byte unused for a server that is not a gateway, and Home Assistant's Modbus integration
+    // defaults to 0. Both read device 1, so a configuration copied from a single-inverter
+    // example works instead of returning an exception. Skipped when they collide with a real
+    // unit, which cannot happen for 0 (validate() forbids unit_id 0) but can for 255.
+    for (const uint8_t alias : {static_cast<uint8_t>(0), static_cast<uint8_t>(255)}) {
+        if (std::find(units.begin(), units.end(), alias) == units.end()) {
+            units.push_back(alias);
+        }
+    }
+
+    for (const uint8_t unitId : units) {
         g_server.registerWorker(unitId, READ_HOLD_REGISTER, readWorker);
         g_server.registerWorker(unitId, READ_INPUT_REGISTER, readWorker);
         if (!config_.writeEnabled) {
@@ -123,22 +215,8 @@ void ModbusTcpServer::stop() {
 
 namespace heliograph::modbus {
 
-ModbusTcpServer::ModbusTcpServer(ModbusServerConfig config) : config_(config) {}
 ModbusTcpServer::~ModbusTcpServer() = default;
 
-void ModbusTcpServer::refresh(const DeviceState& state, const BridgeInfo& bridge,
-                              const DiagnosticsSnapshot& diagnostics, uint64_t nowMs) {
-    std::lock_guard<std::mutex> lock(mapMutex_);
-    map_.update(state, bridge, diagnostics, nowMs);
-}
-
-bool ModbusTcpServer::setConfig(const ModbusServerConfig& config) {
-    if (started_) {
-        return false;
-    }
-    config_ = config;
-    return true;
-}
 uint16_t ModbusTcpServer::activeClients() const { return 0; }
 bool     ModbusTcpServer::running() const { return false; }
 bool     ModbusTcpServer::begin() { return false; }

@@ -216,9 +216,17 @@ address in turn and confirm exactly one answers, at the address you expect.
    > `additional_devices` as above, but you are copying addresses it found rather than guessing.
    > Quick discovery is unchanged: default address only.
    >
-   > **Modbus TCP and Prometheus still publish the first device only.** All three units appear
-   > in the REST API, in the device list and in Home Assistant, each as its own HA device; only
-   > one reaches those two outputs. Next piece of work.
+   > **All three units reach every output.** REST and Home Assistant key them by device id;
+   > Prometheus labels each series `device="growatt_modbus-<RS485 address>"`; Modbus TCP serves
+   > them at `modbus.unit_id` plus the **configuration row index** — units 1, 2, 3 with the
+   > defaults. The register map is identical at each unit, so point your client at a different
+   > unit id and everything is in the same place.
+   >
+   > Those two numbers are not the same thing, and they only coincide because this page has you
+   > assign 1/2/3. Put the units on 1, 2 and 5 and the third is `growatt_modbus-5` in Prometheus
+   > while Modbus TCP serves it at unit **3**. The mapping is in the boot log
+   > (`modbus: unit 3 -> growatt_modbus-5`) and in `modbus_unit_id` on each entry of the
+   > `devices` array in `/api/v1/status`.
 4. Set log level to `trace` and read `/api/v1/logs`. The `GROWATT in <addr>: ...` lines are
    the raw block dump.
 5. Check the dump against the inverter's own app: PV voltage, AC power, today's energy,

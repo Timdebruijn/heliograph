@@ -97,10 +97,12 @@ std::unique_ptr<rest::RestApi>    g_rest;
 std::vector<std::unique_ptr<InverterDriver>> g_drivers;
 std::vector<std::unique_ptr<DeviceContext>>  g_contexts;
 
-/// The first device, or nullptr. Everything that still speaks about "the" inverter -- the
-/// status LED, the boot-confirm check, the outputs -- reads these. Naming them rather than
-/// indexing at each call site keeps the remaining single-device assumptions countable: every
-/// use of g_driver/g_context/g_state is a place that has not been taught about the others yet.
+/// The first device, or nullptr. What is left that still speaks about "the" inverter: the
+/// boot-confirm check, the REST /status device block, and the "is anything polling at all"
+/// guard in the poll loop. Naming them rather than indexing at each call site keeps the
+/// remaining single-device assumptions countable -- every use of g_driver/g_context/g_state is
+/// a place that has not been taught about the others. The outputs no longer belong on that
+/// list: MQTT, REST, Modbus TCP and Prometheus all carry every device.
 InverterDriver* g_driver  = nullptr;
 DeviceContext*  g_context = nullptr;
 StateStore*     g_state   = nullptr;
@@ -131,6 +133,16 @@ size_t g_devicesConfigured = 0;
 /// One line per configured device that is not being polled, in configuration order. Filled at
 /// boot alongside the log lines, so the same facts reach a screen instead of only a ring buffer.
 std::vector<std::string> g_deviceProblems;
+
+/// The started device at each CONFIGURED position, empty where one did not start.
+///
+/// This is what the Modbus unit ids are keyed on, and it exists because g_deviceIds is
+/// compacted: a device that fails to start is simply absent from it, so keying unit ids on that
+/// list would silently move every later inverter down one unit id. A client reading unit 2
+/// would get inverter 3's watts with no way to notice, and unit ids are a wire contract nobody
+/// re-derives after bring-up. Keyed on the configuration instead, an unstarted device's unit id
+/// answers "offline, no data" -- which is the truth, and the same thing the Devices tab shows.
+std::vector<DeviceId> g_configSlotIds;
 
 bool g_outputsStarted = false;
 
@@ -516,9 +528,44 @@ void startOutputs() {
         // Never from configuration: no driver in this build can write, so offering the switch
         // would advertise something untrue. validate() rejects it too.
         cfg.writeEnabled = false;
+        // One unit id per CONFIGURED device, consecutively from modbus.unit_id. Configured, not
+        // started: the unit id has to be a function of the settings page, or a device that
+        // fails to start renumbers every inverter after it. A slot with no device answers
+        // offline with no readings, which is the truth and matches what the Devices tab shows.
+        cfg.deviceCount = static_cast<uint8_t>(g_devicesConfigured);
         g_modbus.setConfig(cfg);
-        log::info("modbus: %s on :%u (unit %u)", g_modbus.begin() ? "listening" : "failed to start",
-                  cfg.port, cfg.inverterUnitId);
+        const bool listening = g_modbus.begin();
+        if (g_modbus.servedDevices() <= 1) {
+            log::info("modbus: %s on :%u (unit %u)", listening ? "listening" : "failed to start",
+                      cfg.port, cfg.inverterUnitId);
+        } else {
+            log::info("modbus: %s on :%u (units %u-%u, one per inverter)",
+                      listening ? "listening" : "failed to start", cfg.port, cfg.inverterUnitId,
+                      g_modbus.unitIdFor(g_modbus.servedDevices() - 1));
+        }
+        // Which unit is which inverter, once, at boot. Without it the only way to find out is
+        // to read modbus.unit_id, fetch /api/v1/devices and count positions -- and on a bus of
+        // identical inverters the per-device lines above are indistinguishable (review).
+        for (size_t i = 0; i < g_configSlotIds.size() && i < g_modbus.servedDevices(); ++i) {
+            log::info("modbus: unit %u -> %s", static_cast<unsigned>(g_modbus.unitIdFor(i)),
+                      g_configSlotIds[i].empty() ? "(configured device did not start)"
+                                                 : g_configSlotIds[i].c_str());
+        }
+        if (g_modbus.servedDevices() < g_devicesConfigured) {
+            // Which of the two limits was hit, because the fix differs: lowering the base is no
+            // help at all when the diagnostics unit is sitting inside the run (validate() only
+            // stops it equalling unit_id, not landing a few above it).
+            const int firstUnserved = cfg.inverterUnitId + g_modbus.servedDevices();
+            log::warn("modbus: only %u of %u configured devices are reachable over Modbus TCP -- "
+                      "unit %d is %s. %s",
+                      static_cast<unsigned>(g_modbus.servedDevices()),
+                      static_cast<unsigned>(g_devicesConfigured), firstUnserved,
+                      firstUnserved == cfg.diagnosticsUnitId ? "the diagnostics unit"
+                                                             : "past 247, the last valid address",
+                      firstUnserved == cfg.diagnosticsUnitId
+                          ? "Move modbus.diagnostics_unit_id out of the range."
+                          : "Lower modbus.unit_id.");
+        }
     }
 
     if (configSnapshot.mqtt.enabled && !configSnapshot.mqtt.host.empty()) {
@@ -586,6 +633,15 @@ void startRestApi() {
     };
     ctx.bridgeInfo  = bridgeInfo;
     ctx.clock       = nowMs;
+    // Configuration slot -> unit id, which is the mapping only this file knows.
+    ctx.modbusUnitIdFor = [](const DeviceId& id) -> uint8_t {
+        for (size_t i = 0; i < g_configSlotIds.size(); ++i) {
+            if (g_configSlotIds[i] == id) {
+                return g_modbus.running() ? g_modbus.unitIdFor(i) : 0;
+            }
+        }
+        return 0;
+    };
     ctx.saveConfig  = [](const Configuration& c) { return g_store.save(c); };
     // Request only -- the poll itself runs on rs485Task, exactly like discovery. Running
     // pollOnce() here executed a seconds-long bus transaction inside an AsyncTCP callback and
@@ -758,10 +814,9 @@ void rs485Task(void* /*arg*/) {
                 break;
             }
         }
-        // MQTT/Home Assistant take every device; Modbus TCP and Prometheus still take one --
-        // the register map holds a single device's registers and the metric names have no
-        // device label. Stated here, in docs/architecture.md, docs/rest-api.md, docs/mqtt.md
-        // and the README rather than left to be found from a missing entity.
+        // Every output takes every device: MQTT/Home Assistant by topic subtree, REST by device
+        // id, Modbus TCP by unit id, Prometheus by a `device` label. docs/architecture.md has
+        // the table of what each one did about backwards compatibility for device 1.
         if (g_state) {
             const auto bridge = bridgeInfo();
             const auto diag   = g_diagnostics.snapshot();
@@ -781,10 +836,26 @@ void rs485Task(void* /*arg*/) {
                 }
             }
             const auto first = g_state->snapshot();
-            // Still first-device-only, and now the ONLY two that are: the Modbus TCP register
-            // map has one device's worth of registers and the metric names have no device
-            // label. Both are named in docs/architecture.md as the remaining gap.
-            g_modbus.refresh(*first, bridge, diag, nowMs());
+            // Every device, one Modbus unit id each: configuration slot i is served at
+            // inverterUnitId + i (#36).
+            //
+            // Keyed on g_configSlotIds -- the CONFIGURED positions -- not on g_deviceIds, which
+            // is compacted. A device that failed to start is absent from the latter, so keying
+            // on it moved every later inverter down a unit id: a client reading unit 2 would
+            // get inverter 3's watts with no way to notice, and a unit id is a wire contract
+            // nobody re-derives after bring-up. A slot with no device is passed as null;
+            // refresh() leaves its map at the constructed sentinels, so that unit answers
+            // offline with no readings rather than someone else's.
+            std::vector<const DeviceState*> modbusDevices;
+            modbusDevices.reserve(g_configSlotIds.size());
+            for (const auto& slotId : g_configSlotIds) {
+                const auto it = std::find_if(views.begin(), views.end(),
+                                             [&slotId](const mqtt::MqttOutput::DeviceView& v) {
+                                                 return !slotId.empty() && v.id == slotId;
+                                             });
+                modbusDevices.push_back(it == views.end() ? nullptr : it->state);
+            }
+            g_modbus.refresh(modbusDevices, bridge, diag, nowMs());
             if (g_mqtt) {
                 // Once, on the first connected pass -- before loop() below, so the clears are
                 // queued ahead of this boot's own discovery announcements.
@@ -929,6 +1000,9 @@ void setup() {
         planned.push_back({d.id, &d.options});
     }
     g_devicesConfigured = planned.size();
+    // One slot per CONFIGURED device, filled in as each one starts. The Modbus unit ids are
+    // keyed on this, not on the compacted g_deviceIds -- see the declaration.
+    g_configSlotIds.assign(planned.size(), DeviceId{});
     if (planned.empty()) {
         log::warn("no driver configured and none compiled in; nothing will be polled");
     }
@@ -978,6 +1052,7 @@ void setup() {
         g_contexts.push_back(std::make_unique<DeviceContext>(*driver, *store, g_diagnostics,
                                                              nowMs, policy));
         g_deviceIds.push_back(id);
+        g_configSlotIds[plannedIndex] = id;
         // `planned` is in configuration order and `p` is the entry being started, so this is
         // true only for the first configured device -- never for a later one that starts first.
         if (&p == &planned.front()) {

@@ -678,21 +678,33 @@ unit, speak up" -- with no serial in the request, so two instances of the same P
 the same handshake and which physical unit each ends up owning is undefined. One PMU device per
 bus; mixing a PMU driver with Modbus drivers is fine.
 
-**Two of the outputs have not caught up.** `ModbusTcpServer::refresh` and `buildMetrics` each
-take a single `DeviceState`, so they are fed the first device only: the register map holds one
-device's worth of registers and the metric names have no device label. REST is device-keyed, and
-MQTT/Home Assistant became so — `MqttOutput` keeps one `Channel` per device (its own topics,
-throttle and discovery signature) and `buildDiscoveryEntities` takes a `uniqueBase` that scopes
-every `unique_id`, `object_id`, retained config topic and HA device identifier.
+**Every output is device-keyed, and each made its own back-compatibility call.** They are not
+the same call, deliberately:
 
-The first device deliberately keeps the bridge-scoped topics and unique ids it has always used,
-so an existing install's entities and recorder history survive the change; devices 2..N live
-under `<base>/<bridgeId>/device/<deviceId>/`. Availability, diagnostics and the relay/DRM topics
-stay bridge-scoped, because they describe the bridge.
+| Output | Device dimension | What happens to device 1 |
+|---|---|---|
+| REST | `/api/v1/devices/<id>` | unchanged; `/status` still describes it, plus a `devices` array |
+| MQTT / HA | topic subtree + `unique_id` prefix | **keeps** the bridge-scoped topics it always had |
+| Modbus TCP | one **unit id** per device, `modbus.unit_id + i` | **keeps** `modbus.unit_id`, map unchanged |
+| Prometheus | a `device` label on every inverter series | **gets the label too** — a breaking change |
 
-Until Modbus TCP and Prometheus follow, that limitation is stated in the README,
-`docs/rest-api.md`, `docs/mqtt.md` and next to the code in `main.cpp` rather than left to be
-discovered from a missing entity.
+MQTT and Modbus TCP could keep device 1 exactly where it was, so they did: an existing Home
+Assistant install keeps its entities and recorder history, and an existing Modbus client keeps
+reading unit 1. Prometheus could not do that without leaving one series unlabelled forever, and
+`sum by (device)` with a blank label is worse than a one-off dashboard edit. `docs/prometheus.md`
+says what to change.
+
+The Modbus mapping is the Unit Identifier doing the job the specification gives it — addressing
+a device on a serial sub-network behind a gateway — so a client needs no vendor-specific address
+arithmetic and the register map simply repeats at each unit. The run is consecutive and stops
+rather than skipping: a client derives device N by adding, so a hole would be inexpressible. The
+diagnostics unit still serves device 1's map, whose bridge block is identical at every unit.
+
+`MqttOutput` keeps one `Channel` per device (its own topics, throttle and discovery signature)
+and `buildDiscoveryEntities` takes a `uniqueBase` that scopes every `unique_id`, `object_id`,
+retained config topic and HA device identifier. Availability, diagnostics and the relay/DRM
+topics stay bridge-scoped, because they describe the bridge — as do the Prometheus counters,
+which live in one `Diagnostics` for the whole bus.
 
 ## Test strategy
 

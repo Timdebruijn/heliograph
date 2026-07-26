@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <vector>
 
 #include "device/device_state.h"
 #include "diagnostics/diagnostics.h"
@@ -28,8 +29,18 @@ namespace heliograph::modbus {
 struct ModbusServerConfig {
     bool     enabled           = true;
     uint16_t port              = 502;
+    /// Device 1. Devices 2..N follow at inverterUnitId + 1, + 2, and so on.
+    ///
+    /// One unit id per inverter is what the Modbus specification's Unit Identifier is for --
+    /// addressing a device on a serial sub-network behind a gateway -- so a client needs no
+    /// vendor-specific address arithmetic, only the unit id field it already has. The register
+    /// map is identical at every unit; it simply repeats. Device 1 stays exactly where it has
+    /// always been, so an existing client keeps working untouched (#36).
     uint8_t  inverterUnitId    = 1;
     uint8_t  diagnosticsUnitId = 250;
+    /// How many inverters to serve, i.e. how many consecutive unit ids to claim. Set from the
+    /// number of devices that started, before begin().
+    uint8_t  deviceCount       = 1;
     uint8_t  maxClients        = 4;
     uint32_t idleTimeoutMs     = 20000;
     /// Never true in the MVP. Kept as config rather than as an absence of code so that the
@@ -60,9 +71,37 @@ public:
     void stop();
     bool running() const;
 
-    /// Re-renders the register map. Called from the poll task; takes the map lock briefly.
-    void refresh(const DeviceState& state, const BridgeInfo& bridge,
+    /// Re-renders the register maps, one per device, in configuration order: `devices[i]` is
+    /// served at `inverterUnitId + i`. Called from the poll task; takes the map lock briefly.
+    ///
+    /// Extra entries beyond servedDevices() are ignored rather than served at a unit id no
+    /// worker is registered for -- the workers are bound at begin() and cannot grow after.
+    void refresh(const std::vector<const DeviceState*>& devices, const BridgeInfo& bridge,
                  const DiagnosticsSnapshot& diagnostics, uint64_t nowMs);
+
+    /// How many inverters this server actually serves. Lower than the configured count when
+    /// the unit ids would run past 247 or collide with the diagnostics unit; begin() logs it.
+    uint8_t servedDevices() const { return servedDevices_; }
+
+    /// The unit id device `index` is served at, or 0 when it is not served.
+    uint8_t unitIdFor(size_t index) const;
+
+    /// How many register maps are allocated. Never zero, even with no inverter: the diagnostics
+    /// unit reads map 0, and a bridge with nothing polling is exactly when it gets scraped.
+    size_t registerMapCount() const { return maps_.size(); }
+
+    /// Reads as a client would, by unit id. False when the unit has no map or the range falls
+    /// outside it -- the server turns that into an exception.
+    ///
+    /// Exists so the whole unit-id-to-device routing is reachable from a host test. The worker
+    /// that used to do this arithmetic is inside `#if defined(ESP32)`, which left the one thing
+    /// this feature is about -- unit `base+i` returning device `i` -- testable only by pointing
+    /// a real Modbus client at real hardware (review, 2026-07-26).
+    bool readUnit(uint8_t unitId, uint16_t address, uint16_t count, uint16_t* out) const;
+
+    /// Index into the maps for a unit id, or kNoMap. Public for the same reason as readUnit().
+    static constexpr size_t kNoMap = static_cast<size_t>(-1);
+    size_t                  mapIndexFor(uint8_t unitId) const;
 
     uint16_t activeClients() const;
 
@@ -72,12 +111,20 @@ public:
     const ModbusServerConfig& config() const { return config_; }
 
 private:
+    /// How many devices can be served without running past unit id 247 or over the diagnostics
+    /// unit. Pure, so the rule is host-testable; begin() applies it.
+    uint8_t serveableDevices() const;
+
     ModbusServerConfig config_;
-    RegisterMap        map_;
-    mutable std::mutex mapMutex_;
-    Diagnostics*       diagnostics_    = nullptr;
-    uint16_t           lastClientCount_ = 0;
-    bool               started_        = false;
+    /// One per served device, index i at unit id inverterUnitId + i. Allocated at begin(), when
+    /// the count is known: 900 registers is 1.8 KB apiece, and eight of those reserved up front
+    /// on a board with one inverter is 14 KB of heap for nothing.
+    std::vector<RegisterMap> maps_;
+    mutable std::mutex       mapMutex_;
+    Diagnostics*             diagnostics_     = nullptr;
+    uint16_t                 lastClientCount_ = 0;
+    uint8_t                  servedDevices_   = 0;
+    bool                     started_         = false;
 };
 
 }  // namespace heliograph::modbus

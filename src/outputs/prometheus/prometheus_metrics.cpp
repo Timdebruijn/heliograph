@@ -40,17 +40,6 @@ void appendValue(std::string& out, const char* name, long value) {
     out += buf;
 }
 
-/// Exports a gauge from a measurement, or nothing at all if it is not a current reading.
-void appendGauge(std::string& out, const DeviceState& state, const char* id, const char* name,
-                 const char* help) {
-    const auto* m = state.measurements.find(id);
-    if (m == nullptr || !m->supported || !m->valid || m->stale) {
-        return;  // omit, do not zero
-    }
-    appendHelp(out, name, help, "gauge");
-    appendValue(out, name, m->value);
-}
-
 std::string escapeLabel(const std::string& value) {
     std::string out;
     out.reserve(value.size());
@@ -67,42 +56,97 @@ std::string escapeLabel(const std::string& value) {
     return out;
 }
 
+/// `<name>{device="<id>"} <value>`.
+void appendDeviceValue(std::string& out, const char* name, const std::string& deviceId,
+                       double value) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), " %.3f\n", value);
+    out += name;
+    out += "{device=\"" + escapeLabel(deviceId) + "\"}";
+    out += buf;
+}
+
+void appendDeviceFlag(std::string& out, const char* name, const std::string& deviceId, bool set) {
+    out += name;
+    out += "{device=\"" + escapeLabel(deviceId) + "\"} ";
+    out += set ? "1\n" : "0\n";
+}
+
+/// One measurement, as one metric family across every device.
+struct GaugeSpec {
+    const char* measurementId;
+    const char* name;
+    const char* help;
+};
+
+constexpr GaugeSpec kInverterGauges[] = {
+    {measurement_id::kAcPowerTotal, "heliograph_inverter_ac_power_watts",
+     "Current AC output power"},
+    {measurement_id::kDcPowerTotal, "heliograph_inverter_dc_power_watts",
+     "Current DC input power (derived)"},
+    {measurement_id::kAcL1Voltage, "heliograph_inverter_ac_voltage_volts", "AC voltage on L1"},
+    {measurement_id::kAcL1Current, "heliograph_inverter_ac_current_amperes", "AC current on L1"},
+    {measurement_id::kAcFrequency, "heliograph_inverter_grid_frequency_hertz", "Grid frequency"},
+    {measurement_id::kEnergyToday, "heliograph_inverter_energy_today_kwh",
+     "Energy produced today"},
+    {measurement_id::kEnergyTotal, "heliograph_inverter_energy_total_kwh",
+     "Lifetime energy produced"},
+    {measurement_id::kTemperature, "heliograph_inverter_temperature_celsius",
+     "Inverter temperature"},
+};
+
 }  // namespace
 
-std::string buildMetrics(const DeviceState& state, const BridgeInfo& bridge,
+std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const BridgeInfo& bridge,
                          const DiagnosticsSnapshot& d) {
     std::string out;
-    out.reserve(2048);
+    out.reserve(2048 + devices.size() * 512);
 
-    appendHelp(out, "heliograph_build_info", "Firmware build information", "gauge");
-    out += "heliograph_build_info{version=\"" + escapeLabel(bridge.firmwareVersion) +
-           "\",driver=\"" + escapeLabel(state.identity.driverId) + "\",board=\"" +
-           escapeLabel(bridge.boardName) + "\"} 1\n";
+    // One build_info series per device: the firmware and board are the bridge's, the driver is
+    // the device's, and on a mixed bus those differ.
+    if (!devices.empty()) {
+        appendHelp(out, "heliograph_build_info", "Firmware build information", "gauge");
+    }
+    for (const auto& dev : devices) {
+        out += "heliograph_build_info{device=\"" + escapeLabel(dev.id) + "\",version=\"" +
+               escapeLabel(bridge.firmwareVersion) + "\",driver=\"" +
+               escapeLabel(dev.state->identity.driverId) + "\",board=\"" +
+               escapeLabel(bridge.boardName) + "\"} 1\n";
+    }
 
-    appendHelp(out, "heliograph_inverter_online", "1 if the inverter is responding", "gauge");
-    appendValue(out, "heliograph_inverter_online",
-                static_cast<unsigned long>(state.inverterOnline ? 1 : 0));
+    // Headers only when there is a series to put under them -- the same rule as the gauges
+    // below. With an empty device list these three used to emit a bare HELP/TYPE pair and no
+    // samples, which is exactly the shape the lazy header exists to avoid (review).
+    if (!devices.empty()) {
+        appendHelp(out, "heliograph_inverter_online", "1 if the inverter is responding", "gauge");
+        for (const auto& dev : devices) {
+            appendDeviceFlag(out, "heliograph_inverter_online", dev.id, dev.state->inverterOnline);
+        }
+        appendHelp(out, "heliograph_data_stale", "1 if the last reading is too old to trust",
+                   "gauge");
+        for (const auto& dev : devices) {
+            appendDeviceFlag(out, "heliograph_data_stale", dev.id, dev.state->dataStale);
+        }
+    }
 
-    appendHelp(out, "heliograph_data_stale", "1 if the last reading is too old to trust", "gauge");
-    appendValue(out, "heliograph_data_stale",
-                static_cast<unsigned long>(state.dataStale ? 1 : 0));
-
-    appendGauge(out, state, measurement_id::kAcPowerTotal, "heliograph_inverter_ac_power_watts",
-                "Current AC output power");
-    appendGauge(out, state, measurement_id::kDcPowerTotal, "heliograph_inverter_dc_power_watts",
-                "Current DC input power (derived)");
-    appendGauge(out, state, measurement_id::kAcL1Voltage, "heliograph_inverter_ac_voltage_volts",
-                "AC voltage on L1");
-    appendGauge(out, state, measurement_id::kAcL1Current, "heliograph_inverter_ac_current_amperes",
-                "AC current on L1");
-    appendGauge(out, state, measurement_id::kAcFrequency, "heliograph_inverter_grid_frequency_hertz",
-                "Grid frequency");
-    appendGauge(out, state, measurement_id::kEnergyToday, "heliograph_inverter_energy_today_kwh",
-                "Energy produced today");
-    appendGauge(out, state, measurement_id::kEnergyTotal, "heliograph_inverter_energy_total_kwh",
-                "Lifetime energy produced");
-    appendGauge(out, state, measurement_id::kTemperature,
-                "heliograph_inverter_temperature_celsius", "Inverter temperature");
+    // HELP/TYPE once per family, then one line per device that actually has the channel. The
+    // header is written lazily so a family no device reports is absent entirely rather than
+    // present as a bare header -- which is a parse error in strict parsers, and is why the
+    // whole family loops here instead of each device rendering its own block.
+    for (const auto& gauge : kInverterGauges) {
+        bool headerWritten = false;
+        for (const auto& dev : devices) {
+            const auto* m = dev.state->measurements.find(gauge.measurementId);
+            if (m == nullptr || !m->supported || !m->valid || m->stale) {
+                continue;  // omit, do not zero
+            }
+            if (!headerWritten) {
+                appendHelp(out, gauge.name, gauge.help, "gauge");
+                headerWritten = true;
+            }
+            appendDeviceValue(out, gauge.name, dev.id, m->value);
+        }
+    }
 
     appendHelp(out, "heliograph_poll_success_total", "Successful inverter polls", "counter");
     appendValue(out, "heliograph_poll_success_total",

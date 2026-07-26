@@ -332,6 +332,11 @@ bool RestApi::begin() {
                 fleet.push_back(rest::summariseDevice(*snapshot, id, now));
             } else if (StateHandle h = context_.devices->state(id)) {
                 fleet.push_back(rest::summariseDevice(*h, id, now));
+            } else {
+                continue;
+            }
+            if (context_.modbusUnitIdFor) {
+                fleet.back().modbusUnitId = context_.modbusUnitIdFor(id);
             }
         }
         std::string body;
@@ -827,13 +832,26 @@ bool RestApi::begin() {
     });
 
 #if ENABLE_PROMETHEUS
-    g_server->on("/metrics", HTTP_GET, [this, firstDevice](AsyncWebServerRequest* request) {
-        const auto snapshot = firstDevice();
-        if (!snapshot) {
+    g_server->on("/metrics", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        // Every polled device, each with its own `device` label -- not the first one. The
+        // handles are held for the whole render: DeviceMetrics keeps a raw pointer into each
+        // snapshot.
+        const auto                                ids = context_.devices->devices();
+        std::vector<StateHandle>                  held;
+        std::vector<prometheus::DeviceMetrics>    devices;
+        held.reserve(ids.size());
+        devices.reserve(ids.size());
+        for (const auto& id : ids) {
+            if (StateHandle h = context_.devices->state(id)) {
+                held.push_back(std::move(h));
+                devices.push_back({id, held.back().get()});
+            }
+        }
+        if (devices.empty()) {
             request->send(503, "text/plain", "# no device configured\n");
             return;
         }
-        const auto body = prometheus::buildMetrics(*snapshot, context_.bridgeInfo(),
+        const auto body = prometheus::buildMetrics(devices, context_.bridgeInfo(),
                                                    context_.diagnostics->snapshot());
         request->send(200, "text/plain; version=0.0.4", body.c_str());
     });

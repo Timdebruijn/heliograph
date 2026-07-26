@@ -233,10 +233,11 @@ can never be filled.
 Adding, removing or retuning a device needs a restart: the drivers and their poll contexts are
 built once, at boot.
 
-**The outputs are not all there yet.** REST, the device list and MQTT/Home Assistant carry every
-configured device; **Modbus TCP and Prometheus carry the first one only**, because the register
-map holds one device's registers and the metric names have no device label. That is the next
-piece of work and is stated in `docs/architecture.md` too.
+**Every output carries every device**, each with its own dimension: REST keys them by device id,
+MQTT/Home Assistant by topic subtree, **Modbus TCP by unit id** (`modbus.unit_id` plus the index,
+same order as `/api/v1/devices`) and **Prometheus by a `device` label**. See
+`docs/modbus-register-map.md` and `docs/prometheus.md`; `docs/architecture.md` has the table of
+what each one did about backwards compatibility.
 
 ## Discovery: what each mode actually probes
 
