@@ -1919,9 +1919,13 @@ async function updatesEnabled(){
   return window.g_updatesEnabled;
 }
 
-// Same rules as ota::isNewer in the firmware: take the leading semver, ignore the build stamp
-// this firmware appends to its own version, and refuse anything else rather than guessing.
-// "0.9.0" sorts above "0.14.0" as text, which is the whole reason this is not a string compare.
+// The comparison lives here and only here, because here is where it runs -- the firmware never
+// needs to know what the latest release is. Take the leading semver, ignore the build stamp the
+// firmware appends to its own version, and refuse anything else rather than guessing.
+//
+// Not a string compare, and that is the whole point: "0.9.0" sorts ABOVE "0.14.0" as text, so
+// the naive version nags forever about a downgrade. Checked by tools/check_web_js.py, which
+// runs these two functions in node against exactly the cases that trap a hand-rolled parser.
 function semver(text){
   const m=/^\s*v?(\d{1,5})\.(\d{1,5})\.(\d{1,5})(?!\d|\.\d)/.exec(String(text||''));
   return m?[+m[1],+m[2],+m[3]]:null;

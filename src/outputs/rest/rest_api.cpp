@@ -1099,7 +1099,13 @@ bool RestApi::begin() {
             // "rebooting" while the old image kept running until someone power-cycled.
             // Deferred like every other reboot so the response still reaches the client.
             context_.requestReboot();
-            request->send(200, kJson, "{\"status\":\"ok\",\"rebooting\":true}");
+            // The digest of what was actually written, so the caller can record what it
+            // installed rather than what it hoped it was sending. Also the only thing that
+            // distinguishes "verified against the release" from "we took your word for it":
+            // an upload with no expected hash still gets one back.
+            std::string body = "{\"status\":\"ok\",\"rebooting\":true,\"sha256\":\"" +
+                               g_ota.writtenSha256() + "\"}";
+            request->send(200, kJson, body.c_str());
         },
         [this, authorised](AsyncWebServerRequest* request, const String& filename, size_t index,
                            uint8_t* data, size_t len, bool final) {
