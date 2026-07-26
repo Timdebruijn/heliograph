@@ -108,6 +108,31 @@ else
     fi
 fi
 
+echo "==> 6. Every test that is written is also registered"
+# A `static void test_x()` with no matching RUN_TEST compiles, reads as coverage, and never
+# runs. test_start_is_never_throttled sat that way for a while -- and it is the test asserting
+# that the rate limiter can never be the reason a curtailed inverter stays curtailed, which is
+# a safety property, not a nicety. Clang says "unused function" only on a fresh compile of that
+# one file, so a normal incremental run never shows it.
+unregistered=""
+for f in test/*/test_main.cpp; do
+    for fn in $(grep -oE '^static void (test_[A-Za-z0-9_]+)\(\)' "$f" | awk '{print $3}' |
+                sed 's/()$//'); do
+        if ! grep -q "RUN_TEST($fn)" "$f"; then
+            unregistered="$unregistered $f:$fn"
+        fi
+    done
+done
+if [ -n "$unregistered" ]; then
+    echo "FAIL: tests defined but never run:"
+    for hit in $unregistered; do
+        echo "      $hit"
+    done
+    status=1
+else
+    echo "OK"
+fi
+
 echo
 if [ $status -eq 0 ]; then
     echo "RESULT: PASS"

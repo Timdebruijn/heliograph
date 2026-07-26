@@ -545,6 +545,7 @@ int main(int, char**) {
     RUN_TEST(test_a_mode_command_without_a_selection_is_refused);
     RUN_TEST(test_a_mode_command_with_a_selection_reaches_the_driver);
 
+    RUN_TEST(test_start_is_never_throttled);
     RUN_TEST(test_a_limit_at_its_maximum_still_pays_for_a_token);
     RUN_TEST(test_run_state_commands_are_spaced_but_never_starved);
     RUN_TEST(test_stop_is_not_starved_by_restricting_traffic);
