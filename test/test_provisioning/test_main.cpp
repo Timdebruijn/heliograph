@@ -4,7 +4,10 @@
 #include <unity.h>
 
 #include <cstring>
+#include <set>
 #include <string>
+
+#include <ArduinoJson.h>
 
 #include "config/configuration_store.h"
 #include "network/provisioning_policy.h"
@@ -285,6 +288,78 @@ static void test_the_storage_serialiser_is_the_only_one_that_writes_secrets() {
 
     TEST_ASSERT_TRUE(forApi.find("GeheimWifiWachtwoord") == std::string::npos);
     TEST_ASSERT_TRUE(forStorage.find("GeheimWifiWachtwoord") != std::string::npos);
+}
+
+/// Collects every key PATH in a document ("mqtt.qos", "relays.roles"), so two documents can be
+/// compared on shape rather than on the order or the values they happen to carry.
+static void collectKeyPaths(JsonVariantConst v, const std::string& prefix,
+                            std::set<std::string>& out) {
+    if (!v.is<JsonObjectConst>()) {
+        return;
+    }
+    for (JsonPairConst kv : v.as<JsonObjectConst>()) {
+        const std::string path = prefix.empty() ? std::string(kv.key().c_str())
+                                                : prefix + "." + kv.key().c_str();
+        out.insert(path);
+        collectKeyPaths(kv.value(), path, out);  // arrays stop here, which is what we want
+    }
+}
+
+/// THE invariant behind config_sections::writeCommon.
+///
+/// The API document and the stored document are written by one shared function plus a short
+/// per-caller tail. This asserts that the tail is the ONLY thing that differs: every key in one
+/// must appear in the other, except the credential keys listed here by name.
+///
+/// It exists because the failure it guards is silent. Before the writers were merged, a setting
+/// added to serializeConfig and forgotten in serializeConfigForStorage produced a settings page
+/// that showed the field, accepted a change, reported success, and lost it on the next reboot --
+/// nothing threw and nothing logged. Merging the writers makes that mistake hard; this makes it
+/// impossible to land unnoticed, including if someone later adds a field to one tail instead of
+/// to writeCommon().
+static void test_the_two_config_documents_differ_only_in_their_credentials() {
+    const auto  c = provisionedConfig();
+    std::string forApi;
+    std::string forStorage;
+    TEST_ASSERT_TRUE(serializeConfig(c, forApi));
+    TEST_ASSERT_TRUE(serializeConfigForStorage(c, forStorage));
+
+    JsonDocument api;
+    JsonDocument stored;
+    TEST_ASSERT_EQUAL(DeserializationError::Ok, deserializeJson(api, forApi).code());
+    TEST_ASSERT_EQUAL(DeserializationError::Ok, deserializeJson(stored, forStorage).code());
+
+    std::set<std::string> apiKeys;
+    std::set<std::string> storedKeys;
+    collectKeyPaths(api.as<JsonVariantConst>(), "", apiKeys);
+    collectKeyPaths(stored.as<JsonVariantConst>(), "", storedKeys);
+
+    // The redaction, stated as data. Anything outside these two lists that appears in only one
+    // document is drift, not design.
+    const std::set<std::string> apiOnly{"wifi.password_set", "mqtt.username_set",
+                                        "mqtt.password_set", "security.password_set"};
+    const std::set<std::string> storedOnly{"wifi.password",          "mqtt.username",
+                                           "mqtt.password",         "security.admin_username",
+                                           "security.admin_password"};
+
+    for (const auto& key : apiKeys) {
+        if (apiOnly.count(key) != 0) continue;
+        TEST_ASSERT_TRUE_MESSAGE(storedKeys.count(key) != 0,
+                                 ("in the API document but not stored: " + key).c_str());
+    }
+    for (const auto& key : storedKeys) {
+        if (storedOnly.count(key) != 0) continue;
+        TEST_ASSERT_TRUE_MESSAGE(apiKeys.count(key) != 0,
+                                 ("stored but not in the API document: " + key).c_str());
+    }
+    // And the redactions themselves are really present, so the lists above cannot silently rot
+    // into a pair of unused constants that make the loops above vacuous.
+    for (const auto& key : apiOnly) {
+        TEST_ASSERT_TRUE_MESSAGE(apiKeys.count(key) != 0, key.c_str());
+    }
+    for (const auto& key : storedOnly) {
+        TEST_ASSERT_TRUE_MESSAGE(storedKeys.count(key) != 0, key.c_str());
+    }
 }
 
 static void test_factory_reset_wipes_credentials() {
@@ -1034,6 +1109,7 @@ int main(int, char**) {
     RUN_TEST(test_ntp_without_dhcp_needs_a_server);
     RUN_TEST(test_ntp_timezone_must_not_be_empty);
     RUN_TEST(test_secrets_survive_the_round_trip);
+    RUN_TEST(test_the_two_config_documents_differ_only_in_their_credentials);
     RUN_TEST(test_the_storage_serialiser_is_the_only_one_that_writes_secrets);
     RUN_TEST(test_factory_reset_wipes_credentials);
     RUN_TEST(test_a_failed_write_is_reported_not_swallowed);
