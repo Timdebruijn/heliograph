@@ -15,6 +15,7 @@ the same LAN", not "someone holding the PCB in their hands".
 | OTA | Same auth + firmware magic check (0xE9) before the first byte hits flash |
 | Completing setup | Refuses without an admin password |
 | Secrets in logs/REST/MQTT/Prometheus | Never. `serializeConfig()` omits every password **and both usernames** — the MQTT one and `security.admin_username` (not masked, absent); `serializeConfigForStorage()` is the only one that writes them |
+| Configuration backup | Passwords omitted unless the operator ticks a box. Admin-gated even redacted. See below |
 | Rate limiting | 1 req/s on `/actions/*` |
 | Request size | 4096 bytes, rejected with 413 |
 | String lengths | Bounded in `validate()`; SSID 32 and PSK 64 are the 802.11/WPA2 limits |
@@ -120,6 +121,28 @@ session token, a CSRF nonce, a pairing code or a generated first-boot password i
 - Remember that a generated secret has to reach the user somehow, and every channel this
   bridge has (the open setup AP, plain HTTP, the serial console) is one of the exposures listed
   above.
+
+**A configuration backup with `?secrets=true` is a plaintext credential file.** It holds the
+WiFi password, the MQTT password and the admin password exactly as NVS stores them. This is the
+one place the firmware will hand a password back to anyone, which is why it is opt-in, off by
+default, admin-gated, and labelled in the UI with what actually happens to such a file: it lands
+in a downloads folder, syncs to whatever cloud drive is watching that folder, and is the obvious
+thing to attach to a bug report. Treat it like a copy of the flash, because that is what it is.
+
+The redacted form — the default — carries no password at all, and the keys are removed rather
+than emptied, so nothing round-trips back in as a deliberate "clear this password". It is still
+admin-gated: it contains no secret, but it does put every other setting in one convenient
+document, and unlike `GET /api/v1/config` nothing needs it except a human who is already signed
+in.
+
+Restoring cannot leave the bridge without an admin password. A redacted backup keeps whatever
+the bridge already has; on a factory-fresh board there is nothing to keep, and that restore is
+refused rather than producing a bridge on your WiFi that nobody can reconfigure.
+
+**The rollback copy holds credentials too.** `config.prev` is a full copy of the previous
+configuration, secrets included, in the same unencrypted NVS. A factory reset clears the whole
+namespace and takes it along — which is what keeps "erases everything, including passwords"
+true.
 
 **OTA images are not cryptographically signed.** The upload is gated by the admin password
 and checked for the ESP32 image magic (`0xE9`) before any byte reaches flash, and a bad image

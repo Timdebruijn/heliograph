@@ -20,6 +20,9 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | GET | `/api/v1/drivers` | — | Registered drivers + descriptors |
 | GET | `/api/v1/config` | — | Config **without secrets** |
 | PATCH | `/api/v1/config` | **✔** | Change config |
+| GET | `/api/v1/config/backup` | **✔** | Download the whole configuration as a file (`?secrets=true` to include passwords) |
+| POST | `/api/v1/config/restore` | **✔** | Apply a backup file (`?dry_run=true` to preview only) |
+| POST | `/api/v1/actions/undo-restore` | **✔** | Swap back to the configuration from before the last restore |
 | POST | `/api/v1/actions/discover` | **✔** | Start discovery |
 | POST | `/api/v1/actions/capture` | **✔** | Record raw RS485 traffic (`?seconds=&baud=&parity=&frames=`) |
 | GET | `/api/v1/capture` | — | The last capture, with per-frame hex and checksum verdicts |
@@ -157,7 +160,7 @@ Uniform, for every error:
 | 401 | Auth missing/incorrect on a secured endpoint |
 | 404 | Unknown device or path |
 | 409 | Discovery already in progress; RS485 bus busy |
-| 413 | Body > 4 KB |
+| 413 | Body > 4 KB (8 KB on `/config/restore`, which carries a whole configuration) |
 | 429 | Rate limit (1 req/s on `/actions/*`) |
 | 503 | No valid data yet (cold start) |
 
@@ -409,6 +412,113 @@ a client knows whether to call `POST /api/v1/actions/reboot`:
 ```
 
 `GET` does not include the field (nothing was changed).
+
+## Backup and restore
+
+The backup file is a thin envelope around the exact document the bridge stores in NVS. That
+matters more than it sounds: the field list has one point of truth, so a setting added in a
+later firmware lands in the backup without anyone remembering to add it, and reading a file
+back reuses the same parser the bootloader uses — including its migration chain, so a backup
+taken on an older firmware is upgraded on the way in.
+
+```json
+{
+  "format": "heliograph-config-backup",
+  "format_version": 1,
+  "firmware_version": "0.13.2",
+  "exported_at": "2026-07-26T12:00:00Z",
+  "includes_secrets": false,
+  "bridge_name": "Shed bridge",
+  "config": { "version": 1, "wifi": { "ssid": "HomeNet", "hostname": "shed" }, "...": "..." }
+}
+```
+
+`format_version` versions the envelope; `config.version` versions the configuration inside it,
+and the two are checked separately. A file from a newer firmware is **refused**, not
+reinterpreted — the same rule NVS loading follows, and for the same reason: a half-understood
+configuration looks plausible.
+
+### Secrets are opt-out by default
+
+`GET /api/v1/config/backup` omits every password. `?secrets=true` includes them, in plain text.
+
+What makes the redacted file usable rather than merely safe is the merge rule: **an absent
+password means "keep the one the bridge already has"**. So a redacted backup restored onto a
+running bridge is complete. Only a factory-fresh board has nothing to inherit — and a restore
+that would leave such a board with no admin password is refused outright (`password_required`),
+because the alternative is a bridge on your WiFi that nobody can change and only a five-second
+BOOT hold can recover.
+
+A password that is *present but empty* is applied. That is a deliberately empty credential (an
+open WiFi network), not a redaction, and the two are told apart by whether the key exists.
+
+### Preview, then apply
+
+`POST /api/v1/config/restore?dry_run=true` returns what would change and applies nothing:
+
+```json
+{
+  "backup": { "format_version": 1, "firmware_version": "0.13.2",
+              "exported_at": "2026-07-26T12:00:00Z", "includes_secrets": false },
+  "change_count": 2,
+  "reboot_required": true,
+  "rollback_exists": true,
+  "changes": [
+    { "field": "mqtt.host", "before": "old.broker", "after": "new.broker" },
+    { "field": "polling.interval_seconds", "before": "10", "after": "30" }
+  ]
+}
+```
+
+The diff is computed against the **merged result**, not against the file, so it tells the truth
+about a redacted backup: those credentials show as unchanged, because leaving them alone is
+what applying it will do. Password values never appear — any key named `password` or ending in
+`_password` renders as `(set)` / `(not set)`, as a rule rather than a list, so a credential
+added later is redacted before anyone has to remember it should be.
+
+Nothing is staged on the bridge between the two calls. The apply re-sends the file rather than
+confirming a token, so there is no server-side session to expire, to be raced by a second
+browser tab, or to apply something other than what was on screen.
+
+`rollback_exists` says whether an undo point is stored **right now**, from an earlier restore —
+applying replaces it, so the way back becomes the configuration the bridge has at this moment
+rather than the older one. It deliberately does *not* claim that an undo will exist afterwards:
+that cannot be known before the copy is attempted, because attempting it is the only thing that
+discovers whether it fits. `rollback_stored` in the result answers that, after the fact.
+
+Dropping `?dry_run=true` applies it and reboots when `reboot_required`:
+
+```json
+{ "status": "restored", "changed_fields": 2, "reboot_required": true, "rollback_stored": true }
+```
+
+### The undo
+
+Immediately before a restore overwrites it, the current configuration is copied to a second NVS
+key. `POST /api/v1/actions/undo-restore` **swaps** the two back — pressing it twice returns to
+the restored configuration, which is what makes the button honest rather than silently doing
+nothing the second time.
+
+Only a restore creates a restore point; an ordinary `PATCH` does not. Writing one on every save
+would double the flash wear and, worse, make "the configuration from before the restore" mean
+nothing in particular.
+
+`rollback_stored: false` means the copy did not fit. NVS here is 20 KB shared with the WiFi
+stack's own calibration data, so a second copy of the configuration is the first thing that will
+not fit — and the restore still goes ahead, because losing the safety net is a smaller harm than
+refusing the operation the safety net was for.
+
+### Restoring during setup
+
+The setup portal offers the same restore, which is the context that makes the feature worth
+having: a factory-reset or replacement board takes a file instead of twenty fields typed by
+hand.
+
+It carries the same gate as `/api/v1/provision`, and for the same reason — the portal is **not**
+exclusive to first boot. It returns on an already-configured bridge after repeated WiFi failures
+(a router reboot reaches that in about two minutes) and its AP is open. So the gate is "does an
+admin password exist yet", not "is the portal up": open on a factory-fresh board, authenticated
+afterwards.
 
 ## Auth
 

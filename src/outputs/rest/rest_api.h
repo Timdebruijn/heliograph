@@ -35,6 +35,7 @@ class AsyncWebServerRequest;
 #include "app/capture_runner.h"
 #include "app/discovery_runner.h"
 #include "drivers/driver_registry.h"
+#include "rest_payloads.h"
 #include "state/state_store.h"
 
 namespace heliograph::rest {
@@ -76,6 +77,15 @@ struct RestContext {
     /// The same wipe the BOOT-hold performs, reached over the network instead of the button --
     /// which is what a user without physical access has when a config locks them out.
     std::function<bool()> requestFactoryReset;
+    /// Copies the stored configuration into the rollback slot, so the restore about to run can
+    /// be undone. False when there was nothing stored yet, or the write was refused -- both
+    /// are reported to the caller rather than aborting the restore over them.
+    std::function<bool()> stashRollback;
+    /// Swaps the rollback copy back in and hands over the configuration that is now live.
+    /// False when there is no rollback copy, or it could not be read.
+    std::function<bool(Configuration&)> rollbackConfig;
+    /// Whether an undo is currently available, for the preview to say so up front.
+    std::function<bool()> hasRollback;
     /// Erases a stored crash dump. Returns false when there was none, or the flash refused.
     /// Admin-gated and rate-limited like every other action -- it destroys diagnostic evidence,
     /// which is exactly the sort of thing an unauthenticated caller must not be able to do.
@@ -111,8 +121,24 @@ public:
 
 private:
     /// Accumulates a chunked body into bodyBuffer_. See the note on bodyBuffer_.
+    ///
+    /// `maxBytes` is per route rather than global: a configuration restore is legitimately
+    /// larger than any other body this API takes, and raising the bound for every endpoint to
+    /// suit the one that needs it would loosen the heap guarantee everywhere else.
     bool collectBody(AsyncWebServerRequest* request, const uint8_t* data, size_t len, size_t index,
-                     size_t total, std::string*& out);
+                     size_t total, std::string*& out, size_t maxBytes = kMaxRequestBytes);
+
+    /// True when collectBody already answered this request (413 too large, 409 busy).
+    ///
+    /// The request handler MUST return without sending when this is true. The body handler runs
+    /// first but the request handler runs anyway, and send() replaces any previously stored
+    /// response -- so the unconditional "a JSON body is required" that every one of these
+    /// handlers falls through to was overwriting the real reason. Upload a file one byte over
+    /// the limit and the API said the body was missing.
+    ///
+    /// Same lesson the OTA route learned with its _tempObject marker, arrived at from the
+    /// other direction: there it was the specific error being replaced by a generic one.
+    bool bodyAlreadyAnswered(AsyncWebServerRequest* request);
     void releaseBody();
 
     RestContext context_;
@@ -130,6 +156,10 @@ private:
     // corrupting this one.
     std::string                  bodyBuffer_;
     const void*                  bodyOwner_ = nullptr;
+    /// The request collectBody has already answered with an error. Compared by pointer and
+    /// never dereferenced; cleared as soon as it is read, and whenever a new body starts, so a
+    /// recycled request address cannot inherit it.
+    const void*                  bodyRejected_ = nullptr;
 };
 
 /// Minimum spacing between /actions/* calls, per the security model.

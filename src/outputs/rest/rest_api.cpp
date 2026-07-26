@@ -53,20 +53,29 @@ RestApi::RestApi(RestContext context, uint16_t port) : context_(std::move(contex
 /// error -- which is exactly how "a JSON body is required" ended up masking an auth failure.
 /// Authorisation belongs in the request handler, where the response is actually formed.
 bool RestApi::collectBody(AsyncWebServerRequest* request, const uint8_t* data, size_t len,
-                          size_t index, size_t total, std::string*& out) {
+                          size_t index, size_t total, std::string*& out, size_t maxBytes) {
     out = nullptr;
-    if (total > kMaxRequestBytes) {
-        sendError(request, {413, "body_too_large", "request body exceeds 4096 bytes"});
+    if (total > maxBytes) {
+        // The limit is interpolated, not spelled out. It used to say "4096" in a message that
+        // would have kept saying 4096 after the constant moved.
+        sendError(request, {413, "body_too_large",
+                            "request body exceeds " + std::to_string(maxBytes) + " bytes"});
+        bodyRejected_ = request;  // or the request handler replaces this with "empty body"
         return false;
     }
     if (index == 0) {
         if (bodyOwner_ != nullptr && bodyOwner_ != request) {
             sendError(request, {409, "busy", "another request is already being processed"});
+            bodyRejected_ = request;
             return false;
         }
-        bodyOwner_ = request;
+        // A fresh body from a different request: whatever the previous rejection referred to
+        // is over, and keeping a stale pointer risks a recycled address matching it.
+        bodyRejected_ = nullptr;
+        bodyOwner_    = request;
         bodyBuffer_.clear();
         bodyBuffer_.reserve(total);
+
         // A client that vanishes mid-body (WiFi drop on the setup AP is the realistic case)
         // never reaches the request handler, so nothing would release the buffer: every later
         // body-carrying request then answered 409 "busy" until a reboot. Same lesson the OTA
@@ -89,8 +98,17 @@ bool RestApi::collectBody(AsyncWebServerRequest* request, const uint8_t* data, s
     return true;
 }
 
+bool RestApi::bodyAlreadyAnswered(AsyncWebServerRequest* request) {
+    if (bodyRejected_ != request) {
+        return false;
+    }
+    bodyRejected_ = nullptr;  // consumed: this request has now been dealt with
+    return true;
+}
+
 void RestApi::releaseBody() {
-    bodyOwner_ = nullptr;
+    bodyOwner_    = nullptr;
+    bodyRejected_ = nullptr;
     bodyBuffer_.clear();
     bodyBuffer_.shrink_to_fit();
 }
@@ -211,6 +229,12 @@ bool RestApi::begin() {
         [this, authorised](AsyncWebServerRequest* request) {
             // The request handler forms the response; the body handler only collects. If the
             // body never completed, nothing was queued and this is a genuinely empty POST.
+            // collectBody may already have answered (413 too large, 409 busy). send()
+            // replaces the stored response, so falling through to the generic error below
+            // would overwrite the real reason with "a JSON body is required".
+            if (bodyAlreadyAnswered(request)) {
+                return;
+            }
             if (bodyOwner_ != request) {
                 sendError(request, {400, "empty_body", "a JSON body is required"});
                 return;
@@ -464,7 +488,13 @@ bool RestApi::begin() {
 
     // Unauthenticated on purpose: it contains no secrets by construction (serializeConfig
     // omits every password), and the UI needs it to render the settings form.
-    g_server->on("/api/v1/config", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    //
+    // AsyncURIMatcher::exact for the same reason /api/v1/devices needs it: a bare string URI
+    // matches "^uri(/.*)?$", so this route would otherwise swallow /api/v1/config/backup and
+    // answer a download request with the redacted settings document. The devices route learned
+    // this the hard way; the sub-routes below are why it matters here now.
+    g_server->on(AsyncURIMatcher::exact("/api/v1/config"), HTTP_GET,
+                 [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         std::string body;
         if (!serializeConfig(*context_.config, body)) {
@@ -474,13 +504,21 @@ bool RestApi::begin() {
         request->send(200, kJson, body.c_str());
     });
 
+    // Exact, like the GET above: a PATCH aimed at /api/v1/config/restore must reach a 404
+    // rather than being read as a settings patch against a body that is a backup file.
     g_server->on(
-        "/api/v1/config", HTTP_PATCH,
+        AsyncURIMatcher::exact("/api/v1/config"), HTTP_PATCH,
         [this, authorised](AsyncWebServerRequest* request) {
             // Auth here, not in the body handler. The body handler runs first; refusing there
             // left this handler to fire afterwards and replace the 401 with its own error.
             if (!authorised(request)) {
                 releaseBody();
+                return;
+            }
+            // collectBody may already have answered (413 too large, 409 busy). send()
+            // replaces the stored response, so falling through to the generic error below
+            // would overwrite the real reason with "a JSON body is required".
+            if (bodyAlreadyAnswered(request)) {
                 return;
             }
             if (bodyOwner_ != request) {
@@ -592,6 +630,204 @@ bool RestApi::begin() {
             std::string* body = nullptr;
             collectBody(request, data, len, index, total, body);
         });
+
+    // Download the whole configuration as one file.
+    //
+    // Admin-gated even in its redacted form, unlike GET /config. The redacted backup carries no
+    // password, but it does carry everything else in one convenient document -- and unlike the
+    // settings endpoint, which the UI must reach to render a form, nothing needs this except a
+    // human who is already signed in.
+    g_server->on(AsyncURIMatcher::exact("/api/v1/config/backup"), HTTP_GET,
+                 [this, authorised](AsyncWebServerRequest* request) {
+        if (!authorised(request)) {
+            return;
+        }
+        context_.diagnostics->recordRestRequest();
+        const BridgeInfo info = context_.bridgeInfo();
+        BackupOptions    options;
+        // Opt-in, one query parameter, and the UI makes the operator tick a box with the
+        // consequence spelled out next to it. See the note at the top of config_backup.h.
+        options.includeSecrets =
+            request->hasParam("secrets") && request->getParam("secrets")->value() == "true";
+        options.firmwareVersion = info.firmwareVersion;
+        // Only from a synced clock. isoUtcTimestamp refuses an implausible epoch anyway; this
+        // makes the intent visible at the call site rather than relying on that.
+        options.exportedAt =
+            info.timeSynced ? isoUtcTimestamp(static_cast<time_t>(info.currentEpoch))
+                            : std::string{};
+
+        std::string body;
+        if (!buildConfigBackup(*context_.config, options, body)) {
+            sendError(request, {500, "backup_failed", "the configuration could not be exported"});
+            return;
+        }
+        auto* response = request->beginResponse(200, kJson, body.c_str());
+        // The hostname, not the display name: it is already constrained to [A-Za-z0-9-] by
+        // validate(), so it cannot break out of the quoted filename, and a display name can
+        // contain anything including a quote.
+        std::string filename = "heliograph-" + context_.config->wifi.hostname;
+        if (!options.exportedAt.empty()) {
+            filename += "-" + options.exportedAt.substr(0, 10);  // date only
+        }
+        response->addHeader("Content-Disposition",
+                            ("attachment; filename=\"" + filename + ".json\"").c_str());
+        request->send(response);
+    });
+
+    // Restore, in two steps that share one implementation: ?dry_run=true previews, without it
+    // applies. Deliberately not a stored preview the confirm step then commits -- the file is
+    // parsed afresh both times, so there is no server-side session to expire, to be raced by a
+    // second browser tab, or to apply something other than what was shown.
+    g_server->on(
+        AsyncURIMatcher::exact("/api/v1/config/restore"), HTTP_POST,
+        [this, authorised](AsyncWebServerRequest* request) {
+            // The same gate as /provision, for the same reason: the setup portal also returns
+            // on an ALREADY-CONFIGURED bridge after repeated WiFi failures, and its AP is open.
+            // Gated on whether a credential exists yet, not on whether the portal happens to be
+            // up -- otherwise anyone in radio range of a bridge whose WiFi had dropped could
+            // overwrite its entire configuration with a file.
+            const bool portal   = context_.portalActive && context_.portalActive();
+            const bool unsealed = context_.config->security.adminPassword.empty();
+            if (!(portal && unsealed) && !authorised(request)) {
+                releaseBody();
+                return;  // authorised() stored the 401
+            }
+            // collectBody may already have answered (413 too large, 409 busy). send()
+            // replaces the stored response, so falling through to the generic error below
+            // would overwrite the real reason with "a backup file is required".
+            if (bodyAlreadyAnswered(request)) {
+                return;
+            }
+            if (bodyOwner_ != request) {
+                sendError(request, {400, "empty_body", "a backup file is required"});
+                return;
+            }
+            BackupContents contents;
+            std::string    detail;
+            const BackupResult parsed = parseConfigBackup(bodyBuffer_, contents, detail);
+            releaseBody();
+            if (parsed != BackupResult::Ok) {
+                // The parser's own sentence, verbatim. "Rejected" with no reason is exactly the
+                // failure this endpoint must not have: the operator is holding a file and needs
+                // to know whether it is the wrong file, a newer one, or a damaged one.
+                sendError(request, {400, backupResultName(parsed), detail});
+                return;
+            }
+
+            const Configuration before = *context_.config;
+            Configuration       merged = before;
+            applyBackup(contents, merged);
+
+            // The file's configuration passed validate() on the way in, and the credentials
+            // merged over it came from a configuration that also passed. Checked anyway: this
+            // is the one place two validated halves are combined, and a bound that involves
+            // both would be invisible to either check on its own.
+            ConfigError error;
+            if (!validate(merged, error)) {
+                sendError(request, {400, "invalid_config",
+                                    error.field.empty() ? error.message
+                                                        : error.field + ": " + error.message});
+                return;
+            }
+            // Never leave the bridge without an admin password. A redacted backup restored onto
+            // a factory-fresh board would do exactly that: it would come up on the WiFi from the
+            // file, with every mutation refused for want of a credential, and the only way back
+            // in a five-second BOOT hold. Same rule /provision enforces, and the message names
+            // the way out.
+            if (merged.security.adminPassword.empty()) {
+                sendError(request, {400, "password_required",
+                                    "this backup carries no admin password and this bridge has "
+                                    "none yet; export again with secrets included, or complete "
+                                    "setup first and restore afterwards"});
+                return;
+            }
+
+            std::vector<ConfigDiffEntry> diff;
+            if (!diffConfigurations(before, merged, diff)) {
+                sendError(request, {500, "diff_failed", "could not compare the two configurations"});
+                return;
+            }
+            const bool rebootRequired = configChangeRequiresReboot(before, merged);
+
+            const bool dryRun = request->hasParam("dry_run") &&
+                                request->getParam("dry_run")->value() == "true";
+            if (dryRun) {
+                std::string body;
+                // Actually asked, not inferred from the callbacks being wired -- which is what
+                // this argument used to be, making the field a report on our own plumbing.
+                const bool rollbackExists =
+                    context_.hasRollback != nullptr && context_.hasRollback();
+                if (!buildRestorePreviewPayload(contents, diff, rebootRequired, rollbackExists,
+                                                body)) {
+                    sendError(request, {500, "payload_too_large",
+                                        "the restore preview exceeded its bound"});
+                    return;
+                }
+                request->send(200, kJson, body.c_str());
+                return;
+            }
+
+            // The undo copy goes in BEFORE the new configuration overwrites the old one --
+            // afterwards there is nothing left to copy. A refusal here (a full NVS) is reported,
+            // not fatal: losing the safety net is a smaller harm than refusing the operation it
+            // was for.
+            const bool rollbackStored =
+                context_.stashRollback != nullptr && context_.stashRollback();
+
+            if (!context_.saveConfig(merged)) {
+                sendError(request, {500, "save_failed", "could not persist the configuration"});
+                return;
+            }
+            context_.applyConfig(merged);  // lock-guarded publish; see RestContext
+
+            std::string body;
+            if (!buildRestoreResultPayload(diff.size(), rebootRequired, rollbackStored, body)) {
+                request->send(200, kJson, "{\"status\":\"restored\"}");
+            } else {
+                request->send(200, kJson, body.c_str());
+            }
+            // Deferred, like every other reboot here: the send is queued, not flushed, and
+            // restarting now would drop the response that says what happened.
+            if (rebootRequired) {
+                context_.requestReboot();
+            }
+        },
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index,
+               size_t total) {
+            std::string* body = nullptr;
+            // The one route with a larger bound: a backup is the whole configuration plus an
+            // envelope, which does not fit the 4096 every other body is held to.
+            collectBody(request, data, len, index, total, body, kMaxBackupBytes);
+        });
+
+    g_server->on("/api/v1/actions/undo-restore", HTTP_POST,
+                 [this, authorised, rateLimited](AsyncWebServerRequest* request) {
+        if (!authorised(request) || rateLimited(request)) {
+            return;
+        }
+        context_.diagnostics->recordRestRequest();
+        Configuration restored;
+        if (context_.rollbackConfig == nullptr || !context_.rollbackConfig(restored)) {
+            // 404 rather than 500: by far the likeliest reason is that no restore has been done
+            // on this bridge, which is the normal state and not something to retry.
+            sendError(request, {404, "no_rollback",
+                                "there is no earlier configuration to go back to"});
+            return;
+        }
+        // rollbackConfig has already written to NVS -- it swaps the two stored blobs -- so
+        // there is deliberately no saveConfig() here. Calling one would re-serialise the same
+        // configuration over the copy that was just put in place.
+        const Configuration before = *context_.config;
+        context_.applyConfig(restored);
+        const bool rebootRequired = configChangeRequiresReboot(before, restored);
+        request->send(200, kJson,
+                      rebootRequired ? "{\"status\":\"rolled_back\",\"rebooting\":true}"
+                                     : "{\"status\":\"rolled_back\",\"rebooting\":false}");
+        if (rebootRequired) {
+            context_.requestReboot();
+        }
+    });
 
     g_server->on("/api/v1/actions/poll", HTTP_POST,
                  [this, authorised, rateLimited](AsyncWebServerRequest* request) {
@@ -1011,12 +1247,15 @@ void RestApi::stop() { started_ = false; }
 void RestApi::notifyState(const DeviceState&, uint64_t) {}
 
 bool RestApi::collectBody(AsyncWebServerRequest*, const uint8_t*, size_t, size_t, size_t,
-                          std::string*& out) {
+                          std::string*& out, size_t) {
     out = nullptr;
     return false;
 }
+bool RestApi::bodyAlreadyAnswered(AsyncWebServerRequest*) { return false; }
+
 void RestApi::releaseBody() {
-    bodyOwner_ = nullptr;
+    bodyOwner_    = nullptr;
+    bodyRejected_ = nullptr;
     bodyBuffer_.clear();
 }
 

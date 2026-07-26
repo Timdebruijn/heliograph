@@ -95,6 +95,33 @@ public:
     std::vector<mqtt::AnnouncedDevice> announcedDevices();
     bool setAnnouncedDevices(const std::vector<mqtt::AnnouncedDevice>& devices);
 
+    /// Copies the stored configuration into the rollback slot, so the restore about to
+    /// overwrite it can be undone. Call immediately before a restore, and nowhere else: doing
+    /// it on every save would double the write wear and, worse, make "the configuration from
+    /// before the restore" mean nothing in particular.
+    ///
+    /// False when nothing is stored yet (a factory-fresh board has nothing to roll back to)
+    /// or when the write was refused. A refusal is not a reason to abandon the restore -- NVS
+    /// here is 20 KB shared with the WiFi stack's own calibration data, so a second copy of
+    /// the configuration is the first thing that will not fit, and losing the safety net is
+    /// a smaller harm than refusing the operation the safety net was for. The caller reports
+    /// it instead.
+    bool stashRollback();
+
+    /// True when a rollback copy is available.
+    bool hasRollback();
+
+    /// SWAPS the rollback copy with the live configuration, and returns the now-live one.
+    ///
+    /// A swap rather than a one-shot restore, because the two writes cost the same and the
+    /// swap is what makes the button honest when pressed twice: undo, look, undo again. A
+    /// one-shot would leave the second press doing nothing with no way to say why.
+    ///
+    /// NotFound when there is no rollback copy. On any parse failure the live configuration
+    /// is left exactly as it was -- a rollback that half-applies is worse than one that
+    /// refuses, because the operator reaching for it is already recovering from something.
+    LoadResult rollback(Configuration& out);
+
 private:
     KeyValueBackend&   backend_;
     KeyValueBackend*   legacy_;
@@ -119,5 +146,11 @@ inline constexpr const char* kStorageKeyConfig = "config";
 /// Separate key, not a field in the config blob: bookkeeping must not be able to make a user's
 /// configuration unloadable, and a factory reset should take it with everything else.
 inline constexpr const char* kStorageKeyAnnounced = "announced";
+/// The configuration as it was before the last restore. Its own key rather than a second blob
+/// inside the config document: it must never be able to make the LIVE configuration
+/// unloadable, and a factory reset (which clears the whole namespace) must take it along.
+///
+/// NVS keys are capped at 15 characters, so this cannot be spelled "config.previous".
+inline constexpr const char* kStorageKeyRollback = "config.prev";
 
 }  // namespace heliograph

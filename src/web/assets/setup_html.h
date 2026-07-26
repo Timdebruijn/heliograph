@@ -34,6 +34,14 @@ button:disabled{opacity:.5;cursor:default}
 .msg.err{background:#f8514922;border:1px solid var(--bad);display:block}
 .msg.ok{background:#3fb95022;border:1px solid var(--ok);display:block}
 .hint{font-size:12px;color:var(--dim);margin-top:6px}
+/* Only the restore preview uses a table here. Same rules as the dashboard's, so the two pages
+   still read as one product. */
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+td,th{text-align:left;padding:6px 6px;border-bottom:1px solid var(--line);vertical-align:top;
+  word-break:break-word}
+th{color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase}
+tr:last-child td{border-bottom:0}
+button.alt{background:none;border:1px solid var(--line);color:var(--fg)}
 </style></head><body><div class="w">
 <h1>Heliograph setup</h1>
 <p class="sub">Connect this bridge to your network.</p>
@@ -81,6 +89,22 @@ button:disabled{opacity:.5;cursor:default}
   <div id="m" class="msg"></div>
 </form>
 
+<!-- The other way in. A board that has just been factory-reset, or a replacement board for one
+     that died, does not need its WiFi typed and then twenty settings re-entered by hand: the
+     backup carries all of them. This is the context that makes the feature worth having, which
+     is why it is on the setup page and not only in Settings. -->
+<div class="card">
+  <b>Restore from a backup</b>
+  <p class="hint" style="margin-top:8px">Have a configuration backup from this or another
+  Heliograph? Apply it here instead of filling in the form. You will see exactly what it
+  changes before anything happens.</p>
+  <label for="rsf">Backup file (.json)</label>
+  <input id="rsf" type="file" accept=".json,application/json">
+  <button id="rsb" type="button" onclick="previewRestore()">Show what it would change</button>
+  <div id="rm" class="msg"></div>
+  <div id="rp"></div>
+</div>
+
 <div class="card">
   <p class="sub" style="margin:0">After saving, the bridge restarts and joins your network.
   This setup network disappears. Find it again by its hostname, or via your router.</p>
@@ -89,6 +113,22 @@ button:disabled{opacity:.5;cursor:default}
 <script>
 const $=s=>document.getElementById(s);
 const msg=(t,ok)=>{const m=$('m');m.textContent=t;m.className='msg '+(ok?'ok':'err')};
+const esc=s=>String(s??'').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+
+// Basic auth by hand: fetch() will not surface the browser's credential dialog reliably, least
+// of all in the captive-portal mini-browser this page is usually opened in.
+//
+// Always UTF-8. btoa() takes a string of code units and only throws above U+00FF, so a plain
+// btoa() silently emits LATIN-1 for exactly the range that matters here -- é, ë, ü, ö, ç. The
+// firmware compares against the bytes it stored from the setup POST, which are UTF-8, so those
+// passwords would never match and the owner would be locked out of their own recovery with
+// "password not accepted" (review, 2026-07-25).
+// Trimmed: Basic auth compares bytes, and this page is most often opened in a phone's
+// captive-portal browser, where a stray autocorrect space is easy and invisible.
+function basicAuthHeader(){
+  const raw=($('curuser').value.trim()||'admin')+':'+$('cur').value;
+  return 'Basic '+btoa(String.fromCharCode(...new TextEncoder().encode(raw)));
+}
 
 // Two modes. First boot: no admin password exists, provisioning is open, and the form sets one.
 // Reconfigure: this setup network came back because the bridge lost WiFi (a router reboot is
@@ -179,18 +219,7 @@ $('f').onsubmit=async e=>{
     // boot there is nothing to preserve, so an open network still sends the empty value.
     if(!reauth||$('pw').value!=='')body.wifi.password=$('pw').value;
     if(reauth){
-      // Basic auth by hand: fetch() will not surface the browser's credential dialog reliably,
-      // least of all in the captive-portal mini-browser this page is usually opened in.
-      //
-      // Always UTF-8. btoa() takes a string of code units and only throws above U+00FF, so a
-      // plain btoa() silently emits LATIN-1 for exactly the range that matters here -- é, ë, ü,
-      // ö, ç. The firmware compares against the bytes it stored from the setup POST, which are
-      // UTF-8, so those passwords would never match and the owner would be locked out of their
-      // own recovery with "password not accepted" (review, 2026-07-25).
-      // Trimmed: Basic auth compares bytes, and this page is most often opened in a phone's
-      // captive-portal browser, where a stray autocorrect space is easy and invisible.
-      const raw=($('curuser').value.trim()||'admin')+':'+$('cur').value;
-      headers['Authorization']='Basic '+btoa(String.fromCharCode(...new TextEncoder().encode(raw)));
+      headers['Authorization']=basicAuthHeader();
     }else{
       body.security={admin_password:$('admin').value};
     }
@@ -215,6 +244,93 @@ $('f').onsubmit=async e=>{
       '<b>http://'+host+'</b> (give it ~30 seconds).';
   }catch(err){msg(err.message);$('b').disabled=false}
 };
+
+// ---------------- Restore ----------------
+// Same two-step flow as the settings page, and the same firmware endpoint. The file is posted
+// straight from a FileReader and nothing is staged on the bridge between the two steps, so
+// what gets applied is exactly what was previewed.
+
+const rmsg=(t,cls)=>{const m=$('rm');m.textContent=t;m.className='msg '+cls;m.style.display='block'};
+let rsPending=null;
+
+// Authenticated exactly like provisioning, and for the same reason: the setup network also
+// comes back on an ALREADY-CONFIGURED bridge after a WiFi outage, and its AP is open. Without
+// this, anyone in radio range of a bridge whose router had rebooted could overwrite its whole
+// configuration -- admin password, broker, relay gates -- from a file.
+function restoreHeaders(){
+  const h={'Content-Type':'application/json'};
+  if(reauth)h['Authorization']=basicAuthHeader();
+  return h;
+}
+
+async function restorePost(query){
+  const f=$('rsf').files[0];
+  if(!f){rmsg('Choose a backup file first.','err');return null}
+  if(reauth&&!$('cur').value){
+    rmsg('This bridge is already set up, so restoring needs its admin password — fill it in above.','err');
+    return null;
+  }
+  const text=rsPending!==null&&query===''?rsPending:await f.text();
+  const r=await fetch('/api/v1/config/restore'+query,
+    {method:'POST',headers:restoreHeaders(),body:text});
+  if(r.status===401){
+    rmsg('Those admin credentials were not accepted — check the username too if you ever changed it.','err');
+    return null;
+  }
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){rmsg((d.error&&d.error.message)||('HTTP '+r.status),'err');return null}
+  return {text,data:d};
+}
+
+async function previewRestore(){
+  $('rp').innerHTML='';rsPending=null;
+  rmsg('Checking the file…','');
+  const out=await restorePost('?dry_run=true');
+  if(!out)return;
+  rsPending=out.text;
+  $('rm').style.display='none';
+  const d=out.data, b=d.backup||{};
+  const src=[b.firmware_version?'written by firmware '+esc(b.firmware_version):'',
+             b.exported_at?'on '+esc(b.exported_at.replace('T',' ').replace('Z',' UTC')):'',
+             b.includes_secrets?'<b>contains passwords</b>':'contains no passwords']
+            .filter(Boolean).join(' · ');
+  if(!d.change_count){
+    $('rp').innerHTML=`<div class="msg ok">This backup matches what the bridge already has —
+      nothing would change.<div class="hint">${src}</div></div>`;
+    return;
+  }
+  // Named where it bites. A redacted backup on a fresh board leaves no WiFi password and no
+  // admin password, and the firmware refuses the second of those outright -- but the WiFi one
+  // it will happily accept, leaving a bridge that cannot join anything.
+  const noWifiPw=!b.includes_secrets;
+  $('rp').innerHTML=`<div class="hint">${src}</div>
+    <table><thead><tr><th>Setting</th><th>Now</th><th>After</th></tr></thead><tbody>
+    ${(d.changes||[]).map(c=>`<tr><td>${esc(c.field)}</td><td>${esc(c.before)}</td>
+      <td><b>${esc(c.after)}</b></td></tr>`).join('')}</tbody></table>
+    <div class="hint">${d.change_count} setting(s) would change.${
+      d.reboot_required?' The bridge restarts afterwards.':''}</div>
+    ${noWifiPw?`<div class="msg err">This backup carries no passwords, so it cannot supply the
+      WiFi password either. Fill the form in above instead, or export a new backup with
+      passwords included.</div>`:''}
+    <button type="button" onclick="applyRestore()">Apply and restart</button>`;
+}
+
+async function applyRestore(){
+  $('rp').innerHTML='';
+  rmsg('Applying…','');
+  const out=await restorePost('');
+  if(!out)return;
+  rsPending=null;
+  $('rm').className='msg ok';
+  // Whether it restarts is the firmware's call, not an assumption: a restore that touched only
+  // live-applied settings does not reboot, and promising a restart that never comes leaves
+  // someone waiting for a bridge that is already back.
+  $('rm').innerHTML='Restored '+(out.data.changed_fields||0)+' setting(s). '+
+    (out.data.reboot_required
+      ? 'The bridge is restarting and joining the network from the backup — this setup network '+
+        'disappears. Give it ~30 seconds.'
+      : 'No restart was needed, so this setup network is still up.');
+}
 </script></body></html>)HTML";
 
 }  // namespace heliograph::web
