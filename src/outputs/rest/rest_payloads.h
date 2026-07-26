@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "config/config_backup.h"
 #include "device/bridge_info.h"
 #include "device/device_state.h"
 #include "diagnostics/diagnostics.h"
@@ -17,7 +18,8 @@ namespace heliograph::rest {
 
 inline constexpr size_t kMaxResponseBytes = 8192;
 /// Bodies above this are refused with 413 before parsing, so a large POST cannot exhaust the
-/// heap just by arriving.
+/// heap just by arriving. Routes that legitimately need more say so per route -- see
+/// kMaxBackupBytes, which a configuration restore passes to collectBody.
 inline constexpr size_t kMaxRequestBytes = 4096;
 
 struct ApiError {
@@ -132,5 +134,28 @@ inline constexpr size_t kMaxLogResponseBytes = 24576;
 bool buildLogsPayload(const std::vector<std::string>& lines, uint32_t totalLines,
                       const std::string& level, std::string& out,
                       size_t maxBytes = kMaxLogResponseBytes);
+
+/// What a restore would do, before it does it.
+///
+/// The preview is computed against the MERGED result, not against the file, so it tells the
+/// truth about a redacted backup: those credentials show as unchanged because leaving them
+/// alone is what applying it will actually do.
+///
+/// `rollbackAvailable` is whether an undo will exist afterwards. Shown up front rather than
+/// discovered later, because on a nearly-full NVS the answer is no and that changes whether
+/// someone wants to press the button at all.
+///
+/// A separate response bound: a restore that touches every setting produces a long table, and
+/// truncating the one screen the operator is using to decide would defeat it.
+inline constexpr size_t kMaxRestorePreviewBytes = 16384;
+bool buildRestorePreviewPayload(const BackupContents& backup,
+                                const std::vector<ConfigDiffEntry>& diff, bool rebootRequired,
+                                bool rollbackAvailable, std::string& out,
+                                size_t maxBytes = kMaxRestorePreviewBytes);
+
+/// The outcome of an applied restore. `rollbackStored` false means the undo copy did not fit;
+/// the restore still happened, and saying so is the whole point of reporting it separately.
+bool buildRestoreResultPayload(size_t changedFields, bool rebootRequired, bool rollbackStored,
+                               std::string& out, size_t maxBytes = kMaxResponseBytes);
 
 }  // namespace heliograph::rest

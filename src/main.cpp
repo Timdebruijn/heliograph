@@ -692,6 +692,14 @@ void startRestApi() {
     ctx.requestDiscovery    = [](bool extended) { return g_discovery.request(extended); };
     ctx.discoveryReport     = [] { return g_discovery.report(); };
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
+    // The undo behind a configuration restore. Straight through to the store, which owns both
+    // the stash and the swap; the REST layer only decides when.
+    ctx.stashRollback  = [] { return g_store.stashRollback(); };
+    ctx.hasRollback    = [] { return g_store.hasRollback(); };
+    ctx.rollbackConfig = [](Configuration& out) {
+        const auto result = g_store.rollback(out);
+        return result == LoadResult::Ok || result == LoadResult::Migrated;
+    };
     // Clears a dump the operator has dealt with. Without it every later diagnostics read keeps
     // reporting the same old crash, and "is this new?" becomes unanswerable. The cached copy is
     // updated in the same breath so the next payload agrees with the flash.

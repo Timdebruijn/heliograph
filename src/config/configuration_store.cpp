@@ -421,6 +421,54 @@ bool ConfigurationStore::setAnnouncedDevices(const std::vector<mqtt::AnnouncedDe
     return backend_.write(kStorageKeyAnnounced, raw);
 }
 
+bool ConfigurationStore::stashRollback() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::string                 blob;
+    if (!backend_.read(kStorageKeyConfig, blob) || blob.empty()) {
+        return false;  // nothing stored yet: a factory-fresh board has nothing to undo to
+    }
+    return backend_.write(kStorageKeyRollback, blob);
+}
+
+bool ConfigurationStore::hasRollback() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::string                 blob;
+    return backend_.read(kStorageKeyRollback, blob) && !blob.empty();
+}
+
+LoadResult ConfigurationStore::rollback(Configuration& out) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::string                 previous;
+    if (!backend_.read(kStorageKeyRollback, previous) || previous.empty()) {
+        return LoadResult::NotFound;
+    }
+    // Parsed BEFORE anything is written. The blob has been through validate() once already --
+    // save() refuses to persist a configuration it would not load -- but a firmware update
+    // between the stash and the rollback can tighten a range, and swapping first and
+    // discovering that second would leave the bridge running the very configuration this call
+    // exists to escape.
+    Configuration parsed;
+    const auto    result = deserializeConfigFromStorage(previous, parsed);
+    if (result != LoadResult::Ok && result != LoadResult::Migrated) {
+        return result;
+    }
+    // The swap. The current blob is read rather than re-serialised from `out`: it is the exact
+    // bytes that are live, which is what a redo has to put back.
+    std::string current;
+    backend_.read(kStorageKeyConfig, current);
+    if (!backend_.write(kStorageKeyConfig, previous)) {
+        return LoadResult::Corrupt;  // nothing has moved; the live config is untouched
+    }
+    // A failed second half leaves the rollback slot holding what is now ALSO live. Harmless:
+    // the next rollback is then a no-op rather than a surprise, which beats leaving the slot
+    // pointing at a configuration nobody is running.
+    if (!current.empty()) {
+        backend_.write(kStorageKeyRollback, current);
+    }
+    out = parsed;
+    return result;
+}
+
 bool ConfigurationStore::factoryReset() {
     std::lock_guard<std::mutex> lock(mutex_);
     return backend_.erase();
