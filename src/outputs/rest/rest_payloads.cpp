@@ -441,8 +441,24 @@ bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::s
             doc["selected_driver_id"] = nullptr;
         }
 
+        // Bounded. A sweep of eight addresses across two Modbus drivers can produce sixteen
+        // candidates at roughly half a kilobyte each, and the response bound is 8 KB -- past
+        // which finish() refuses the whole body and the wizard shows "nothing answered" after a
+        // minute of probing. Ten is well inside the bound and more than a bridge can poll.
+        constexpr size_t kMaxCandidates = 10;
+        size_t           omitted        = 0;
+        if (report.outcome.candidates.size() > kMaxCandidates) {
+            omitted = report.outcome.candidates.size() - kMaxCandidates;
+        }
+        // Never silently: the lowest-scoring ones are dropped, and the client is told how many.
+        doc["candidates_omitted"] = static_cast<unsigned>(omitted);
+
         JsonArray candidates = doc["candidates"].to<JsonArray>();
+        size_t    written    = 0;
         for (const auto& c : report.outcome.candidates) {
+            if (++written > kMaxCandidates) {
+                break;
+            }
             JsonObject e            = candidates.add<JsonObject>();
             e["driver_id"]          = c.descriptor.id;
             e["display_name"]       = c.descriptor.displayName;
@@ -484,6 +500,15 @@ bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::s
             for (const auto& line : c.probe.evidence) {
                 evidence.add(line);
             }
+        }
+        // Addresses that produced traffic without identifying anything -- two devices sharing
+        // one unit id, in practice. Not candidates: they are not devices.
+        JsonArray unidentified = doc["unidentified_addresses"].to<JsonArray>();
+        for (const auto& u : report.outcome.unidentified) {
+            JsonObject e  = unidentified.add<JsonObject>();
+            e["driver_id"] = u.driverId;
+            e["address"]   = u.address;
+            e["note"]      = u.note;
         }
         JsonObject selectedOptions = doc["selected_options"].to<JsonObject>();
         for (const auto& [key, value] : report.outcome.selectedOptions) {

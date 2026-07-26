@@ -4,8 +4,13 @@
 //
 // Discovery only ever calls InverterDriver::probe(), never execute(). Everything a probe is
 // forbidden from doing -- writes, function codes 5/6/15/16, broadcast writes, start/stop,
-// power limits, address changes, clock setting, factory reset, firmware updates, brute-force
-// scanning -- is therefore unreachable from here by construction, not by discipline.
+// power limits, clock setting, factory reset, firmware updates, brute-force scanning -- is
+// therefore unreachable from here by construction, not by discipline.
+//
+// One honest exception, and it predates the address sweep: a driver for a protocol that
+// REGISTERS devices (the AA55/PMU family) hands the inverter a bus address as part of probing
+// it at all -- there is no read-only way to discover such a device. That is why those drivers
+// name no addressOptionKey: the sweep must not turn one address assignment into nine.
 
 #pragma once
 
@@ -69,9 +74,24 @@ struct DiscoveryCandidate {
     }
 };
 
+/// An address where bytes came back that identified nothing.
+///
+/// The reason the sweep is worth having at all: two inverters left on one unit id answer
+/// together, their replies collide, and the result is a failed checksum -- not silence. Reported
+/// separately from the candidates because it is not a device, and thrown away before this
+/// existed, so the wizard blamed the wiring for the one fault it could actually name.
+struct UnidentifiedAddress {
+    std::string driverId;
+    std::string address;
+    /// The probe's own words, shown verbatim.
+    std::string note;
+};
+
 struct DiscoveryOutcome {
     /// Highest score first.
     std::vector<DiscoveryCandidate> candidates;
+    /// Addresses that produced traffic without a usable reply. Never a device.
+    std::vector<UnidentifiedAddress> unidentified;
     bool                            autoSelected = false;
     std::string                     selectedDriverId;
     /// The options the selected candidate answered at, so the wizard configures the device it

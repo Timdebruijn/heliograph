@@ -180,9 +180,10 @@ static DriverDescriptor addressedDesc(const std::string& id, const std::string& 
 static void addAddressedDriver(DriverRegistry& r, const DriverDescriptor& d, AddressBus* bus) {
     r.registerDriver(d, [d, bus](Transport&,
                                  const DriverOptions& options) -> std::unique_ptr<InverterDriver> {
-        const auto it = options.find("unit_id");
-        return std::make_unique<AddressedDriver>(d, bus,
-                                                 it == options.end() ? std::string{} : it->second);
+        // Falls back to the declared default exactly as every real driver's optionsFrom() does.
+        // Without that, "probed with no options" would look like "probed at no address", and
+        // the quick-mode test below would be asserting the fake rather than the engine.
+        return std::make_unique<AddressedDriver>(d, bus, d.optionOr(options, "unit_id"));
     });
 }
 
@@ -211,7 +212,12 @@ static void test_extended_discovery_finds_devices_at_other_addresses() {
 
 // Quick mode is the one that runs by default and on a bus that may already be in service.
 // Its cost must not change: one probe per driver, at the driver's own default.
-static void test_quick_discovery_still_probes_only_the_default_address() {
+//
+// And it must carry NO options. Passing the driver's default looks equivalent -- same value,
+// same probe -- but the wizard prefers a discovered address over the stored configuration, so a
+// quick candidate claiming an address it never discovered would propose the default to a bridge
+// configured at unit id 7 (review, 2026-07-26).
+static void test_quick_discovery_probes_the_default_address_and_claims_nothing() {
     DriverRegistry reg;
     MockTransport  t;
     AddressBus     bus;
@@ -223,7 +229,11 @@ static void test_quick_discovery_still_probes_only_the_default_address() {
 
     TEST_ASSERT_EQUAL_size_t(1, out.candidates.size());
     TEST_ASSERT_EQUAL_size_t(1, bus.probed.size());
-    TEST_ASSERT_EQUAL_STRING("1", bus.probed[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("1", bus.probed[0].c_str());  // its own default, internally
+    TEST_ASSERT_TRUE_MESSAGE(out.candidates[0].matchedOptions.empty(),
+                             "a quick candidate must not claim an address it did not discover");
+    TEST_ASSERT_TRUE(out.candidates[0].address().empty());
+    TEST_ASSERT_TRUE(out.selectedOptions.empty());
     TEST_ASSERT_TRUE(out.sweptAddresses.empty());
 }
 
@@ -318,6 +328,142 @@ static void test_one_device_answering_at_two_addresses_is_reported_once() {
         mentioned = mentioned || line.find("also answered at address 5") != std::string::npos;
     }
     TEST_ASSERT_TRUE_MESSAGE(mentioned, "the second address has to be reported, not dropped");
+}
+
+// Two units left on one address answer together and their replies collide into a bad checksum.
+// The probe reports that as "did not respond" -- deliberately, so garbage at the wrong baud rate
+// cannot abort the profile sweep -- and it used to be discarded with the failed probe. It is the
+// one fault a sweep can name that nothing else can, and it is the likeliest mistake on a chain
+// of identical inverters.
+class NoisyDriver : public InverterDriver {
+public:
+    NoisyDriver(DriverDescriptor d, std::string address)
+        : descriptor_(std::move(d)), address_(std::move(address)) {}
+    const DriverDescriptor& descriptor() const override { return descriptor_; }
+    bool                    begin(Transport&) override { return true; }
+    ProbeResult             probe() override {
+        ProbeResult r;
+        if (address_ == "1") {
+            r.sawTraffic = true;  // two devices on this id; nothing usable came back
+            r.evidence.push_back("replies arrived but failed their checksum");
+            return r;
+        }
+        if (address_ == "2") {
+            r.responded       = true;
+            r.checksumValid   = true;
+            r.confidenceScore = 95;
+        }
+        return r;
+    }
+    PollResult           poll(DeviceState&) override { return PollResult::Ok; }
+    DeviceIdentity       identity() const override { return {}; }
+    InverterCapabilities capabilities() const override { return {}; }
+    BusErrorCounts       busErrors() const override { return {}; }
+    CommandResult        execute(const InverterCommand&) override { return CommandResult::Ok; }
+
+private:
+    DriverDescriptor descriptor_;
+    std::string      address_;
+};
+
+static void test_an_address_with_traffic_but_no_device_is_reported() {
+    DriverRegistry reg;
+    MockTransport  t;
+    const auto     d = addressedDesc("growatt_like", "1");
+    reg.registerDriver(d, [d](Transport&, const DriverOptions& o) {
+        return std::make_unique<NoisyDriver>(d, d.optionOr(o, "unit_id"));
+    });
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(1, out.candidates.size());  // only the clean one at 2
+    TEST_ASSERT_EQUAL_size_t(1, out.unidentified.size());
+    TEST_ASSERT_EQUAL_STRING("1", out.unidentified[0].address.c_str());
+    TEST_ASSERT_TRUE(out.unidentified[0].note.find("checksum") != std::string::npos);
+}
+
+// ...and when that is ALL there is, the reason must not send someone to re-crimp a cable that
+// is fine. A bus producing traffic is demonstrably wired.
+static void test_traffic_without_an_identification_is_not_reported_as_bad_wiring() {
+    DriverRegistry reg;
+    MockTransport  t;
+    const auto     d = addressedDesc("growatt_like", "1");
+    reg.registerDriver(d, [d](Transport&, const DriverOptions& o) {
+        // Only address 1 exists, and it is the noisy one.
+        const std::string addr = d.optionOr(o, "unit_id");
+        return std::make_unique<NoisyDriver>(d, addr == "2" ? "9" : addr);
+    });
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_TRUE(out.candidates.empty());
+    TEST_ASSERT_EQUAL_size_t(1, out.unidentified.size());
+    TEST_ASSERT_TRUE(out.reason.find("produced traffic") != std::string::npos);
+    TEST_ASSERT_TRUE_MESSAGE(out.reason.find("check wiring") == std::string::npos,
+                             "the bus answered; blaming the cable sends someone the wrong way");
+}
+
+// One bus, one set of line settings. Once something answers at a profile, the driver's other
+// baud rates are silence by construction -- and at eight addresses each, trying them anyway is
+// the difference between a slow sweep and an unusable one. Nothing pinned this.
+static void test_the_remaining_profiles_are_not_swept_once_one_answers() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied            = {"3"};
+    DriverDescriptor d      = addressedDesc("two_speed", "1");
+    d.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3},
+                                   SerialProfile{115200, SerialParity::None, 8, 1, 1000, 3}};
+    addAddressedDriver(reg, d, &bus);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(1, out.candidates.size());
+    // Eight addresses at the first profile, and no second pass over them.
+    TEST_ASSERT_EQUAL_size_t(8, bus.probed.size());
+}
+
+// The driver's default is probed first and is not necessarily the lowest address, so keeping
+// "the first one probed" would report a device at the higher of the two while claiming the
+// lower. Only reachable for a driver whose default sits above the sweep range.
+static void test_a_duplicate_is_kept_at_the_lowest_address_not_the_first_probed() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied     = {"8", "3"};
+    bus.sharedSerial = true;
+    addAddressedDriver(reg, addressedDesc("high_default", "8"), &bus);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(1, out.candidates.size());
+    TEST_ASSERT_EQUAL_STRING("3", out.candidates[0].address().c_str());
+}
+
+// A driver naming an option that is not numeric, or not declared at all, has nothing a sweep
+// can use. Probing it over 1..8 is eight transactions the driver would refuse.
+static void test_an_unsweepable_address_option_is_not_swept() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied = {"left"};
+    DriverDescriptor enumerated = desc("enum_option", 10);
+    enumerated.addressOptionKey = "side";
+    enumerated.options = {DriverOption{"side", "Side", "", "left", {"left", "right"}}};
+    addAddressedDriver(reg, enumerated, &bus);
+
+    DriverDescriptor undeclared = desc("undeclared_option", 9);
+    undeclared.addressOptionKey = "unit_id";  // names an option it never declares
+    addAddressedDriver(reg, undeclared, &bus);
+
+    DiscoveryEngine e(reg, t);
+    e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(2, bus.probed.size());  // one probe each, not nine
 }
 
 // The watchdog reason for the callback: an extended sweep is dozens of response timeouts inside
@@ -718,12 +864,17 @@ int main(int, char**) {
     RUN_TEST(test_timings_are_recorded_for_the_wizard);
     RUN_TEST(test_the_runner_never_executes_a_command);
     RUN_TEST(test_extended_discovery_finds_devices_at_other_addresses);
-    RUN_TEST(test_quick_discovery_still_probes_only_the_default_address);
+    RUN_TEST(test_quick_discovery_probes_the_default_address_and_claims_nothing);
     RUN_TEST(test_the_drivers_own_default_is_probed_even_outside_the_sweep);
     RUN_TEST(test_the_sweep_stays_inside_the_declared_bounds);
     RUN_TEST(test_a_driver_without_an_address_option_is_probed_once);
     RUN_TEST(test_identical_inverters_do_not_block_auto_selection);
     RUN_TEST(test_one_device_answering_at_two_addresses_is_reported_once);
+    RUN_TEST(test_an_address_with_traffic_but_no_device_is_reported);
+    RUN_TEST(test_traffic_without_an_identification_is_not_reported_as_bad_wiring);
+    RUN_TEST(test_the_remaining_profiles_are_not_swept_once_one_answers);
+    RUN_TEST(test_a_duplicate_is_kept_at_the_lowest_address_not_the_first_probed);
+    RUN_TEST(test_an_unsweepable_address_option_is_not_swept);
     RUN_TEST(test_every_probe_ticks_the_caller);
     RUN_TEST(test_single_convincing_match_is_auto_selected);
     RUN_TEST(test_clear_winner_over_a_weak_match_is_auto_selected);

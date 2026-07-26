@@ -683,8 +683,9 @@ void reconcileAnnouncedDevices(const BridgeInfo& bridge) {
 
 void rs485Task(void* /*arg*/) {
     for (;;) {
-        // One feed per iteration; the 120 s budget covers the longest legitimate iteration
-        // (an extended discovery run). See the watchdog setup in setup().
+        // One feed per iteration. The 120 s budget covers a normal iteration; an extended
+        // discovery run no longer fits inside one feed and provides its own, per probe -- see
+        // the call below and the watchdog setup in setup().
         esp_task_wdt_reset();
         // Own stack headroom into diagnostics: the 8192 sizing rests on one measured crash
         // (2026-07-19); this keeps creeping growth visible in the API instead of leaving

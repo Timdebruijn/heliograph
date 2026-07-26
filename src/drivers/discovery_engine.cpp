@@ -3,6 +3,7 @@
 #include "discovery_engine.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace heliograph {
 namespace {
@@ -30,19 +31,28 @@ bool probesAgree(const ProbeResult& a, const ProbeResult& b) {
 /// itself in any mode.
 std::vector<std::string> addressesFor(const DriverDescriptor& descriptor, DiscoveryMode mode,
                                       const DiscoveryConfig& config) {
-    if (descriptor.addressOptionKey.empty()) {
+    // Quick mode probes with NO options at all, exactly as it always has. Passing the driver's
+    // own default looks equivalent -- same value, same probe -- but it makes every quick
+    // candidate claim an address it did not discover, and the wizard prefers a discovered
+    // address over the stored configuration. A bridge configured at unit id 7 would have had
+    // quick discovery quietly propose 1 (review, 2026-07-26).
+    if (mode != DiscoveryMode::Extended || !descriptor.hasSweepableAddress()) {
         return {std::string{}};
     }
-    const std::string def = descriptor.optionOr(DriverOptions{}, descriptor.addressOptionKey);
-    std::vector<std::string> out{def};
-    if (mode != DiscoveryMode::Extended) {
-        return out;
+    const std::string        def = descriptor.optionOr(DriverOptions{}, descriptor.addressOptionKey);
+    const auto               bounds = descriptor.addressRange();
+    std::vector<std::string> out;
+    // The driver's own default first -- but only if the driver would accept it. A default
+    // outside its own declared bounds would be probed, reported, offered by the wizard, and
+    // then refused by the PATCH gate: a dead end on the confirm step.
+    const long parsedDefault = std::strtol(def.c_str(), nullptr, 10);
+    if (!def.empty() && parsedDefault >= bounds.first && parsedDefault <= bounds.second) {
+        out.push_back(def);
     }
-    const auto bounds = descriptor.addressRange();
     for (const int address : config.sweepAddresses) {
         // Outside what the driver declares is not a gap in the sweep, it is a value the driver
         // would refuse anyway -- the option bounds are the protocol's.
-        if (bounds.second != 0 && (address < bounds.first || address > bounds.second)) {
+        if (address < bounds.first || address > bounds.second) {
             continue;
         }
         const std::string value = std::to_string(address);
@@ -50,28 +60,43 @@ std::vector<std::string> addressesFor(const DriverDescriptor& descriptor, Discov
             out.push_back(value);
         }
     }
+    if (out.empty()) {
+        out.push_back(std::string{});  // nothing sweepable after all; probe once, as before
+    }
     return out;
 }
 
 /// Same driver, same non-empty serial number, two addresses: one inverter mid-reconfiguration,
-/// or one still answering on an address it was moved off. Reported once, at the lower address,
+/// or one still answering on an address it was moved off. Reported once, at the lowest address,
 /// with the fact recorded -- two entries for one device would have the owner configure it
 /// twice, and two configured devices that resolve to one physical inverter is the collision the
 /// boot loop exists to refuse.
+///
+/// "Lowest", numerically, and not "the first one probed": the driver's own default is probed
+/// first and is not necessarily the lowest, so keeping the first would report a device at the
+/// higher of the two addresses while claiming the lower (review, 2026-07-26).
 void mergeDuplicateSerials(std::vector<DiscoveryCandidate>& candidates) {
+    const auto lower = [](const std::string& a, const std::string& b) {
+        return std::strtol(a.c_str(), nullptr, 10) < std::strtol(b.c_str(), nullptr, 10);
+    };
     for (auto it = candidates.begin(); it != candidates.end(); ++it) {
         if (it->probe.serialNumber.empty()) {
             continue;  // no serial: nothing to match on, and two silent units are two units
         }
         for (auto other = it + 1; other != candidates.end();) {
-            if (other->descriptor.id == it->descriptor.id &&
-                other->probe.serialNumber == it->probe.serialNumber) {
-                it->probe.evidence.push_back("the same serial number also answered at address " +
-                                             other->address());
-                other = candidates.erase(other);
-            } else {
+            if (other->descriptor.id != it->descriptor.id ||
+                other->probe.serialNumber != it->probe.serialNumber) {
                 ++other;
+                continue;
             }
+            if (lower(other->address(), it->address())) {
+                // Keep the lower address, and with it the options the wizard will configure.
+                std::swap(it->matchedOptions, other->matchedOptions);
+                std::swap(it->matchedProfile, other->matchedProfile);
+            }
+            it->probe.evidence.push_back("the same serial number also answered at address " +
+                                         other->address());
+            other = candidates.erase(other);
         }
     }
 }
@@ -146,6 +171,16 @@ DiscoveryOutcome DiscoveryEngine::run(DiscoveryMode mode, const DiscoveryConfig&
                 tick();
                 ProbeResult first = driver->probe();
                 if (!first.responded) {
+                    // Bytes that identified nothing are the duplicate-address signal, and the
+                    // only one there is: two units on one id answer together and collide. Kept
+                    // rather than discarded with the probe -- but only when an address was
+                    // actually selected, since at the wrong baud rate the same garbage is
+                    // routine and says nothing about addressing.
+                    if (first.sawTraffic && !address.empty()) {
+                        outcome.unidentified.push_back(
+                            {descriptor.id, address,
+                             first.evidence.empty() ? std::string{} : first.evidence.back()});
+                    }
                     continue;
                 }
 
@@ -192,6 +227,15 @@ DiscoveryOutcome DiscoveryEngine::run(DiscoveryMode mode, const DiscoveryConfig&
                      });
 
     if (outcome.candidates.empty()) {
+        // Traffic without an identification is a different fault from silence, and pointing at
+        // the wiring when the bus is demonstrably alive sends someone to re-crimp a cable that
+        // is fine. Two units left on one address is what this usually is.
+        if (!outcome.unidentified.empty()) {
+            outcome.reason = "no device could be identified, but address " +
+                             outcome.unidentified.front().address +
+                             " produced traffic: " + outcome.unidentified.front().note;
+            return outcome;
+        }
         outcome.reason = "no device answered; check wiring, termination and the RS485 A/B order";
         // Which addresses were asked, so silence at 1..8 is not mistaken for silence
         // everywhere: an inverter parked outside the swept range is configured by hand.

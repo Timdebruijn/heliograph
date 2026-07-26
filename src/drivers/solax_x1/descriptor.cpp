@@ -31,7 +31,11 @@ const DriverDescriptor& descriptor() {
         x.supportsMultipleDevices = false;
         x.supportsRead            = true;
         x.supportsWrite           = false;
-        x.addressOptionKey        = "address";
+        // Deliberately NOT addressOptionKey. This option is the address the bridge HANDS the
+        // inverter at registration, not one the inverter already answers at -- sweeping it would
+        // not discover anything, it would assign nine different addresses in a row and leave the
+        // device on the last one, while the report named the first (review, 2026-07-26). A PMU
+        // device is found by its broadcast offline query, which needs no address at all.
         x.options                 = {DriverOption{
             "address", "Assigned bus address",
             "Address handed to the inverter at registration (reference default 10 = 0x0A). "
