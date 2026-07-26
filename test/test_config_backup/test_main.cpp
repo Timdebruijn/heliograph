@@ -6,6 +6,7 @@
 
 #include <ArduinoJson.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
