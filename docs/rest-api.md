@@ -238,6 +238,70 @@ configured device; **Modbus TCP and Prometheus carry the first one only**, becau
 map holds one device's registers and the metric names have no device label. That is the next
 piece of work and is stated in `docs/architecture.md` too.
 
+## Discovery: what each mode actually probes
+
+| | Serial profiles | Bus addresses | Probes, drivers in this build |
+|---|---|---|---|
+| **Quick** | the driver's first recommended profile | none — the driver's own default, with no option set | 4, ≈ 8 s |
+| **Extended** | all of them, stopping at the first profile that answers | the driver's default, then **1–8** | up to 33, ≈ 35 s |
+
+Quick mode's cost is unchanged — one probe per driver — because it is the mode that runs by
+default, sometimes on a bus that is already in service. It also passes **no options at all**, so
+a quick candidate never claims an address it did not discover: the wizard prefers a discovered
+address over the stored configuration, and a candidate carrying the driver's default would have
+quietly proposed unit id 1 to a bridge configured at 7.
+
+The extended numbers are the worst case, on a bus where nothing answers: 16 probes each for the
+two Modbus drivers (2 profiles × 8 addresses), one for the PMU driver, at roughly a second of
+response timeout apiece. Polling is stopped for the whole run. On a bus with devices it is much
+faster — the profile is settled at the first address that answers and the rest are probed at
+known-good line settings.
+
+Extended sweeps addresses because a chain of identical inverters is the case the wizard was
+worst at: only the unit at the default address could ever be a candidate, and the address is
+exactly the field a typo makes invisible. Each candidate carries the `options` it answered at
+and an `address`, and the report carries `swept_addresses` — so "nothing else answered" can be
+told apart from "nothing else was asked". A device parked outside 1–8 is still configured by
+hand; the wizard says which addresses it tried rather than implying the bus is empty.
+
+Why 1–8 and not 1–247: the bridge polls at most eight devices, and probing 247 addresses across
+every driver and profile is hours of traffic for addresses nothing could use. A driver's own
+default is included on top of the range, as long as the driver would accept it.
+
+**Only an address the device already has is swept.** A driver names it (`addressOptionKey`), and
+naming it is a claim about what the option means, not just where it lives. SolaX's `address` is
+the address the bridge *hands out* at registration, so it is deliberately not named: sweeping it
+would assign nine addresses in a row and leave the inverter on the last one while the report
+described the first. A driver that names nothing, or names an option that is not a declared
+numeric one, is probed once.
+
+**Traffic without a device is reported, not discarded.** `unidentified_addresses` lists any
+address where bytes came back that identified nothing — which on a chain of identical inverters
+is what two units left on the same unit id look like: their replies collide into a failed
+checksum. That is the one fault a sweep can diagnose that nothing else can, and when it is all
+there is, the report says so instead of blaming the wiring.
+
+`candidates` is capped at ten, lowest scores dropped first, with `candidates_omitted` saying how
+many. Sixteen candidates at half a kilobyte each would exceed the 8 KB response bound, and a
+refused body reads to the wizard as "nothing answered" after a minute of probing.
+
+Two consequences worth knowing:
+
+- **One driver can now produce several candidates**, one per device. The "too close to call"
+  rule only compares *different* drivers: three inverters of the same make are not ambiguous
+  about which protocol they speak, and treating them as such would have made the sweep defeat
+  auto-selection on exactly the bus it was built for. The wizard still configures one device and
+  says how many answered.
+- **The same serial number at two addresses is reported once**, at the lower address, with the
+  other recorded in its evidence. That is one inverter mid-reconfiguration, and configuring it
+  twice would collide at boot.
+
+A full extended sweep on a silent bus is dozens of response timeouts back to back, all with
+polling stopped. It is a user-requested operation and it is slow; the task watchdog is fed per
+probe rather than per run. Note that the "stop at the first profile that answers" saving only
+applies to a driver that *does* answer — for every driver that finds nothing, profiles and
+addresses multiply in full, and that is where the bulk of the time on a mixed bus goes.
+
 ## `serial` — overriding the line the driver picks
 
 Every driver advertises the serial profiles plausible for its protocol and configures the first

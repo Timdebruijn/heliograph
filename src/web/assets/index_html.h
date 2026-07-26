@@ -546,6 +546,8 @@ let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null, wizSavedSerial=null
     wizOptions={};
 // What the bridge already has configured, so step 5 can offer it back instead of overwriting it.
 let wizStoredDriverId=null, wizStoredOptions={};
+/// The options the chosen candidate actually answered at, carried from step 4 into step 5.
+let wizFound={};
 const STEPS=['Interface','Mode','Probing','Candidates','Confirm','Test poll','Save'];
 
 function stepBar(){
@@ -565,10 +567,14 @@ function renderWizard(){
   } else if(wizStep===2){
     h+=`<div class="card"><b>Step 2 — Automatic or manual</b>
     <p class="dim">Quick tries each auto-detectable driver once, on its own recommended serial
-    profile. Extended tries every profile and repeats — slower and noisier on the bus, so it is
-    opt-in.</p>
-    <p class="dim">Probing is read-only. It never writes a register, never starts or stops the
-    inverter, and never changes an address permanently.</p>
+    profile and its own default address — a few seconds. Extended also tries every profile and
+    <b>sweeps bus addresses 1–8</b>, which is what finds a chain of inverters rather than just
+    the one at the default address. Budget up to a minute, and note that polling stops for the
+    whole run.</p>
+    <p class="dim">Probing never writes a register and never starts or stops the inverter.
+    Modbus drivers only ever read. One exception, and it is not new: on protocols where the
+    bridge <i>registers</i> devices, being discovered means being handed a bus address — there
+    is no read-only way to find such a device at all.</p>
     <button onclick="startDiscovery(false)">Run quick discovery</button>
     <button onclick="startDiscovery(true)" style="background:none;border:1px solid var(--line);color:var(--fg)">Run extended discovery</button>
     <button onclick="wizStep=5;renderWizard()" style="background:none;border:1px solid var(--line);color:var(--fg)">Skip — select a driver manually</button></div>`;
@@ -580,13 +586,42 @@ function renderWizard(){
     const c=(wizReport&&wizReport.candidates)||[];
     h+=`<div class="card"><b>Step 4 — Candidates</b>
     <p class="dim">${esc(wizReport?wizReport.reason:'')}</p>`;
-    if(!c.length){h+='<p class="dim">Nothing answered. The quick scan only tries each driver’s default line speed — run the <b>extended scan</b> to try all of them. Also check the wiring: A/B swapped is the most common cause, then termination.</p>'}
+    const swept=(wizReport&&wizReport.swept_addresses)||[];
+    const sweptText=swept.length?`Addresses ${esc(swept[0])}–${esc(swept[swept.length-1])} and each driver’s own default were tried.`:'';
+    if(!c.length){h+=`<p class="dim">Nothing was identified. ${sweptText||'The quick scan only tries each driver’s default line speed and default address — run the <b>extended scan</b> to try all of them, and addresses 1–8.'} Check the wiring too: A/B swapped is the most common cause, then termination.</p>`}
+    // Traffic without an identification is the one fault a sweep can name that nothing else
+    // can: two inverters left on the same unit id answer together and their replies collide.
+    // Shown before the candidates, because it explains a device that is missing from them.
+    const unk=(wizReport&&wizReport.unidentified_addresses)||[];
+    if(unk.length){
+      h+=`<div class="msg err" style="display:block"><b>Traffic at ${unk.length===1?'an address':'addresses'} with no device identified.</b>
+      <ul style="margin:6px 0 0 18px">${unk.map(u=>`<li>Address <b>${esc(u.address)}</b> (${esc(u.driver_id)}): ${esc(u.note)}</li>`).join('')}</ul>
+      <div style="margin-top:6px">On a chain of identical inverters this usually means two of them
+      are still on the same address — their replies collide. Put one unit on the bus at a time to
+      confirm, then reassign.</div></div>`;
+    }
+    // Devices, not cards: two drivers can both claim one physical inverter, and telling the
+    // owner to add "3 devices" when two of the cards are one unit produces exactly the
+    // duplicate-id collision the boot loop refuses.
+    const deviceCount=new Set(c.map(x=>x.driver_id+'@'+(x.address??''))).size;
+    if(deviceCount>1){
+      h+=`<p class="dim">${deviceCount} devices answered. ${sweptText} The wizard configures one — add the rest afterwards under <b>Settings → Extra devices</b>, using the addresses below.</p>`;
+    }
+    if(wizReport&&wizReport.candidates_omitted>0){
+      h+=`<p class="dim">${esc(wizReport.candidates_omitted)} further lower-scoring candidate(s) are not shown.</p>`;
+    }
     c.forEach(x=>{
       h+=`<div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:10px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <b>${esc(x.display_name)}</b><span class="tag">${x.confidence}/100</span></div>
       <table style="margin-top:8px">
       <tr><td class="dim">Driver</td><td>${esc(x.driver_id)} <span class="tag">${esc(x.support_level)}</span></td></tr>
+      <!-- Absent means two different things and they must not read the same: in a quick scan
+           no address was selected at all, so this device is wherever its driver defaults to;
+           in a swept scan it means the protocol hands out addresses itself. -->
+      <tr><td class="dim">Bus address</td><td>${x.address!=null?'<b>'+esc(x.address)+'</b>'
+        :(swept.length?'<span class="dim">assigned by the protocol</span>'
+                      :'<span class="dim">not probed — the quick scan does not sweep addresses</span>')}</td></tr>
       <tr><td class="dim">Serial profile tried</td><td>${x.serial_profile?`${x.serial_profile.baud_rate} ${x.serial_profile.data_bits}${esc(x.serial_profile.parity[0].toUpperCase())}${x.serial_profile.stop_bits}, timeout ${x.serial_profile.response_timeout_ms} ms`:'—'}</td></tr>
       <tr><td class="dim">Response found</td><td>${x.responded?'yes':'no'}</td></tr>
       <tr><td class="dim">Checksum valid</td><td>${x.checksum_valid?'yes':'no'}</td></tr>
@@ -595,7 +630,9 @@ function renderWizard(){
       <tr><td class="dim">Serial number</td><td>${esc(x.serial_number||'—')}</td></tr>
       <tr><td class="dim">Evidence</td><td>${(x.evidence||[]).map(e=>'· '+esc(e)).join('<br>')||'—'}</td></tr>
       </table>
-      <button onclick="wizChosen='${esc(x.driver_id)}';wizStep=5;renderWizard()">Choose this driver</button>
+      <!-- The options travel as JSON through esc(), not as a hand-built string: they come from
+           the device, and every other value on this page goes through the same escape. -->
+      <button onclick="wizChosen=${esc(JSON.stringify(x.driver_id))};wizFound=${esc(JSON.stringify(x.options||{}))};wizStep=5;renderWizard()">Choose this device</button>
       </div>`;
     });
     h+=`<button onclick="wizStep=2;renderWizard()" style="background:none;border:1px solid var(--line);color:var(--fg)">Back</button></div>`;
@@ -663,7 +700,10 @@ function renderWizard(){
 }
 
 async function startDiscovery(extended){
-  wizStep=3;wizReport=null;renderWizard();
+  // wizFound is cleared here and not only reassigned on the next pick: it outranks the stored
+  // configuration in step 5, so an address left over from a previous run -- or from a run the
+  // user then skipped past -- would silently propose a device they did not choose this time.
+  wizStep=3;wizReport=null;wizChosen=null;wizFound={};renderWizard();
   const r=await authFetch('/api/v1/actions/discover'+(extended?'?extended=true':''),{method:'POST'});
   if(r.cancelled){wizStep=2;renderWizard();return}
   if(r.status===401){wizStep=2;renderWizard();alert('Admin password required.');return}
@@ -673,7 +713,13 @@ async function startDiscovery(extended){
     wizReport=await (await fetch('/api/v1/discovery')).json();
     if(wizReport.busy){renderWizard();return}
     clearInterval(wizPoll);
-    if(wizReport.auto_selected)wizChosen=wizReport.selected_driver_id;
+    // The options come with the selection. Without them the auto-select path landed on step 5
+    // with the driver filled in and the address left at its default -- the one thing the sweep
+    // exists to get right.
+    if(wizReport.auto_selected){
+      wizChosen=wizReport.selected_driver_id;
+      wizFound=wizReport.selected_options||{};
+    }
     wizStep=4;renderWizard();
   },1000);
 }
@@ -764,7 +810,12 @@ function wizRenderOpts(){
     // rewrote a working {profile:"mic_tl_x", unit_id:"3"} back to the defaults and reported
     // success. Every rendered key is asserted in the PATCH, so nothing survives by omission.
     const stored=(id===wizStoredDriverId)?(wizStoredOptions||{})[o.key]:undefined;
-    const cur=stored??o.default_value??'';
+    // What the device ANSWERED at wins over both. Only ever the bus address -- discovery
+    // reports the options it probed with, and it only ever varies that one -- and it is the
+    // whole point of sweeping: finding an inverter at address 3 and then offering to configure
+    // address 1 would be a worse answer than not looking (#37).
+    const found=(id===wizChosen)?(wizFound||{})[o.key]:undefined;
+    const cur=found??stored??o.default_value??'';
     const hint=o.description?`<div class="dim" style="font-size:12px">${esc(o.description)}</div>`:'';
     if(o.allowed_values&&o.allowed_values.length){
       // An empty entry among the allowed values is the driver saying "unset means my own

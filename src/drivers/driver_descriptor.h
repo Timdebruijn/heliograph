@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "transport/serial_profile.h"
@@ -91,6 +92,46 @@ struct DriverDescriptor {
 
     /// Settings this driver understands. See DriverOption.
     std::vector<DriverOption> options;
+
+    /// The option naming an address the device ALREADY answers at, which a probe can therefore
+    /// select: "unit_id" for Modbus.
+    ///
+    /// Named rather than inferred, because there is no safe convention to infer from. Two
+    /// distinctions matter and neither is visible from an option's name or type:
+    ///   - a driver may have several numeric options (SunSpec has a base register too), and
+    ///     probing the wrong one at eight values is eight pointless transactions on a live bus;
+    ///   - an option may be an address the bridge HANDS OUT rather than one the device has.
+    ///     The registration protocols work that way, and sweeping such an option would assign
+    ///     nine addresses in a row rather than discover anything.
+    ///
+    /// Empty means there is nothing to sweep, and that is the safe default for a new driver.
+    /// Extended discovery sweeps this option; nothing else reads it.
+    std::string addressOptionKey;
+
+    /// True when addressOptionKey names a declared, numeric option -- the only shape a sweep can
+    /// use. A key naming nothing, or naming an enum, would otherwise be swept over values the
+    /// driver never accepts.
+    bool hasSweepableAddress() const {
+        if (addressOptionKey.empty()) {
+            return false;
+        }
+        for (const auto& o : options) {
+            if (o.key == addressOptionKey) {
+                return o.isNumeric() && !o.defaultValue.empty();
+            }
+        }
+        return false;
+    }
+
+    /// The declared bounds of addressOptionKey. Only meaningful when hasSweepableAddress().
+    std::pair<long, long> addressRange() const {
+        for (const auto& o : options) {
+            if (o.key == addressOptionKey && o.isNumeric()) {
+                return {o.minValue, o.maxValue};
+            }
+        }
+        return {0, 0};
+    }
 
     /// Looks up an option value, falling back to the declared default.
     std::string optionOr(const DriverOptions& values, const std::string& key) const {

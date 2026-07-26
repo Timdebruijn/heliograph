@@ -20,6 +20,15 @@ namespace heliograph {
 struct ProbeResult {
     bool responded      = false;
     bool checksumValid  = false;
+    /// Bytes came back but did not identify anything -- a reply that failed its checksum, or a
+    /// frame that made no sense. Deliberately separate from `responded`, which stops the profile
+    /// sweep: garbage at the wrong line speed must not claim a device.
+    ///
+    /// It exists because on an ADDRESS sweep the same signal means something quite different.
+    /// Two inverters left on one unit id answer together and their replies collide into a bad
+    /// checksum, so "traffic here, no device" is precisely the duplicate-address diagnosis --
+    /// and it was being thrown away with the failed probe (review, 2026-07-26).
+    bool sawTraffic = false;
     /// 0-100. Only meaningful relative to other drivers probed on the same bus.
     int  confidenceScore = 0;
 

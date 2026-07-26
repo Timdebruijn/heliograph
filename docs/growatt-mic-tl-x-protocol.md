@@ -207,10 +207,14 @@ address in turn and confirm exactly one answers, at the address you expect.
    > ```
    >
    > Note `driver_id` here where the `driver` section uses `id`. Sending the array replaces it,
-   > so send all the extra units at once. Restart afterwards. Discovery probes only the default
-   > address, so it finds the unit at address 1 and not the others — a known gap, not a wiring
-   > fault. Check `/api/v1/devices` after the restart: you should see one entry per unit, named
-   > `growatt_modbus-1`, `-2`, `-3`.
+   > so send all the extra units at once. Restart afterwards. Check `/api/v1/devices` after the
+   > restart: you should see one entry per unit, named `growatt_modbus-1`, `-2`, `-3`.
+   >
+   > **Or let the wizard find them.** Extended discovery sweeps addresses 1–8, so it reports one
+   > candidate per unit with the address each answered at — which is also how you confirm that
+   > the addresses you wrote actually took. It still configures one device; the others go in
+   > `additional_devices` as above, but you are copying addresses it found rather than guessing.
+   > Quick discovery is unchanged: default address only.
    >
    > **Modbus TCP and Prometheus still publish the first device only.** All three units appear
    > in the REST API, in the device list and in Home Assistant, each as its own HA device; only

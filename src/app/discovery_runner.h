@@ -57,7 +57,12 @@ public:
     /// Called from rs485Task. Runs a pending request, if any, and returns true if it ran.
     /// Polling must be paused around this by the caller: probing re-registers every inverter
     /// on the bus.
-    bool runIfRequested(Transport& transport);
+    ///
+    /// `onProbe` is called before each probe, on the caller's task. An extended sweep is now
+    /// dozens of probes -- every address on a silent bus is a response timeout -- and they all
+    /// happen inside one rs485Task iteration, so the task watchdog has to be fed from in here
+    /// rather than once around the whole run.
+    bool runIfRequested(Transport& transport, const std::function<void()>& onProbe = {});
 
     DiscoveryReport report() const;
     bool            busy() const;
