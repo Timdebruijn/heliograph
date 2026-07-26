@@ -97,10 +97,12 @@ std::unique_ptr<rest::RestApi>    g_rest;
 std::vector<std::unique_ptr<InverterDriver>> g_drivers;
 std::vector<std::unique_ptr<DeviceContext>>  g_contexts;
 
-/// The first device, or nullptr. Everything that still speaks about "the" inverter -- the
-/// status LED, the boot-confirm check, the outputs -- reads these. Naming them rather than
-/// indexing at each call site keeps the remaining single-device assumptions countable: every
-/// use of g_driver/g_context/g_state is a place that has not been taught about the others yet.
+/// The first device, or nullptr. What is left that still speaks about "the" inverter: the
+/// boot-confirm check, the REST /status device block, and the "is anything polling at all"
+/// guard in the poll loop. Naming them rather than indexing at each call site keeps the
+/// remaining single-device assumptions countable -- every use of g_driver/g_context/g_state is
+/// a place that has not been taught about the others. The outputs no longer belong on that
+/// list: MQTT, REST, Modbus TCP and Prometheus all carry every device.
 InverterDriver* g_driver  = nullptr;
 DeviceContext*  g_context = nullptr;
 StateStore*     g_state   = nullptr;
@@ -516,9 +518,28 @@ void startOutputs() {
         // Never from configuration: no driver in this build can write, so offering the switch
         // would advertise something untrue. validate() rejects it too.
         cfg.writeEnabled = false;
+        // One unit id per started device, consecutively from modbus.unit_id. Started, not
+        // configured: a unit id that answers with a map of NaN is worse than one that answers
+        // nothing, because a client cannot tell the two apart.
+        cfg.deviceCount = static_cast<uint8_t>(g_deviceIds.size());
         g_modbus.setConfig(cfg);
-        log::info("modbus: %s on :%u (unit %u)", g_modbus.begin() ? "listening" : "failed to start",
-                  cfg.port, cfg.inverterUnitId);
+        const bool listening = g_modbus.begin();
+        if (g_modbus.servedDevices() <= 1) {
+            log::info("modbus: %s on :%u (unit %u)", listening ? "listening" : "failed to start",
+                      cfg.port, cfg.inverterUnitId);
+        } else {
+            log::info("modbus: %s on :%u (units %u-%u, one per inverter)",
+                      listening ? "listening" : "failed to start", cfg.port, cfg.inverterUnitId,
+                      g_modbus.unitIdFor(g_modbus.servedDevices() - 1));
+        }
+        if (g_modbus.servedDevices() < g_deviceIds.size()) {
+            log::warn("modbus: only %u of %u devices are reachable over Modbus TCP -- the unit "
+                      "ids would run past 247 or into the diagnostics unit (%u). Lower "
+                      "modbus.unit_id.",
+                      static_cast<unsigned>(g_modbus.servedDevices()),
+                      static_cast<unsigned>(g_deviceIds.size()),
+                      static_cast<unsigned>(cfg.diagnosticsUnitId));
+        }
     }
 
     if (configSnapshot.mqtt.enabled && !configSnapshot.mqtt.host.empty()) {
@@ -781,10 +802,15 @@ void rs485Task(void* /*arg*/) {
                 }
             }
             const auto first = g_state->snapshot();
-            // Still first-device-only, and now the ONLY two that are: the Modbus TCP register
-            // map has one device's worth of registers and the metric names have no device
-            // label. Both are named in docs/architecture.md as the remaining gap.
-            g_modbus.refresh(*first, bridge, diag, nowMs());
+            // Every device, one Modbus unit id each, in the same order as g_deviceIds and as
+            // the views above -- so unit 1 and the first Home Assistant device are the same
+            // inverter. `held` keeps the snapshots alive across the call (#36).
+            std::vector<const DeviceState*> modbusDevices;
+            modbusDevices.reserve(views.size());
+            for (const auto& v : views) {
+                modbusDevices.push_back(v.state);
+            }
+            g_modbus.refresh(modbusDevices, bridge, diag, nowMs());
             if (g_mqtt) {
                 // Once, on the first connected pass -- before loop() below, so the clears are
                 // queued ahead of this boot's own discovery announcements.

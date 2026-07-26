@@ -163,10 +163,11 @@ own address before you connect them together.
 > took. It configures one device; the rest go in `additional_devices` as above. Quick discovery
 > is unchanged: each driver's default address only.
 >
-> One thing before wiring three: **Modbus TCP and Prometheus still carry the first device only**
-> — REST, `/api/v1/devices`, the bridge's own dashboard and Home Assistant have all of them.
-> That is next on the list, not a wiring fault. Note also that the units share one bus and one
-> poll interval, so each is read roughly every N intervals with N inverters.
+> **Every output carries all of them now.** Modbus TCP serves one **unit id per inverter**,
+> consecutively from `modbus.unit_id` — unit 1, 2, 3 with the default — and the register map is
+> the same at each. Prometheus labels every inverter series with `device="…"`, the same id REST
+> and Home Assistant use. Note that the units share one bus and one poll interval, so each is
+> read roughly every N intervals with N inverters.
 
 ### 2. Flash the firmware
 

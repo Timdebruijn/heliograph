@@ -50,6 +50,42 @@ your board type. On a home LAN that is normally fine. If it is not, put the brid
 segregated VLAN and let only the scraper reach it — the firmware has no per-endpoint access
 control to do it for you. See [security.md](security.md).
 
+## Several inverters: the `device` label
+
+Every inverter series carries a **`device`** label holding the device id — the same string
+`/api/v1/devices` serves and MQTT uses in its topics, e.g. `growatt_modbus-2`. So one bus of
+three inverters is three series per metric:
+
+```
+heliograph_inverter_ac_power_watts{device="growatt_modbus-1"} 1240.000
+heliograph_inverter_ac_power_watts{device="growatt_modbus-2"} 980.500
+heliograph_inverter_ac_power_watts{device="growatt_modbus-3"} 1105.000
+```
+
+**Bridge-wide series carry no `device` label** — uptime, heap, WiFi, the RS485 and poll
+counters, the relay and DRM series. They are not per device: the counters live in one place for
+the whole bus, so labelling them would invent a distinction the firmware does not make.
+
+### If you already have a dashboard
+
+**The first device is labelled too.** That is a breaking change and it was chosen deliberately:
+leaving device 1 unlabelled would have been back-compatible, but `sum by (device)` would then
+produce a blank label forever, and an asymmetry that has to be explained every time is worse
+than a one-off edit. (MQTT made the opposite call for its topics, because there the cost of
+changing was a user's whole Home Assistant history.)
+
+What actually breaks, and what does not:
+
+| Query | Before | After |
+|---|---|---|
+| `heliograph_inverter_ac_power_watts` | one series | one series **per inverter** — a graph gains lines |
+| `sum(heliograph_inverter_ac_power_watts)` | the one inverter | the whole bus — usually what you wanted |
+| a recording rule expecting a single series | fine | **fix it**: add `sum(...)` or `{device="…"}` |
+| any bridge-wide series | unchanged | unchanged |
+
+With one inverter nothing changes except that a label appears. Existing panels keep working;
+they just gain a legend entry.
+
 ## What is exported
 
 Every series is prefixed `heliograph_`. Base units are in the names, counters end in `_total`.
@@ -58,14 +94,16 @@ Every series is prefixed `heliograph_`. Base units are in the names, counters en
 
 | Metric | Type | Notes |
 |---|---|---|
-| `heliograph_build_info` | gauge | Always `1`. Carries labels `version`, `driver`, `board` |
+| `heliograph_build_info` | gauge | Always `1`. One per inverter. Labels `device`, `version`, `driver`, `board` |
 | `heliograph_inverter_online` | gauge | `1` when the inverter is answering, `0` when it is not |
 | `heliograph_data_stale` | gauge | `1` when the last reading is too old to trust |
 
 ### Inverter readings
 
-All gauges, and all **omitted entirely when the value is unknown** (see
-[Missing values](#missing-values-are-missing-not-zero)).
+All gauges, all carrying `device`, and all **omitted entirely when the value is unknown** (see
+[Missing values](#missing-values-are-missing-not-zero)) — per device, so a bus where one
+inverter reports temperature and another does not gives one series, not two with a fabricated
+one. A metric no inverter reports is absent entirely, header included.
 
 | Metric | Unit |
 |---|---|

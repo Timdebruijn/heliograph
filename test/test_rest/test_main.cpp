@@ -1419,11 +1419,19 @@ static void test_oversized_response_is_refused() {
 
 // --- Prometheus ------------------------------------------------------------------------------
 
+/// One device, the way every test below used to call buildMetrics directly. The id is what
+/// lands in the `device` label, so the assertions read the same shape a scraper sees.
+static std::string metricsOf(const DeviceState& state, const BridgeInfo& bridge,
+                             const DiagnosticsSnapshot& diagnostics,
+                             const char* id = "eversolar_legacy") {
+    return prometheus::buildMetrics({{id, &state}}, bridge, diagnostics);
+}
+
 static void test_prometheus_stack_and_fragmentation_gauges() {
     Rig        r;
     const auto state = r.poll();
     // Unsampled stack marks: the gauges are omitted entirely, like the RSSI gauge.
-    auto text = prometheus::buildMetrics(state, makeBridge(), r.diagnostics.snapshot());
+    auto text = metricsOf(state, makeBridge(), r.diagnostics.snapshot());
     TEST_ASSERT_TRUE(text.find("rs485_stack_free_bytes") == std::string::npos);
     TEST_ASSERT_TRUE(text.find("loop_stack_free_bytes") == std::string::npos);
 
@@ -1431,7 +1439,7 @@ static void test_prometheus_stack_and_fragmentation_gauges() {
     r.diagnostics.recordLoopStackFree(4100);
     auto bridge              = makeBridge();
     bridge.maxAllocHeapBytes = 65536;
-    text = prometheus::buildMetrics(state, bridge, r.diagnostics.snapshot());
+    text = metricsOf(state, bridge, r.diagnostics.snapshot());
     TEST_ASSERT_TRUE(text.find("heliograph_rs485_stack_free_bytes 2500\n") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_loop_stack_free_bytes 4100\n") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_max_alloc_heap_bytes 65536\n") != std::string::npos);
@@ -1440,10 +1448,10 @@ static void test_prometheus_stack_and_fragmentation_gauges() {
 static void test_prometheus_exports_current_readings() {
     Rig        r;
     const auto state = r.poll();
-    const auto text  = prometheus::buildMetrics(state, makeBridge(), r.diagnostics.snapshot());
+    const auto text  = metricsOf(state, makeBridge(), r.diagnostics.snapshot());
 
-    TEST_ASSERT_TRUE(text.find("heliograph_inverter_online 1\n") != std::string::npos);
-    TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts 1842.000\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_online{device=\"eversolar_legacy\"} 1\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts{device=\"eversolar_legacy\"} 1842.000\n") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_poll_success_total 1\n") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_wifi_rssi_dbm -57\n") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_uptime_seconds 86400\n") != std::string::npos);
@@ -1461,11 +1469,11 @@ static void test_prometheus_omits_unknown_rather_than_exporting_zero() {
         ctx.pollOnce();
     }
     const auto text =
-        prometheus::buildMetrics(*r.store.snapshot(), makeBridge(), r.diagnostics.snapshot());
+        metricsOf(*r.store.snapshot(), makeBridge(), r.diagnostics.snapshot());
 
     TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts") == std::string::npos);
-    TEST_ASSERT_TRUE(text.find("heliograph_inverter_online 0\n") != std::string::npos);
-    TEST_ASSERT_TRUE(text.find("heliograph_data_stale 1\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_online{device=\"eversolar_legacy\"} 0\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_data_stale{device=\"eversolar_legacy\"} 1\n") != std::string::npos);
     // Counters still work while the inverter is away.
     TEST_ASSERT_TRUE(text.find("heliograph_poll_failure_total 10\n") != std::string::npos);
 }
@@ -1478,7 +1486,7 @@ static void test_prometheus_omits_relays_on_a_board_without_them() {
     DeviceContext ctx(r.driver, r.store, r.diagnostics, clockFn);
     ctx.pollOnce();
     BridgeInfo b = makeBridge();  // relayCount stays 0
-    const auto text = prometheus::buildMetrics(*r.store.snapshot(), b, r.diagnostics.snapshot());
+    const auto text = metricsOf(*r.store.snapshot(), b, r.diagnostics.snapshot());
 
     TEST_ASSERT_TRUE(text.find("heliograph_relay_energised") == std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_relays_enabled") == std::string::npos);
@@ -1494,7 +1502,7 @@ static void test_prometheus_exports_relay_and_drm_state() {
     b.relaysEnabled = true;
     b.relayMask    = 0b010;  // only relay index 1 energised
     b.relayRoles   = {"drm0", "drm5", "none"};
-    const auto text = prometheus::buildMetrics(*r.store.snapshot(), b, r.diagnostics.snapshot());
+    const auto text = metricsOf(*r.store.snapshot(), b, r.diagnostics.snapshot());
 
     TEST_ASSERT_TRUE(text.find("heliograph_relays_enabled 1\n") != std::string::npos);
     // Labels carry the SAME 0-based index as the MQTT topic and the REST route.
@@ -1516,7 +1524,7 @@ static void test_prometheus_labelled_family_declares_help_once() {
     BridgeInfo b = makeBridge();
     b.relayCount = 6;
     b.relayMask  = 0b101010;
-    const auto text = prometheus::buildMetrics(*r.store.snapshot(), b, r.diagnostics.snapshot());
+    const auto text = metricsOf(*r.store.snapshot(), b, r.diagnostics.snapshot());
 
     auto count = [&text](const std::string& needle) {
         size_t n = 0;
@@ -1540,7 +1548,7 @@ static void test_prometheus_omits_drm_mode_without_roles() {
     BridgeInfo b = makeBridge();
     b.relayCount = 2;
     b.relayRoles = {"none", "none"};
-    const auto text = prometheus::buildMetrics(*r.store.snapshot(), b, r.diagnostics.snapshot());
+    const auto text = metricsOf(*r.store.snapshot(), b, r.diagnostics.snapshot());
 
     TEST_ASSERT_TRUE(text.find("heliograph_relay_energised{relay=\"0\"}") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_drm_mode") == std::string::npos);
@@ -1555,7 +1563,7 @@ static void test_prometheus_omits_ntp_timestamp_until_synced() {
 
     BridgeInfo unsynced = makeBridge();
     const auto before =
-        prometheus::buildMetrics(*r.store.snapshot(), unsynced, r.diagnostics.snapshot());
+        metricsOf(*r.store.snapshot(), unsynced, r.diagnostics.snapshot());
     TEST_ASSERT_TRUE(before.find("heliograph_time_synced 0\n") != std::string::npos);
     TEST_ASSERT_TRUE(before.find("heliograph_ntp_last_sync_timestamp_seconds") ==
                      std::string::npos);
@@ -1564,7 +1572,7 @@ static void test_prometheus_omits_ntp_timestamp_until_synced() {
     synced.timeSynced      = true;
     synced.lastNtpSyncEpoch = 1753000000;
     const auto after =
-        prometheus::buildMetrics(*r.store.snapshot(), synced, r.diagnostics.snapshot());
+        metricsOf(*r.store.snapshot(), synced, r.diagnostics.snapshot());
     TEST_ASSERT_TRUE(after.find("heliograph_time_synced 1\n") != std::string::npos);
     TEST_ASSERT_TRUE(after.find("heliograph_ntp_last_sync_timestamp_seconds 1753000000\n") !=
                      std::string::npos);
@@ -1573,7 +1581,7 @@ static void test_prometheus_omits_ntp_timestamp_until_synced() {
 static void test_prometheus_has_no_high_cardinality_labels() {
     Rig        r;
     const auto state = r.poll();
-    const auto text  = prometheus::buildMetrics(state, makeBridge(), r.diagnostics.snapshot());
+    const auto text  = metricsOf(state, makeBridge(), r.diagnostics.snapshot());
 
     // The serial number must never become a label: cardinality explodes across a fleet.
     TEST_ASSERT_TRUE(text.find(fx::kExpectedSerial) == std::string::npos);
@@ -1582,7 +1590,7 @@ static void test_prometheus_has_no_high_cardinality_labels() {
 static void test_prometheus_naming_conventions() {
     Rig        r;
     const auto state = r.poll();
-    const auto text  = prometheus::buildMetrics(state, makeBridge(), r.diagnostics.snapshot());
+    const auto text  = metricsOf(state, makeBridge(), r.diagnostics.snapshot());
 
     // Counters end in _total and are typed as counters; gauges are typed as gauges.
     TEST_ASSERT_TRUE(text.find("# TYPE heliograph_poll_success_total counter") != std::string::npos);
@@ -1600,11 +1608,117 @@ static void test_prometheus_naming_conventions() {
     }
 }
 
+// --- Prometheus with more than one inverter ---------------------------------------------
+//
+// Every inverter series carries a `device` label, the first one included. The alternative --
+// leaving device 1 unlabelled for back-compatibility, the way MQTT keeps its bridge-scoped
+// topics -- would have made `sum by (device)` produce a blank label forever (#36).
+
+static void test_every_inverter_series_carries_its_device_label() {
+    Rig r1;
+    Rig r2;
+    const auto a = r1.poll();
+    const auto b = r2.poll();
+    const auto text =
+        prometheus::buildMetrics({{"growatt_modbus-1", &a}, {"growatt_modbus-2", &b}},
+                                 makeBridge(), r1.diagnostics.snapshot());
+
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts{device=\"growatt_modbus-1\"} "
+                               "1842.000\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts{device=\"growatt_modbus-2\"} "
+                               "1842.000\n") != std::string::npos);
+    // Bridge-wide series stay unlabelled: the counters live in one Diagnostics for the bus.
+    TEST_ASSERT_TRUE(text.find("heliograph_uptime_seconds 86400\n") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_uptime_seconds{") == std::string::npos);
+}
+
+// HELP and TYPE appear once per metric family, whatever the device count. Repeating them per
+// series is a parse error in strict parsers -- the relay family already had a test for this,
+// and turning the inverter gauges into families made it apply to them too.
+static void test_help_and_type_appear_once_per_family_across_devices() {
+    Rig r1;
+    Rig r2;
+    const auto a = r1.poll();
+    const auto b = r2.poll();
+    const auto text =
+        prometheus::buildMetrics({{"growatt_modbus-1", &a}, {"growatt_modbus-2", &b}},
+                                 makeBridge(), r1.diagnostics.snapshot());
+
+    const std::string help = "# HELP heliograph_inverter_ac_power_watts";
+    size_t            count = 0;
+    for (size_t at = text.find(help); at != std::string::npos; at = text.find(help, at + 1)) {
+        ++count;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+}
+
+// A family no device reports is absent entirely -- not a bare HELP/TYPE header with no series
+// under it, which is what a lazily-written header exists to prevent.
+static void test_a_family_no_device_reports_has_no_header() {
+    Rig r;
+    DeviceContext ctx(r.driver, r.store, r.diagnostics, clockFn);
+    ctx.pollOnce();
+    r.device.offline = true;
+    for (int i = 0; i < 10; ++i) {
+        g_now += 10000;
+        ctx.pollOnce();
+    }
+    const auto text = metricsOf(*r.store.snapshot(), makeBridge(), r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("# HELP heliograph_inverter_ac_power_watts") == std::string::npos);
+    TEST_ASSERT_TRUE(text.find("# TYPE heliograph_inverter_ac_power_watts") == std::string::npos);
+}
+
+// --- Modbus TCP unit ids --------------------------------------------------------------------
+//
+// One unit id per inverter, consecutively from modbus.unit_id: the Modbus specification's Unit
+// Identifier is exactly the field for addressing a device behind a gateway, so a client needs
+// no vendor-specific arithmetic. Device 1 stays where it has always been.
+
+static modbus::ModbusServerConfig serverConfig(uint8_t base, uint8_t devices,
+                                               uint8_t diagnostics = 250) {
+    modbus::ModbusServerConfig cfg;
+    cfg.inverterUnitId    = base;
+    cfg.diagnosticsUnitId = diagnostics;
+    cfg.deviceCount       = devices;
+    return cfg;
+}
+
+static void test_each_device_gets_the_next_unit_id() {
+    modbus::ModbusTcpServer server(serverConfig(1, 3));
+    TEST_ASSERT_EQUAL_UINT8(3, server.servedDevices());
+    TEST_ASSERT_EQUAL_UINT8(1, server.unitIdFor(0));
+    TEST_ASSERT_EQUAL_UINT8(2, server.unitIdFor(1));
+    TEST_ASSERT_EQUAL_UINT8(3, server.unitIdFor(2));
+    TEST_ASSERT_EQUAL_UINT8(0, server.unitIdFor(3));  // not served
+}
+
+// A single-inverter bridge is served at exactly the unit id it always was, whatever the base.
+static void test_one_device_is_unchanged_at_the_configured_unit_id() {
+    modbus::ModbusTcpServer server(serverConfig(7, 1));
+    TEST_ASSERT_EQUAL_UINT8(1, server.servedDevices());
+    TEST_ASSERT_EQUAL_UINT8(7, server.unitIdFor(0));
+}
+
+// The run has to be unbroken: a client derives device N's unit id by adding, so skipping a
+// taken id and carrying on would leave a hole nothing can express. It stops instead, and
+// main() logs how many were dropped.
+static void test_the_run_stops_at_the_diagnostics_unit() {
+    modbus::ModbusTcpServer server(serverConfig(8, 4, 10));
+    TEST_ASSERT_EQUAL_UINT8(2, server.servedDevices());  // 8, 9; 10 is the diagnostics unit
+    TEST_ASSERT_EQUAL_UINT8(0, server.unitIdFor(2));
+}
+
+static void test_the_run_stops_at_the_last_valid_slave_address() {
+    // 247 is the last valid Modbus slave address; 248 and up are reserved.
+    modbus::ModbusTcpServer server(serverConfig(246, 4, 10));
+    TEST_ASSERT_EQUAL_UINT8(2, server.servedDevices());  // 246, 247
+}
+
 static void test_prometheus_build_info_carries_the_version() {
     Rig        r;
     const auto state = r.poll();
-    const auto text  = prometheus::buildMetrics(state, makeBridge(), r.diagnostics.snapshot());
-    TEST_ASSERT_TRUE(text.find("heliograph_build_info{version=\"0.1.0\",driver=\"eversolar_legacy\"") !=
+    const auto text  = metricsOf(state, makeBridge(), r.diagnostics.snapshot());
+    TEST_ASSERT_TRUE(text.find("heliograph_build_info{device=\"eversolar_legacy\",version=\"0.1.0\",driver=\"eversolar_legacy\"") !=
                      std::string::npos);
 }
 
@@ -1616,9 +1730,9 @@ static void test_the_mock_hybrid_also_exports() {
     DeviceContext ctx(driver, store, diag, clockFn);
     ctx.pollOnce();
 
-    const auto text = prometheus::buildMetrics(*store.snapshot(), makeBridge(), diag.snapshot());
+    const auto text = metricsOf(*store.snapshot(), makeBridge(), diag.snapshot());
     TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts") != std::string::npos);
-    TEST_ASSERT_TRUE(text.find("heliograph_build_info{version=\"0.1.0\",driver=\"mock_inverter\"") !=
+    TEST_ASSERT_TRUE(text.find("heliograph_build_info{device=\"eversolar_legacy\",version=\"0.1.0\",driver=\"mock_inverter\"") !=
                      std::string::npos);
 }
 
@@ -1712,6 +1826,13 @@ int main(int, char**) {
     RUN_TEST(test_prometheus_omits_ntp_timestamp_until_synced);
     RUN_TEST(test_prometheus_has_no_high_cardinality_labels);
     RUN_TEST(test_prometheus_naming_conventions);
+    RUN_TEST(test_every_inverter_series_carries_its_device_label);
+    RUN_TEST(test_help_and_type_appear_once_per_family_across_devices);
+    RUN_TEST(test_a_family_no_device_reports_has_no_header);
+    RUN_TEST(test_each_device_gets_the_next_unit_id);
+    RUN_TEST(test_one_device_is_unchanged_at_the_configured_unit_id);
+    RUN_TEST(test_the_run_stops_at_the_diagnostics_unit);
+    RUN_TEST(test_the_run_stops_at_the_last_valid_slave_address);
     RUN_TEST(test_prometheus_build_info_carries_the_version);
     RUN_TEST(test_the_mock_hybrid_also_exports);
     RUN_TEST(test_status_payload_reports_clock_sync_state);

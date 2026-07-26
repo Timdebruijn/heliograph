@@ -18,8 +18,39 @@ Schema version: **1** (register 0-1). Increment on every breaking change.
 | Byte order | big-endian (Modbus standard) |
 | Measurements | **input registers** (FC4) |
 | Port | 502 (configurable) |
-| Unit ID inverter | 1 (configurable) |
+| Unit ID inverter | `modbus.unit_id` (default 1) for device 1, **+1 per further device** |
 | Unit ID diagnostics | 250 (configurable) |
+
+## Several inverters: one unit id each
+
+The bridge polls up to eight inverters on one RS485 bus. Each gets its **own Modbus unit id**,
+consecutively from `modbus.unit_id`, in the same order as `/api/v1/devices`:
+
+| Device | Unit ID (default config) |
+|---|---|
+| 1 (`driver`) | 1 |
+| 2 (`additional_devices[0]`) | 2 |
+| 3 (`additional_devices[1]`) | 3 |
+
+**The register map below is identical at every unit id.** Point a client at a different unit and
+everything is in the same place; there is no per-device offset and no address arithmetic. This is
+what the Modbus specification's Unit Identifier is for — addressing a device on a serial
+sub-network behind a gateway — so any client that can set a slave/unit id already supports it.
+
+A bridge with one inverter is unchanged: it is served at `modbus.unit_id` exactly as before.
+
+Two rules worth knowing:
+
+- **The run is consecutive and stops rather than skipping.** If the ids would reach the
+  diagnostics unit or run past 247 (the last valid Modbus slave address), the devices beyond
+  that point are simply not served, and the boot log says how many and why. A hole in the run
+  would be inexpressible: a client derives device N's id by adding.
+- **Only devices that actually started get an id.** A unit id that answered with a map full of
+  NaN would be worse than one that does not answer at all — a client cannot tell those apart.
+
+The **diagnostics unit (250)** serves device 1's map. Its 800-899 block is bridge-wide and
+identical at every unit anyway; the same is true of the poll and RS485 counters, which the
+firmware keeps per bus rather than per device.
 
 FC3 (Read Holding Registers) mirrors the same content as FC4, so clients that can only do FC3
 (many PLCs, some EVCC configurations) also work. FC6/FC16 are disabled and
