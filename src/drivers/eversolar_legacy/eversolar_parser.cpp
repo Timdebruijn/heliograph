@@ -5,6 +5,7 @@
 
 #include <vector>
 
+#include "protocols/byte_order.h"
 #include "protocols/pmu/pmu_protocol.h"  // kRegisterAck
 
 namespace heliograph::eversolar {
@@ -71,15 +72,16 @@ std::string toTrimmedString(const uint8_t* data, size_t len) {
 
 }  // namespace
 
-uint16_t readWord(const uint8_t* data, size_t index) {
-    const size_t o = index * 2;
-    return static_cast<uint16_t>((data[o] << 8) | data[o + 1]);
-}
+// Word-indexed, unlike bytes::be16 -- this protocol numbers its payload in 16-bit registers,
+// and every call site below reads better as a register number than as a byte offset.
+uint16_t readWord(const uint8_t* data, size_t index) { return bytes::be16(data, index * 2); }
 
 int16_t readSignedWord(const uint8_t* data, size_t index) {
-    return static_cast<int16_t>(readWord(data, index));
+    return bytes::be16s(data, index * 2);
 }
 
+// Not bytes::be32: the two halves are not adjacent. Several layouts put the high and low words
+// at unrelated register numbers, which is why this takes two indices.
 uint32_t readDoubleWord(const uint8_t* data, size_t highIndex, size_t lowIndex) {
     return (static_cast<uint32_t>(readWord(data, highIndex)) << 16) | readWord(data, lowIndex);
 }

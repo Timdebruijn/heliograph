@@ -2,32 +2,25 @@
 
 #include "modbus_rtu.h"
 
+#include "protocols/byte_order.h"
+
 namespace heliograph::modbus {
 namespace {
 
 /// Appends the CRC of the first `len` bytes at out[len], low byte first (Modbus wire order),
 /// and returns the new length. Caller guarantees room for two more bytes.
 size_t appendCrc(uint8_t* out, size_t len) {
-    const uint16_t crc = crc16(out, len);
-    out[len]     = static_cast<uint8_t>(crc & 0xFF);
-    out[len + 1] = static_cast<uint8_t>((crc >> 8) & 0xFF);
+    bytes::putLe16(out + len, crc16(out, len));  // Modbus sends the CRC low byte first
     return len + 2;
 }
 
-void putBe16(uint8_t* out, uint16_t v) {
-    out[0] = static_cast<uint8_t>((v >> 8) & 0xFF);
-    out[1] = static_cast<uint8_t>(v & 0xFF);
-}
-
-uint16_t getBe16(const uint8_t* in) {
-    return static_cast<uint16_t>((static_cast<uint16_t>(in[0]) << 8) | in[1]);
-}
+using bytes::be16;
+using bytes::putBe16;
 
 bool crcOk(const uint8_t* buf, size_t len) {
-    // len includes the trailing two CRC bytes.
-    const uint16_t expected = crc16(buf, len - 2);
-    const uint16_t actual   = static_cast<uint16_t>(buf[len - 2] | (buf[len - 1] << 8));
-    return expected == actual;
+    // len includes the trailing two CRC bytes. The CRC is the one little-endian field in an
+    // otherwise big-endian frame -- hence le16 here and be16 everywhere else.
+    return crc16(buf, len - 2) == bytes::le16(buf, len - 2);
 }
 
 }  // namespace
@@ -160,7 +153,7 @@ ParseResult parseReadResponse(const uint8_t* buf, size_t len, uint8_t expectedUn
         return ParseResult::Malformed;
     }
     for (size_t i = 0; i < registers; ++i) {
-        regsOut[i] = getBe16(buf + 3 + i * 2);
+        regsOut[i] = be16(buf + 3 + i * 2);
     }
     out.unitId        = buf[0];
     out.functionCode  = buf[1];
@@ -207,8 +200,8 @@ ParseResult parseWriteResponse(const uint8_t* buf, size_t len, uint8_t expectedU
     }
     out.unitId       = buf[0];
     out.functionCode = buf[1];
-    out.address      = getBe16(buf + 2);
-    out.value        = getBe16(buf + 4);
+    out.address      = be16(buf + 2);
+    out.value        = be16(buf + 4);
     return ParseResult::Ok;
 }
 

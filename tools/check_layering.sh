@@ -25,6 +25,9 @@ echo "==> 2. The host-testable core must not depend on Arduino or ESP-IDF"
 # break the build, it means protocol logic has drifted into something untestable.
 core_paths=(
     src/device
+    src/protocols/byte_order.h
+    src/protocols/modbus/modbus_rtu.h
+    src/protocols/modbus/modbus_rtu.cpp
     src/protocols/pmu/pmu_protocol.h
     src/protocols/pmu/pmu_protocol.cpp
     src/network/rtc_time.h
