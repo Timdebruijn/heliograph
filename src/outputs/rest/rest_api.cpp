@@ -307,7 +307,7 @@ bool RestApi::begin() {
             std::string       body;
             if (!rest::buildStatusPayload(empty, "", context_.bridgeInfo(),
                                           context_.diagnostics->snapshot(), nullptr,
-                                          context_.clock(), body)) {
+                                          context_.clock(), {}, body)) {
                 sendError(request, {500, "payload_too_large", "status payload exceeded its bound"});
                 return;
             }
@@ -316,10 +316,21 @@ bool RestApi::begin() {
         }
         // The registered id: the key the per-device routes actually answer on.
         const auto ids = context_.devices->devices();
+        // One snapshot per device, taken here so the whole payload describes one instant. The
+        // Dashboard and the header indicator are built from this and never from the first
+        // device alone (#38); walking the per-device routes instead would be 1+N requests a
+        // second on the board that is also driving the bus.
+        std::vector<rest::DeviceSummary> fleet;
+        fleet.reserve(ids.size());
+        for (const auto& id : ids) {
+            if (StateHandle h = context_.devices->state(id)) {
+                fleet.push_back(rest::summariseDevice(*h, id, context_.clock()));
+            }
+        }
         std::string body;
         if (!buildStatusPayload(*snapshot, ids.empty() ? std::string{} : ids.front(),
                                 context_.bridgeInfo(), context_.diagnostics->snapshot(),
-                                activeDescriptor(*snapshot), context_.clock(), body)) {
+                                activeDescriptor(*snapshot), context_.clock(), fleet, body)) {
             sendError(request, {500, "payload_too_large", "status payload exceeded its bound"});
             return;
         }

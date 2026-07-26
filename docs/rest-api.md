@@ -91,9 +91,39 @@ once a driver has write capabilities.
   },
   "measurements": {
     "ac.power.total": { "value": 1842.0, "unit": "W", "valid": true, "stale": false }
+  },
+  "devices": [
+    { "id": "growatt_modbus-1", "online": true, "data_valid": true, "data_stale": false,
+      "last_successful_poll_seconds_ago": 3, "ac_power_w": 1240.0 },
+    { "id": "growatt_modbus-2", "online": false, "data_valid": false, "data_stale": false,
+      "last_successful_poll_seconds_ago": null, "ac_power_w": null }
+  ],
+  "totals": {
+    "devices_polled": 2, "devices_answering": 1,
+    "ac_power_w": 1240.0, "ac_power_devices": 1,
+    "energy_today_kwh": 5.25, "energy_today_devices": 1,
+    "energy_total_kwh": 24680.0, "energy_total_devices": 1
   }
 }
 ```
+
+`device` and `measurements` describe the **first** device and always will — that is what existing
+clients read. `devices` and `totals` describe the whole bus, and are what anything presenting
+itself as the bridge's health must use. The built-in web UI does: the header indicator is green
+only when every polled device is answering, and with more than one inverter the Dashboard tiles
+are totals rather than device 1's readings.
+
+Three rules in `totals`, all of which exist because the alternative reads as a fact:
+
+- **`devices_answering`** counts devices that are online, hold valid data and are not stale.
+  Started is not answering (see below), and neither is a device whose last reading has aged out.
+- **A sum is `null` when no device reported the channel**, never `0`.
+- **Every sum carries its own count** (`ac_power_devices` and friends). A total over two of three
+  inverters is indistinguishable from a total over three that had a bad afternoon; the count is
+  the difference. A device that reports no value at all does not contribute a zero to the sum.
+
+Per-device rows use `null` for an absent reading for the same reason: "reports no power" and
+"reports 0 W" are different answers.
 
 ## Error format
 
