@@ -4,8 +4,10 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <string>
 
+#include "device/device_state.h"  // kMaxDevices, the bound on the instance option
 #include "diagnostics/logger.h"
 
 namespace heliograph::mock {
@@ -34,10 +36,31 @@ constexpr double kPeakDcWatts = 6000.0;
 /// quarter of the day has passed -- which looks broken and is the opposite of what a
 /// demonstration driver is for. Booting into peak output shows the stack working immediately,
 /// and the night still arrives a few minutes later.
-double solarFraction(uint64_t nowMs, uint64_t dayLengthMs) {
+///
+/// `instance` staggers the curve so that several simulated inverters do not move in lockstep.
+/// What needs testing is several devices reporting DIFFERENT non-zero values at once: a fleet
+/// reporting one identical number makes a shared store, a mislabelled Prometheus series or a
+/// Modbus unit off by one look exactly like correct output.
+///
+/// A THIRTY-SECOND of a day apart, not a sixteenth. The cycle starts at midday and daylight
+/// runs a quarter-day either side, so at a sixteenth the eighth instance would already be dark
+/// the moment the bridge boots -- and a fleet whose last members report nothing from the outset
+/// is not the demonstration this is for. At 1/32 the whole run of kMaxDevices spans 7/32 of a
+/// day, which puts every one of them in daylight AT BOOT (1.0 down to 0.195 of peak).
+///
+/// They do NOT all stay there, and that is the second thing this buys. As the day advances they
+/// set one by one, last instance first, so a running fleet is a mix of producing and dark
+/// devices -- which is what exercises the rule that a total is null when no device reported the
+/// channel rather than 0, and the per-device online/stale handling underneath it. A fleet that
+/// rose and set in unison would never reach that state at all.
+///
+/// Instance 1 gets no offset, so the single-mock case is bit-for-bit what it always was.
+double solarFraction(uint64_t nowMs, uint64_t dayLengthMs, uint8_t instance) {
     if (dayLengthMs == 0) {
         return 0.0;
     }
+    const uint64_t offset = (instance > 0 ? instance - 1u : 0u) * (dayLengthMs / 32ULL);
+    nowMs += offset;
     const double raw = static_cast<double>(nowMs % dayLengthMs) / static_cast<double>(dayLengthMs);
     const double phase = raw < 0.5 ? raw + 0.5 : raw - 0.5;  // shift midnight -> midday
     if (phase < 0.25 || phase > 0.75) {
@@ -75,11 +98,35 @@ DriverDescriptor makeDescriptor(bool writable) {
                               // leaving the one driver everybody has compiled in unbounded
                               // would make "the numeric driver options" a claim about most of
                               // them (review, 2026-07-25).
-                              1, 1440}};
+                              1, 1440},
+                 DriverOption{"unit_id", "Simulated unit",
+                              "Which simulated inverter this is. Give each mock under Extra "
+                              "devices its own number: it is what keeps them apart, and it "
+                              "staggers their solar curves so they do not all report the same "
+                              "value at the same moment.",
+                              "1", {}, 1, static_cast<long>(kMaxDevices)}};
+    // Named like the real drivers' address option, which buys two things: the settings page
+    // already warns when two devices share a `unit_id`, and DiscoveryCandidate::address() has
+    // something to report.
+    //
+    // Safe despite the note in discovery_engine.h about a sweep turning one address assignment
+    // into nine: the engine skips every driver with supportsAutoDetection false, and this is
+    // the driver that comment names. The sweep can never reach it.
+    x.addressOptionKey = "unit_id";
     return x;
 }
 
 }  // namespace
+
+std::string mockSerialNumber(uint8_t instance) {
+    // Ten digits, zero-padded: instance 1 comes out as "MOCK-0000000001", exactly the constant
+    // every mock reported before it could be told apart. An existing single-mock install
+    // therefore keeps its device id -- and with it its REST path, its MQTT topic subtree and
+    // its Home Assistant entities -- across this change, with no retained topics orphaned.
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "MOCK-%010u", static_cast<unsigned>(instance));
+    return buf;
+}
 
 const DriverDescriptor& readOnlyDescriptor() {
     static const DriverDescriptor d = makeDescriptor(false);
@@ -106,6 +153,17 @@ MockOptions optionsFrom(const heliograph::DriverOptions& values, bool writable) 
                   d.optionOr(values, "day_length_minutes").c_str(),
                   static_cast<unsigned long long>(out.dayLengthMs / 60000ULL));
     }
+    long unit = 0;
+    if (d.numericOption(values, "unit_id", unit)) {
+        out.instance = static_cast<uint8_t>(unit);
+    } else {
+        // Warned about rather than silently defaulted: this option decides the device's
+        // IDENTITY, so falling back to 1 on a typo hands the second mock the first one's id
+        // and it disappears at boot as a duplicate -- which is the exact failure this option
+        // was added to remove.
+        log::warn("MOCK unit_id '%s' invalid, using %u",
+                  d.optionOr(values, "unit_id").c_str(), static_cast<unsigned>(out.instance));
+    }
     return out;
 }
 
@@ -113,10 +171,15 @@ MockDriver::MockDriver(ClockFn clock, MockOptions options)
     : clock_(std::move(clock)), options_(options) {
     identity_.manufacturer    = "Heliograph open-source project";
     identity_.model           = "Mock Hybrid 6000";
-    identity_.serialNumber    = "MOCK-0000000001";
+    identity_.serialNumber    = mockSerialNumber(options.instance);
     identity_.firmwareVersion = "1.0.0";
     identity_.protocolName    = "none (simulated)";
     identity_.driverId        = options.writable ? "mock_inverter_writable" : "mock_inverter";
+    // Set as well as the serial, not instead of it. deviceId() prefers the serial, so this
+    // changes nothing today -- but instanceKey is what identifies a device before its first
+    // poll, and leaving it empty here would make the mock the one driver that behaves
+    // differently at exactly the moment the store keys are minted.
+    identity_.instanceKey     = std::to_string(static_cast<unsigned>(options.instance));
 
     capabilities_.addRead(InverterCapability::ReadAcPower);
     capabilities_.addRead(InverterCapability::ReadAcVoltage);
@@ -184,7 +247,7 @@ PollResult MockDriver::poll(DeviceState& state) {
     }
 
     const uint64_t now      = clock_ ? clock_() : 0;
-    const double   fraction = solarFraction(now, options_.dayLengthMs);
+    const double   fraction = solarFraction(now, options_.dayLengthMs, options_.instance);
     const double   dcPower  = kPeakDcWatts * fraction;
     const double   acPower  = dcPower * 0.97;
 

@@ -322,7 +322,21 @@ pio run -e waveshare-rs485-can   # or -relay-1ch / -relay-6ch
 ```
 
 The `mock` environment runs the full output stack against a simulated inverter — useful for
-UI and integration work without an RS485 bus.
+UI and integration work without an RS485 bus. It adds two virtual relays and compiles the real
+drivers out; the **driver itself is in every shipped image**, so on real hardware you can just
+pick *Mock Inverter* under Settings → Driver.
+
+It models a three-phase hybrid with two MPPTs and a battery — deliberately unlike any single
+real device, so an output adapter that quietly assumed one phase or no battery has something to
+fail against. Give each one a `unit_id` under **Extra devices** and you can run a whole
+simulated fleet: separate device ids, separate MQTT subtrees and Home Assistant devices,
+consecutive Modbus unit ids, and one `device` label per instance in Prometheus. Their solar
+curves are staggered, so they report different values at the same moment rather than one number
+multiplied by N — which is what makes a shared store or an off-by-one unit id visible instead of
+plausible.
+
+What it cannot do is anything at the byte level: it ignores the transport entirely, so protocol
+framing, checksums and timing still need real hardware.
 
 All inverter drivers are **read-only**, and that is not in tension with the curtailment above:
 no driver ever writes to your inverter over its protocol. Sending a setpoint would need a
