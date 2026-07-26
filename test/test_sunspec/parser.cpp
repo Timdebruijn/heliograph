@@ -13,8 +13,6 @@
 
 using namespace heliograph::sunspec;
 
-void setUp() {}
-void tearDown() {}
 
 namespace {
 
@@ -170,8 +168,7 @@ static void test_common_model_too_short_is_refused() {
     TEST_ASSERT_FALSE(decodeCommon(b.data(), b.size(), id));
 }
 
-int main(int, char**) {
-    UNITY_BEGIN();
+void run_sunspec_parser() {
     RUN_TEST(test_model_ids);
     RUN_TEST(test_scale_factor_is_applied_with_its_sign);
     RUN_TEST(test_signed_points_decode_negative);
@@ -183,5 +180,4 @@ int main(int, char**) {
     RUN_TEST(test_a_truncated_block_is_refused);
     RUN_TEST(test_common_model_strings);
     RUN_TEST(test_common_model_too_short_is_refused);
-    return UNITY_END();
 }

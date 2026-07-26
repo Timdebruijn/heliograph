@@ -17,8 +17,6 @@ using namespace heliograph;
 using namespace heliograph::modbus;
 using heliograph::test::MockTransport;
 
-void setUp() {}
-void tearDown() {}
 
 namespace {
 
@@ -194,8 +192,7 @@ static void test_a_zero_length_read_is_refused() {
     TEST_ASSERT_TRUE(t.writes.empty());
 }
 
-int main(int, char**) {
-    UNITY_BEGIN();
+void run_modbus_client() {
     RUN_TEST(test_a_good_reply_decodes);
     RUN_TEST(test_an_exception_reports_its_code);
     RUN_TEST(test_silence_is_a_timeout);
@@ -206,5 +203,4 @@ int main(int, char**) {
     RUN_TEST(test_a_reply_with_too_few_registers_is_refused);
     RUN_TEST(test_a_reply_with_exactly_the_requested_count_is_ok);
     RUN_TEST(test_a_zero_length_read_is_refused);
-    return UNITY_END();
 }

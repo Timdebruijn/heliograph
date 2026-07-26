@@ -16,8 +16,6 @@ using namespace heliograph;
 using heliograph::test::FakeSunspecDevice;
 using heliograph::test::MockTransport;
 
-void setUp() {}
-void tearDown() {}
 
 namespace {
 
@@ -390,8 +388,7 @@ static void test_the_driver_is_read_only() {
     TEST_ASSERT_EQUAL(CommandResult::Unsupported, d.execute(cmd));
 }
 
-int main(int, char**) {
-    UNITY_BEGIN();
+void run_sunspec_driver() {
     RUN_TEST(test_probe_identifies_the_device_from_the_common_model);
     RUN_TEST(test_the_whole_chain_is_mapped_not_just_the_usable_model);
     RUN_TEST(test_poll_publishes_scaled_readings);
@@ -411,5 +408,4 @@ int main(int, char**) {
     RUN_TEST(test_an_undecodable_model_counts_an_invalid_frame);
     RUN_TEST(test_a_silent_device_does_not_poll);
     RUN_TEST(test_the_driver_is_read_only);
-    return UNITY_END();
 }
