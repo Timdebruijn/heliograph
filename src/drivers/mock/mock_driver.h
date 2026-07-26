@@ -65,9 +65,6 @@ public:
     /// untestable without hardware.
     BusErrorCounts       busErrors() const override { return busErrors_; }
 
-    void setOptions(const MockOptions& options) { options_ = options; }
-    const MockOptions& options() const { return options_; }
-
     /// Last value accepted by execute(), so tests can prove a command reached the driver
     /// instead of only that it was not rejected.
     double lastAcceptedValue() const { return lastAcceptedValue_; }

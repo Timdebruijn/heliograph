@@ -73,7 +73,6 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
                 std::string("mqtt disconnected: ") +
                 espMqttClientTypes::disconnectReasonToString(reason));
         }
-        lastDisconnectReason_ = static_cast<uint8_t>(reason);
     });
 
     relayCount_ = bridge.relayCount;
