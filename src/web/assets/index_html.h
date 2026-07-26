@@ -249,11 +249,15 @@ function singleTiles(s,d,g){
 /// voltage, frequency, status and error code have no bridge-wide meaning at all, so they are
 /// not averaged into something plausible -- they live per device, on the strip below and on
 /// the Device tab.
-function fleetTiles(fleet,tot){
+function fleetTiles(fleet,tot,expected){
+  // Against the configured count, so a device that never started is counted as not reporting
+  // rather than quietly left out of the question. esc() on both: this is the only place in the
+  // new code that interpolates a number straight into innerHTML, and the file's rule is that
+  // everything is escaped whatever its type is claimed to be.
   const sub=(n)=>{
-    const of=fleet.length;
-    return n===of?`<div class="k" style="margin-top:6px;text-transform:none">${of} inverters</div>`
-      :`<div class="k" style="margin-top:6px;text-transform:none;color:var(--bad)">${n} of ${of} reporting</div>`;
+    const of=expected??fleet.length;
+    return n===of?`<div class="k" style="margin-top:6px;text-transform:none">${esc(of)} inverters</div>`
+      :`<div class="k" style="margin-top:6px;text-transform:none;color:var(--bad)">${esc(n)} of ${esc(of)} reporting</div>`;
   };
   const t=(label,value,unit,decimals,count)=>tile(label,fmt(value,decimals),unit,sub(count??0));
   return t('AC Power',tot.ac_power_w,'W',0,tot.ac_power_devices)+
@@ -285,22 +289,31 @@ function fleetStrip(fleet){
 function render(s){
   const d=s.device,b=s.bridge,m=s.measurements||{};
   const dot=x=>x?'<span class="dot ok"></span>':'<span class="dot bad"></span>';
-  // The inverter indicator describes EVERY polled device, not the first one. On a bus of three
-  // it was driven by device 1's `online`, so a dead second inverter left the one indicator
-  // anybody glances at green (#38). Green means all of them are answering; anything less is
-  // red, deliberately -- an amber "some" is a state you learn to ignore.
   const fleet=s.devices||[], tot=s.totals||{};
   const polled=tot.devices_polled??fleet.length, answering=tot.devices_answering??0;
-  const invLabel=polled>1?`Inverters ${answering}/${polled}`:'Inverter';
-  // Fall back to the first device only where there is no fleet at all: firmware that predates
-  // this, or a bridge with nothing polling.
-  const invOk=polled>0?answering===polled:d.online;
+  // The CONFIGURED count is the denominator, not the started one. Three identical inverters
+  // left on the default address all resolve to the same id, so two of them are skipped at boot
+  // and `devices_polled` is 1 -- which, keyed off the started count, put the single-device
+  // layout and a green "Inverter" back on screen in the most likely bring-up mistake there is
+  // (review, 2026-07-26). A device that did not start is missing, not absent from the question.
+  const expected=b.devices_configured??polled;
+  // The inverter indicator describes EVERY device, not the first one. On a bus of three it was
+  // driven by device 1's `online`, so a dead second inverter left the one indicator anybody
+  // glances at green (#38). Green means all of them are answering; anything less is red,
+  // deliberately -- an amber "some" is a state you learn to ignore.
+  //
+  // With ONE device this is byte for byte the header it has always been, `online` and its two
+  // tags included. The strict rule would have turned it red during the stale window where it
+  // used to stay green, and that is a change to every existing single-inverter bridge that
+  // nobody asked for.
+  const multi=expected>1||polled>1;
   $('#hdr').innerHTML=dot(b.wifi_connected)+'WiFi '+
     dot(b.mqtt_connected)+'MQTT '+
     dot(b.modbus_listening)+'Modbus '+
-    dot(invOk)+invLabel+
-    (polled>1?'':(d.data_stale?' <span class="tag">stale</span>':'')+
-                 (d.data_valid?'':' <span class="tag">no data</span>'));
+    (multi?dot(answering===expected)+`Inverters ${esc(answering)}/${esc(expected)}`
+          :dot(d.online)+'Inverter'+
+           (d.data_stale?' <span class="tag">stale</span>':'')+
+           (d.data_valid?'':' <span class="tag">no data</span>'));
   $('#ver').textContent='v'+b.firmware_version;
   // Boards without relays never send the field; the settings card keys off this.
   window.g_relayCount=(b.relays||[]).length;
@@ -310,8 +323,8 @@ function render(s){
     // One inverter: exactly the dashboard this has always been. Several: the tiles that can
     // honestly be added become bridge totals, the ones that only mean something per device
     // move to the strip below, and nothing on this page presents one inverter as the bridge.
-    $('#tiles').innerHTML=(polled>1?fleetTiles(fleet,tot):singleTiles(s,d,g))+bridgeTiles(b);
-    $('#fleet').innerHTML=polled>1?fleetStrip(fleet):'';
+    $('#tiles').innerHTML=(multi?fleetTiles(fleet,tot,expected):singleTiles(s,d,g))+bridgeTiles(b);
+    $('#fleet').innerHTML=multi?fleetStrip(fleet):'';
   }
   if(tab==='dev'){
     // Every configured device, not just the first. The bridge polls up to eight; this tab
@@ -433,7 +446,12 @@ async function renderDevices(b){
       const ident={...(dev.identity||{}),online:dev.online,data_valid:dev.data_valid,
                    data_stale:dev.data_stale,support_level:(dev.driver||{}).support_level};
       const ago=dev.last_successful_poll_seconds_ago;
-      if(dev.online&&dev.data_valid)answering++;
+      // The same three conditions the status endpoint counts (totals.devices_answering) and the
+      // header indicator reads. Without the staleness term this tab said "3 of 3 answering"
+      // while the header said 2 of 3 -- for the seventy seconds between a device going stale
+      // and going offline, which is exactly when someone clicks through to this tab to find out
+      // what is wrong (review, 2026-07-26).
+      if(dev.online&&dev.data_valid&&!dev.data_stale)answering++;
       // The line that answers "is this one alive", above the table rather than thirteen rows
       // into it. Never answered at all is its own state: that is a bus fault, not a sleeping
       // inverter, and the two look identical in `online: false` alone.

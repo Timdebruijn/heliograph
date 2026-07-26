@@ -61,8 +61,13 @@ struct DeviceSummary {
     double      energyTotalKwh   = 0.0;
 };
 
-/// Reduces one device's state to the row above. Only valid, non-stale-agnostic readings count:
-/// a stale value is still the last thing the device said and stays in the total, flagged.
+/// Reduces one device's state to the row above.
+///
+/// A reading counts only while it is valid AND fresh -- the same rule every other output uses.
+/// A stale one is dropped rather than carried: `markAllStale()` keeps `valid` true when a
+/// device goes offline, so carrying it means a dead inverter's last daylight value stays in the
+/// household total until the next reboot. The row still reports how long ago the device
+/// answered, which is what the reading has been replaced by.
 DeviceSummary summariseDevice(const DeviceState& state, const std::string& deviceId,
                               uint64_t nowMs);
 

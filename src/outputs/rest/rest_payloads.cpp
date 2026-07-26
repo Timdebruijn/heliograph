@@ -59,14 +59,22 @@ DeviceSummary summariseDevice(const DeviceState& state, const std::string& devic
     s.dataValid = state.dataValid;
     s.dataStale = state.dataStale;
     if (state.lastSuccessfulPollMs != 0) {
-        s.everPolled         = true;
-        s.lastPollSecondsAgo = static_cast<uint32_t>((nowMs - state.lastSuccessfulPollMs) / 1000);
+        s.everPolled = true;
+        // Guarded like MeasurementSet::updateStaleness does the same subtraction: unsigned, and
+        // a caller passing a clock older than the snapshot would otherwise get ~584 million
+        // years "ago". Not reachable from the one call site today; this is a public function.
+        s.lastPollSecondsAgo = nowMs > state.lastSuccessfulPollMs
+                                   ? static_cast<uint32_t>((nowMs - state.lastSuccessfulPollMs) / 1000)
+                                   : 0;
     }
     const auto take = [&state](const char* id, bool& has, double& value) {
         const Measurement* m = state.measurements.find(id);
-        // valid, not merely supported: an unread channel holds 0.0, and a zero silently added
-        // to a household total is the kind of wrong that nobody catches.
-        if (m != nullptr && m->supported && m->valid) {
+        // valid AND fresh, the same rule writeMeasurement, the MQTT payloads and the Modbus
+        // register map all use. Two traps, both of which produce a number nobody questions:
+        // an unread channel holds 0.0, and markAllStale() leaves `valid` true when a device
+        // goes offline -- so without !stale a dead inverter's last daylight reading was summed
+        // into the Dashboard total forever. At 03:00 the bridge reported watts (review).
+        if (m != nullptr && m->supported && m->valid && !m->stale) {
             has   = true;
             value = m->value;
         }
