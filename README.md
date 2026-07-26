@@ -7,7 +7,14 @@ Heliograph is open-source firmware for a small, cheap box that sits next to your
 inverter and talks to it over its own communication port. It **reads** the inverter and hands
 the data to whatever you already use — **Home Assistant, MQTT, Modbus TCP, a REST/JSON API, or
 Prometheus** — and on the relay boards it can also **turn the inverter down** when you want it
-to produce less. It runs entirely on your own network. No account, no cloud, no subscription.
+to produce less. New Modbus inverters can be added as a **TOML data file** — no C++, no
+firmware fork. It runs entirely on your own network. No account, no cloud, no subscription.
+
+<p align="center">
+  <img src="docs/images/dashboard.png" width="480" alt="Heliograph's built-in web dashboard showing live production from a 2009 EverSolar inverter">
+  <br>
+  <em>The built-in dashboard — a 2009 EverSolar read live over RS485, with no cloud and no app in between.</em>
+</p>
 
 ---
 
@@ -47,6 +54,12 @@ common set of measurements, and republishes that:
 | **Prometheus** | `/metrics` — see [docs/prometheus.md](docs/prometheus.md); also readable by Zabbix and Checkmk |
 | **Web dashboard** | Built into the device; works with no internet at all |
 
+<p align="center">
+  <img src="docs/images/device.png" width="420" alt="The Device tab listing an inverter's identity, capabilities and every live measurement">
+  <br>
+  <em>Everything the inverter reports collapses into one canonical model — which is why the same values reach Home Assistant, MQTT, Modbus, REST and Prometheus without any per-output glue.</em>
+</p>
+
 ### And it can turn your inverter down
 
 On the relay boards, Heliograph drives the **DRM input** that many inverters carry — the
@@ -59,6 +72,16 @@ way to write a power limit over RS485, a DRM contact is often the **only** contr
 exists. It is the one thing here that acts rather than observes, so it ships switched off,
 behind two independent gates, and fails safe by design — details in
 [Curtailment](#curtailment-turning-the-inverter-down).
+
+### And you can teach it a new inverter
+
+Most Modbus inverters can be added **without touching C++**. A driver is a TOML file listing
+the registers and their scaling, compiled into the firmware at build time — if you can read
+the register table in your inverter's manual, you can write one. Every integration above then
+works for it for free, because outputs only ever see the canonical measurements, never the
+raw protocol. There is even a probe script for reading a device you have in front of you.
+
+Full walkthrough: [docs/adding-a-device.md](docs/adding-a-device.md).
 
 ---
 
@@ -127,7 +150,7 @@ curtailment:
 | Board | What it adds | Status |
 |---|---|---|
 | [Waveshare ESP32-S3-RS485-CAN](https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN) | battery-backed clock; the reference board | **Production** — pick this if you only need to read the inverter |
-| [Waveshare ESP32-S3-Relay-1CH](https://www.waveshare.com/wiki/ESP32-S3-Relay-1CH) | 1 relay (on/off curtailment), clock | Builds and ships; not yet confirmed on hardware |
+| [Waveshare ESP32-S3-Relay-1CH](https://www.waveshare.com/wiki/ESP32-S3-Relay-1CH) | 1 relay (on/off curtailment), clock | **Hardware-verified** — boots and actuates its relay on real hardware 2026-07-26; polarity not yet meter-measured |
 | [Waveshare ESP32-S3-Relay-6CH](https://www.waveshare.com/wiki/ESP32-S3-Relay-6CH) | 6 relays (stepped curtailment), status LED, buzzer | **Hardware-verified** — relays, polarity and failsafe measured 2026-07-23 |
 
 Besides the board you need a **USB-C cable**, and wire for the RS485 connection: two data
@@ -233,6 +256,12 @@ that ships several register maps still needs the map chosen, and the wizard's co
 asks for it. If nothing answers, turn the log level up to `trace` under *Settings* and watch
 the *Logs* tab — it shows exactly what is being sent and whether anything comes back.
 
+<p align="center">
+  <img src="docs/images/discovery.png" width="480" alt="The Discovery wizard stepping through interface, mode, probing, candidates, confirm, test poll and save">
+  <br>
+  <em>Discovery is a guided wizard: it probes the bus, proposes a driver, and lets you confirm with a test poll before anything is saved.</em>
+</p>
+
 ### 6. Connect your tooling
 
 MQTT and Home Assistant discovery are configured under *Settings*; enable MQTT, point it at
@@ -254,9 +283,11 @@ Three things are worth understanding before you consider it:
 **Status: the actuator is proven, the connection to an inverter is not yet.** On the Relay-6CH
 the relays themselves have been verified on real hardware (2026-07-23): channel order,
 polarity, the power-cut failsafe and the de-energised boot state were all measured rather than
-assumed. What has *not* happened yet is driving a real inverter's DRM port with it — that step
-is waiting on a manufacturer's confirmation of how their terminals expect to be driven. Treat
-this as a capability that is built and bench-tested, not as one that has been run in the field.
+assumed. The Relay-1CH's single relay has since been actuated on hardware too (2026-07-26),
+though its polarity and failsafe have not yet been meter-measured the way the 6CH's were. What
+has *not* happened yet on either board is driving a real inverter's DRM port — that step is
+waiting on a manufacturer's confirmation of how their terminals expect to be driven. Treat this
+as a capability that is built and bench-tested, not as one that has been run in the field.
 
 **It ships switched off.** Two independent settings must both be changed before a relay can
 move (`relays.enabled` on, and `security.read_only_mode` off). A relay board with factory
