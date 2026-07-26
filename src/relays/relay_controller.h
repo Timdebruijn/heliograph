@@ -70,6 +70,11 @@ public:
     bool    readOnlyMode() const { return readOnly_; }
 
 private:
+    /// The gates every relay operation passes, whatever it is asking for: the global kill
+    /// switch, then the feature flag. Ok means "keep going", anything else is the refusal to
+    /// return. Shared so a gate added later cannot land in one entry point and not the other.
+    CommandResult checkGates() const;
+
     /// One token per accepted assert. Its own instance, so relay traffic and inverter write
     /// traffic can never consume each other's allowance -- see rate_limiter.h for why the
     /// arithmetic is shared but the state is not.
