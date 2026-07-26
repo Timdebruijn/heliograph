@@ -5,7 +5,7 @@
 namespace heliograph {
 
 DeviceContext::DeviceContext(InverterDriver& driver, StateStore& store, Diagnostics& diagnostics,
-                             ClockFn clock, PollPolicy policy)
+                             ClockFn clock, const PollPolicy& policy)
     : driver_(driver),
       store_(store),
       diagnostics_(diagnostics),

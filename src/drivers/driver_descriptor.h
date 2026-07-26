@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <utility>
@@ -108,29 +110,29 @@ struct DriverDescriptor {
     /// Extended discovery sweeps this option; nothing else reads it.
     std::string addressOptionKey;
 
+    /// The option declared under this key, or nullptr. Every other lookup below goes through
+    /// here; four separate hand-rolled searches over the same vector is three too many.
+    const DriverOption* findOption(const std::string& key) const {
+        const auto it = std::find_if(options.begin(), options.end(),
+                                     [&](const DriverOption& o) { return o.key == key; });
+        return it == options.end() ? nullptr : &*it;
+    }
+
     /// True when addressOptionKey names a declared, numeric option -- the only shape a sweep can
     /// use. A key naming nothing, or naming an enum, would otherwise be swept over values the
     /// driver never accepts.
     bool hasSweepableAddress() const {
-        if (addressOptionKey.empty()) {
-            return false;
-        }
-        for (const auto& o : options) {
-            if (o.key == addressOptionKey) {
-                return o.isNumeric() && !o.defaultValue.empty();
-            }
-        }
-        return false;
+        const DriverOption* o = addressOptionKey.empty() ? nullptr : findOption(addressOptionKey);
+        return o != nullptr && o->isNumeric() && !o->defaultValue.empty();
     }
 
     /// The declared bounds of addressOptionKey. Only meaningful when hasSweepableAddress().
     std::pair<long, long> addressRange() const {
-        for (const auto& o : options) {
-            if (o.key == addressOptionKey && o.isNumeric()) {
-                return {o.minValue, o.maxValue};
-            }
+        const DriverOption* o = findOption(addressOptionKey);
+        if (o == nullptr || !o->isNumeric()) {
+            return {0, 0};
         }
-        return {0, 0};
+        return {o->minValue, o->maxValue};
     }
 
     /// Looks up an option value, falling back to the declared default.
@@ -138,12 +140,47 @@ struct DriverDescriptor {
         if (const auto it = values.find(key); it != values.end()) {
             return it->second;
         }
-        for (const auto& o : options) {
-            if (o.key == key) {
-                return o.defaultValue;
-            }
+        const DriverOption* o = findOption(key);
+        return o == nullptr ? std::string{} : o->defaultValue;
+    }
+
+    /// Reads a numeric option and checks it against the bounds the option ITSELF declares.
+    ///
+    /// This is the whole point: every driver factory used to re-state its own option's range as
+    /// a literal (`parsed >= 1 && parsed <= 247` beside a DriverOption{…, 1, 247}), so each
+    /// bound lived in two places and three of the four pairs had already drifted -- SunSpec's
+    /// base_address accepted 65535 that the descriptor refused, and the mock's day length had
+    /// no upper bound at all despite declaring one. A driver now writes its range once, in the
+    /// descriptor, where the REST gate and the settings page read it too.
+    ///
+    /// True with `out` filled when the stored value -- or, absent that, the declared default --
+    /// is a whole decimal number inside the declared range. False with `out` untouched when the
+    /// option is unknown, not numeric, empty, not a number, or out of range.
+    ///
+    /// Deliberately NOT the stricter parse validateDriverOptions applies: that one also refuses
+    /// " 7", "+7" and "007" so a typed value is never silently rewritten. That is a rule about
+    /// what a user may SUBMIT. This is a rule about what the firmware may READ back out of a
+    /// config written by an older build, and refusing to boot a driver over a leading zero
+    /// would be the wrong trade.
+    bool numericOption(const DriverOptions& values, const std::string& key, long& out) const {
+        const DriverOption* option = findOption(key);
+        if (option == nullptr || !option->isNumeric()) {
+            return false;
         }
-        return {};
+        const std::string value = optionOr(values, key);
+        if (value.empty()) {
+            return false;
+        }
+        char*      end    = nullptr;
+        const long parsed = std::strtol(value.c_str(), &end, 10);  // base 10: "010" is ten
+        if (end == value.c_str() || *end != '\0') {
+            return false;
+        }
+        if (parsed < option->minValue || parsed > option->maxValue) {
+            return false;
+        }
+        out = parsed;
+        return true;
     }
 };
 

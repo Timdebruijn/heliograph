@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-#include <cstdlib>
-
+#include "diagnostics/logger.h"
 #include "sunspec_driver.h"
 
 namespace heliograph::sunspec {
@@ -61,15 +60,23 @@ std::unique_ptr<InverterDriver> factory(Transport& transport, const DriverOption
     const DriverDescriptor& d = descriptor();
     SunspecOptions          o;
 
-    // Base 10 explicitly on both: strtol with base 0 reads a leading zero as octal, which
-    // turned a driver option into a different number once already in this project.
-    const long unit = std::strtol(d.optionOr(options, "unit_id").c_str(), nullptr, 10);
-    if (unit >= 1 && unit <= 247) {
+    // Both ranges come from the descriptor's own DriverOption rows. They used to be restated
+    // here as literals, and had already drifted: base_address was accepted up to 0xFFFF here
+    // while the declaration says 65534, for the documented reason that the 'SunS' marker is
+    // two registers wide. The declaration wins.
+    long unit = 0;
+    if (d.numericOption(options, "unit_id", unit)) {
         o.unitId = static_cast<uint8_t>(unit);
+    } else {
+        log::warn("SUNSPEC unit_id '%s' invalid, using %u",
+                  d.optionOr(options, "unit_id").c_str(), static_cast<unsigned>(o.unitId));
     }
-    const long base = std::strtol(d.optionOr(options, "base_address").c_str(), nullptr, 10);
-    if (base >= 0 && base <= 0xFFFF) {
+    long base = 0;
+    if (d.numericOption(options, "base_address", base)) {
         o.baseAddress = static_cast<uint16_t>(base);
+    } else {
+        log::warn("SUNSPEC base_address '%s' invalid, using %u",
+                  d.optionOr(options, "base_address").c_str(), static_cast<unsigned>(o.baseAddress));
     }
     return std::make_unique<SunspecDriver>(o);
 }

@@ -41,10 +41,4 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& diagnostics, const Bridg
 bool buildIdentityPayload(const DeviceIdentity& identity, std::string& out,
                           size_t maxBytes = kMaxPayloadBytes);
 
-bool buildCapabilitiesPayload(const InverterCapabilities& capabilities, std::string& out,
-                              size_t maxBytes = kMaxPayloadBytes);
-
-/// Stable snake_case name for a capability, used in the capabilities payload and the REST API.
-const char* capabilityName(InverterCapability capability);
-
 }  // namespace heliograph::mqtt

@@ -104,9 +104,6 @@ bool buildDevicePayload(const DeviceState& state, const std::string& deviceId,
 bool buildMeasurementsPayload(const DeviceState& state, std::string& out,
                               size_t maxBytes = kMaxResponseBytes);
 
-bool buildCapabilitiesPayload(const InverterCapabilities& capabilities, std::string& out,
-                              size_t maxBytes = kMaxResponseBytes);
-
 bool buildDiagnosticsPayload(const DiagnosticsSnapshot& diagnostics, const BridgeInfo& bridge,
                              std::string& out, size_t maxBytes = kMaxResponseBytes);
 

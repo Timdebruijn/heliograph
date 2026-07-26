@@ -13,7 +13,7 @@
 
 namespace heliograph {
 
-WifiManager::WifiManager(ProvisioningPolicy policy) : policy_(policy) {}
+WifiManager::WifiManager(const ProvisioningPolicy& policy) : policy_(policy) {}
 
 namespace {
 
@@ -243,7 +243,7 @@ void WifiManager::loop(uint64_t nowMs) {
 
 namespace heliograph {
 
-WifiManager::WifiManager(ProvisioningPolicy policy) : policy_(policy) {}
+WifiManager::WifiManager(const ProvisioningPolicy& policy) : policy_(policy) {}
 void        WifiManager::begin(const Configuration& config) { config_ = config; }
 void        WifiManager::loop(uint64_t) {}
 bool        WifiManager::connected() const { return false; }

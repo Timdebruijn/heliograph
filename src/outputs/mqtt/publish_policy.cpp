@@ -6,7 +6,7 @@
 
 namespace heliograph::mqtt {
 
-PublishThrottle::PublishThrottle(PublishPolicy policy) : policy_(policy) {}
+PublishThrottle::PublishThrottle(const PublishPolicy& policy) : policy_(policy) {}
 
 double PublishThrottle::deadbandFor(MeasurementType type) const {
     switch (type) {

@@ -86,7 +86,7 @@ struct RestContext {
 
 class RestApi {
 public:
-    RestApi(RestContext context, uint16_t port = 80);
+    explicit RestApi(RestContext context, uint16_t port = 80);
     ~RestApi();
 
     RestApi(const RestApi&)            = delete;

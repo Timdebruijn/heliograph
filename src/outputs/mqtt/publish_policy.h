@@ -32,7 +32,7 @@ struct PublishPolicy {
 /// Tracks what was last published and answers whether the current state differs enough.
 class PublishThrottle {
 public:
-    explicit PublishThrottle(PublishPolicy policy = {});
+    explicit PublishThrottle(const PublishPolicy& policy = {});
 
     /// True when `state` should be published now.
     ///

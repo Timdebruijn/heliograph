@@ -3,7 +3,6 @@
 
 #include "solax_driver.h"
 
-#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -25,17 +24,13 @@ constexpr uint8_t kTimeoutsBeforeRecoveryProbe = 3;
 
 SolaxOptions optionsFrom(const heliograph::DriverOptions& values) {
     SolaxOptions out;
-    const std::string addr = solax::descriptor().optionOr(values, "address");
-    if (!addr.empty()) {
-        // Base 10, not 0: auto-detection would silently read "010" as octal 8 (a valid
-        // address, so no warning would fire). Same pattern as the growatt unit_id parse.
-        const long parsed = strtol(addr.c_str(), nullptr, 10);
-        if (parsed >= 0x01 && parsed <= 0xFE) {
-            out.assignedAddress = static_cast<uint8_t>(parsed);
-        } else {
-            log::warn("SOLAX address '%s' invalid (want 1-254), using 0x%02X", addr.c_str(),
-                      out.assignedAddress);
-        }
+    // Range comes from the descriptor's own DriverOption, not from a literal repeated here.
+    long addr = 0;
+    if (solax::descriptor().numericOption(values, "address", addr)) {
+        out.assignedAddress = static_cast<uint8_t>(addr);
+    } else {
+        log::warn("SOLAX address '%s' invalid, using 0x%02X",
+                  solax::descriptor().optionOr(values, "address").c_str(), out.assignedAddress);
     }
     return out;
 }

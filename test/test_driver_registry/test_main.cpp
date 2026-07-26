@@ -331,6 +331,89 @@ static void test_a_range_starting_at_zero_is_still_numeric() {
     TEST_ASSERT_FALSE(validateDriverOptions(d, {{"base_address", "65535"}}, e));
 }
 
+// --- numericOption: the read-back path, deliberately not the same rule as the gate above -----
+
+// The gate refuses what a user TYPES. This is what the firmware READS back out of a stored
+// config, and the two must not be confused: refusing to start a driver over a leading zero
+// written by an older build would be the wrong answer.
+static void test_numeric_option_reads_a_value_inside_the_declared_range() {
+    const auto d = boundedDescriptor();
+    long       out = 0;
+    TEST_ASSERT_TRUE(d.numericOption({{"unit_id", "7"}}, "unit_id", out));
+    TEST_ASSERT_EQUAL_INT32(7, out);
+    TEST_ASSERT_TRUE(d.numericOption({{"unit_id", "1"}}, "unit_id", out));
+    TEST_ASSERT_EQUAL_INT32(1, out);
+    TEST_ASSERT_TRUE(d.numericOption({{"unit_id", "247"}}, "unit_id", out));
+    TEST_ASSERT_EQUAL_INT32(247, out);
+}
+
+// The whole point of the change: the range comes from the DriverOption row, so a factory can
+// no longer disagree with its own declaration.
+static void test_numeric_option_refuses_what_the_declaration_refuses() {
+    const auto d = boundedDescriptor();
+    long       out = 99;
+    TEST_ASSERT_FALSE(d.numericOption({{"unit_id", "0"}}, "unit_id", out));
+    TEST_ASSERT_FALSE(d.numericOption({{"unit_id", "248"}}, "unit_id", out));
+    TEST_ASSERT_EQUAL_INT32(99, out);  // untouched on refusal, so the caller keeps its default
+}
+
+// strtol alone reads "12abc" as 12 and stops. That is how a typo becomes a plausible unit id.
+static void test_numeric_option_refuses_trailing_garbage_and_non_numbers() {
+    const auto d = boundedDescriptor();
+    long       out = 99;
+    TEST_ASSERT_FALSE(d.numericOption({{"unit_id", "12abc"}}, "unit_id", out));
+    TEST_ASSERT_FALSE(d.numericOption({{"unit_id", "one"}}, "unit_id", out));
+    TEST_ASSERT_FALSE(d.numericOption({{"unit_id", ""}}, "unit_id", out));
+    TEST_ASSERT_EQUAL_INT32(99, out);
+}
+
+// Accepted here and refused by the gate, on purpose. Also base 10 explicitly: "010" is ten,
+// not eight -- strtol with base 0 would read it as octal.
+static void test_numeric_option_accepts_a_padded_number_the_gate_would_refuse() {
+    const auto        d = boundedDescriptor();
+    DriverOptionError e;
+    TEST_ASSERT_FALSE(validateDriverOptions(d, {{"unit_id", "010"}}, e));
+
+    long out = 0;
+    TEST_ASSERT_TRUE(d.numericOption({{"unit_id", "010"}}, "unit_id", out));
+    TEST_ASSERT_EQUAL_INT32(10, out);
+}
+
+// Absent means "use what the driver declared", which is how every factory gets its default.
+static void test_numeric_option_falls_back_to_the_declared_default() {
+    const auto d = boundedDescriptor();
+    long       out = 0;
+    TEST_ASSERT_TRUE(d.numericOption({}, "unit_id", out));
+    TEST_ASSERT_EQUAL_INT32(1, out);  // boundedDescriptor declares "1"
+}
+
+// A key that names nothing, and a key that names a free-form option, are both refusals rather
+// than a lenient parse of whatever string happens to be stored there.
+static void test_numeric_option_refuses_unknown_and_non_numeric_keys() {
+    DriverDescriptor d;
+    d.id      = "mixed";
+    d.options = {DriverOption{"note", "Note", "", "42", {}}};  // no bounds -> free-form
+    long out  = 99;
+    TEST_ASSERT_FALSE(d.numericOption({{"note", "42"}}, "note", out));
+    TEST_ASSERT_FALSE(d.numericOption({{"nope", "1"}}, "nope", out));
+    TEST_ASSERT_EQUAL_INT32(99, out);
+}
+
+// A range that legitimately starts at zero must read back too, not just validate -- this is
+// the SunSpec base register, and it is the pair that had drifted.
+static void test_numeric_option_handles_a_range_starting_at_zero() {
+    DriverDescriptor d;
+    d.id      = "based";
+    d.options = {DriverOption{"base_address", "Base", "", "40000", {}, 0, 65534}};
+    long out  = 99;
+    TEST_ASSERT_TRUE(d.numericOption({{"base_address", "0"}}, "base_address", out));
+    TEST_ASSERT_EQUAL_INT32(0, out);
+    TEST_ASSERT_TRUE(d.numericOption({{"base_address", "65534"}}, "base_address", out));
+    TEST_ASSERT_EQUAL_INT32(65534, out);
+    TEST_ASSERT_FALSE(d.numericOption({{"base_address", "65535"}}, "base_address", out));
+    TEST_ASSERT_EQUAL_INT32(65534, out);
+}
+
 static void test_an_unbounded_option_stays_free_form() {
     DriverDescriptor d;
     d.id      = "free";
@@ -362,5 +445,12 @@ int main(int, char**) {
     RUN_TEST(test_a_factory_built_mock_has_a_running_clock);
     RUN_TEST(test_driver_ids_are_stable_strings);
     RUN_TEST(test_configured_options_reach_the_created_driver);
+    RUN_TEST(test_numeric_option_reads_a_value_inside_the_declared_range);
+    RUN_TEST(test_numeric_option_refuses_what_the_declaration_refuses);
+    RUN_TEST(test_numeric_option_refuses_trailing_garbage_and_non_numbers);
+    RUN_TEST(test_numeric_option_accepts_a_padded_number_the_gate_would_refuse);
+    RUN_TEST(test_numeric_option_falls_back_to_the_declared_default);
+    RUN_TEST(test_numeric_option_refuses_unknown_and_non_numeric_keys);
+    RUN_TEST(test_numeric_option_handles_a_range_starting_at_zero);
     return UNITY_END();
 }

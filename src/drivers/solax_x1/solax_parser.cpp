@@ -3,30 +3,15 @@
 
 #include "solax_parser.h"
 
+#include "protocols/byte_order.h"
+
 namespace heliograph::solax {
 namespace {
 
-uint16_t u16At(const uint8_t* data, size_t offset) {
-    return static_cast<uint16_t>((data[offset] << 8) | data[offset + 1]);
-}
-
-int16_t s16At(const uint8_t* data, size_t offset) {
-    return static_cast<int16_t>(u16At(data, offset));
-}
-
-uint32_t u32BigAt(const uint8_t* data, size_t offset) {
-    return (static_cast<uint32_t>(data[offset]) << 24) |
-           (static_cast<uint32_t>(data[offset + 1]) << 16) |
-           (static_cast<uint32_t>(data[offset + 2]) << 8) |
-           static_cast<uint32_t>(data[offset + 3]);
-}
-
-uint32_t u32LittleAt(const uint8_t* data, size_t offset) {
-    return static_cast<uint32_t>(data[offset]) |
-           (static_cast<uint32_t>(data[offset + 1]) << 8) |
-           (static_cast<uint32_t>(data[offset + 2]) << 16) |
-           (static_cast<uint32_t>(data[offset + 3]) << 24);
-}
+using bytes::be16;
+using bytes::be16s;
+using bytes::be32;
+using bytes::le32;
 
 /// Fixed-width space/NUL-padded ASCII field -> trimmed string. Non-printable bytes are
 /// dropped rather than copied, so a corrupt field cannot smuggle control characters into
@@ -54,22 +39,22 @@ DecodeResult decodeStatusReport(const uint8_t* data, size_t len, StatusReport& o
         return DecodeResult::TooShort;
     }
     out                = StatusReport{};
-    out.temperatureC   = static_cast<double>(s16At(data, 0));
-    out.energyTodayKwh = u16At(data, 2) * 0.1;
-    out.pv1Voltage     = u16At(data, 4) * 0.1;
-    out.pv2Voltage     = u16At(data, 6) * 0.1;
-    out.pv1Current     = u16At(data, 8) * 0.1;
-    out.pv2Current     = u16At(data, 10) * 0.1;
-    out.acCurrent      = u16At(data, 12) * 0.1;
-    out.acVoltage      = u16At(data, 14) * 0.1;
-    out.frequencyHz    = u16At(data, 16) * 0.01;
-    out.acPowerW       = static_cast<double>(u16At(data, 18));
+    out.temperatureC   = static_cast<double>(be16s(data, 0));
+    out.energyTodayKwh = be16(data, 2) * 0.1;
+    out.pv1Voltage     = be16(data, 4) * 0.1;
+    out.pv2Voltage     = be16(data, 6) * 0.1;
+    out.pv1Current     = be16(data, 8) * 0.1;
+    out.pv2Current     = be16(data, 10) * 0.1;
+    out.acCurrent      = be16(data, 12) * 0.1;
+    out.acVoltage      = be16(data, 14) * 0.1;
+    out.frequencyHz    = be16(data, 16) * 0.01;
+    out.acPowerW       = static_cast<double>(be16(data, 18));
     // offset 20 unused per the reference.
-    out.energyTotalKwh = u32BigAt(data, 22) * 0.1;
-    out.runtimeHours   = u32BigAt(data, 26);
-    out.mode           = u16At(data, 30);
+    out.energyTotalKwh = be32(data, 22) * 0.1;
+    out.runtimeHours   = be32(data, 26);
+    out.mode           = be16(data, 30);
     // offsets 32-44: protection thresholds, deliberately not decoded (see header).
-    out.errorBits = u32LittleAt(data, 46);
+    out.errorBits = le32(data, 46);
     return DecodeResult::Ok;
 }
 

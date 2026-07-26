@@ -98,8 +98,12 @@ void traceHex(const char* prefix, const uint8_t* data, size_t len) {
     // output that itself takes the device down.
     constexpr size_t kMaxBytes = 64;
     const size_t     n         = len < kMaxBytes ? len : kMaxBytes;
-    char             line[3 * kMaxBytes + 1];
-    size_t           pos = 0;
+    // Initialised, not merely written by the loop below: at len == 0 that loop does not run and
+    // an uninitialised buffer would go to trace("%s"), printing stack bytes until it happened to
+    // hit a NUL. Two of the three callers guard with `received > 0`, but Rs485Transport::write
+    // passes the number of bytes it actually wrote -- which is 0 when the UART write fails.
+    char   line[3 * kMaxBytes + 1] = {};
+    size_t pos                     = 0;
     for (size_t i = 0; i < n; ++i) {
         pos += static_cast<size_t>(snprintf(line + pos, sizeof(line) - pos, "%02X ", data[i]));
     }

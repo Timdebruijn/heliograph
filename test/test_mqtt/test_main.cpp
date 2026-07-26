@@ -13,6 +13,7 @@
 #include "device/device_context.h"
 #include "drivers/eversolar_legacy/eversolar_driver.h"
 #include "drivers/mock/mock_driver.h"
+#include "outputs/json_util.h"
 #include "outputs/mqtt/announced_devices.h"
 #include "outputs/mqtt/home_assistant_discovery.h"
 #include "outputs/mqtt/mqtt_payloads.h"
@@ -408,7 +409,8 @@ static void test_capabilities_payload_reports_read_only() {
     Rig r;
     const auto  state = r.poll();
     std::string json;
-    TEST_ASSERT_TRUE(buildCapabilitiesPayload(state.capabilities, json));
+    TEST_ASSERT_TRUE(json_util::buildCapabilitiesPayload(state.capabilities, json,
+                                                     kMaxPayloadBytes));
     auto doc = parse(json);
 
     TEST_ASSERT_TRUE(doc["read_only"].as<bool>());
@@ -423,7 +425,8 @@ static void test_writable_driver_lists_its_bounds() {
     o.writable = true;
     mock::MockDriver driver(clockFn, o);
     std::string      json;
-    TEST_ASSERT_TRUE(buildCapabilitiesPayload(driver.capabilities(), json));
+    TEST_ASSERT_TRUE(json_util::buildCapabilitiesPayload(driver.capabilities(), json,
+                                                     kMaxPayloadBytes));
     auto doc = parse(json);
 
     TEST_ASSERT_FALSE(doc["read_only"].as<bool>());

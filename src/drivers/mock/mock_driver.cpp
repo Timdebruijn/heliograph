@@ -4,8 +4,9 @@
 
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <string>
+
+#include "diagnostics/logger.h"
 
 namespace heliograph::mock {
 namespace {
@@ -93,11 +94,17 @@ const DriverDescriptor& writableDescriptor() {
 MockOptions optionsFrom(const heliograph::DriverOptions& values, bool writable) {
     MockOptions out;
     out.writable = writable;
-    const std::string minutes =
-        (writable ? writableDescriptor() : readOnlyDescriptor()).optionOr(values, "day_length_minutes");
-    const long parsed = std::strtol(minutes.c_str(), nullptr, 10);
-    if (parsed > 0) {
-        out.dayLengthMs = static_cast<uint64_t>(parsed) * 60ULL * 1000ULL;
+    // The 1-1440 range comes from the descriptor row, which is where it was declared and never
+    // enforced: this parser only checked `> 0`, so the one driver everybody has compiled in was
+    // the one whose declared bound meant nothing.
+    const DriverDescriptor& d = writable ? writableDescriptor() : readOnlyDescriptor();
+    long minutes = 0;
+    if (d.numericOption(values, "day_length_minutes", minutes)) {
+        out.dayLengthMs = static_cast<uint64_t>(minutes) * 60ULL * 1000ULL;
+    } else {
+        log::warn("MOCK day_length_minutes '%s' invalid, using %llu minutes",
+                  d.optionOr(values, "day_length_minutes").c_str(),
+                  static_cast<unsigned long long>(out.dayLengthMs / 60000ULL));
     }
     return out;
 }

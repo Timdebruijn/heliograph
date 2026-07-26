@@ -49,7 +49,7 @@ struct MqttConfig {
 
 class MqttOutput {
 public:
-    MqttOutput(MqttConfig config, PublishPolicy publishPolicy = {});
+    explicit MqttOutput(MqttConfig config, PublishPolicy publishPolicy = {});
 
     /// Sets up the client and starts connecting. Non-blocking.
     bool begin(const BridgeInfo& bridge);
@@ -165,9 +165,6 @@ private:
     uint64_t nextReconnectMs_    = 0;
     /// Exponential back-off, capped. An unreachable broker must not turn into a busy loop.
     uint32_t reconnectDelayMs_ = 1000;
-    /// espMqttClientTypes::DisconnectReason of the last drop, for diagnostics. Atomic:
-    /// written by onDisconnect on the library's task, read from the caller's task.
-    std::atomic<uint8_t> lastDisconnectReason_{0};
     /// Set by onDisconnect (library task), consumed by loop() (caller's task): forces a
     /// throttle reset and a discovery republish after a reconnect, because retained
     /// messages may not have survived the broker outage. The disconnect callback itself
@@ -198,9 +195,6 @@ private:
     /// re-announce discovery and re-ack state -- "applied immediately" would otherwise
     /// only be true after the next reconnect (self-review of PR #3).
     uint64_t lastRelayRolesSig_ = 0;
-
-public:
-    uint8_t lastDisconnectReason() const { return lastDisconnectReason_; }
 };
 
 inline constexpr uint32_t kMaxReconnectDelayMs = 60000;

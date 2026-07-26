@@ -3,6 +3,8 @@
 
 #include "pmu_protocol.h"
 
+#include "protocols/byte_order.h"
+
 namespace heliograph::pmu {
 
 uint16_t checksum(const uint8_t* data, size_t len) {
@@ -55,9 +57,7 @@ BuildResult buildRequestFrom(Address     source,
     }
 
     // Checksum covers every byte up to and including the payload, header included.
-    const uint16_t sum = checksum(out, kOffsetData + dataLen);
-    out[kOffsetData + dataLen]     = static_cast<uint8_t>(sum >> 8);
-    out[kOffsetData + dataLen + 1] = static_cast<uint8_t>(sum & 0xFF);
+    bytes::putBe16(out + kOffsetData + dataLen, checksum(out, kOffsetData + dataLen));
 
     outLength = frameLen;
     return BuildResult::Ok;
@@ -89,8 +89,7 @@ ParseResult parseFrame(const uint8_t* buf, size_t len, Frame& out) {
     }
 
     const uint16_t calculated = checksum(buf, kOffsetData + dataLen);
-    const uint16_t received =
-        static_cast<uint16_t>((buf[kOffsetData + dataLen] << 8) | buf[kOffsetData + dataLen + 1]);
+    const uint16_t received = bytes::be16(buf, kOffsetData + dataLen);
     if (calculated != received) {
         // Header and length byte were consistent up to this point, so the length is good
         // enough for resync: report it so the caller can skip the whole corrupt frame

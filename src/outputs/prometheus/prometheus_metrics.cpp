@@ -22,12 +22,10 @@ void appendHelp(std::string& out, const char* name, const char* help, const char
     out += '\n';
 }
 
-void appendValue(std::string& out, const char* name, double value) {
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "%s %.3f\n", name, value);
-    out += buf;
-}
-
+// Only the integral overloads exist. Every bridge-level metric is a counter, a gauge of bytes
+// or a 0/1 flag; the one place a double would be wanted -- a measurement -- goes through
+// appendDeviceValue below, which formats its own. A `double` overload shipped here unused and
+// unnoticed until -Wunused-function caught it; add one back the day something needs it.
 void appendValue(std::string& out, const char* name, unsigned long value) {
     char buf[64];
     std::snprintf(buf, sizeof(buf), "%s %lu\n", name, value);

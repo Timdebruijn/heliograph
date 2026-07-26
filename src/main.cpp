@@ -219,14 +219,16 @@ void applySerialOverride() {
     const auto& p = g_config.serial.profile;
     if (g_transport.configure(p)) {
         Serial.printf("[serial] override: %u baud, %u data bits, %s parity, %u stop\n",
-                      p.baudRate, p.dataBits, parityName(p.parity), p.stopBits);
+                      static_cast<unsigned>(p.baudRate), static_cast<unsigned>(p.dataBits),
+                      parityName(p.parity), static_cast<unsigned>(p.stopBits));
     } else {
         // configure() opens the UART before the direction-pin setup that is the only thing
         // that can fail, so on this path the line IS at the override's speed and framing --
         // what is missing is half-duplex direction control. Saying "the line is still at the
         // driver's setting" would have sent the reader to the wrong hypothesis entirely.
         Serial.printf("[serial] override applied at %u baud, but RS485 direction control "
-                      "failed to configure; transmissions may collide\n", p.baudRate);
+                      "failed to configure; transmissions may collide\n",
+                      static_cast<unsigned>(p.baudRate));
     }
 }
 
@@ -398,7 +400,7 @@ void initOnboardIndicators() {
         digitalWrite(board::kBuzzerPin, LOW);
     }
     if (board::kHasStatusLed) {
-        neopixelWrite(board::kStatusLedPin, 0, 0, 0);  // dark until the first health reading
+        rgbLedWrite(board::kStatusLedPin, 0, 0, 0);  // dark until the first health reading
     }
 }
 
@@ -439,11 +441,14 @@ void driveStatusLed(const status::LedIndication& ind) {
         case status::LedColor::Blue:  b = 40; break;
         case status::LedColor::Off:   break;
     }
-    // Channel order: this WS2812 lights the RED element from neopixelWrite's SECOND argument,
+    // Channel order: this WS2812 lights the RED element from rgbLedWrite's SECOND argument,
     // not the first -- a plain "green" (0,40,0) came out red on the first 6CH hardware run
-    // (2026-07-23). So swap red and green here; blue is unaffected. neopixelWrite's own GRB
+    // (2026-07-23). So swap red and green here; blue is unaffected. rgbLedWrite's own GRB
     // timing conversion is fine, it is the element mapping on this board that is transposed.
-    neopixelWrite(board::kStatusLedPin, g, r, b);
+    //
+    // rgbLedWrite, not neopixelWrite: the latter is [[deprecated]] in Arduino core 3.x and is
+    // now a thin forwarder to this one. Same signature, same behaviour.
+    rgbLedWrite(board::kStatusLedPin, g, r, b);
 }
 
 /// One call per loop pass: sample BOOT, act on a completed hold, and refresh the LED.

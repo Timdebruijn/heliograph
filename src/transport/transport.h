@@ -17,8 +17,6 @@ namespace heliograph {
 
 enum class TransportType : uint8_t { Rs485, Rs232, Can, Tcp, Mock };
 
-const char* transportTypeName(TransportType type);
-
 struct TransportStats {
     uint32_t bytesWritten   = 0;
     uint32_t bytesRead      = 0;
