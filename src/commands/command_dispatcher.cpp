@@ -18,31 +18,7 @@ bool onStep(double value, double minimum, double step) {
 }  // namespace
 
 CommandDispatcher::CommandDispatcher(ClockFn clock, RateLimitPolicy rateLimit)
-    : clock_(std::move(clock)), rateLimit_(rateLimit) {}
-
-bool CommandDispatcher::allowedByRateLimit(uint64_t nowMs) {
-    // Clamped rather than wrapped. On unsigned types a clock that goes backwards turns the
-    // subtraction into a huge number, which reads as "ages ago" and refills the whole allowance
-    // -- the throttle fails OPEN. Not reachable with the esp_timer-backed monotonic clock this
-    // ships with, but the clock is injectable and the failure direction is the permissive one,
-    // so it is clamped here the way DeviceContext::due() and updateStaleness() already do.
-    const uint64_t since = nowMs > lastAcceptedMs_ ? nowMs - lastAcceptedMs_ : 0;
-    if (everAccepted_ && since >= rateLimit_.minIntervalMs) {
-        burstUsed_ = 0;  // quiet long enough, the allowance refills
-    }
-    if (burstUsed_ < rateLimit_.burst) {
-        ++burstUsed_;
-        everAccepted_   = true;
-        lastAcceptedMs_ = nowMs;
-        return true;
-    }
-    if (!everAccepted_ || since >= rateLimit_.minIntervalMs) {
-        everAccepted_   = true;
-        lastAcceptedMs_ = nowMs;
-        return true;
-    }
-    return false;
-}
+    : clock_(std::move(clock)), rateLimit_(rateLimit), limiter_(rateLimit) {}
 
 namespace {
 
@@ -152,7 +128,7 @@ DispatchOutcome CommandDispatcher::dispatch(const InverterCommand& command,
     {
         std::lock_guard<std::mutex> lock(m_);
         const bool allowed = changesRunState(command) ? allowedAsRelease(now)
-                                                      : allowedByRateLimit(now);
+                                                      : limiter_.allow(now);
         if (!allowed) {
             return {CommandResult::RateLimited, "too many commands; try again shortly"};
         }

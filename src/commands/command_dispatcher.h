@@ -15,19 +15,14 @@
 #include <mutex>
 #include <string>
 
+#include "rate_limiter.h"
+
 #include "device/capability.h"
 #include "device/clock.h"
 #include "device/command.h"
 #include "drivers/inverter_driver.h"
 
 namespace heliograph {
-
-struct RateLimitPolicy {
-    /// Minimum spacing between accepted commands.
-    uint32_t minIntervalMs = 1000;
-    /// How many may be issued back to back before the spacing applies.
-    uint32_t burst = 3;
-};
 
 struct DispatchOutcome {
     CommandResult result = CommandResult::Rejected;
@@ -69,7 +64,6 @@ public:
     DispatchOutcome dispatch(const InverterCommand& command, InverterDriver& driver);
 
 private:
-    bool allowedByRateLimit(uint64_t nowMs);
     bool allowedAsRelease(uint64_t nowMs);
 
     ClockFn           clock_;
@@ -79,16 +73,14 @@ private:
     /// Guards the rate-limiter fields below, and nothing else.
     std::mutex m_;
 
-    // Explicit flag, not a "0 means never" sentinel: millis() at boot IS near zero, and
-    // the sentinel collision let the first post-boot window bypass the throttle (found by
-    // the RelayController's twin of this logic, 2026-07-22).
-    bool     everAccepted_   = false;
-    uint64_t lastAcceptedMs_ = 0;
-    uint32_t burstUsed_      = 0;
+    /// The ordinary track. See rate_limiter.h for the two traps its arithmetic avoids.
+    RateLimiter limiter_;
 
     // Releases run on their own track: they are never blocked by restricting traffic, but they
     // still keep a minimum spacing so a loop cannot saturate the bus with them. See
-    // changesRunState() for why they are treated apart at all.
+    // changesRunState() for why they are treated apart at all. Kept as its own two fields
+    // rather than a second RateLimiter: a burst of 0 happens to reproduce this exactly, but
+    // relying on that equivalence would hide the intent behind an accident of the arithmetic.
     bool     everReleased_  = false;
     uint64_t lastReleaseMs_ = 0;
 };

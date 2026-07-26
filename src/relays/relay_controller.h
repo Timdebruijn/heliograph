@@ -19,7 +19,8 @@
 #include <functional>
 #include <vector>
 
-#include "commands/command_dispatcher.h"  // RateLimitPolicy
+#include "rate_limiter.h"  // RateLimitPolicy, RateLimiter
+
 #include "device/clock.h"
 #include "device/command.h"  // CommandResult vocabulary
 
@@ -69,22 +70,18 @@ public:
     bool    readOnlyMode() const { return readOnly_; }
 
 private:
-    bool allowedByRateLimit(uint64_t nowMs);
+    /// One token per accepted assert. Its own instance, so relay traffic and inverter write
+    /// traffic can never consume each other's allowance -- see rate_limiter.h for why the
+    /// arithmetic is shared but the state is not.
+    bool allowedToAssert(uint64_t nowMs) { return limiter_.allow(nowMs); }
 
-    ClockFn         clock_;
-    RateLimitPolicy rateLimit_;
-    RelayApplyFn    apply_;
-    uint8_t         count_    = 0;
-    bool            readOnly_ = true;
-    bool            enabled_  = false;
-    bool            state_[kMaxRelays] = {};
-
-    // An explicit flag, not a "0 means never" sentinel: millis() at boot IS near zero, and a
-    // sentinel collision there let the first post-boot burst bypass the throttle (caught by
-    // test_rate_limit_throttles_on_but_never_off). CommandDispatcher carries the same flag.
-    bool     everAccepted_   = false;
-    uint64_t lastAcceptedMs_ = 0;
-    uint32_t burstUsed_      = 0;
+    ClockFn      clock_;
+    RelayApplyFn apply_;
+    RateLimiter  limiter_;
+    uint8_t      count_    = 0;
+    bool         readOnly_ = true;
+    bool         enabled_  = false;
+    bool         state_[kMaxRelays] = {};
 };
 
 }  // namespace heliograph

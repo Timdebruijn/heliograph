@@ -5,7 +5,7 @@
 namespace heliograph {
 
 RelayController::RelayController(ClockFn clock, RateLimitPolicy rateLimit)
-    : clock_(std::move(clock)), rateLimit_(rateLimit) {}
+    : clock_(std::move(clock)), limiter_(rateLimit) {}
 
 void RelayController::begin(uint8_t count, RelayApplyFn apply) {
     count_ = count > kMaxRelays ? kMaxRelays : count;
@@ -20,32 +20,6 @@ void RelayController::allOff() {
             apply_(i, false);
         }
     }
-}
-
-// Same refill logic as CommandDispatcher::allowedByRateLimit. This copy found two problems
-// first and the dispatcher has since adopted both: "has ever accepted" as an explicit flag
-// rather than a lastAcceptedMs_ == 0 sentinel (millis() at boot IS near zero, so the sentinel
-// collides exactly when the device just started), and a clamped elapsed time so a clock that
-// moves backwards cannot wrap the subtraction into "ages ago" and refill the whole allowance.
-// Duplicated rather than shared through a base class by intent: two small, independently
-// testable copies beat a coupling between the inverter write path and the bridge actuator.
-bool RelayController::allowedByRateLimit(uint64_t nowMs) {
-    const uint64_t since = nowMs > lastAcceptedMs_ ? nowMs - lastAcceptedMs_ : 0;
-    if (everAccepted_ && since >= rateLimit_.minIntervalMs) {
-        burstUsed_ = 0;
-    }
-    if (burstUsed_ < rateLimit_.burst) {
-        ++burstUsed_;
-        everAccepted_   = true;
-        lastAcceptedMs_ = nowMs;
-        return true;
-    }
-    if (!everAccepted_ || since >= rateLimit_.minIntervalMs) {
-        everAccepted_   = true;
-        lastAcceptedMs_ = nowMs;
-        return true;
-    }
-    return false;
 }
 
 CommandResult RelayController::set(uint8_t index, bool energised) {
@@ -65,7 +39,7 @@ CommandResult RelayController::set(uint8_t index, bool energised) {
     // direction and must never wait behind a throttle.
     if (energised) {
         const uint64_t now = clock_ ? clock_() : 0;
-        if (!allowedByRateLimit(now)) {
+        if (!allowedToAssert(now)) {
             return CommandResult::RateLimited;
         }
     }
@@ -97,7 +71,7 @@ CommandResult RelayController::applyPattern(const std::vector<bool>& pattern) {
     // pattern is the safe direction and passes unconditionally, like set(index, false).
     if (assertsAny) {
         const uint64_t now = clock_ ? clock_() : 0;
-        if (!allowedByRateLimit(now)) {
+        if (!allowedToAssert(now)) {
             return CommandResult::RateLimited;
         }
     }
