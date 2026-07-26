@@ -11,9 +11,9 @@ to produce less. New Modbus inverters can be added as a **TOML data file** — n
 firmware fork. It runs entirely on your own network. No account, no cloud, no subscription.
 
 <p align="center">
-  <img src="docs/images/dashboard.png" width="480" alt="Heliograph's built-in web dashboard showing live production from a 2009 EverSolar inverter">
+  <img src="docs/images/dashboard.png" width="480" alt="Heliograph's built-in web dashboard showing live production from a long-unsupported EverSolar inverter">
   <br>
-  <em>The built-in dashboard — a 2009 EverSolar read live over RS485, with no cloud and no app in between.</em>
+  <em>The built-in dashboard — a long-unsupported EverSolar read live over RS485, with no cloud and no app in between.</em>
 </p>
 
 ---
@@ -24,7 +24,7 @@ Solar inverters are built to last twenty years. The software around them is not.
 
 - **The manufacturer's monitoring died.** The portal was shut down, the app stopped working,
   or the monitoring dongle is no longer supported. The inverter still produces perfectly —
-  you just cannot see it any more. Heliograph exists because of a 2009 EverSolar that
+  you just cannot see it any more. Heliograph exists because of an EverSolar that
   outlived its own monitoring portal.
 - **Your data goes to their cloud first.** Production figures from equipment in your own
   home travel to a manufacturer's server, come back minutes later, and vanish when your
