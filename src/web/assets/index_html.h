@@ -58,16 +58,15 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
 #cfgform{display:flex;flex-direction:column;gap:26px}
 .cfgsec{display:flex;flex-direction:column;gap:12px}
 .cfgsec>h3{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}
-/* The first control in a card sits directly under the card's own title, where label's 12 px
-   top margin is the right gap; a heading-less card would otherwise start with a double gap. */
-.card>b:first-child+label{margin-top:10px}
 /* The gap already separates it. Without this the global button margin stacks on top of the
    flex gap and Save floats a long way from the settings it saves. */
 .cfgsave>button{margin-top:0}
-.card code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg)}
+#cfgform code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg)}
 /* Last row of a table inside a card: the card's own padding is the bottom edge, so the row
-   rule underneath it draws a line to nowhere. */
-.card table tr:last-child td{border-bottom:0}
+   rule underneath it draws a line to nowhere. Scoped to this tab rather than to .card, which
+   the dashboard and the Device tab also use -- they have the same dangling rule, but changing
+   how they look is not what this is about. */
+#cfgform .card table tr:last-child td{border-bottom:0}
 dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:20px;width:90%;max-width:340px}
 dialog::backdrop{background:#000a}
 .err{background:#f8514922;border:1px solid var(--bad);padding:10px;border-radius:8px;margin-bottom:12px}
