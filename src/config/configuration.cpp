@@ -2,6 +2,7 @@
 
 #include "configuration.h"
 
+#include "config_sections.h"
 #include "json_limits.h"
 #include "relays/drm.h"
 
@@ -305,38 +306,31 @@ bool validate(const Configuration& config, ConfigError& error) {
     return true;
 }
 
-bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes,
-                     const bool* rebootRequired) {
-    JsonDocument doc;
-    doc["version"]     = config.version;
+namespace config_sections {
+
+void writeCommon(JsonDocument& doc, const Configuration& config) {
     doc["bridge_name"] = config.bridgeName;
 
-    JsonObject wifi   = doc["wifi"].to<JsonObject>();
-    wifi["ssid"]      = config.wifi.ssid;
-    wifi["hostname"]  = config.wifi.hostname;
-    // Not the password, not a mask of it. Only whether one is stored.
-    wifi["password_set"] = !config.wifi.password.empty();
+    // Left open: each caller adds its own credential handling to these two objects.
+    JsonObject wifi  = doc["wifi"].to<JsonObject>();
+    wifi["ssid"]     = config.wifi.ssid;
+    wifi["hostname"] = config.wifi.hostname;
 
-    JsonObject mqtt        = doc["mqtt"].to<JsonObject>();
-    mqtt["enabled"]        = config.mqtt.enabled;
-    mqtt["host"]           = config.mqtt.host;
-    mqtt["port"]           = config.mqtt.port;
-    // The username is half of a credential pair -- omitted like the password, with only a
-    // *_set flag. It is not needed to identify the broker (host/topic do that) and handing
-    // an unauthenticated LAN reader half the login is a leak worth closing.
-    mqtt["username_set"]   = !config.mqtt.username.empty();
-    mqtt["password_set"]   = !config.mqtt.password.empty();
-    mqtt["base_topic"]     = config.mqtt.baseTopic;
+    JsonObject mqtt           = doc["mqtt"].to<JsonObject>();
+    mqtt["enabled"]           = config.mqtt.enabled;
+    mqtt["host"]              = config.mqtt.host;
+    mqtt["port"]              = config.mqtt.port;
+    mqtt["base_topic"]        = config.mqtt.baseTopic;
     mqtt["discovery_prefix"]  = config.mqtt.discoveryPrefix;
     mqtt["discovery_enabled"] = config.mqtt.discoveryEnabled;
     mqtt["qos"]               = config.mqtt.qos;
 
-    JsonObject modbus              = doc["modbus"].to<JsonObject>();
-    modbus["enabled"]              = config.modbus.enabled;
-    modbus["port"]                 = config.modbus.port;
-    modbus["unit_id"]              = config.modbus.unitId;
-    modbus["diagnostics_unit_id"]  = config.modbus.diagnosticsUnitId;
-    modbus["write_enabled"]        = config.modbus.writeEnabled;
+    JsonObject modbus             = doc["modbus"].to<JsonObject>();
+    modbus["enabled"]             = config.modbus.enabled;
+    modbus["port"]                = config.modbus.port;
+    modbus["unit_id"]             = config.modbus.unitId;
+    modbus["diagnostics_unit_id"] = config.modbus.diagnosticsUnitId;
+    modbus["write_enabled"]       = config.modbus.writeEnabled;
 
     doc["polling"]["interval_seconds"] = config.polling.intervalSeconds;
 
@@ -346,14 +340,13 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
         relayRoles.add(role);
     }
 
-    JsonObject driver           = doc["driver"].to<JsonObject>();
-    driver["id"]                = config.driver.id;
-    driver["auto_detect"]       = config.driver.autoDetect;
-    JsonObject options = driver["options"].to<JsonObject>();
+    JsonObject driver     = doc["driver"].to<JsonObject>();
+    driver["id"]          = config.driver.id;
+    driver["auto_detect"] = config.driver.autoDetect;
+    JsonObject options    = driver["options"].to<JsonObject>();
     for (const auto& [key, value] : config.driver.options) {
         options[key] = value;
     }
-
 
     // Always emitted, empty or not, so a client can tell "this firmware has no idea about
     // extra devices" from "this bridge has none configured".
@@ -383,17 +376,38 @@ bool serializeConfig(const Configuration& config, std::string& out, size_t maxBy
     serial["data_bits"] = config.serial.profile.dataBits;
     serial["stop_bits"] = config.serial.profile.stopBits;
 
-    JsonObject security = doc["security"].to<JsonObject>();
-    // The admin username is omitted for the same reason mqtt.username is, in the mqtt block
-    // above: it is half of a credential pair, this endpoint is unauthenticated, and Basic has no
-    // brute-force protection. Serving it turned guessing the login into guessing only the
-    // password. Unlike the MQTT one it needs no *_set flag -- validate() requires it to be
-    // non-empty, so "is one set" is always yes and would say nothing.
-    security["password_set"]   = !config.security.adminPassword.empty();
-    security["read_only_mode"] = config.security.readOnlyMode;
-
     doc["updates"]["check_enabled"] = config.updates.checkEnabled;
     doc["logging"]["level"]         = logLevelName(config.logLevel);
+}
+
+}  // namespace config_sections
+
+bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes,
+                     const bool* rebootRequired) {
+    JsonDocument doc;
+    // The API reports the version the configuration WAS LOADED AS, where the store writes the
+    // version it is being written in. The only field where the two documents disagree on the
+    // value rather than on the redaction, which is why it is not in writeCommon().
+    doc["version"] = config.version;
+    config_sections::writeCommon(doc, config);
+
+    // Not the password, not a mask of it. Only whether one is stored.
+    doc["wifi"]["password_set"] = !config.wifi.password.empty();
+
+    // The username is half of a credential pair -- omitted like the password, with only a
+    // *_set flag. It is not needed to identify the broker (host/topic do that) and handing
+    // an unauthenticated LAN reader half the login is a leak worth closing.
+    doc["mqtt"]["username_set"] = !config.mqtt.username.empty();
+    doc["mqtt"]["password_set"] = !config.mqtt.password.empty();
+
+    JsonObject security = doc["security"].to<JsonObject>();
+    // The admin username is omitted for the same reason mqtt.username is, above: it is half of
+    // a credential pair, this endpoint is unauthenticated, and Basic has no brute-force
+    // protection. Serving it turned guessing the login into guessing only the password. Unlike
+    // the MQTT one it needs no *_set flag -- validate() requires it to be non-empty, so "is one
+    // set" is always yes and would say nothing.
+    security["password_set"]   = !config.security.adminPassword.empty();
+    security["read_only_mode"] = config.security.readOnlyMode;
 
     // PATCH response only: tells a non-UI client whether the change it just made is waiting
     // on a restart. Absent from GET (nothing was changed there).
