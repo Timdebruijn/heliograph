@@ -98,6 +98,38 @@ peripheral). No driver uses it today. It is recorded because battery BMS protoco
 commonly speak CAN, which makes this board a natural fit for a future battery-side
 source — a deliberate decision for later, not an accident waiting in a header file.
 
+## After a crash — the core dump
+
+A panic writes a full ELF core dump to the `coredump` partition (64 KB, present in both
+partition tables; `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` is set in the prebuilt IDF config). It
+survives the reboot.
+
+The bridge now tells you it is there without a cable. The boot log carries a `coredump:` warn
+line naming the faulting task and PC, `GET /api/v1/diagnostics` reports
+`coredump_present` / `coredump_task` / `coredump_pc`, Prometheus exports
+`heliograph_coredump_present`, and Modbus register 828 carries the same flag. That is enough to
+know a crash happened, which task died, and roughly where — usually enough to decide whether it
+is worth going further.
+
+To go further, pull the dump itself:
+
+```bash
+python -m esp_coredump --chip esp32s3 --port /dev/tty.usbmodem* info_corefile .pio/build/waveshare-rs485-can/firmware.elf
+```
+
+The ELF you pass **must be the image that was running when it crashed**. Keep the build
+artifacts from the release you flashed, or rebuild from the exact tag — a dump decoded against
+a different binary produces confident nonsense.
+
+Once you have dealt with it, clear the dump so the next one is distinguishable from this one:
+
+```bash
+curl -u admin:PASSWORD -X POST http://heliograph.local/api/v1/actions/clear-coredump
+```
+
+A new crash overwrites the old one on its own (`CONFIG_ESP_COREDUMP_FLASH_NO_OVERWRITE` is not
+set), so clearing is about answering "is this new?", not about making room.
+
 ## Step-debugging over the built-in USB-JTAG
 
 The S3 has a USB-Serial-JTAG peripheral on the chip. No external probe, no extra wiring, and

@@ -816,6 +816,21 @@ bool RestApi::begin() {
             }
         });
 
+    g_server->on("/api/v1/actions/clear-coredump", HTTP_POST,
+                 [this, authorised, rateLimited](AsyncWebServerRequest* request) {
+        if (!authorised(request) || rateLimited(request)) {
+            return;
+        }
+        context_.diagnostics->recordRestRequest();
+        if (context_.clearCoredump == nullptr || !context_.clearCoredump()) {
+            // 404, not 500: by far the likeliest reason is that there is nothing stored, which
+            // is the normal state and not an error the caller should retry.
+            sendError(request, {404, "no_coredump", "no crash dump is stored"});
+            return;
+        }
+        request->send(200, kJson, "{\"status\":\"cleared\"}");
+    });
+
     g_server->on("/api/v1/actions/reboot", HTTP_POST,
                  [this, authorised, rateLimited](AsyncWebServerRequest* request) {
         if (!authorised(request) || rateLimited(request)) {

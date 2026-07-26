@@ -142,6 +142,21 @@ static void test_psram_registers_carry_the_sentinel_without_psram() {
     TEST_ASSERT_EQUAL_UINT32(kInvalidU32, (static_cast<uint32_t>(v[0]) << 16) | v[1]);
 }
 
+static void test_coredump_register_flags_a_stored_dump() {
+    EversolarRig r;
+    r.bridge.coredumpPresent = true;
+    r.pollAndRender();
+    uint16_t v = 0;
+    TEST_ASSERT_TRUE(r.map.read(reg::kDiagCoredump, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(1, v);
+
+    EversolarRig clean;
+    clean.bridge.coredumpPresent = false;
+    clean.pollAndRender();
+    TEST_ASSERT_TRUE(clean.map.read(reg::kDiagCoredump, 1, &v));
+    TEST_ASSERT_EQUAL_UINT16(0, v);
+}
+
 // --- schema and framing --------------------------------------------------------------------
 
 static void test_schema_version_is_published() {
@@ -591,5 +606,6 @@ int main(int, char**) {
     RUN_TEST(test_firmware_version_registers_report_the_running_version);
     RUN_TEST(test_psram_registers_report_size_and_free);
     RUN_TEST(test_psram_registers_carry_the_sentinel_without_psram);
+    RUN_TEST(test_coredump_register_flags_a_stored_dump);
     return UNITY_END();
 }

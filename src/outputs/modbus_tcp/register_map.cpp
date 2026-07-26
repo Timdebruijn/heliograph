@@ -348,6 +348,7 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
         writeU32(reg::kDiagPsramSize, kInvalidU32);
         writeU32(reg::kDiagPsramFree, kInvalidU32);
     }
+    writeU16(reg::kDiagCoredump, bridge.coredumpPresent ? 1 : 0);
     // Read-only observation of the bridge relays; the sentinel distinguishes "no relay
     // hardware" from "relays, none energised". Control never goes through Modbus.
     if (bridge.relayCount > 0) {

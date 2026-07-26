@@ -325,6 +325,19 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
     }
     doc["reset_reason"]            = bridge.resetReason;
     doc["ota_image_state"]         = bridge.otaImageState;
+
+    // Absent, not zero, when no dump is stored: task "" at PC 0 is not a fact about anything,
+    // and `coredump_present` false already carries the whole message. The partition and the
+    // IDF support have existed since the OTA layout was designed; nothing read them until now.
+    doc["coredump_present"] = bridge.coredumpPresent;
+    if (bridge.coredumpPresent) {
+        doc["coredump_task"] = bridge.coredumpTask.empty() ? nullptr
+                                                           : JsonString(bridge.coredumpTask.c_str());
+        doc["coredump_pc"]   = bridge.coredumpPc;
+    } else {
+        doc["coredump_task"] = nullptr;
+        doc["coredump_pc"]   = nullptr;
+    }
     doc["wifi_connected"]          = bridge.wifiConnected;
     if (bridge.wifiConnected) {
         doc["wifi_rssi_dbm"] = bridge.wifiRssiDbm;

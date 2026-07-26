@@ -203,6 +203,14 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
                "Largest allocatable heap block (fragmentation signal)", "gauge");
     appendValue(out, "heliograph_max_alloc_heap_bytes",
                 static_cast<unsigned long>(bridge.maxAllocHeapBytes));
+    // Always emitted, unlike the gauges below it: 0 means "no crash dump stored", which is a
+    // fact rather than a missing sample, and it is the value an alert rule wants to watch for
+    // going to 1. The task name and PC are not metric material -- read those from
+    // /api/v1/diagnostics once this fires.
+    appendHelp(out, "heliograph_coredump_present",
+               "1 when a crash dump is waiting in flash", "gauge");
+    appendValue(out, "heliograph_coredump_present",
+                static_cast<unsigned long>(bridge.coredumpPresent ? 1 : 0));
     // The three gauges above are MALLOC_CAP_INTERNAL and exclude PSRAM entirely, so on an 8 MB
     // board they describe ~300 KB of the RAM that exists. Emitted only when there IS PSRAM:
     // a flat 0 on the Relay-6CH, which has none, would look like exhaustion to an alert rule

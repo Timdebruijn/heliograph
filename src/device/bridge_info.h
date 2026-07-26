@@ -66,6 +66,20 @@ struct BridgeInfo {
     /// confirmation, then "valid"). Makes the rollback window observable in diagnostics.
     std::string otaImageState = "unknown";
 
+    /// The crash dump waiting in the `coredump` partition, read once at boot.
+    ///
+    /// Same kind of fact as otaImageState above: a one-shot read of what the bootloader left
+    /// behind, carried here so the outputs never call an ESP-IDF function themselves. Reading
+    /// it verifies a checksum over the whole stored image, so it happens once in setup(), not
+    /// per request.
+    ///
+    /// `coredumpPresent` false is the normal state, and the state after an erase; the other
+    /// two are meaningless then and every output reports them absent rather than as task ""
+    /// at PC 0.
+    bool        coredumpPresent = false;
+    std::string coredumpTask;
+    uint32_t    coredumpPc      = 0;
+
     /// The board this firmware is running on. Reported to Home Assistant as the bridge
     /// device's model.
     /// Set by main from board::kName; the default only serves host tests, which have no
