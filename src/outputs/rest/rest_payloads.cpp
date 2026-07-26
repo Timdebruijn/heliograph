@@ -51,9 +51,44 @@ bool buildProvisionPayload(const std::string& hostname, std::string& out, size_t
     return finish(doc, out, maxBytes);
 }
 
+DeviceSummary summariseDevice(const DeviceState& state, const std::string& deviceId,
+                              uint64_t nowMs) {
+    DeviceSummary s;
+    s.id        = deviceId;
+    s.online    = state.inverterOnline;
+    s.dataValid = state.dataValid;
+    s.dataStale = state.dataStale;
+    if (state.lastSuccessfulPollMs != 0) {
+        s.everPolled = true;
+        // Guarded like MeasurementSet::updateStaleness does the same subtraction: unsigned, and
+        // a caller passing a clock older than the snapshot would otherwise get ~584 million
+        // years "ago". Not reachable from the one call site today; this is a public function.
+        s.lastPollSecondsAgo = nowMs > state.lastSuccessfulPollMs
+                                   ? static_cast<uint32_t>((nowMs - state.lastSuccessfulPollMs) / 1000)
+                                   : 0;
+    }
+    const auto take = [&state](const char* id, bool& has, double& value) {
+        const Measurement* m = state.measurements.find(id);
+        // valid AND fresh, the same rule writeMeasurement, the MQTT payloads and the Modbus
+        // register map all use. Two traps, both of which produce a number nobody questions:
+        // an unread channel holds 0.0, and markAllStale() leaves `valid` true when a device
+        // goes offline -- so without !stale a dead inverter's last daylight reading was summed
+        // into the Dashboard total forever. At 03:00 the bridge reported watts (review).
+        if (m != nullptr && m->supported && m->valid && !m->stale) {
+            has   = true;
+            value = m->value;
+        }
+    };
+    take(measurement_id::kAcPowerTotal, s.hasAcPower, s.acPowerW);
+    take(measurement_id::kEnergyToday, s.hasEnergyToday, s.energyTodayKwh);
+    take(measurement_id::kEnergyTotal, s.hasEnergyTotal, s.energyTotalKwh);
+    return s;
+}
+
 bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
                         const BridgeInfo& bridge, const DiagnosticsSnapshot& diagnostics,
-                        const DriverDescriptor* driver, uint64_t nowMs, std::string& out,
+                        const DriverDescriptor* driver, uint64_t nowMs,
+                        const std::vector<DeviceSummary>& fleet, std::string& out,
                         size_t maxBytes) {
     JsonDocument doc;
 
@@ -160,6 +195,69 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     } else {
         doc["error_code"] = nullptr;
     }
+
+    // Every polled device, and the totals over them. The `device` block above is the first
+    // device and stays that way for compatibility, but nothing that presents itself as the
+    // bridge's health may be built from it: on a bus of three, one dead inverter left the
+    // header indicator green and the Dashboard reporting a healthy day (#38).
+    JsonArray devices = doc["devices"].to<JsonArray>();
+    double    acTotal = 0.0, todayTotal = 0.0, lifetimeTotal = 0.0;
+    unsigned  acCount = 0, todayCount = 0, lifetimeCount = 0, answering = 0;
+    for (const auto& f : fleet) {
+        JsonObject o    = devices.add<JsonObject>();
+        o["id"]         = f.id;
+        o["online"]     = f.online;
+        o["data_valid"] = f.dataValid;
+        o["data_stale"] = f.dataStale;
+        if (f.everPolled) {
+            o["last_successful_poll_seconds_ago"] = f.lastPollSecondsAgo;
+        } else {
+            o["last_successful_poll_seconds_ago"] = nullptr;  // 0 would read as "just now"
+        }
+        // Absent channels stay null rather than 0: "this inverter reports no power" and
+        // "this inverter reports 0 W" are different answers and look identical as a number.
+        if (f.hasAcPower) {
+            o["ac_power_w"] = f.acPowerW;
+        } else {
+            o["ac_power_w"] = nullptr;
+        }
+        if (f.online && f.dataValid && !f.dataStale) {
+            ++answering;
+        }
+        if (f.hasAcPower) {
+            acTotal += f.acPowerW;
+            ++acCount;
+        }
+        if (f.hasEnergyToday) {
+            todayTotal += f.energyTodayKwh;
+            ++todayCount;
+        }
+        if (f.hasEnergyTotal) {
+            lifetimeTotal += f.energyTotalKwh;
+            ++lifetimeCount;
+        }
+    }
+    JsonObject t = doc["totals"].to<JsonObject>();
+    // "Answering" is the strict reading: started, online, holding data that is valid and not
+    // stale. A device that started and never returned a byte is not answering, and neither is
+    // one whose last reading has aged out.
+    t["devices_answering"] = answering;
+    t["devices_polled"]    = static_cast<unsigned>(fleet.size());
+    // A total over none is unknown, not zero. The count travels with it so a client can say
+    // "2 of 3 inverters" instead of implying the sum covers everything.
+    const auto total = [&t](const char* key, unsigned count, double sum) {
+        if (count != 0) {
+            t[key] = sum;
+        } else {
+            t[key] = nullptr;
+        }
+    };
+    total("ac_power_w", acCount, acTotal);
+    t["ac_power_devices"] = acCount;
+    total("energy_today_kwh", todayCount, todayTotal);
+    t["energy_today_devices"] = todayCount;
+    total("energy_total_kwh", lifetimeCount, lifetimeTotal);
+    t["energy_total_devices"] = lifetimeCount;
 
     doc["poll_success_total"] = diagnostics.pollSuccessTotal;
     doc["poll_failure_total"] = diagnostics.pollFailureTotal;

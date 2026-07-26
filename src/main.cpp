@@ -470,11 +470,20 @@ void serviceOnboard() {
         in.inverterExpected    = g_devicesConfigured > 0;
         in.mqttConnected       = g_mqtt && g_mqtt->connected();
         in.modbusListening      = g_modbus.running();
-        if (g_state) {
-            const auto s      = g_state->snapshot();
-            in.inverterOnline = s->inverterOnline;
-            in.dataValid      = s->dataValid;
-            in.dataStale      = s->dataStale;
+        // Worst-of across every polled device, not the first one. The LED is on the bridge, so
+        // it reports the bridge: with three inverters on one bus it showed device 1 and stayed
+        // green while the other two were dead -- the same defect as the web header (#38), on
+        // the indicator someone standing at the bus is actually looking at. Its three states
+        // are kept: red when any device is offline, amber when any is stale or invalid.
+        in.inverterOnline = !g_deviceIds.empty();
+        in.dataValid      = true;
+        in.dataStale      = false;
+        for (const auto& id : g_deviceIds) {
+            if (StateHandle h = g_devices.state(id)) {
+                in.inverterOnline = in.inverterOnline && h->inverterOnline;
+                in.dataValid      = in.dataValid && h->dataValid;
+                in.dataStale      = in.dataStale || h->dataStale;
+            }
         }
         driveStatusLed(status::decide(in));
     }

@@ -307,7 +307,7 @@ bool RestApi::begin() {
             std::string       body;
             if (!rest::buildStatusPayload(empty, "", context_.bridgeInfo(),
                                           context_.diagnostics->snapshot(), nullptr,
-                                          context_.clock(), body)) {
+                                          context_.clock(), {}, body)) {
                 sendError(request, {500, "payload_too_large", "status payload exceeded its bound"});
                 return;
             }
@@ -315,11 +315,29 @@ bool RestApi::begin() {
             return;
         }
         // The registered id: the key the per-device routes actually answer on.
-        const auto ids = context_.devices->devices();
+        const auto     ids = context_.devices->devices();
+        const uint64_t now = context_.clock();
+        // One snapshot per device, each taken at its own instant -- not one instant for the
+        // whole payload, which is not something this can promise. What it does guarantee is
+        // that the first device is snapshotted ONCE: `snapshot` is reused for its row, so
+        // `device` and `devices[0]` cannot contradict each other inside one response.
+        //
+        // The Dashboard and the header indicator are built from this and never from the first
+        // device alone (#38); walking the per-device routes instead would be 1+N requests a
+        // second on the board that is also driving the bus.
+        std::vector<rest::DeviceSummary> fleet;
+        fleet.reserve(ids.size());
+        for (const auto& id : ids) {
+            if (!ids.empty() && id == ids.front()) {
+                fleet.push_back(rest::summariseDevice(*snapshot, id, now));
+            } else if (StateHandle h = context_.devices->state(id)) {
+                fleet.push_back(rest::summariseDevice(*h, id, now));
+            }
+        }
         std::string body;
         if (!buildStatusPayload(*snapshot, ids.empty() ? std::string{} : ids.front(),
                                 context_.bridgeInfo(), context_.diagnostics->snapshot(),
-                                activeDescriptor(*snapshot), context_.clock(), body)) {
+                                activeDescriptor(*snapshot), now, fleet, body)) {
             sendError(request, {500, "payload_too_large", "status payload exceeded its bound"});
             return;
         }

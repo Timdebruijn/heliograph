@@ -69,7 +69,7 @@ dialog::backdrop{background:#000a}
 </nav>
 <main>
 <div id="banner" class="err hide"></div>
-<section id="dash"><div class="grid" id="tiles"></div></section>
+<section id="dash"><div class="grid" id="tiles"></div><div id="fleet"></div></section>
 <section id="dev" class="hide"><div id="devbox"></div></section>
 <section id="diag" class="hide"><table id="diagtbl"></table></section>
 <section id="logs" class="hide">
@@ -215,41 +215,116 @@ async function authFetch(url,opts={}){
 function tile(k,v,u,extra=''){return `<div class="card"><div class="k">${esc(k)}</div>
 <div class="v">${esc(v)}<span class="u"> ${esc(u)}</span></div>${extra}</div>`}
 
+/// Bridge-wide tiles: true whatever is on the bus, so they are the same in both layouts.
+function bridgeTiles(b){
+  return tile('Uptime',up(b.uptime_seconds),'')+
+    tile('WiFi',b.wifi_rssi_dbm??'—','dBm')+
+    tile('Modbus clients',b.modbus_clients??0,'')+
+    // Honest clock: before the first NTP sync there is no time to show. The extra
+    // null-guard matters: the API can answer time_synced:true with time:null when
+    // formatting failed server-side, and a throw here would kill the whole render loop
+    // and put up the "Cannot reach the bridge" banner for a healthy bridge.
+    tile('Clock',b.time_synced?(b.time?esc(b.time.split(' ')[1]??b.time):'—'):'not synced','');
+    // No firmware tile: the version already sits in the header, permanently.
+}
+
+/// The single-inverter dashboard, unchanged. `g` reads the first device's measurements.
+function singleTiles(s,d,g){
+  return tile('AC Power',fmt(g('ac.power.total'),0),'W')+
+    tile('Today',fmt(g('energy.today'),2),'kWh')+
+    tile('Total',fmt(g('energy.total'),1),'kWh')+
+    tile('Temperature',fmt(g('inverter.temperature')),'°C')+
+    tile('AC Voltage',fmt(g('ac.phase_l1.voltage')),'V')+
+    tile('Frequency',fmt(g('ac.frequency'),2),'Hz')+
+    tile('Status',esc(s.status_text??'—'),'')+
+    // null means this protocol has no error code field at all -- not "no fault".
+    tile('Error code',s.error_code===null?'not reported':esc(s.error_code),'')+
+    tile('Last poll',d.last_successful_poll_seconds_ago??'—','s ago');
+}
+
+/// Totals across every polled inverter, each carrying how many it actually covers.
+///
+/// The count is not decoration. A sum over two of three inverters looks exactly like a sum
+/// over three that had a bad day, and the difference is the whole diagnosis. Temperature,
+/// voltage, frequency, status and error code have no bridge-wide meaning at all, so they are
+/// not averaged into something plausible -- they live per device, on the strip below and on
+/// the Device tab.
+function fleetTiles(fleet,tot,expected){
+  // Against the configured count, so a device that never started is counted as not reporting
+  // rather than quietly left out of the question. esc() on both: this is the only place in the
+  // new code that interpolates a number straight into innerHTML, and the file's rule is that
+  // everything is escaped whatever its type is claimed to be.
+  const sub=(n)=>{
+    const of=expected??fleet.length;
+    return n===of?`<div class="k" style="margin-top:6px;text-transform:none">${esc(of)} inverters</div>`
+      :`<div class="k" style="margin-top:6px;text-transform:none;color:var(--bad)">${esc(n)} of ${esc(of)} reporting</div>`;
+  };
+  const t=(label,value,unit,decimals,count)=>tile(label,fmt(value,decimals),unit,sub(count??0));
+  return t('AC Power',tot.ac_power_w,'W',0,tot.ac_power_devices)+
+    t('Today',tot.energy_today_kwh,'kWh',2,tot.energy_today_devices)+
+    t('Total',tot.energy_total_kwh,'kWh',1,tot.energy_total_devices);
+}
+
+/// One line per inverter under the totals, so a dead one cannot hide inside a sum.
+///
+/// Deliberately not a second copy of the Device tab: id, whether it is answering, what it is
+/// producing, and how long ago it last replied. Anything more belongs where there is room.
+function fleetStrip(fleet){
+  const rows=fleet.map(f=>{
+    const answering=f.online&&f.data_valid&&!f.data_stale;
+    const ago=f.last_successful_poll_seconds_ago;
+    // Never answered is its own state: that is a bus fault, not a sleeping inverter, and the
+    // two are indistinguishable in `online:false` alone.
+    const when=(ago===null||ago===undefined)?'<span class="tag" style="background:var(--bad)">never answered</span>'
+      :`<span class="tag">${f.data_stale?'stale — ':''}replied ${esc(ago)} s ago</span>`;
+    const w=(f.ac_power_w===null||f.ac_power_w===undefined)?'—':fmt(f.ac_power_w,0)+' W';
+    return `<tr><td><span class="dot ${answering?'ok':'bad'}"></span>${esc(f.id)}</td>
+      <td class="n">${esc(w)}</td><td class="n">${when}</td></tr>`;
+  }).join('');
+  return `<div class="card" style="margin-top:14px"><table>
+    <tr><th>Inverter</th><th style="text-align:right">AC power</th>
+    <th style="text-align:right">Last reply</th></tr>${rows}</table></div>`;
+}
+
 function render(s){
   const d=s.device,b=s.bridge,m=s.measurements||{};
   const dot=x=>x?'<span class="dot ok"></span>':'<span class="dot bad"></span>';
+  const fleet=s.devices||[], tot=s.totals||{};
+  const polled=tot.devices_polled??fleet.length, answering=tot.devices_answering??0;
+  // The CONFIGURED count is the denominator, not the started one. Three identical inverters
+  // left on the default address all resolve to the same id, so two of them are skipped at boot
+  // and `devices_polled` is 1 -- which, keyed off the started count, put the single-device
+  // layout and a green "Inverter" back on screen in the most likely bring-up mistake there is
+  // (review, 2026-07-26). A device that did not start is missing, not absent from the question.
+  const expected=b.devices_configured??polled;
+  // The inverter indicator describes EVERY device, not the first one. On a bus of three it was
+  // driven by device 1's `online`, so a dead second inverter left the one indicator anybody
+  // glances at green (#38). Green means all of them are answering; anything less is red,
+  // deliberately -- an amber "some" is a state you learn to ignore.
+  //
+  // With ONE device this is byte for byte the header it has always been, `online` and its two
+  // tags included. The strict rule would have turned it red during the stale window where it
+  // used to stay green, and that is a change to every existing single-inverter bridge that
+  // nobody asked for.
+  const multi=expected>1||polled>1;
   $('#hdr').innerHTML=dot(b.wifi_connected)+'WiFi '+
     dot(b.mqtt_connected)+'MQTT '+
     dot(b.modbus_listening)+'Modbus '+
-    dot(d.online)+'Inverter'+
-    (d.data_stale?' <span class="tag">stale</span>':'')+
-    (d.data_valid?'':' <span class="tag">no data</span>');
+    (multi?dot(answering===expected)+`Inverters ${esc(answering)}/${esc(expected)}`
+          :dot(d.online)+'Inverter'+
+           (d.data_stale?' <span class="tag">stale</span>':'')+
+           (d.data_valid?'':' <span class="tag">no data</span>'));
   $('#ver').textContent='v'+b.firmware_version;
   // Boards without relays never send the field; the settings card keys off this.
   window.g_relayCount=(b.relays||[]).length;
   window.g_maxDevices=b.max_devices||window.g_maxDevices;
   const g=id=>m[id]?m[id].value:null;
   if(tab==='dash'){
-    $('#tiles').innerHTML=
-      tile('AC Power',fmt(g('ac.power.total'),0),'W')+
-      tile('Today',fmt(g('energy.today'),2),'kWh')+
-      tile('Total',fmt(g('energy.total'),1),'kWh')+
-      tile('Temperature',fmt(g('inverter.temperature')),'°C')+
-      tile('AC Voltage',fmt(g('ac.phase_l1.voltage')),'V')+
-      tile('Frequency',fmt(g('ac.frequency'),2),'Hz')+
-      tile('Status',esc(s.status_text??'—'),'')+
-      // null means this protocol has no error code field at all -- not "no fault".
-      tile('Error code',s.error_code===null?'not reported':esc(s.error_code),'')+
-      tile('Last poll',d.last_successful_poll_seconds_ago??'—','s ago')+
-      tile('Uptime',up(b.uptime_seconds),'')+
-      tile('WiFi',b.wifi_rssi_dbm??'—','dBm')+
-      tile('Modbus clients',b.modbus_clients??0,'')+
-      // Honest clock: before the first NTP sync there is no time to show. The extra
-      // null-guard matters: the API can answer time_synced:true with time:null when
-      // formatting failed server-side, and a throw here would kill the whole render loop
-      // and put up the "Cannot reach the bridge" banner for a healthy bridge.
-      tile('Clock',b.time_synced?(b.time?esc(b.time.split(' ')[1]??b.time):'—'):'not synced','');
-      // No firmware tile: the version already sits in the header, permanently.
+    // One inverter: exactly the dashboard this has always been. Several: the tiles that can
+    // honestly be added become bridge totals, the ones that only mean something per device
+    // move to the strip below, and nothing on this page presents one inverter as the bridge.
+    $('#tiles').innerHTML=(multi?fleetTiles(fleet,tot,expected):singleTiles(s,d,g))+bridgeTiles(b);
+    $('#fleet').innerHTML=multi?fleetStrip(fleet):'';
   }
   if(tab==='dev'){
     // Every configured device, not just the first. The bridge polls up to eight; this tab
@@ -371,7 +446,12 @@ async function renderDevices(b){
       const ident={...(dev.identity||{}),online:dev.online,data_valid:dev.data_valid,
                    data_stale:dev.data_stale,support_level:(dev.driver||{}).support_level};
       const ago=dev.last_successful_poll_seconds_ago;
-      if(dev.online&&dev.data_valid)answering++;
+      // The same three conditions the status endpoint counts (totals.devices_answering) and the
+      // header indicator reads. Without the staleness term this tab said "3 of 3 answering"
+      // while the header said 2 of 3 -- for the seventy seconds between a device going stale
+      // and going offline, which is exactly when someone clicks through to this tab to find out
+      // what is wrong (review, 2026-07-26).
+      if(dev.online&&dev.data_valid&&!dev.data_stale)answering++;
       // The line that answers "is this one alive", above the table rather than thirteen rows
       // into it. Never answered at all is its own state: that is a bus fault, not a sleeping
       // inverter, and the two look identical in `online: false` alone.

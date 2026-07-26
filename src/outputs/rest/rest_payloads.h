@@ -37,13 +37,52 @@ bool buildErrorPayload(const ApiError& error, const std::string& requestId, std:
 bool buildProvisionPayload(const std::string& hostname, std::string& out,
                            size_t maxBytes = kMaxResponseBytes);
 
+/// One polled device, reduced to what an always-visible summary needs.
+///
+/// Exists so the Dashboard and the header indicator can describe every inverter from the one
+/// request they already make. Walking /api/v1/devices/<id> per device would be 1+N requests per
+/// second on the board that is also driving the RS485 bus -- the Device tab does that, and has
+/// to rate-limit itself to once every five seconds because of it.
+///
+/// Every channel is optional and says so separately from its value: a device that does not
+/// report energy must not contribute a zero to a total.
+struct DeviceSummary {
+    std::string id;
+    bool        online    = false;
+    bool        dataValid = false;
+    bool        dataStale = false;
+    bool        everPolled          = false;
+    uint32_t    lastPollSecondsAgo  = 0;
+    bool        hasAcPower       = false;
+    double      acPowerW         = 0.0;
+    bool        hasEnergyToday   = false;
+    double      energyTodayKwh   = 0.0;
+    bool        hasEnergyTotal   = false;
+    double      energyTotalKwh   = 0.0;
+};
+
+/// Reduces one device's state to the row above.
+///
+/// A reading counts only while it is valid AND fresh -- the same rule every other output uses.
+/// A stale one is dropped rather than carried: `markAllStale()` keeps `valid` true when a
+/// device goes offline, so carrying it means a dead inverter's last daylight value stays in the
+/// household total until the next reboot. The row still reports how long ago the device
+/// answered, which is what the reading has been replaced by.
+DeviceSummary summariseDevice(const DeviceState& state, const std::string& deviceId,
+                              uint64_t nowMs);
+
 /// `deviceId` is the id the device is REGISTERED under -- the key in /api/v1/devices and the
 /// per-device routes. Not identity.deviceId(): that one changes when a late-arriving serial
 /// number completes the identity (the store key was minted at begin(), before registration on
 /// the bus), and reporting it sent clients to a path that 404s. Seen live 2026-07-19.
+///
+/// `fleet` is every polled device, first one included, in registration order. It drives the
+/// Dashboard totals and the header indicator; `device` stays the first device so that every
+/// existing client keeps working unchanged.
 bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
                         const BridgeInfo& bridge, const DiagnosticsSnapshot& diagnostics,
-                        const DriverDescriptor* driver, uint64_t nowMs, std::string& out,
+                        const DriverDescriptor* driver, uint64_t nowMs,
+                        const std::vector<DeviceSummary>& fleet, std::string& out,
                         size_t maxBytes = kMaxResponseBytes);
 
 bool buildDevicesPayload(const std::vector<std::string>& deviceIds, std::string& out,

@@ -416,8 +416,167 @@ static void test_the_status_payload_publishes_the_device_cap() {
     std::string json;
     TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", makeBridge(),
                                               r.diagnostics.snapshot(),
-                                              &eversolar::descriptor(), g_now, json));
+                                              &eversolar::descriptor(), g_now, {}, json));
     TEST_ASSERT_EQUAL_UINT32(kMaxDevices, parse(json)["bridge"]["max_devices"].as<uint32_t>());
+}
+
+// --- the fleet summary the Dashboard and the header indicator are built from ---------------
+//
+// Everything below exists because the always-visible parts of the UI described the FIRST
+// device as if it were the bridge: the header dot was device 1's `online`, and every tile came
+// from device 1's measurements. On a bus of three, one dead inverter left a green indicator and
+// a healthy-looking dashboard (#38).
+
+/// A device whose readings are whatever the test says, so a fleet can be assembled without
+/// three simulated inverters. Only the channels the summary reads are declared.
+///
+/// `stale` goes through markAllStale(), which is what the firmware actually does: it leaves
+/// every measurement VALID and only sets the stale flag. Setting `dataStale` alone produced a
+/// combination the state machine cannot reach -- fresh measurements under a stale device -- and
+/// that is why the first version of these tests stayed green while a dead inverter's last
+/// daylight reading was being summed into the Dashboard total (review, 2026-07-26).
+static DeviceState fakeDevice(bool online, bool valid, bool stale, double watts,
+                              double today, uint64_t lastPollMs) {
+    DeviceState s;
+    s.inverterOnline       = online;
+    s.dataValid            = valid;
+    s.dataStale            = stale;
+    s.lastSuccessfulPollMs = lastPollMs;
+    s.measurements.declare(measurement_id::kAcPowerTotal, MeasurementType::Power, Unit::Watt,
+                           "AC Power");
+    s.measurements.declare(measurement_id::kEnergyToday, MeasurementType::Energy,
+                           Unit::KilowattHour, "Energy Today");
+    if (valid) {
+        s.measurements.set(measurement_id::kAcPowerTotal, watts, lastPollMs);
+        s.measurements.set(measurement_id::kEnergyToday, today, lastPollMs);
+    }
+    if (stale) {
+        s.measurements.markAllStale();
+    }
+    return s;
+}
+
+static JsonDocument statusOf(const std::vector<rest::DeviceSummary>& fleet) {
+    Rig         r;
+    const auto  state = r.poll();
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", makeBridge(),
+                                              r.diagnostics.snapshot(),
+                                              &eversolar::descriptor(), g_now, fleet, json));
+    return parse(json);
+}
+
+static void test_the_status_payload_totals_every_polled_device() {
+    const auto a = rest::summariseDevice(fakeDevice(true, true, false, 1200.0, 5.0, g_now - 2000),
+                                         "growatt_modbus-1", g_now);
+    const auto b = rest::summariseDevice(fakeDevice(true, true, false, 800.0, 3.5, g_now - 1000),
+                                         "growatt_modbus-2", g_now);
+    const auto doc = statusOf({a, b});
+
+    TEST_ASSERT_EQUAL_UINT32(2, doc["devices"].size());
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", doc["devices"][1]["id"]);
+    TEST_ASSERT_EQUAL_DOUBLE(2000.0, doc["totals"]["ac_power_w"].as<double>());
+    TEST_ASSERT_EQUAL_DOUBLE(8.5, doc["totals"]["energy_today_kwh"].as<double>());
+    TEST_ASSERT_EQUAL_UINT32(2, doc["totals"]["devices_answering"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(2, doc["totals"]["devices_polled"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(2, doc["totals"]["ac_power_devices"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(2, doc["devices"][0]["last_successful_poll_seconds_ago"].as<uint32_t>());
+}
+
+// The reason the count travels with every total: a sum over two of three inverters is
+// indistinguishable from a sum over three that had a bad afternoon.
+static void test_a_device_that_reports_nothing_does_not_count_towards_a_total() {
+    const auto live = rest::summariseDevice(
+        fakeDevice(true, true, false, 1200.0, 5.0, g_now - 2000), "growatt_modbus-1", g_now);
+    // Started, never returned a byte: every channel declared, none valid.
+    const auto dead = rest::summariseDevice(fakeDevice(false, false, false, 0.0, 0.0, 0),
+                                            "growatt_modbus-2", g_now);
+    const auto doc = statusOf({live, dead});
+
+    // 1200, not 1200 + a fabricated 0.
+    TEST_ASSERT_EQUAL_DOUBLE(1200.0, doc["totals"]["ac_power_w"].as<double>());
+    TEST_ASSERT_EQUAL_UINT32(1, doc["totals"]["ac_power_devices"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(2, doc["totals"]["devices_polled"].as<uint32_t>());
+    // The header dot keys off this: one of two answering must never read as healthy.
+    TEST_ASSERT_EQUAL_UINT32(1, doc["totals"]["devices_answering"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["devices"][1]["ac_power_w"].isNull());
+    TEST_ASSERT_TRUE(doc["devices"][1]["last_successful_poll_seconds_ago"].isNull());
+}
+
+// A stale reading leaves the total, and the row says when the device last answered instead.
+//
+// This is the state every inverter is in all night, and it is the one that has to be right:
+// markAllStale() keeps `valid` true, so a summary that only checked validity kept summing
+// yesterday's watts. The bridge reported production at 03:00 and labelled it "3 inverters"
+// in the same neutral grey as a healthy afternoon.
+static void test_a_stale_reading_leaves_the_total_and_the_device_is_not_answering() {
+    const auto stale = rest::summariseDevice(
+        fakeDevice(true, true, true, 900.0, 4.0, g_now - 60000), "growatt_modbus-1", g_now);
+    const auto doc = statusOf({stale});
+
+    TEST_ASSERT_TRUE(doc["totals"]["ac_power_w"].isNull());
+    TEST_ASSERT_TRUE(doc["totals"]["energy_today_kwh"].isNull());
+    // Zero of one reporting, which is what turns the tile's sub-label red.
+    TEST_ASSERT_EQUAL_UINT32(0, doc["totals"]["ac_power_devices"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["devices"][0]["ac_power_w"].isNull());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["totals"]["devices_answering"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["devices"][0]["data_stale"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT32(60, doc["devices"][0]["last_successful_poll_seconds_ago"].as<uint32_t>());
+}
+
+// The same thing again, but reached the way the firmware reaches it: a real poll followed by
+// enough failures to take the device offline. No fixture can lie about the state machine here,
+// and it is the state machine -- markAllStale() leaving `valid` set -- that made the earlier
+// version of this summary report watts at three in the morning.
+static void test_the_night_state_reports_no_production() {
+    Rig             r;
+    const auto      polled = r.poll();
+    const StalenessPolicy policy;
+    DeviceState     s = polled;
+    TEST_ASSERT_TRUE(s.measurements.isValid(measurement_id::kAcPowerTotal));
+
+    for (uint32_t i = 0; i <= policy.failuresBeforeOffline; ++i) {
+        s.recordPollFailure(g_now + (i + 1) * 10000, policy);
+    }
+    TEST_ASSERT_FALSE(s.inverterOnline);
+    // The trap in one assertion: still valid, and stale.
+    const Measurement* m = s.measurements.find(measurement_id::kAcPowerTotal);
+    TEST_ASSERT_TRUE(m != nullptr && m->valid && m->stale);
+
+    const auto doc = statusOf({rest::summariseDevice(s, "growatt_modbus-1", g_now + 120000)});
+    TEST_ASSERT_TRUE(doc["totals"]["ac_power_w"].isNull());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["totals"]["ac_power_devices"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["totals"]["devices_answering"].as<uint32_t>());
+}
+
+// A bridge with nothing polling still answers /status -- it is the only payload that says how
+// many devices were configured and why each is missing. A total over no devices is unknown.
+static void test_totals_over_no_devices_are_null_not_zero() {
+    const auto doc = statusOf({});
+    TEST_ASSERT_EQUAL_UINT32(0, doc["devices"].size());
+    TEST_ASSERT_TRUE(doc["totals"]["ac_power_w"].isNull());
+    TEST_ASSERT_TRUE(doc["totals"]["energy_today_kwh"].isNull());
+    TEST_ASSERT_TRUE(doc["totals"]["energy_total_kwh"].isNull());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["totals"]["devices_polled"].as<uint32_t>());
+}
+
+// The bound is 8 KB and a full bus is eight devices. The fleet rows are new weight in the one
+// payload the page fetches every second; if they push it over, the whole UI goes dark.
+static void test_a_full_bus_of_summaries_still_fits() {
+    std::vector<rest::DeviceSummary> fleet;
+    for (size_t i = 0; i < kMaxDevices; ++i) {
+        fleet.push_back(rest::summariseDevice(
+            fakeDevice(true, true, false, 1234.5, 6.78, g_now - 1000),
+            "growatt_modbus-" + std::to_string(i + 1), g_now));
+    }
+    Rig         r;
+    const auto  state = r.poll();
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "growatt_modbus-1", makeBridge(),
+                                              r.diagnostics.snapshot(),
+                                              &eversolar::descriptor(), g_now, fleet, json));
+    TEST_ASSERT_TRUE(json.size() < rest::kMaxResponseBytes);
+    TEST_ASSERT_EQUAL_UINT32(kMaxDevices, parse(json)["devices"].size());
 }
 
 // A configured device that is not polling is the failure every mistake on the settings page
@@ -435,7 +594,7 @@ static void test_the_status_payload_reports_devices_that_did_not_start() {
     std::string json;
     TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", bridge,
                                               r.diagnostics.snapshot(),
-                                              &eversolar::descriptor(), g_now, json));
+                                              &eversolar::descriptor(), g_now, {}, json));
     auto doc = parse(json);
     TEST_ASSERT_EQUAL_UINT32(3, doc["bridge"]["devices_configured"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(2, doc["bridge"]["devices_started"].as<uint32_t>());
@@ -455,7 +614,7 @@ static void test_the_problem_list_is_always_present() {
     std::string json;
     TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", makeBridge(),
                                               r.diagnostics.snapshot(),
-                                              &eversolar::descriptor(), g_now, json));
+                                              &eversolar::descriptor(), g_now, {}, json));
     auto doc = parse(json);
     TEST_ASSERT_FALSE(doc["bridge"]["device_problems"].isNull());
     TEST_ASSERT_EQUAL_UINT32(0, doc["bridge"]["device_problems"].size());
@@ -1051,7 +1210,7 @@ static void test_status_payload_reports_clock_sync_state() {
     std::string json;
     TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", unsynced,
                                               r.diagnostics.snapshot(),
-                                              &eversolar::descriptor(), g_now, json));
+                                              &eversolar::descriptor(), g_now, {}, json));
     auto doc = parse(json);
     TEST_ASSERT_FALSE(doc["bridge"]["time_synced"].as<bool>());
     TEST_ASSERT_TRUE(doc["bridge"]["time"].isNull());
@@ -1069,7 +1228,7 @@ static void test_status_payload_reports_clock_sync_state() {
     synced.ntpFromDhcp      = true;
     TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", synced,
                                               r.diagnostics.snapshot(),
-                                              &eversolar::descriptor(), g_now, json));
+                                              &eversolar::descriptor(), g_now, {}, json));
     doc = parse(json);
     TEST_ASSERT_TRUE(doc["bridge"]["time_synced"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("2024-01-01 00:00:00", doc["bridge"]["time"]);
@@ -1086,7 +1245,7 @@ static void test_status_payload() {
     std::string json;
     TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", makeBridge(),
                                               r.diagnostics.snapshot(),
-                                              &eversolar::descriptor(), g_now, json));
+                                              &eversolar::descriptor(), g_now, {}, json));
     auto doc = parse(json);
 
     TEST_ASSERT_EQUAL_STRING("heliograph-a1b2c3", doc["bridge"]["id"]);
@@ -1108,7 +1267,7 @@ static void test_status_reports_unknown_before_the_first_poll() {
     DeviceState state;
     std::string json;
     TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", makeBridge(),
-                                              DiagnosticsSnapshot{}, nullptr, g_now, json));
+                                              DiagnosticsSnapshot{}, nullptr, g_now, {}, json));
     TEST_ASSERT_TRUE(parse(json)["device"]["last_successful_poll_seconds_ago"].isNull());
 }
 
@@ -1123,7 +1282,7 @@ static void test_stale_status_is_null() {
     }
     std::string json;
     rest::buildStatusPayload(*r.store.snapshot(), "eversolar_legacy", makeBridge(),
-                             r.diagnostics.snapshot(), &eversolar::descriptor(), g_now, json);
+                             r.diagnostics.snapshot(), &eversolar::descriptor(), g_now, {}, json);
     auto doc = parse(json);
 
     TEST_ASSERT_TRUE(doc["measurements"]["ac.power.total"]["value"].isNull());
@@ -1254,7 +1413,7 @@ static void test_oversized_response_is_refused() {
     const auto state = r.poll();
     std::string json = "untouched";
     TEST_ASSERT_FALSE(rest::buildStatusPayload(state, "eversolar_legacy", makeBridge(),
-                                               r.diagnostics.snapshot(), nullptr, g_now, json, 50));
+                                               r.diagnostics.snapshot(), nullptr, g_now, {}, json, 50));
     TEST_ASSERT_EQUAL_STRING("untouched", json.c_str());
 }
 
@@ -1485,6 +1644,12 @@ int main(int, char**) {
     RUN_TEST(test_re_adding_an_id_returns_the_same_store_rather_than_failing);
     RUN_TEST(test_the_device_manager_refuses_past_its_cap);
     RUN_TEST(test_the_status_payload_publishes_the_device_cap);
+    RUN_TEST(test_the_status_payload_totals_every_polled_device);
+    RUN_TEST(test_a_device_that_reports_nothing_does_not_count_towards_a_total);
+    RUN_TEST(test_a_stale_reading_leaves_the_total_and_the_device_is_not_answering);
+    RUN_TEST(test_the_night_state_reports_no_production);
+    RUN_TEST(test_totals_over_no_devices_are_null_not_zero);
+    RUN_TEST(test_a_full_bus_of_summaries_still_fits);
     RUN_TEST(test_the_status_payload_reports_devices_that_did_not_start);
     RUN_TEST(test_the_problem_list_is_always_present);
     RUN_TEST(test_a_device_payload_says_when_it_last_answered);

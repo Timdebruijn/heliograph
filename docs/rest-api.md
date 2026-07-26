@@ -91,9 +91,48 @@ once a driver has write capabilities.
   },
   "measurements": {
     "ac.power.total": { "value": 1842.0, "unit": "W", "valid": true, "stale": false }
+  },
+  "devices": [
+    { "id": "growatt_modbus-1", "online": true, "data_valid": true, "data_stale": false,
+      "last_successful_poll_seconds_ago": 3, "ac_power_w": 1240.0 },
+    { "id": "growatt_modbus-2", "online": false, "data_valid": false, "data_stale": false,
+      "last_successful_poll_seconds_ago": null, "ac_power_w": null }
+  ],
+  "totals": {
+    "devices_polled": 2, "devices_answering": 1,
+    "ac_power_w": 1240.0, "ac_power_devices": 1,
+    "energy_today_kwh": 5.25, "energy_today_devices": 1,
+    "energy_total_kwh": 24680.0, "energy_total_devices": 1
   }
 }
 ```
+
+`device` and `measurements` describe the **first** device and always will — that is what existing
+clients read; `devices[0]` is built from the same snapshot, so the two cannot contradict each
+other within one response. `devices` and `totals` cover every **started** device, and are what
+anything presenting itself as the bridge's health must use. Compare them against
+`devices_configured`, not against each other: a device that failed to start has no row at all,
+and the built-in web UI counts it as not reporting rather than leaving it out of the question.
+
+Four rules, all of which exist because the alternative reads as a fact:
+
+- **A reading counts only while it is valid and fresh.** When a device goes offline the firmware
+  marks its measurements stale but keeps them *valid*, so a summary that checked validity alone
+  kept a dead inverter's last daylight value in the household total until the next reboot. Both
+  `devices[].ac_power_w` and the sums go `null` instead; `last_successful_poll_seconds_ago` is
+  what the reading has been replaced by.
+- **`devices_answering`** counts devices that are online, hold valid data and are not stale.
+  Started is not answering (see below), and neither is a device whose reading has aged out.
+- **A sum is `null` when no device reported the channel**, never `0`.
+- **Every sum carries its own count** (`ac_power_devices` and friends). A total over two of three
+  inverters is indistinguishable from a total over three that had a bad afternoon; the count is
+  the difference. A device that reports no value at all does not contribute a zero to the sum.
+
+Per-device rows use `null` for an absent reading for the same reason: "reports no power" and
+"reports 0 W" are different answers.
+
+Overnight, therefore, every sum is `null` with a count of `0` — the bridge reports that it does
+not know, not that the sun produced 0 W and not yesterday's last reading.
 
 ## Error format
 
