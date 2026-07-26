@@ -901,6 +901,20 @@ void setup() {
     const auto loaded = g_store.load(g_config);
     // Apply the stored level before anything else logs, or the first lines ignore it.
     log::setLevel(g_config.logLevel);
+
+    // TZ before the FIRST log:: call, not merely before the RTC restore. formatLogTimestamp
+    // renders through localtime_r, so a stamped line written while TZ is unset comes out in
+    // UTC with nothing saying so. That is not hypothetical: a warm reset (OTA reboot, the
+    // reboot action) keeps the system clock across the restart, so the clock is already valid
+    // here and the config line below shipped an hour or two in the past on every OTA -- the
+    // exact boot whose log gets read. Seen on 0.13.0, 2026-07-26. A cold start hid it: the
+    // clock is not valid yet at this point, so the line carries an uptime stamp instead.
+    //
+    // This is as early as it can go. The zone comes out of the stored configuration, so the
+    // load above has to have happened -- which is fine, because nothing on that path logs.
+    setenv("TZ", g_config.ntp.timezone.c_str(), 1);
+    tzset();
+
     log::info("config: %s (log level %s)", loadResultName(loaded), logLevelName(g_config.logLevel));
     if (loaded == LoadResult::Corrupt || loaded == LoadResult::FutureVersion) {
         // Defaults, so the device lands in the setup portal. Better than running on values we
@@ -911,9 +925,7 @@ void setup() {
     // RTC restore, before anything else that logs at length: with a battery-backed
     // PCF85063 (board::kHasRtc) the system clock is valid from here on, so every log line
     // below carries a wall-clock timestamp even when the network never comes up -- which
-    // is exactly the boot you end up debugging. TZ first, so the timestamps render local.
-    setenv("TZ", g_config.ntp.timezone.c_str(), 1);
-    tzset();
+    // is exactly the boot you end up debugging.
     if (rtc::begin()) {
         time_t stored = 0;
         if (rtc::readUtc(stored)) {
