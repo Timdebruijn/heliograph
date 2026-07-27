@@ -342,6 +342,27 @@ function fleetTiles(fleet,tot,expected){
 /// Deliberately not a second copy of the Device tab: id, whether it is answering, what it is
 /// producing, and how long ago it last replied. Anything more belongs where there is room.
 function fleetStrip(fleet){
+  // Only columns some inverter can actually fill. A driver that does not report temperature
+  // makes a whole column of em dashes, which reads as "broken" rather than "not applicable" --
+  // and a bus of identical inverters means it is all of them or none. Decided per render from
+  // the payload, so adding a device with more channels widens the table by itself.
+  // Battery power says the direction in words rather than as a sign. The payload follows the
+  // project's convention (positive charging, negative discharging), but a reader should not
+  // have to know it to answer "is it charging?" -- and a bare -800 W invites the wrong guess.
+  // The word is derived from the number as DISPLAYED, not from the raw value: a trickle of
+  // 0.4 W rounds to 0 at this precision, and "charging 0 W" is a cell that argues with itself.
+  const batt=v=>{
+    const w=fmt(Math.abs(v),0);
+    if(Number(w)===0) return 'idle';
+    return (v>0?'charging ':'discharging ')+w+' W';
+  };
+  const all=[{k:'ac_power_w',t:'AC power',d:0,u:'W'},
+             {k:'energy_today_kwh',t:'Today',d:2,u:'kWh'},
+             {k:'ac_voltage_v',t:'AC voltage',d:1,u:'V'},
+             {k:'temperature_c',t:'Temp',d:1,u:'°C'},
+             {k:'battery_soc_pct',t:'SOC',d:0,u:'%'},
+             {k:'battery_power_w',t:'Battery',d:0,u:'W',fn:batt}];
+  const cols=all.filter(c=>fleet.some(f=>f[c.k]!==null&&f[c.k]!==undefined));
   const rows=fleet.map(f=>{
     const answering=f.online&&f.data_valid&&!f.data_stale;
     const ago=f.last_successful_poll_seconds_ago;
@@ -349,12 +370,18 @@ function fleetStrip(fleet){
     // two are indistinguishable in `online:false` alone.
     const when=(ago===null||ago===undefined)?'<span class="tag" style="background:var(--bad)">never answered</span>'
       :`<span class="tag">${f.data_stale?'stale — ':''}replied ${esc(ago)} s ago</span>`;
-    const w=(f.ac_power_w===null||f.ac_power_w===undefined)?'—':fmt(f.ac_power_w,0)+' W';
+    // Em dash, not 0 and not blank: this driver does not report the channel, which is a
+    // different statement from "reports zero" and must not be readable as a measurement.
+    const num=(v,c)=>(v===null||v===undefined)?'—':(c.fn?c.fn(v):fmt(v,c.d)+' '+c.u);
     return `<tr><td><span class="dot ${answering?'ok':'bad'}"></span>${esc(f.id)}</td>
-      <td class="n">${esc(w)}</td><td class="n">${when}</td></tr>`;
+      ${cols.map(c=>`<td class="n">${esc(num(f[c.k],c))}</td>`).join('')}
+      <td class="n">${when}</td></tr>`;
   }).join('');
-  return `<div class="card" style="margin-top:14px"><table>
-    <tr><th>Inverter</th><th style="text-align:right">AC power</th>
+  // Scrolls rather than squeezes: even four columns do not fit a phone, and hiding them below
+  // a breakpoint means the reading you went looking for is the one that is not there.
+  const width=260+cols.length*100;
+  return `<div class="card" style="margin-top:14px;overflow-x:auto"><table style="min-width:${width}px">
+    <tr><th>Inverter</th>${cols.map(c=>`<th style="text-align:right">${c.t}</th>`).join('')}
     <th style="text-align:right">Last reply</th></tr>${rows}</table></div>`;
 }
 

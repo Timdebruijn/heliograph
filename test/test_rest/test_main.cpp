@@ -483,9 +483,24 @@ static DeviceState fakeDevice(bool online, bool valid, bool stale, double watts,
                            "AC Power");
     s.measurements.declare(measurement_id::kEnergyToday, MeasurementType::Energy,
                            Unit::KilowattHour, "Energy Today");
+    // Every other channel the summary reads, so the size test below weighs the EXPENSIVE case.
+    // With these absent they serialise as null -- four characters where a full-precision double
+    // is twenty -- and "a full bus still fits" would be measuring the cheapest bus there is.
+    s.measurements.declare(measurement_id::kAcL1Voltage, MeasurementType::Voltage, Unit::Volt,
+                           "AC Voltage");
+    s.measurements.declare(measurement_id::kTemperature, MeasurementType::Temperature,
+                           Unit::Celsius, "Temperature");
+    s.measurements.declare(measurement_id::kBatterySoc, MeasurementType::Ratio,
+                           Unit::Percent, "Battery SOC");
+    s.measurements.declare(measurement_id::kBatteryPower, MeasurementType::Power, Unit::Watt,
+                           "Battery Power");
     if (valid) {
         s.measurements.set(measurement_id::kAcPowerTotal, watts, lastPollMs);
         s.measurements.set(measurement_id::kEnergyToday, today, lastPollMs);
+        s.measurements.set(measurement_id::kAcL1Voltage, 242.13456789, lastPollMs);
+        s.measurements.set(measurement_id::kTemperature, 48.256789, lastPollMs);
+        s.measurements.set(measurement_id::kBatterySoc, 64.5, lastPollMs);
+        s.measurements.set(measurement_id::kBatteryPower, -1523.456789, lastPollMs);
     }
     if (stale) {
         s.measurements.markAllStale();
@@ -612,7 +627,9 @@ static void test_a_full_bus_of_summaries_still_fits() {
     TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "growatt_modbus-1", makeBridge(),
                                               r.diagnostics.snapshot(),
                                               &eversolar::descriptor(), g_now, fleet, json));
-    TEST_ASSERT_TRUE(json.size() < rest::kMaxResponseBytes);
+    // LESS_THAN, not TRUE(<): on failure Unity prints both numbers, so the report says how
+    // far over the cap a new field pushed it instead of only that it did.
+    TEST_ASSERT_LESS_THAN_UINT32(rest::kMaxResponseBytes, json.size());
     TEST_ASSERT_EQUAL_UINT32(kMaxDevices, parse(json)["devices"].size());
 }
 

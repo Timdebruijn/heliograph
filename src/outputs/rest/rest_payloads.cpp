@@ -67,6 +67,13 @@ DeviceSummary summariseDevice(const DeviceState& state, const std::string& devic
     take(measurement_id::kAcPowerTotal, s.hasAcPower, s.acPowerW);
     take(measurement_id::kEnergyToday, s.hasEnergyToday, s.energyTodayKwh);
     take(measurement_id::kEnergyTotal, s.hasEnergyTotal, s.energyTotalKwh);
+    // L1 specifically, not "the AC voltage": a three-phase inverter has three, and picking one
+    // to stand for all of them would be a quiet lie. L1 is the phase every supported driver
+    // reports, and the Device tab remains the place to see all of them.
+    take(measurement_id::kAcL1Voltage, s.hasAcVoltage, s.acVoltageV);
+    take(measurement_id::kTemperature, s.hasTemperature, s.temperatureC);
+    take(measurement_id::kBatterySoc, s.hasBatterySoc, s.batterySocPct);
+    take(measurement_id::kBatteryPower, s.hasBatteryPower, s.batteryPowerW);
     return s;
 }
 
@@ -201,6 +208,33 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
         }
         // Absent channels stay null rather than 0: "this inverter reports no power" and
         // "this inverter reports 0 W" are different answers and look identical as a number.
+        // Same absent-is-null rule for every channel below: a driver that does not report
+        // temperature and one reporting 0 degrees are different answers.
+        if (f.hasEnergyToday) {
+            o["energy_today_kwh"] = f.energyTodayKwh;
+        } else {
+            o["energy_today_kwh"] = nullptr;
+        }
+        if (f.hasAcVoltage) {
+            o["ac_voltage_v"] = f.acVoltageV;
+        } else {
+            o["ac_voltage_v"] = nullptr;
+        }
+        if (f.hasTemperature) {
+            o["temperature_c"] = f.temperatureC;
+        } else {
+            o["temperature_c"] = nullptr;
+        }
+        if (f.hasBatterySoc) {
+            o["battery_soc_pct"] = f.batterySocPct;
+        } else {
+            o["battery_soc_pct"] = nullptr;
+        }
+        if (f.hasBatteryPower) {
+            o["battery_power_w"] = f.batteryPowerW;
+        } else {
+            o["battery_power_w"] = nullptr;
+        }
         if (f.hasAcPower) {
             o["ac_power_w"] = f.acPowerW;
         } else {

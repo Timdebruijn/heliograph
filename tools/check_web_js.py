@@ -58,6 +58,7 @@ def main() -> int:
                 status |= check_version_compare(script, scratch)
                 status |= check_auth_prompt_reentrancy(script, scratch)
                 status |= check_auth_fetch_race(script, scratch)
+                status |= check_fleet_columns(script, scratch)
     return status
 
 
@@ -159,6 +160,70 @@ process.exit(bad === 0 ? 0 : 1);
     path.write_text(harness)
     result = subprocess.run(["node", str(path)], capture_output=True, text=True)
     print(f"version comparison: {'OK' if result.returncode == 0 else 'FAIL'}")
+    if result.returncode != 0:
+        print(result.stdout + result.stderr)
+        return 1
+    return 0
+
+
+def check_fleet_columns(script, scratch):
+    """A fleet column appears only when some inverter can fill it.
+
+    A string inverter has no battery, and a column of em dashes reads as "broken" rather than
+    "not applicable". The inverse matters just as much: one device reporting a channel must keep
+    the column for all of them, with the em dash marking the device that does not -- absent and
+    zero are different answers and must not look alike.
+
+    Battery direction is checked as words. The payload carries the project's sign convention
+    (positive charging, negative discharging); a reader should not need to know it, and a bare
+    negative in a cell invites exactly the wrong guess.
+    """
+    body = extract_function(script, "fleetStrip")
+    if body is None:
+        print("FAIL: fleetStrip() not found in index_html.h; this check needs updating")
+        return 1
+    harness = (
+        "const esc=s=>String(s);\nconst fmt=(v,d)=>Number(v).toFixed(d);\n"
+        + body
+        + r"""
+const cols = h => (h.match(/<th[^>]*>([^<]*)<\/th>/g)||[]).map(x=>x.replace(/<[^>]*>/g,''));
+const base = {online:true,data_valid:true,data_stale:false,last_successful_poll_seconds_ago:2};
+let bad = 0;
+const check = (cond, msg) => { if (!cond) { console.error(msg); bad++; } };
+
+let h = fleetStrip([{...base,id:'a',ac_power_w:771,energy_today_kwh:9.3,ac_voltage_v:238,
+  temperature_c:48.6,battery_soc_pct:null,battery_power_w:null}]);
+let c = cols(h);
+check(!c.includes('SOC') && !c.includes('Battery'), 'battery columns shown for a device with no battery');
+check(c.includes('Temp') && c.includes('Today'), 'a channel the device reports has no column');
+
+h = fleetStrip([{...base,id:'b',ac_power_w:1200,battery_soc_pct:64,battery_power_w:1500}]);
+check(cols(h).includes('SOC'), 'SOC column missing for a hybrid');
+check(h.includes('charging 1500 W'), 'charging not spelled out');
+check(h.includes('64 %'), 'state of charge not rendered');
+
+h = fleetStrip([{...base,id:'c',battery_soc_pct:20,battery_power_w:-800}]);
+check(h.includes('discharging 800 W'), 'discharging not spelled out');
+check(!h.includes('-800'), 'a raw negative leaked into the cell');
+
+h = fleetStrip([{...base,id:'d',battery_soc_pct:50,battery_power_w:0}]);
+check(h.includes('idle'), 'a resting battery is not reported as idle');
+
+h = fleetStrip([{...base,id:'g',battery_soc_pct:50,battery_power_w:0.4}]);
+check(h.includes('idle'), 'a trickle that rounds to 0 W still claims a direction');
+check(!h.includes('charging 0 W'), 'the cell argues with itself: a direction next to zero watts');
+
+h = fleetStrip([{...base,id:'e',temperature_c:40},{...base,id:'f',temperature_c:null}]);
+check(cols(h).includes('Temp'), 'column dropped although one device reports it');
+check(h.includes('\u2014'), 'the device without the channel is not an em dash');
+
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    path = pathlib.Path(scratch) / "fleet_columns.js"
+    path.write_text(harness)
+    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    print(f"fleet columns: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
         return 1
