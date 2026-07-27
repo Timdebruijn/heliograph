@@ -288,14 +288,36 @@ broker.
 ### Clearing it
 
 The bridge logs the old and new prefixes when it notices the change, so the tree to clear is
-named in the boot log rather than left for you to work out. With mosquitto's tools:
+named in the boot log rather than left for you to work out.
+
+Retained messages are deleted by publishing an empty payload to the same topic with the retain
+flag set. With mosquitto's tools, for a base topic that moved:
 
 ```bash
-mosquitto_sub -h BROKER -t 'OLD_BASE/BRIDGE_ID/#' -v --retained-only -W 2   | cut -d' ' -f1 | xargs -I{} mosquitto_pub -h BROKER -t {} -r -n
+mosquitto_sub -h BROKER -t 'OLD_BASE/BRIDGE_ID/#' -v --retained-only -W 2 \
+  | cut -d' ' -f1 \
+  | xargs -I{} mosquitto_pub -h BROKER -t {} -r -n
 ```
 
-Same shape for an old discovery prefix, with `-t 'OLD_PREFIX/+/BRIDGE_ID*/#'`. `-r -n` publishes
-an empty retained payload, which is how a retained message is deleted.
+For a discovery prefix that moved, the entities live under several component types
+(`sensor`, `binary_sensor`, `switch`, `select`) and under two id shapes — `BRIDGE_ID` for the
+first device and the bridge's own entities, `BRIDGE_ID_DEVICEID` for every other. **MQTT has no
+wildcard within a topic level** — `+` matches exactly one whole level and `#` the rest, so
+`BRIDGE_ID*` matches nothing. Subscribe to the whole prefix and filter:
+
+```bash
+mosquitto_sub -h BROKER -t 'OLD_PREFIX/#' -v --retained-only -W 2 \
+  | grep "BRIDGE_ID" \
+  | cut -d' ' -f1 \
+  | xargs -I{} mosquitto_pub -h BROKER -t {} -r -n
+```
+
+Two things about `--retained-only`: it exits as soon as a **non**-retained message arrives, which
+on an orphaned tree never happens (nothing publishes there any more) but will cut the listing
+short if you point it at a live one. And `-W 2` is the safety net — without a timeout the client
+waits forever on a quiet tree.
+
+Check what would be deleted before deleting it: drop the `xargs` line and read the list first.
 
 ### Why the firmware does not do it for you
 

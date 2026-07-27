@@ -1165,14 +1165,14 @@ static void test_older_announcement_records_still_read_with_unknown_prefixes() {
 static void test_announced_devices_round_trip_and_start_empty() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
-    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+    TEST_ASSERT_TRUE(store.announcement().devices.empty());
 
     mqtt::AnnouncementRecord announced;
     announced.baseTopic       = "heliograph";
     announced.discoveryPrefix = "homeassistant";
     announced.devices         = {{"growatt_modbus-1", true}, {"growatt_modbus-2", false}};
     TEST_ASSERT_TRUE(store.setAnnouncement(announced));
-    const auto back = store.announcedDevices();
+    const auto back = store.announcement().devices;
     TEST_ASSERT_EQUAL_UINT32(2, back.size());
     TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", back[1].id.c_str());
     // Which tree a device was announced on is half the fact: without it, a device promoted into
@@ -1183,7 +1183,7 @@ static void test_announced_devices_round_trip_and_start_empty() {
 
     // Removing the last device must be storable as such, not indistinguishable from "never set".
     TEST_ASSERT_TRUE(store.setAnnouncement({}));
-    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+    TEST_ASSERT_TRUE(store.announcement().devices.empty());
 }
 
 // The key first shipped as a plain array of ids. Reading one back as non-primary is not a
@@ -1194,7 +1194,7 @@ static void test_announced_bookkeeping_reads_the_flat_id_list() {
     ConfigurationStore store(backend);
     backend.write(kStorageKeyAnnounced, R"(["eversolar-1","growatt_modbus-2"])");
 
-    const auto back = store.announcedDevices();
+    const auto back = store.announcement().devices;
     TEST_ASSERT_EQUAL_UINT32(2, back.size());
     TEST_ASSERT_EQUAL_STRING("eversolar-1", back[0].id.c_str());
     TEST_ASSERT_FALSE(back[0].primary);
@@ -1207,7 +1207,7 @@ static void test_corrupt_announced_bookkeeping_is_not_fatal() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
     backend.write(kStorageKeyAnnounced, "{not json");
-    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+    TEST_ASSERT_TRUE(store.announcement().devices.empty());
 
     auto c = provisionedConfig();
     TEST_ASSERT_TRUE(store.save(c));
@@ -1222,7 +1222,7 @@ static void test_a_factory_reset_forgets_what_was_announced() {
     ConfigurationStore store(backend);
     store.setAnnouncement({"heliograph", "homeassistant", {{"growatt_modbus-1", true}}});
     TEST_ASSERT_TRUE(store.factoryReset());
-    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+    TEST_ASSERT_TRUE(store.announcement().devices.empty());
 }
 
 static void test_ota_rejects_a_non_firmware_upload_before_writing() {

@@ -378,9 +378,6 @@ mqtt::AnnouncementRecord ConfigurationStore::announcement() {
     return out;
 }
 
-std::vector<mqtt::AnnouncedDevice> ConfigurationStore::announcedDevices() {
-    return announcement().devices;
-}
 
 bool ConfigurationStore::setAnnouncement(const mqtt::AnnouncementRecord& record) {
     std::lock_guard<std::mutex> lock(mutex_);
