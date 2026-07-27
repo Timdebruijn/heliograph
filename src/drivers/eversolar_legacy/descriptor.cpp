@@ -65,9 +65,18 @@ const DriverDescriptor& descriptor() {
             "16",
             {},
             kFirstInverterAddress, 254}};
-        // Named the same as the sibling drivers' address option, which is what lets the
-        // settings page warn when two configured devices would share one.
-        x.addressOptionKey = "address";
+        // Deliberately NOT addressOptionKey, for the same reason the SolaX driver spells out:
+        // this is the address the bridge HANDS the inverter at registration, not one the
+        // inverter already answers at. Sweeping it would discover nothing -- it would assign a
+        // string of addresses in a row and leave the device on the last one while the report
+        // named the first. A PMU device is found by its broadcast offline query, which needs no
+        // address at all.
+        //
+        // It was set here briefly, on the belief that the settings page reads it to warn about
+        // two devices sharing an address. It does not: extended discovery is the only consumer.
+        // The mistake was harmless only by accident -- the sweep runs over 1-8 and this option
+        // starts at 16, so every candidate fell outside the bounds and was skipped. Widening
+        // the sweep would have made a discovery run broadcast RE_REGISTER at a working bus.
         return x;
     }();
     return d;
