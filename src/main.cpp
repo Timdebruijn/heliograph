@@ -106,9 +106,18 @@ namespace {
 // inverter that is not answering, why, and how long ago it last replied. Underneath: the two
 // PMU drivers stop carrying the same hundred-line transaction loop twice, and AsyncTCP and
 // ESPAsyncWebServer move up for two use-after-free fixes on the teardown path the dashboard's
-// live updates run over.
+// live updates run over. 0.18.0 lets an operator name their inverters -- "Schuur", "Balkon"
+// instead of XH30006011550619 -- everywhere a device is shown, including as the Home Assistant
+// device name, while every identifier keys on the id exactly as before, so renaming one keeps
+// its history. The Modbus TCP client limit and idle timeout become settings rather than header
+// constants nothing ever assigned; six clients came back as four on hardware with nothing
+// anywhere saying a limit had been hit, and the bridge now says so. A SunSpec inverter that
+// implements model 123 can be curtailed from Home Assistant, which is the first write path in
+// this firmware and stays behind the read-only kill switch. And the legacy PMU driver can put
+// several inverters on one bus, one device each -- untested against real hardware, since nobody
+// involved has two, so the pitfalls are written down rather than claimed away.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 17
+#define HELIOGRAPH_VERSION_MINOR 18
 #define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
