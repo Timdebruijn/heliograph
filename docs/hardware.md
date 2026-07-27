@@ -1,56 +1,97 @@
-# Hardware — Waveshare ESP32-S3-RS485-CAN
+# Hardware — the three supported boards
 
-Status: **pins verified** by the board documentation and by months of runtime on the real
-hardware. Component-level details (transceiver and isolator part numbers) are pending a
-read of this board's schematic and are explicitly marked as such below.
+Heliograph runs on three Waveshare ESP32-S3 boards, one firmware image each. They share the
+ESP32-S3, the RS485 pins and the BOOT button, and differ in almost everything else: relays,
+RTC, PSRAM, flash size, status LED, and whether the RS485 transceiver needs a direction pin
+at all.
 
-> **History.** This project spent its first months believing it ran on the Waveshare
-> **ESP32-S3-Relay-1CH**, the board named in the original project brief; the earlier
-> revision of this document verified that board's schematic in detail. The physical boards
-> turned out to be the RS485-CAN (spotted 2026-07-22). Nothing ever misbehaved because the
-> RS485 subsystem is pin-identical between the two designs. Consequence of the
-> correction: there is **no relay** (the GPIO47 safety clamp was removed — the safest
-> state for a pin with no known function is untouched hi-Z). A first revision of this
-> correction also claimed "no RTC chip" on the strength of an incomplete community
-> document — wrong: the official schematic shows a **PCF85063AT** with backup supply,
-> and the firmware now uses it (clock valid from boot, corrected after every NTP sync).
+`src/boards/*.h` is the authoritative pin record. This document explains the parts a header
+cannot: why a value is what it is, what has actually been measured, and what has not.
+
+> **History.** This project spent its first months believing it ran on the
+> **ESP32-S3-Relay-1CH**, the board named in the original project brief. The physical boards
+> turned out to be the RS485-CAN (spotted 2026-07-22). Nothing ever misbehaved, because the
+> RS485 subsystem is pin-identical between the two designs. A first revision of that
+> correction also claimed "no RTC chip" on the strength of an incomplete community document —
+> wrong: the official schematic shows a **PCF85063AT** with backup supply, and the firmware
+> now uses it (clock valid from boot, corrected after every NTP sync).
+
+## At a glance
+
+| | RS485-CAN | Relay-1CH | Relay-6CH |
+|---|---|---|---|
+| Board id (`board_id`, image name) | `rs485-can` | `relay-1ch` | `relay-6ch` |
+| Module | N16R8 | N16R8 | **N8** |
+| Flash | 16 MB | 16 MB | **8 MB** |
+| PSRAM | 8 MB octal | 8 MB octal | **none** |
+| Relays | none | 1 (GPIO47) | 6 (1, 2, 41, 42, 45, 46) |
+| RTC (PCF85063AT) | yes (38/39) | yes (38/39) | **no** |
+| RS485 direction pin | GPIO21 | GPIO21 | **none — auto-direction** |
+| Status LED | no | no | yes (GPIO38) |
+| Buzzer | no | no | yes (GPIO21) |
+| CAN | yes (15/16, unused) | no | no |
+
+Relays are active-high on both relay boards, and every relay is off at boot — see
+[docs/drm.md](drm.md) for what that means for a failsafe.
+
+**GPIO21 is the trap in that table.** On the RS485-CAN and the 1CH it drives the transceiver's
+direction; on the 6CH it is the buzzer. Flashing the wrong image onto a 6CH would therefore beep
+at every transmission rather than fail visibly, which is why the board id travels in the image
+name and in `/api/v1/status`.
 
 ## Sources
 
 | Source | Location | Used for |
 |---|---|---|
-| Wiki | <https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN> | Board overview, interfaces, jumpers |
-| Schematic (PDF) | <https://files.waveshare.com/wiki/ESP32-S3-RS485-CAN/ESP32-S3-RS485-CAN-Schematic.pdf> | GPIO matrix, RTC (PCF85063AT), transceivers |
-| Community board doc | [Sleeper85/esphome-yambms](https://github.com/Sleeper85/esphome-yambms/blob/main/documents/README/Board_Waveshare_ESP32-S3-RS485-CAN.md) | Pin assignments cross-check (note: it omits the RTC) |
+| Wiki (RS485-CAN) | <https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN> | Board overview, interfaces, jumpers |
+| Schematic (RS485-CAN, PDF) | <https://files.waveshare.com/wiki/ESP32-S3-RS485-CAN/ESP32-S3-RS485-CAN-Schematic.pdf> | GPIO matrix, RTC (PCF85063AT), transceivers |
+| Community board doc | [Sleeper85/esphome-yambms](https://github.com/Sleeper85/esphome-yambms/blob/main/documents/README/Board_Waveshare_ESP32-S3-RS485-CAN.md) | Pin cross-check (note: it omits the RTC) |
+| Waveshare support | email, 2026-07-27 | RTC backup battery type (see below) |
 | Runtime | this project, production since 2026-07 | RS485 pins, flash size, USB-CDC behaviour |
-
-This is one of three supported boards; the board headers in `src/boards/` are the
-authoritative pin record for all of them (Relay-1CH: 1 relay + RTC; Relay-6CH: 6 relays,
-8 MB flash, RS485 direction pin still unverified — see the header).
 
 ## Pinout
 
-| Function | GPIO | Status |
-|---|---|---|
-| RS485 TX (UART1) | **17** | verified (documentation + runtime) |
-| RS485 RX (UART1) | **18** | verified (documentation + runtime) |
-| RS485 EN (direction) | **21** | verified (documentation + runtime) |
-| CAN TX | **15** | documented; unused by this firmware |
-| CAN RX | **16** | documented; unused by this firmware |
-| RTC SCL (PCF85063) | **38** | verified (official schematic GPIO matrix) |
-| RTC SDA (PCF85063) | **39** | verified (official schematic GPIO matrix) |
-| RTC INT | **40** | schematic; unused by this firmware |
-| BOOT button | GPIO0 | schematic-confirmed; held ~5 s while running, factory-resets (see Recovery) |
+Shared by all three: **RS485 TX 17, RS485 RX 18** (UART1), **BOOT GPIO0**.
+
+| Function | RS485-CAN | Relay-1CH | Relay-6CH | Status |
+|---|---|---|---|---|
+| RS485 EN (direction) | **21** | **21** | — | verified; the 6CH has no direction GPIO |
+| Relay(s) | — | **47** | **1, 2, 41, 42, 45, 46** | 6CH order verified on hardware 2026-07-23 |
+| RTC SCL / SDA (PCF85063) | **38 / 39** | **38 / 39** | — | official schematic GPIO matrix |
+| RTC INT | **40** | not checked | — | RS485-CAN schematic only; unused by this firmware, so nobody has needed the 1CH's |
+| Status LED | — | — | **38** | verified on hardware 2026-07-23 |
+| Buzzer | — | — | **21** | verified on hardware 2026-07-23 |
+| CAN TX / RX | **15 / 16** | — | — | documented; unused by this firmware |
+
+## The RTC, and the battery that backs it
+
+The RS485-CAN and the Relay-1CH carry a **PCF85063AT** with a backup supply, so the clock is
+valid from boot and logs are stamped before the network exists. The firmware reads it at boot
+and writes it back after every NTP sync. The Relay-6CH has no RTC: on that board the clock is
+unknown until NTP answers.
+
+**Use an ML2032 (rechargeable). Never a CR2032.**
+
+Waveshare support, asked directly (2026-07-27):
+
+> Use the RTC-Battery-B (ML2032). It is a rechargeable 3V cell with the correct SH1.0
+> connector. Do not use non-rechargeable cells, as the board's circuit provides a charge
+> voltage.
+
+This is a safety point rather than a preference. The board puts a charging voltage on the cell,
+and a CR2032 is not built to take one — a non-rechargeable lithium cell under charge can vent or
+rupture. The connector is SH1.0, so a cell holder with the wrong plug is also the wrong cell.
+Product page: <https://www.waveshare.com/rtc-battery.htm>
+
+Sourced from a support email rather than from the schematic, and recorded as such.
 
 ## Board facts
 
 | Fact | Value | Relevance |
 |---|---|---|
-| Flash | **16 MB** | Dual-app OTA partitions + headroom (`partitions_16mb_ota.csv`) |
-| PSRAM | 8 MB, octal | `-DBOARD_HAS_PSRAM` + `memory_type = qio_opi`. Reported as `psram_size_bytes` / `psram_free_bytes` — see below |
 | USB | native USB-C, no CH340 | `-DARDUINO_USB_CDC_ON_BOOT=1`; attaching USB power-cycles a USB-powered board |
 | Power | USB-C or 7–36 V DC terminal | The DC terminal allows powering from the inverter side of the room |
-| Isolation | power + optocoupler, RS485 **and** CAN | `SGND` is NOT `GND` — never bridge them |
+| Isolation (RS485-CAN) | power + optocoupler, RS485 **and** CAN | `SGND` is NOT `GND` — never bridge them |
 | Termination | 120 Ω jumper per bus | Fit only when the bridge is physically at the end of the RS485 bus |
 | Buttons | BOOT + RESET | RESET reboots. BOOT held ~5 s **while running** factory-resets; held **at power-on** it enters USB download mode instead (GPIO0 strapping) — see Recovery |
 
@@ -61,11 +102,12 @@ The bridge reports five memory numbers, and they do not all measure the same poo
 | Field | Covers |
 |---|---|
 | `free_heap_bytes`, `minimum_free_heap_bytes`, `max_alloc_heap_bytes` | **Internal SRAM only** (~320 KB total) |
-| `psram_size_bytes`, `psram_free_bytes` | **External PSRAM only** (8 MB here, absent on the Relay-6CH) |
+| `psram_size_bytes`, `psram_free_bytes` | **External PSRAM only** (8 MB on the RS485-CAN and the 1CH; the 6CH has none) |
 
 This is not a naming quirk, it is what the Arduino core does: `ESP.getFreeHeap()`,
 `getMinFreeHeap()` and `getMaxAllocHeap()` are all `heap_caps_*(MALLOC_CAP_INTERNAL)`. So a free
-heap of ~150 KB on this board is healthy, not alarming — it is 150 KB of 320 KB, not of 8 MB.
+heap of ~150 KB is healthy, not alarming — it is 150 KB of 320 KB, not of 8 MB. That reading is
+the same on all three boards, PSRAM or not.
 
 The PSRAM pair is `null` in JSON, absent from Prometheus and `0xFFFFFFFF` in the Modbus
 registers on a board that has none. That is also how you tell, from the network alone, that
@@ -78,7 +120,8 @@ it. `psram_free_bytes` moving is normal and expected.
 
 ## RS485 direction control
 
-The transceiver's enable pin (GPIO21) is handed to the UART peripheral as its RTS line:
+**On the RS485-CAN and the Relay-1CH.** The transceiver's enable pin (GPIO21) is handed to the
+UART peripheral as its RTS line:
 
 ```c
 serial.begin(baudrate, SERIAL_8N1, RX, TX);
@@ -90,6 +133,13 @@ With `UART_MODE_RS485_HALF_DUPLEX` the ESP32-S3 UART switches direction on the e
 boundary. Toggling the pin from software is explicitly **not** done: it cannot reliably
 race the last stop bit. This is configured once in the transport's `begin()` and is
 transparent afterwards.
+
+**The Relay-6CH has no direction pin, and that is verified rather than unknown.** Its official
+demo transmits and receives with a plain `begin(9600, SERIAL_8N1, RX, TX)` — no `setPins`, no
+RS485 mode — so the schematic's `TXDEN'` net is driven by the board's own auto-direction
+circuit. The board header sets the direction pin to `-1`, which makes the transport skip RTS
+configuration entirely. GPIO21, the direction pin on the other two boards, is this board's
+buzzer.
 
 ## CAN
 
@@ -187,11 +237,11 @@ already-configured board after a few minutes without WiFi and its AP is open (se
 |---|---|---|
 | ESP32-S3-Relay-6CH | GPIO0 | **Yes** — hold, LED countdown and release confirmed on hardware 2026-07-23 |
 | ESP32-S3-RS485-CAN | GPIO0 | Schematic only — the pin is confirmed, the 5 s reset has not been run on this board |
-| ESP32-S3-Relay-1CH | GPIO0 | Schematic only — nobody on the project owns one |
+| ESP32-S3-Relay-1CH | GPIO0 | Schematic only — hardware is on the project since 2026-07-26, the 5 s reset has not been run on it |
 
 The pin is the same GPIO0 on all three and the code path is shared, so there is no reason to
-expect a difference — but "no reason to expect" is not a measurement. If you own an RS485-CAN
-or a 1CH, running it once and reporting the result is a genuinely useful contribution.
+expect a difference — but "no reason to expect" is not a measurement. Running it once on an
+RS485-CAN or a 1CH and reporting the result is a genuinely useful contribution.
 
 **Not to be confused with download mode.** BOOT is GPIO0, the SoC's download strapping pin,
 so holding it *at power-on or during RESET* drops the board into the USB firmware-download
@@ -199,9 +249,15 @@ mode instead — the factory reset only happens when BOOT is held during normal 
 boards with a status LED (the Relay-6CH) the LED blinks red while the reset counts down and a
 buzzer confirms the wipe; the RS485-CAN has neither, so there the reboot is the only signal.
 
-## Open / to be verified on hardware or schematic
+## Open / to be verified on hardware
 
-1. **GPIO47** — no documented function on this board. The firmware no longer touches it.
+1. **BOOT factory reset on the RS485-CAN and the 1CH** — see the table above.
+2. **Relay actuation on the Relay-1CH** — the board has been powered and flashed, but its single
+   relay (GPIO47) has not been switched and measured. The 6CH's six were verified on 2026-07-23
+   (order, polarity, failsafe on power-cut).
+3. **GPIO47 on the RS485-CAN** — no documented function there. The firmware does not touch it;
+   the safest state for a pin with no known function is untouched hi-Z. It is the relay pin on
+   the 1CH, which is why it appears twice in this project's history.
 
-Component detail from the schematic, for reference: SP3485EN RS485 transceiver behind a
-π163E31 isolator, TJA1051T CAN transceiver, PCF85063AT RTC with 32.768 kHz crystal.
+Component detail from the RS485-CAN schematic, for reference: SP3485EN RS485 transceiver behind
+a π163E31 isolator, TJA1051T CAN transceiver, PCF85063AT RTC with 32.768 kHz crystal.
