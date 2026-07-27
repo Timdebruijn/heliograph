@@ -134,34 +134,46 @@ void WifiManager::startMdns() {
 /// after mode() for the same reason fireStackReadyHook() does -- the netif exists, DHCP has not
 /// run yet.
 ///
-/// The all-INADDR_NONE call is not a no-op and is not skipped: NetworkInterface::config() reads
-/// an all-zero address as "clear", stops the DHCP client, wipes the IP info, and then restarts
-/// the DHCP client. Calling it explicitly on the DHCP path makes a bridge that has just been
-/// switched back from a static address behave the same as one that never had one, without a
-/// reboot-shaped difference between them.
+/// NOT INADDR_NONE, AND THIS IS A TRAP WORTH THE PARAGRAPH. Every tutorial spells "go back to
+/// DHCP" as WiFi.config(INADDR_NONE, ...), and the Arduino layer does treat INADDR_NONE as its
+/// "unset" sentinel -- but lwip defines it as 0xFFFFFFFF, while the layer that actually decides,
+/// NetworkInterface::config(), clears and restarts the DHCP client only when the address is
+/// ZERO. Handing it INADDR_NONE therefore stops the DHCP client, configures 255.255.255.255 as
+/// a static address, and never starts DHCP again -- on the default path every bridge takes.
+/// Verified against core 3.3.9's own source, not inferred. All-zeroes is the form that reaches
+/// the clearing branch.
+///
+/// The call is made explicitly rather than skipped so a bridge that has just been switched back
+/// from a static address behaves the same as one that never had one, without a reboot-shaped
+/// difference between them.
 ///
 /// Nothing is validated here. validate() already refused everything that does not parse, and
 /// repeating the rules in a second place is how two answers to the same question appear.
 void WifiManager::applyAddressing() {
-    const auto& w = config_.wifi;
+    const auto&     w    = config_.wifi;
+    const IPAddress none(0, 0, 0, 0);
     if (!w.staticIp()) {
-        WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+        WiFi.config(none, none, none);
         log::info("net: DHCP");
         return;
     }
-    const auto toAddr = [](const std::string& text) {
+    uint32_t   maskRaw = 0;
+    const auto toAddr  = [&none](const std::string& text) {
         uint32_t raw = 0;
         if (!net::parseIpv4(text, raw)) {
-            return IPAddress(INADDR_NONE);
+            return none;  // unreachable: validate() refused anything that does not parse
         }
         // parseIpv4 yields host byte order, most significant octet first.
         return IPAddress((raw >> 24) & 0xFF, (raw >> 16) & 0xFF, (raw >> 8) & 0xFF, raw & 0xFF);
     };
+    net::parseIpv4(w.subnet, maskRaw);
     const IPAddress ip   = toAddr(w.ip);
     const IPAddress gw   = toAddr(w.gateway);
     const IPAddress mask = toAddr(w.subnet);
-    const IPAddress dns1 = w.dns1.empty() ? IPAddress(INADDR_NONE) : toAddr(w.dns1);
-    const IPAddress dns2 = w.dns2.empty() ? IPAddress(INADDR_NONE) : toAddr(w.dns2);
+    // An omitted DNS server is all-zeroes, which esp_netif reads as "none set" -- the same
+    // encoding the clearing path above relies on.
+    const IPAddress dns1 = w.dns1.empty() ? none : toAddr(w.dns1);
+    const IPAddress dns2 = w.dns2.empty() ? none : toAddr(w.dns2);
 
     if (!WiFi.config(ip, gw, mask, dns1, dns2)) {
         // Reported, then carried on with. A refusal here leaves the DHCP client running, which
@@ -169,16 +181,12 @@ void WifiManager::applyAddressing() {
         // only way anyone learns the address they configured is not the one in use.
         log::error("net: static address %s was refused by the driver; falling back to DHCP",
                    w.ip.c_str());
-        WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+        WiFi.config(none, none, none);
         return;
     }
     log::info("net: static %s/%u gw %s dns %s", w.ip.c_str(),
-              static_cast<unsigned>(net::maskPrefixLength([&] {
-                  uint32_t raw = 0;
-                  net::parseIpv4(w.subnet, raw);
-                  return raw;
-              }())),
-              w.gateway.c_str(), w.dns1.empty() ? "(none)" : w.dns1.c_str());
+              static_cast<unsigned>(net::maskPrefixLength(maskRaw)), w.gateway.c_str(),
+              w.dns1.empty() ? "(none)" : w.dns1.c_str());
 }
 
 void WifiManager::attemptConnect() {

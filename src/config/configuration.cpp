@@ -221,6 +221,20 @@ bool validateStaticIp(const Configuration& config, ConfigError& error) {
         }
     }
 
+    // There is no DHCP on a static address, so ntp.use_dhcp cannot supply anything.
+    //
+    // esp_sntp_servermode_dhcp() puts the lease-provided server at index 0 and the configured
+    // one at index 1 as fallback. With no lease, index 0 is never filled -- and if ntp.server is
+    // empty, index 1 is never set either. The result is NTP enabled with no server at all: the
+    // clock never syncs, every log line stays stamped from uptime, and nothing reports an error.
+    // The DHCP path is allowed to leave the server empty precisely because the lease covers it;
+    // that reasoning does not survive here.
+    if (config.ntp.enabled && config.ntp.server.empty()) {
+        error = {"ntp.server", "required with a static address: there is no DHCP lease to "
+                               "provide one"};
+        return false;
+    }
+
     // The rule that keeps a static bridge from being quietly half-dead.
     //
     // With no DNS server the stack resolves nothing. The bridge still boots, still answers on

@@ -847,6 +847,32 @@ static void test_no_dns_is_fine_when_nothing_is_configured_by_name() {
     TEST_ASSERT_TRUE_MESSAGE(validate(c, e), e.field.c_str());
 }
 
+/// The other quiet one, found reviewing the first. ntp.use_dhcp means "take the server from the
+/// DHCP lease" -- and a static address has no lease. Index 0 is never filled, and with an empty
+/// ntp.server index 1 is never set either, so NTP runs with no server at all: the clock never
+/// syncs and every log line stays stamped from uptime. The DHCP path may leave the server empty
+/// because the lease covers it; that reasoning does not survive a static address.
+static void test_a_static_address_needs_an_ntp_server_even_with_use_dhcp_on() {
+    auto c        = staticConfig();
+    c.ntp.enabled = true;
+    c.ntp.useDhcp = true;
+    c.ntp.server.clear();
+    ConfigError e;
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("ntp.server", e.field.c_str());
+
+    // Naming one is enough -- use_dhcp then merely means "prefer the lease if there ever is one".
+    c.ntp.server = "192.168.1.1";
+    TEST_ASSERT_TRUE_MESSAGE(validate(c, e), e.field.c_str());
+
+    // And on DHCP the empty server stays legal, because the lease really does supply it.
+    auto d        = provisionedConfig();
+    d.ntp.enabled = true;
+    d.ntp.useDhcp = true;
+    d.ntp.server.clear();
+    TEST_ASSERT_TRUE_MESSAGE(validate(d, e), e.field.c_str());
+}
+
 static void test_static_addressing_round_trips_through_storage_and_patch() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
@@ -1363,6 +1389,7 @@ int main(int, char**) {
     RUN_TEST(test_taking_the_gateways_own_address_is_refused);
     RUN_TEST(test_a_static_address_with_no_dns_is_refused_while_a_name_is_configured);
     RUN_TEST(test_no_dns_is_fine_when_nothing_is_configured_by_name);
+    RUN_TEST(test_a_static_address_needs_an_ntp_server_even_with_use_dhcp_on);
     RUN_TEST(test_static_addressing_round_trips_through_storage_and_patch);
     RUN_TEST(test_changing_the_address_requires_a_restart);
     RUN_TEST(test_overlong_strings_are_refused_at_the_boundary);
