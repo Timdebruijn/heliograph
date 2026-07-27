@@ -518,6 +518,42 @@ static JsonDocument statusOf(const std::vector<rest::DeviceSummary>& fleet) {
     return parse(json);
 }
 
+// totalsFor is now the ONE definition of "answering" -- the status payload and the ten-second
+// log heartbeat both call it, so a disagreement between the dashboard and the logs is no longer
+// possible by construction (#74). Tested directly rather than only through the payload: the
+// heartbeat has no JSON to assert on.
+static void test_only_a_device_that_is_online_valid_and_fresh_is_answering() {
+    const auto ok = rest::summariseDevice(fakeDevice(true, true, false, 100.0, 1.0, g_now - 1000),
+                                          "a", g_now);
+    // Offline AND stale: that is how the firmware leaves a device that stopped answering, and
+    // (false, true, false) is a combination the state machine cannot produce -- my first version
+    // of this test built exactly that and asserted the wrong count, which is the trap fakeDevice
+    // documents above.
+    const auto offline  = rest::summariseDevice(fakeDevice(false, true, true, 100.0, 1.0, g_now - 1000),
+                                                "b", g_now);
+    const auto invalid  = rest::summariseDevice(fakeDevice(true, false, false, 100.0, 1.0, g_now - 1000),
+                                                "c", g_now);
+    const auto stale    = rest::summariseDevice(fakeDevice(true, true, true, 100.0, 1.0, g_now - 1000),
+                                                "d", g_now);
+
+    const auto t = rest::totalsFor({ok, offline, invalid, stale});
+    TEST_ASSERT_EQUAL_UINT32(4, t.polled);
+    TEST_ASSERT_EQUAL_UINT32(1, t.answering);
+    // Only the answering device contributes a reading. A stale one still holds valid==true, so
+    // without the freshness rule a dead inverter's last daylight value keeps being summed.
+    TEST_ASSERT_EQUAL_UINT32(1, t.acCount);
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, t.acPowerW);
+}
+
+// A fleet with nothing in it has no readings, not zero readings: the count is what tells the
+// heartbeat to print "unknown" rather than "0.0 W" on a bridge whose inverters are all dark.
+static void test_an_empty_fleet_reports_no_readings_rather_than_zero() {
+    const auto t = rest::totalsFor({});
+    TEST_ASSERT_EQUAL_UINT32(0, t.polled);
+    TEST_ASSERT_EQUAL_UINT32(0, t.answering);
+    TEST_ASSERT_EQUAL_UINT32(0, t.acCount);
+}
+
 static void test_the_status_payload_totals_every_polled_device() {
     const auto a = rest::summariseDevice(fakeDevice(true, true, false, 1200.0, 5.0, g_now - 2000),
                                          "growatt_modbus-1", g_now);
@@ -2223,6 +2259,8 @@ int main(int, char**) {
     RUN_TEST(test_the_device_manager_refuses_past_its_cap);
     RUN_TEST(test_the_status_payload_reports_the_address_and_how_it_was_obtained);
     RUN_TEST(test_the_status_payload_publishes_the_device_cap);
+    RUN_TEST(test_only_a_device_that_is_online_valid_and_fresh_is_answering);
+    RUN_TEST(test_an_empty_fleet_reports_no_readings_rather_than_zero);
     RUN_TEST(test_the_status_payload_totals_every_polled_device);
     RUN_TEST(test_a_device_that_reports_nothing_does_not_count_towards_a_total);
     RUN_TEST(test_a_stale_reading_leaves_the_total_and_the_device_is_not_answering);

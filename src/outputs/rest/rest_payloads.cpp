@@ -36,6 +36,29 @@ bool buildProvisionPayload(const std::string& hostname, std::string& out, size_t
     return finish(doc, out, maxBytes);
 }
 
+FleetTotals totalsFor(const std::vector<DeviceSummary>& fleet) {
+    FleetTotals t;
+    t.polled = static_cast<unsigned>(fleet.size());
+    for (const auto& f : fleet) {
+        if (f.online && f.dataValid && !f.dataStale) {
+            ++t.answering;
+        }
+        if (f.hasAcPower) {
+            t.acPowerW += f.acPowerW;
+            ++t.acCount;
+        }
+        if (f.hasEnergyToday) {
+            t.energyTodayKwh += f.energyTodayKwh;
+            ++t.todayCount;
+        }
+        if (f.hasEnergyTotal) {
+            t.energyTotalKwh += f.energyTotalKwh;
+            ++t.lifetimeCount;
+        }
+    }
+    return t;
+}
+
 DeviceSummary summariseDevice(const DeviceState& state, const std::string& deviceId,
                               uint64_t nowMs) {
     DeviceSummary s;
@@ -187,8 +210,9 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     // bridge's health may be built from it: on a bus of three, one dead inverter left the
     // header indicator green and the Dashboard reporting a healthy day (#38).
     JsonArray devices = doc["devices"].to<JsonArray>();
-    double    acTotal = 0.0, todayTotal = 0.0, lifetimeTotal = 0.0;
-    unsigned  acCount = 0, todayCount = 0, lifetimeCount = 0, answering = 0;
+    // Summed by the shared helper, not here: the log heartbeat reports the same fleet and must
+    // not carry its own copy of what "answering" means (#74).
+    const FleetTotals totals = totalsFor(fleet);
     for (const auto& f : fleet) {
         JsonObject o    = devices.add<JsonObject>();
         o["id"]         = f.id;
@@ -240,28 +264,13 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
         } else {
             o["ac_power_w"] = nullptr;
         }
-        if (f.online && f.dataValid && !f.dataStale) {
-            ++answering;
-        }
-        if (f.hasAcPower) {
-            acTotal += f.acPowerW;
-            ++acCount;
-        }
-        if (f.hasEnergyToday) {
-            todayTotal += f.energyTodayKwh;
-            ++todayCount;
-        }
-        if (f.hasEnergyTotal) {
-            lifetimeTotal += f.energyTotalKwh;
-            ++lifetimeCount;
-        }
     }
     JsonObject t = doc["totals"].to<JsonObject>();
     // "Answering" is the strict reading: started, online, holding data that is valid and not
     // stale. A device that started and never returned a byte is not answering, and neither is
     // one whose last reading has aged out.
-    t["devices_answering"] = answering;
-    t["devices_polled"]    = static_cast<unsigned>(fleet.size());
+    t["devices_answering"] = totals.answering;
+    t["devices_polled"]    = totals.polled;
     // A total over none is unknown, not zero. The count travels with it so a client can say
     // "2 of 3 inverters" instead of implying the sum covers everything.
     const auto total = [&t](const char* key, unsigned count, double sum) {
@@ -271,12 +280,12 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
             t[key] = nullptr;
         }
     };
-    total("ac_power_w", acCount, acTotal);
-    t["ac_power_devices"] = acCount;
-    total("energy_today_kwh", todayCount, todayTotal);
-    t["energy_today_devices"] = todayCount;
-    total("energy_total_kwh", lifetimeCount, lifetimeTotal);
-    t["energy_total_devices"] = lifetimeCount;
+    total("ac_power_w", totals.acCount, totals.acPowerW);
+    t["ac_power_devices"] = totals.acCount;
+    total("energy_today_kwh", totals.todayCount, totals.energyTodayKwh);
+    t["energy_today_devices"] = totals.todayCount;
+    total("energy_total_kwh", totals.lifetimeCount, totals.energyTotalKwh);
+    t["energy_total_devices"] = totals.lifetimeCount;
 
     doc["poll_success_total"] = diagnostics.pollSuccessTotal;
     doc["poll_failure_total"] = diagnostics.pollFailureTotal;

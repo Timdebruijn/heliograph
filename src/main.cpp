@@ -42,6 +42,7 @@
 #include "outputs/modbus_tcp/modbus_tcp_server.h"
 #include "outputs/mqtt/mqtt_output.h"
 #include "outputs/rest/rest_api.h"
+#include "outputs/rest/rest_payloads.h"
 #include "relays/drm.h"
 #include "relays/relay_controller.h"
 #include "status/boot_button.h"
@@ -1348,16 +1349,49 @@ void loop() {
         // Same per-task self-report as rs485Task; see the note there.
         g_diagnostics.recordLoopStackFree(
             static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr)));
-        if (g_state) {
-            const auto  s = g_state->snapshot();
-            const auto* p = s->measurements.find(measurement_id::kAcPowerTotal);
-            // Through the logger, not a raw print: the heartbeat then carries the same
-            // wall-clock stamp as everything else, which is what makes an unattended capture
-            // legible after the fact.
-            log::info("state: wifi=%s inverter=%d valid=%d stale=%d power=%s heap=%lu",
-                      provisioningStateName(g_wifi.state()), s->inverterOnline, s->dataValid,
-                      s->dataStale, (p && p->valid) ? String(p->value, 1).c_str() : "unknown",
+        // THE WHOLE FLEET, not the first device (#74). This used to read g_state, which is
+        // assigned once while starting devices and then holds device 1 forever: on a bus of
+        // four, three could be dead and this line would report the healthy one every ten
+        // seconds. It also printed `inverter=%d` from a bool, so "1" meant online and read as
+        // a count -- identical output for one inverter and for eight.
+        //
+        // Summed by rest::totalsFor so the heartbeat and /api/v1/status cannot disagree about
+        // what "answering" means.
+        //
+        // Through the logger, not a raw print: the heartbeat then carries the same wall-clock
+        // stamp as everything else, which is what makes an unattended capture legible.
+        {
+            const uint64_t                   now = nowMs();
+            std::vector<rest::DeviceSummary> fleet;
+            fleet.reserve(g_deviceIds.size());
+            for (const auto& id : g_deviceIds) {
+                if (StateHandle h = g_devices.state(id)) {
+                    fleet.push_back(rest::summariseDevice(*h, id, now));
+                }
+            }
+            const auto t = rest::totalsFor(fleet);
+            log::info("state: wifi=%s devices=%u/%u answering power=%s heap=%lu",
+                      provisioningStateName(g_wifi.state()), t.answering,
+                      static_cast<unsigned>(g_devicesConfigured),
+                      t.acCount != 0 ? String(t.acPowerW, 1).c_str() : "unknown",
                       static_cast<unsigned long>(ESP.getFreeHeap()));
+            // One line each for the devices that are NOT answering, and none at all when the
+            // fleet is healthy. A capture from a working bridge stays one line per heartbeat;
+            // a sick one names the inverter instead of leaving it to be deduced from a count.
+            // Bounded by kMaxDevices, so this can never be more than eight lines.
+            for (const auto& f : fleet) {
+                if (f.online && f.dataValid && !f.dataStale) {
+                    continue;
+                }
+                if (f.everPolled) {
+                    log::info("state:   %s not answering (last reply %us ago)", f.id.c_str(),
+                              static_cast<unsigned>(f.lastPollSecondsAgo));
+                } else {
+                    // Never a byte since boot: a bus or addressing fault, not an inverter that
+                    // went quiet, and the two need different things done about them.
+                    log::info("state:   %s has never answered", f.id.c_str());
+                }
+            }
         }
     }
     delay(100);

@@ -84,6 +84,28 @@ struct DeviceSummary {
     double      batteryPowerW    = 0.0;
 };
 
+/// What a fleet adds up to.
+///
+/// A count travels with every sum because a total over none is unknown, not zero -- and a total
+/// over two of three inverters must not read as the household figure.
+struct FleetTotals {
+    unsigned polled        = 0;
+    /// Started, online, holding data that is valid and NOT stale. The strict reading: a device
+    /// that never returned a byte is not answering, and neither is one whose reading aged out.
+    unsigned answering     = 0;
+    unsigned acCount       = 0;
+    double   acPowerW      = 0.0;
+    unsigned todayCount    = 0;
+    double   energyTodayKwh = 0.0;
+    unsigned lifetimeCount = 0;
+    double   energyTotalKwh = 0.0;
+};
+
+/// Sums a fleet. Pure, so the status payload and the log heartbeat can agree by construction
+/// rather than by two people remembering the same rule -- the heartbeat used to describe the
+/// first device only, and there was no shared definition of "answering" for it to use (#74).
+FleetTotals totalsFor(const std::vector<DeviceSummary>& fleet);
+
 /// Reduces one device's state to the row above.
 ///
 /// A reading counts only while it is valid AND fresh -- the same rule every other output uses.
