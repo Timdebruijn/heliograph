@@ -346,22 +346,55 @@ function fleetStrip(fleet){
   // makes a whole column of em dashes, which reads as "broken" rather than "not applicable" --
   // and a bus of identical inverters means it is all of them or none. Decided per render from
   // the payload, so adding a device with more channels widens the table by itself.
-  // Battery power says the direction in words rather than as a sign. The payload follows the
-  // project's convention (positive charging, negative discharging), but a reader should not
-  // have to know it to answer "is it charging?" -- and a bare -800 W invites the wrong guess.
-  // The word is derived from the number as DISPLAYED, not from the raw value: a trickle of
-  // 0.4 W rounds to 0 at this precision, and "charging 0 W" is a cell that argues with itself.
-  const batt=v=>{
-    const w=fmt(Math.abs(v),0);
-    if(Number(w)===0) return 'idle';
-    return (v>0?'charging ':'discharging ')+w+' W';
+  // Battery power says its direction, rather than leaving it in the sign of a number. The
+  // payload follows the project's convention (positive charging, negative discharging), but a
+  // reader should not have to know that to answer "is it charging?" -- a bare -800 W invites
+  // the wrong guess. The direction is derived from the number as DISPLAYED, not from the raw
+  // value: a trickle of 0.4 W rounds to 0 at this precision, and a direction next to zero watts
+  // is a cell that argues with itself.
+  //
+  // TWO carriers, and this is the whole of it: an ARROW and a COLOUR. Down is power going into
+  // the battery, up is power coming out of it; red is charging, green is discharging. The word
+  // used to be spelled out in the cell and no longer is -- the arrow says it, and that column
+  // was the widest in the table by a distance, which is what broke the layout to begin with.
+  //
+  // The arrow is not decoration. It is a SHAPE, so it survives a reader who cannot tell the red
+  // from the green, and it is why the colour may never become the only carrier. The word itself
+  // reaches assistive technology and a hover through the cell's title, rather than being
+  // dropped outright.
+  //
+  // Red for charging is the household reading rather than the battery's: discharging means the
+  // house is running on its own stored sun instead of buying it. Somebody could just as well
+  // see green as "filling up", which is exactly why the legend below is not optional.
+  const battState=v=>{
+    if(Number(fmt(Math.abs(v),0))===0) return 'idle';
+    return v>0?'charging':'discharging';
   };
-  const all=[{k:'ac_power_w',t:'AC power',d:0,u:'W'},
-             {k:'energy_today_kwh',t:'Today',d:2,u:'kWh'},
-             {k:'ac_voltage_v',t:'AC voltage',d:1,u:'V'},
-             {k:'temperature_c',t:'Temp',d:1,u:'°C'},
-             {k:'battery_soc_pct',t:'SOC',d:0,u:'%'},
-             {k:'battery_power_w',t:'Battery',d:0,u:'W',fn:batt}];
+  const battColour={charging:'var(--bad)',discharging:'var(--ok)',idle:'var(--dim)'};
+  // An arrow on top of the word and the colour, so the meaning survives losing any one of the
+  // three: down is power going INTO the battery, up is power coming out of it. Idle gets no
+  // arrow, because nothing is moving and an arrow would have to point somewhere.
+  const battArrow={charging:'\u2193',discharging:'\u2191',idle:''};
+  // Arrow and number only. The word came out because the arrow already says it and the column
+  // was the widest in the table by a distance -- which is what broke the layout in the first
+  // place. That makes the legend load-bearing rather than supplementary: it is now the only
+  // place the arrows are spelled out, so it renders whenever the column does, never optionally.
+  const batt=v=>{
+    const state=battState(v);
+    if(state==='idle') return 'idle';
+    return battArrow[state]+' '+fmt(Math.abs(v),0)+' W';
+  };
+  // Each column declares what it actually needs. A flat allowance per column was fine while
+  // the widest cell was a number; it stopped being fine the moment a hybrid appeared, because
+  // the battery cell holds a SENTENCE ("discharging 400 W") and the header "AC voltage" is two
+  // words. At 100px each they wrapped mid-column and the rows lost their alignment -- seen on
+  // a four-device bench the moment the mock started publishing battery power (0.18.0).
+  const all=[{k:'ac_power_w',t:'AC power',d:0,u:'W',w:110},
+             {k:'energy_today_kwh',t:'Today',d:2,u:'kWh',w:110},
+             {k:'ac_voltage_v',t:'AC voltage',d:1,u:'V',w:115},
+             {k:'temperature_c',t:'Temp',d:1,u:'°C',w:90},
+             {k:'battery_soc_pct',t:'SOC',d:0,u:'%',w:80},
+             {k:'battery_power_w',t:'Battery',d:0,u:'W',fn:batt,w:110,state:battState}];
   const cols=all.filter(c=>fleet.some(f=>f[c.k]!==null&&f[c.k]!==undefined));
   const rows=fleet.map(f=>{
     const answering=f.online&&f.data_valid&&!f.data_stale;
@@ -378,16 +411,48 @@ function fleetStrip(fleet){
     // someone debugging still needs to read it off the screen they are already looking at.
     const named=f.label?`${esc(f.label)}<div class="dim" style="font-size:11px">${esc(f.id)}</div>`
                        :esc(f.id);
+    // Only a column that asks for it is coloured, and only when it holds a reading. Colouring
+    // every value that happens to be present would turn the strip into a traffic light nobody
+    // asked for. Keyed off the column definition rather than a literal column name, so the rule
+    // travels with the column instead of a second place having to know which one is special.
+    //
+    // title carries the word the cell stopped spelling out. A screen reader announcing
+    // "down arrow 2450 watts" is not an answer to "is it charging?", and the legend that
+    // answers it lives elsewhere in the document. Costs nothing on screen.
+    const cell=c=>{
+      const v=f[c.k];
+      const has=v!==null&&v!==undefined;
+      if(!c.state||!has) return `<td class="n">${esc(num(v,c))}</td>`;
+      const state=c.state(v);
+      return `<td class="n" title="${esc(state)}" style="color:${battColour[state]}">${
+        esc(num(v,c))}</td>`;
+    };
     return `<tr><td><span class="dot ${answering?'ok':'bad'}"></span>${named}</td>
-      ${cols.map(c=>`<td class="n">${esc(num(f[c.k],c))}</td>`).join('')}
+      ${cols.map(cell).join('')}
       <td class="n">${when}</td></tr>`;
   }).join('');
   // Scrolls rather than squeezes: even four columns do not fit a phone, and hiding them below
   // a breakpoint means the reading you went looking for is the one that is not there.
-  const width=260+cols.length*100;
-  return `<div class="card" style="margin-top:14px;overflow-x:auto"><table style="min-width:${width}px">
+  //
+  // Summed from what the columns declare, plus the name and the "Last reply" tag at either end.
+  // nowrap is the other half: without it the table honours min-width and then wraps the text
+  // inside the cells anyway, which is the worst of both -- a scrollbar AND broken rows.
+  const width=260+cols.reduce((a,c)=>a+c.w,0)+150;
+  // Only when there is a battery column to explain. A legend for a column that is not on
+  // screen is noise, and this strip already filters columns no inverter can fill.
+  // Shows the cell itself, not an abstraction of it: same arrow, same colour, same word. A
+  // legend that renders differently from the thing it explains is one more thing to decode.
+  const key=(state,text)=>`<span style="display:inline-flex;align-items:center;gap:6px">
+    <span style="color:${battColour[state]}">${battArrow[state]||'\u2014'} ${state}</span>${text}</span>`;
+  const legend=cols.some(c=>c.k==='battery_power_w')
+    ? `<div class="dim" style="font-size:12px;margin-top:10px;display:flex;flex-wrap:wrap;gap:18px">
+       ${key('charging','power going into the battery')}
+       ${key('discharging','the house is running on it')}
+       ${key('idle','')}</div>`
+    : '';
+  return `<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table style="min-width:${width}px;white-space:nowrap">
     <tr><th>Inverter</th>${cols.map(c=>`<th style="text-align:right">${c.t}</th>`).join('')}
-    <th style="text-align:right">Last reply</th></tr>${rows}</table></div>`;
+    <th style="text-align:right">Last reply</th></tr>${rows}</table></div>${legend}</div>`;
 }
 
 function render(s){

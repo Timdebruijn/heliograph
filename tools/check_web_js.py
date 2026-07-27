@@ -197,14 +197,36 @@ let c = cols(h);
 check(!c.includes('SOC') && !c.includes('Battery'), 'battery columns shown for a device with no battery');
 check(c.includes('Temp') && c.includes('Today'), 'a channel the device reports has no column');
 
+// The direction is carried by an ARROW now, not by the word it used to spell out. What the
+// rule protects has not changed: a reader must be able to answer "is it charging?" without
+// knowing this project's sign convention, and a bare -800 does not let them.
+//
+// Two carriers, deliberately, and both are checked. The arrow is a SHAPE, so it survives being
+// read by someone who cannot distinguish the red from the green; the colour is the second cue,
+// not the only one. Asserting only the colour would let a future change drop the arrow and
+// leave the meaning in a hue.
 h = fleetStrip([{...base,id:'b',ac_power_w:1200,battery_soc_pct:64,battery_power_w:1500}]);
 check(cols(h).includes('SOC'), 'SOC column missing for a hybrid');
-check(h.includes('charging 1500 W'), 'charging not spelled out');
+check(h.includes('\u2193 1500 W'), 'charging is not marked with a down arrow');
+check(h.includes('var(--bad)'), 'charging is not coloured');
+// The word left the cell but not the document. A screen reader announcing "down arrow 2450
+// watts" cannot answer "is it charging?", and the legend that answers it is elsewhere.
+check(h.includes('title="charging"'), 'the cell does not carry the word for assistive tech');
 check(h.includes('64 %'), 'state of charge not rendered');
 
 h = fleetStrip([{...base,id:'c',battery_soc_pct:20,battery_power_w:-800}]);
-check(h.includes('discharging 800 W'), 'discharging not spelled out');
+check(h.includes('\u2191 800 W'), 'discharging is not marked with an up arrow');
+check(h.includes('var(--ok)'), 'discharging is not coloured');
+check(h.includes('title="discharging"'), 'the cell does not carry the word for assistive tech');
 check(!h.includes('-800'), 'a raw negative leaked into the cell');
+
+// The legend became load-bearing the moment the word came out of the cell: it is the only
+// place the arrows are explained. A strip that renders the column without it is undecodable.
+check(h.includes('power going into the battery') && h.includes('the house is running on it'),
+      'the battery column renders without the legend that explains its arrows');
+h = fleetStrip([{...base,id:'h',ac_power_w:500,battery_power_w:null,battery_soc_pct:null}]);
+check(!h.includes('power going into the battery'),
+      'a legend for a battery column that is not on screen');
 
 h = fleetStrip([{...base,id:'d',battery_soc_pct:50,battery_power_w:0}]);
 check(h.includes('idle'), 'a resting battery is not reported as idle');
