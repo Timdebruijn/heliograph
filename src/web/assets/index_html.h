@@ -351,10 +351,24 @@ function fleetStrip(fleet){
   // have to know it to answer "is it charging?" -- and a bare -800 W invites the wrong guess.
   // The word is derived from the number as DISPLAYED, not from the raw value: a trickle of
   // 0.4 W rounds to 0 at this precision, and "charging 0 W" is a cell that argues with itself.
+  // Colour REINFORCES the word, it never replaces it. The cell still reads "charging" or
+  // "discharging" in full, so a colourblind reader loses nothing and a screenshot pasted into
+  // a chat still says what it means. Colour alone carrying the meaning would be the bug.
+  //
+  // Red for charging, green for discharging, which is the household reading rather than the
+  // battery's: discharging means the house is running on its own stored sun instead of buying
+  // it, and charging means power is going in. Both readings are defensible -- somebody could
+  // just as well see green as "filling up" -- which is exactly why the legend below exists
+  // rather than leaving it to be guessed.
+  const battState=v=>{
+    if(Number(fmt(Math.abs(v),0))===0) return 'idle';
+    return v>0?'charging':'discharging';
+  };
+  const battColour={charging:'var(--bad)',discharging:'var(--ok)',idle:'var(--dim)'};
   const batt=v=>{
-    const w=fmt(Math.abs(v),0);
-    if(Number(w)===0) return 'idle';
-    return (v>0?'charging ':'discharging ')+w+' W';
+    const state=battState(v);
+    if(state==='idle') return 'idle';
+    return state+' '+fmt(Math.abs(v),0)+' W';
   };
   // Each column declares what it actually needs. A flat allowance per column was fine while
   // the widest cell was a number; it stopped being fine the moment a hybrid appeared, because
@@ -383,8 +397,16 @@ function fleetStrip(fleet){
     // someone debugging still needs to read it off the screen they are already looking at.
     const named=f.label?`${esc(f.label)}<div class="dim" style="font-size:11px">${esc(f.id)}</div>`
                        :esc(f.id);
+    // Only the battery column is coloured, and only when it holds a reading. Colouring a value
+    // that is merely present would turn the strip into a traffic light nobody asked for.
+    const cell=c=>{
+      const v=f[c.k];
+      const style=(c.k==='battery_power_w'&&v!==null&&v!==undefined)
+        ? ` style="color:${battColour[battState(v)]}"` : '';
+      return `<td class="n"${style}>${esc(num(v,c))}</td>`;
+    };
     return `<tr><td><span class="dot ${answering?'ok':'bad'}"></span>${named}</td>
-      ${cols.map(c=>`<td class="n">${esc(num(f[c.k],c))}</td>`).join('')}
+      ${cols.map(cell).join('')}
       <td class="n">${when}</td></tr>`;
   }).join('');
   // Scrolls rather than squeezes: even four columns do not fit a phone, and hiding them below
@@ -394,9 +416,19 @@ function fleetStrip(fleet){
   // nowrap is the other half: without it the table honours min-width and then wraps the text
   // inside the cells anyway, which is the worst of both -- a scrollbar AND broken rows.
   const width=260+cols.reduce((a,c)=>a+c.w,0)+150;
-  return `<div class="card" style="margin-top:14px;overflow-x:auto"><table style="min-width:${width}px;white-space:nowrap">
+  // Only when there is a battery column to explain. A legend for a column that is not on
+  // screen is noise, and this strip already filters columns no inverter can fill.
+  const swatch=(colour,text)=>`<span style="display:inline-flex;align-items:center;gap:5px">
+    <span class="dot" style="background:${colour};margin-right:0"></span>${text}</span>`;
+  const legend=cols.some(c=>c.k==='battery_power_w')
+    ? `<div class="dim" style="font-size:12px;margin-top:10px;display:flex;flex-wrap:wrap;gap:14px">
+       ${swatch('var(--bad)','charging — power going into the battery')}
+       ${swatch('var(--ok)','discharging — the house is running on it')}
+       ${swatch('var(--dim)','idle')}</div>`
+    : '';
+  return `<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table style="min-width:${width}px;white-space:nowrap">
     <tr><th>Inverter</th>${cols.map(c=>`<th style="text-align:right">${c.t}</th>`).join('')}
-    <th style="text-align:right">Last reply</th></tr>${rows}</table></div>`;
+    <th style="text-align:right">Last reply</th></tr>${rows}</table></div>${legend}</div>`;
 }
 
 function render(s){
