@@ -1392,6 +1392,14 @@ void loop() {
                     log::info("state:   %s has never answered", f.id.c_str());
                 }
             }
+            // A device that never STARTED is not in the fleet at all -- it has no driver, so it
+            // has no id to print (see the reconciliation note above). Without this the count
+            // would read "3/4" with nothing named, which is the one case a reader cannot tell
+            // apart from a bug in the count. Said at boot too, but a capture taken hours later
+            // has long since lost that line out of the ring.
+            for (const auto& p : g_deviceProblems) {
+                log::info("state:   %s", p.c_str());
+            }
         }
     }
     delay(100);
