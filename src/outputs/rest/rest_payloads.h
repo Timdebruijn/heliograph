@@ -67,6 +67,21 @@ struct DeviceSummary {
     double      energyTodayKwh   = 0.0;
     bool        hasEnergyTotal   = false;
     double      energyTotalKwh   = 0.0;
+    /// Per-device only: these two are never summed. A household total of volts is meaningless
+    /// and a total of temperatures worse, so unlike the three above they exist purely so the
+    /// fleet strip can show whether one inverter sits at a different voltage or runs hotter
+    /// than its neighbours -- which on a shared bus is the interesting comparison.
+    bool        hasAcVoltage     = false;
+    double      acVoltageV       = 0.0;
+    bool        hasTemperature   = false;
+    double      temperatureC     = 0.0;
+    /// Hybrids only, and absent on every string inverter. `batteryPowerW` keeps the project's
+    /// sign convention (measurement.h): positive charging, negative discharging -- so direction
+    /// and magnitude travel as one number rather than as a flag that can disagree with it.
+    bool        hasBatterySoc    = false;
+    double      batterySocPct    = 0.0;
+    bool        hasBatteryPower  = false;
+    double      batteryPowerW    = 0.0;
 };
 
 /// Reduces one device's state to the row above.
