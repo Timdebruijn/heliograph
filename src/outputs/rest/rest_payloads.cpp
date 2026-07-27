@@ -371,74 +371,8 @@ bool buildMeasurementsPayload(const DeviceState& state, std::string& out, size_t
 bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bridge,
                              std::string& out, size_t maxBytes) {
     JsonDocument doc;
-    doc["uptime_seconds"]          = bridge.uptimeSeconds;
-    doc["firmware_version"]        = bridge.firmwareVersion;
-    doc["board"]                   = bridge.boardName;
-    doc["free_heap_bytes"]         = bridge.freeHeapBytes;
-    doc["minimum_free_heap_bytes"] = bridge.minFreeHeapBytes;
-    doc["max_alloc_heap_bytes"]    = bridge.maxAllocHeapBytes;
-
-    // Absent, not zero, when the board has none -- and 0 is a legitimate reading for
-    // psram_free_bytes on a board that HAS PSRAM and has exhausted it, so the two must not
-    // collapse onto the same value. Reported at all because the three heap figures above are
-    // MALLOC_CAP_INTERNAL and say nothing about it (audit, 2026-07-26).
-    if (bridge.psramSizeBytes > 0) {
-        doc["psram_size_bytes"] = bridge.psramSizeBytes;
-        doc["psram_free_bytes"] = bridge.psramFreeBytes;
-    } else {
-        doc["psram_size_bytes"] = nullptr;
-        doc["psram_free_bytes"] = nullptr;
-    }
-    doc["reset_reason"]            = bridge.resetReason;
-    doc["ota_image_state"]         = bridge.otaImageState;
-
-    // Absent, not zero, when no dump is stored: task "" at PC 0 is not a fact about anything,
-    // and `coredump_present` false already carries the whole message. The partition and the
-    // IDF support have existed since the OTA layout was designed; nothing read them until now.
-    doc["coredump_present"] = bridge.coredumpPresent;
-    if (bridge.coredumpPresent && !bridge.coredumpTask.empty()) {
-        doc["coredump_task"] = bridge.coredumpTask;  // std::string: copied into the document
-    } else {
-        doc["coredump_task"] = nullptr;
-    }
-    if (bridge.coredumpPresent) {
-        doc["coredump_pc"] = bridge.coredumpPc;
-    } else {
-        doc["coredump_pc"] = nullptr;
-    }
-    doc["wifi_connected"]          = bridge.wifiConnected;
-    if (bridge.wifiConnected) {
-        doc["wifi_rssi_dbm"] = bridge.wifiRssiDbm;
-    } else {
-        doc["wifi_rssi_dbm"] = nullptr;
-    }
-    doc["mqtt_connected"]                  = bridge.mqttConnected;
-    json_util::addClockFields(doc.as<JsonObject>(), bridge);
-    doc["poll_success_total"]              = d.pollSuccessTotal;
-    doc["poll_failure_total"]              = d.pollFailureTotal;
-    doc["consecutive_poll_failures"]       = d.consecutivePollFailures;
-    doc["checksum_error_total"]            = d.checksumErrorTotal;
-    doc["rs485_timeout_total"]             = d.rs485TimeoutTotal;
-    doc["invalid_frame_total"]             = d.invalidFrameTotal;
-    doc["wifi_reconnect_total"]            = d.wifiReconnectTotal;
-    doc["mqtt_reconnect_total"]            = d.mqttReconnectTotal;
-    doc["modbus_client_connections_total"] = d.modbusClientConnections;
-    doc["rest_requests_total"]             = d.restRequestTotal;
-    doc["mqtt_publish_failure_total"] = d.mqttPublishFailureTotal;
-    doc["last_successful_poll_ms"]         = d.lastSuccessfulPollMs;
-    // Null until the first sample, not 0: a monitoring rule on "stack headroom == 0" must
-    // not fire during the first seconds after boot.
-    if (d.rs485StackFreeBytes > 0) {
-        doc["rs485_stack_free_bytes"] = d.rs485StackFreeBytes;
-    } else {
-        doc["rs485_stack_free_bytes"] = nullptr;
-    }
-    if (d.loopStackFreeBytes > 0) {
-        doc["loop_stack_free_bytes"] = d.loopStackFreeBytes;
-    } else {
-        doc["loop_stack_free_bytes"] = nullptr;
-    }
-    doc["last_error"]                      = d.lastError;
+    json_util::writeDiagnostics(doc.to<JsonObject>(), d, bridge, bridge.boardName,
+                                bridge.mqttConnected);
     return finish(doc, out, maxBytes);
 }
 

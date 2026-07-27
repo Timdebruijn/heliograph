@@ -7,6 +7,7 @@
 
 #include <ArduinoJson.h>
 
+#include <optional>
 #include <string>
 
 #include "json_limits.h"
@@ -15,6 +16,7 @@
 #include "device/capability.h"
 #include "device/command.h"
 #include "device/device_state.h"
+#include "diagnostics/diagnostics.h"
 #include "diagnostics/log_timestamp.h"
 
 namespace heliograph::json_util {
@@ -106,6 +108,100 @@ inline void writeDeviceStatus(JsonObject obj, const DeviceState& state) {
     } else {
         obj["error_code"] = nullptr;
     }
+}
+
+/// Everything both diagnostics payloads report, written once.
+///
+/// They were a copy of each other -- same fields, same order, same null-not-zero rules, right
+/// down to a word-for-word comment. That is the failure mode this header exists to prevent: a
+/// field added to one output and silently missing from the other, with nothing failing to say
+/// so. It escaped the earlier consolidation because the two builders differ in TWO fields, and
+/// two differences were enough to make them look like separate functions.
+///
+/// Those two differences are deliberate and are preserved exactly, which is why they are
+/// parameters rather than something this function decides:
+///   - `boardName` empty omits `board`. MQTT already carries the board as the Home Assistant
+///     device model, so repeating it on the diagnostics topic says nothing new.
+///   - `mqttConnected` unset omits `mqtt_connected`. On a payload that arrived over MQTT the
+///     field can only ever say true; it is a fact worth reporting over REST and a tautology
+///     over MQTT.
+///
+/// Field order is preserved for both callers, so no consumer sees a changed document.
+inline void writeDiagnostics(JsonObject doc, const DiagnosticsSnapshot& d,
+                             const BridgeInfo& bridge, const std::string& boardName,
+                             std::optional<bool> mqttConnected) {
+    doc["uptime_seconds"]   = bridge.uptimeSeconds;
+    doc["firmware_version"] = bridge.firmwareVersion;
+    addOptional(doc, "board", boardName);
+    doc["free_heap_bytes"]         = bridge.freeHeapBytes;
+    doc["minimum_free_heap_bytes"] = bridge.minFreeHeapBytes;
+    doc["max_alloc_heap_bytes"]    = bridge.maxAllocHeapBytes;
+
+    // Absent, not zero, when the board has none -- and 0 is a legitimate reading for
+    // psram_free_bytes on a board that HAS PSRAM and has exhausted it, so the two must not
+    // collapse onto the same value. Reported at all because the three heap figures above are
+    // MALLOC_CAP_INTERNAL and say nothing about it (audit, 2026-07-26).
+    if (bridge.psramSizeBytes > 0) {
+        doc["psram_size_bytes"] = bridge.psramSizeBytes;
+        doc["psram_free_bytes"] = bridge.psramFreeBytes;
+    } else {
+        doc["psram_size_bytes"] = nullptr;
+        doc["psram_free_bytes"] = nullptr;
+    }
+    doc["reset_reason"]    = bridge.resetReason;
+    doc["ota_image_state"] = bridge.otaImageState;
+
+    // Absent, not zero, when no dump is stored: task "" at PC 0 is not a fact about anything,
+    // and `coredump_present` false already carries the whole message.
+    doc["coredump_present"] = bridge.coredumpPresent;
+    if (bridge.coredumpPresent && !bridge.coredumpTask.empty()) {
+        doc["coredump_task"] = bridge.coredumpTask;  // std::string: copied into the document
+    } else {
+        doc["coredump_task"] = nullptr;
+    }
+    if (bridge.coredumpPresent) {
+        doc["coredump_pc"] = bridge.coredumpPc;
+    } else {
+        doc["coredump_pc"] = nullptr;
+    }
+    doc["wifi_connected"] = bridge.wifiConnected;
+    // Only meaningful while associated; 0 dBm would look like an excellent signal.
+    if (bridge.wifiConnected) {
+        doc["wifi_rssi_dbm"] = bridge.wifiRssiDbm;
+    } else {
+        doc["wifi_rssi_dbm"] = nullptr;
+    }
+    if (mqttConnected.has_value()) {
+        doc["mqtt_connected"] = *mqttConnected;
+    }
+    addClockFields(doc, bridge);
+
+    doc["poll_success_total"]              = d.pollSuccessTotal;
+    doc["poll_failure_total"]              = d.pollFailureTotal;
+    doc["consecutive_poll_failures"]       = d.consecutivePollFailures;
+    doc["checksum_error_total"]            = d.checksumErrorTotal;
+    doc["rs485_timeout_total"]             = d.rs485TimeoutTotal;
+    doc["invalid_frame_total"]             = d.invalidFrameTotal;
+    doc["wifi_reconnect_total"]            = d.wifiReconnectTotal;
+    doc["mqtt_reconnect_total"]            = d.mqttReconnectTotal;
+    doc["modbus_client_connections_total"] = d.modbusClientConnections;
+    doc["rest_requests_total"]             = d.restRequestTotal;
+    doc["mqtt_publish_failure_total"]      = d.mqttPublishFailureTotal;
+    doc["last_successful_poll_ms"]         = d.lastSuccessfulPollMs;
+    // Null until the first sample, not 0: a monitoring rule on "stack headroom == 0" must not
+    // fire during the first seconds after boot.
+    if (d.rs485StackFreeBytes > 0) {
+        doc["rs485_stack_free_bytes"] = d.rs485StackFreeBytes;
+    } else {
+        doc["rs485_stack_free_bytes"] = nullptr;
+    }
+    if (d.loopStackFreeBytes > 0) {
+        doc["loop_stack_free_bytes"] = d.loopStackFreeBytes;
+    } else {
+        doc["loop_stack_free_bytes"] = nullptr;
+    }
+    // Set from pollResultName() and friends only. Never carries payload bytes or config.
+    doc["last_error"] = d.lastError;
 }
 
 /// The capabilities document, byte-for-byte the same over MQTT and REST.
