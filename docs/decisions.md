@@ -159,3 +159,40 @@ Environments: one per board (`waveshare-rs485-can`, `waveshare-relay-1ch`, `wave
 
 The partition table gets **two app partitions** (`ota_0`/`ota_1`) plus `otadata`, which
 fits comfortably on 16 MB. A failed OTA thereby falls back to the previous partition.
+
+## Decision 4: the tag and the firmware must agree, and something must check it
+
+A release has **two** version numbers. The workflow takes its number from the tag name
+(`GITHUB_REF_NAME`); the firmware reports the `#define`s in `src/main.cpp`, and that is what
+reaches `/api/v1/status`, the Modbus identity block and the Home Assistant device.
+
+Nothing compared them. Tag without bumping and every bridge reports the old number while
+`latest.json` advertises the new one — and the dashboard's update check compares exactly those
+two, so it offers the same update forever, to everyone, until somebody notices by hand.
+
+This was a manual step through 0.18.0, 0.18.1 and 0.18.2, and went right three times only
+because someone remembered each time. That is not a property to rely on.
+
+`tools/check_version.sh` now runs as the **first** step of the release workflow, before
+anything is installed: it needs only the checkout and fails in under a second, because
+everything after it is wasted work when the two numbers disagree.
+
+It is also the pre-flight check to run by hand before creating a tag:
+
+```
+tools/check_version.sh            # what does the firmware declare?
+tools/check_version.sh v0.19.0    # would this tag be honest?
+```
+
+Two deliberate properties:
+
+- **A pre-release keeps the version of the release it leads to.** `v0.19.0-rc1` matches a
+  source declaring `0.19.0`; requiring the label in the source would mean a commit per
+  release candidate.
+- **Wired into the wrong workflow, it does nothing rather than breaking.** In ordinary CI
+  `GITHUB_REF_NAME` holds a branch name, and a check that read `main` as a version would fail
+  every pull request for a reason unrelated to the change. An explicit argument is always
+  checked; the environment variable only when it looks like a release tag.
+
+The release procedure is therefore: bump the defines, merge that, **then** tag the merge
+commit. Never move a tag onto a build that reports a different number.
