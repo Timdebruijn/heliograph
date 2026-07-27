@@ -193,6 +193,14 @@ void WifiManager::attemptConnect() {
     ++attempt_;
     attemptInFlight_  = true;
     attemptStartedMs_ = 0;  // set by loop() on the next tick
+    // Immediately before every begin(), not once at startup. Three paths reach an association:
+    // the first attempt, a back-off retry, and the return from the setup portal -- and that last
+    // one goes through stopPortal()'s WiFi.mode(WIFI_STA), which may rebuild the STA netif and
+    // take the addressing with it. Applying it once in begin() left that to chance, and the way
+    // it fails is a static bridge quietly coming back on DHCP at a different address. Here the
+    // invariant is simply "the addressing is in place before every begin()", with no transition
+    // to reason about. config() is idempotent, and on a reconnect there is no lease to disturb.
+    applyAddressing();
     WiFi.begin(config_.wifi.ssid.c_str(), config_.wifi.password.c_str());
 }
 
@@ -232,7 +240,6 @@ void WifiManager::begin(const Configuration& config) {
     // The mode() call above initialised the network stack; DHCP has not run yet -- the
     // one safe moment for pre-lease lwip configuration (see setNetworkStackReadyHook).
     fireStackReadyHook();
-    applyAddressing();
     state_ = ProvisioningState::Connecting;
     attemptConnect();
 }

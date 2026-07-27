@@ -437,8 +437,29 @@ static void test_an_unsynced_clock_produces_no_timestamp() {
     TEST_ASSERT_TRUE(isoUtcTimestamp(1000).empty());
 }
 
+/// A backup carries the addressing, so restoring one taken on another network would hand this
+/// bridge an address that cannot work here -- and the preview is what stands between the
+/// operator and that. It covers the new fields for free because they go through writeCommon,
+/// which is exactly the kind of "free" that stops being true when someone adds a field
+/// somewhere else. Pinned so it cannot quietly stop covering them.
+static void test_the_restore_preview_shows_an_address_change() {
+    Configuration before;
+    before.wifi.ssid = "thuis";
+    Configuration after = before;
+    after.wifi.ip       = "192.168.1.50";
+    after.wifi.gateway  = "192.168.1.1";
+    after.wifi.subnet   = "255.255.255.0";
+
+    std::vector<ConfigDiffEntry> diff;
+    TEST_ASSERT_TRUE(diffConfigurations(before, after, diff));
+    TEST_ASSERT_NOT_NULL_MESSAGE(find(diff, "wifi.ip"), "an address change must be previewed");
+    TEST_ASSERT_NOT_NULL(find(diff, "wifi.gateway"));
+    TEST_ASSERT_NOT_NULL(find(diff, "wifi.subnet"));
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_the_restore_preview_shows_an_address_change);
     RUN_TEST(test_round_trip_with_secrets_is_lossless);
     RUN_TEST(test_envelope_metadata_is_reported_back);
     RUN_TEST(test_backup_carries_every_stored_key);

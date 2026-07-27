@@ -1429,7 +1429,7 @@ async function renderConfig(){
     <div id="c_ipfields" class="${c.wifi.ip?'':'hide'}" style="margin-top:12px">
       ${txt('c_ip','IP address',c.wifi.ip,'This bridge, for example 192.168.1.50.')}
       ${txt('c_gw','Gateway',c.wifi.gateway,'Usually your router, and it must sit inside the same subnet as the address above.')}
-      ${txt('c_sn','Subnet mask',c.wifi.subnet||'255.255.255.0','255.255.255.0 unless your network says otherwise.')}
+      ${txt('c_sn','Subnet mask',c.wifi.subnet,'255.255.255.0 unless your network says otherwise.')}
       ${txt('c_dns1','DNS server',c.wifi.dns1,'Required as soon as anything here is configured by name — an NTP server or an MQTT broker. Without it the clock never syncs and nothing says so.')}
       ${txt('c_dns2','Second DNS server (optional)',c.wifi.dns2)}
       <div class="dim" style="font-size:12px;margin-top:8px"><b>Get this wrong and the bridge
