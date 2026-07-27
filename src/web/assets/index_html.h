@@ -81,7 +81,7 @@ dialog::backdrop{background:#000a}
 <span style="flex:1"></span>
 <!-- Subtle on purpose: a quiet link, not a banner. It appears only when a newer release
      actually exists, and clicking it goes to the card that can install it. -->
-<a id="updbadge" class="tag hide" href="#" onclick="return gotoUpdate()"
+<a id="updbadge" class="tag hide" href="#" onclick="gotoUpdate();return false"
    title="A newer firmware release is available">update available</a>
 <span id="ver" class="tag"></span></header>
 <nav>
@@ -1202,7 +1202,8 @@ function pick(o,path){return path.split('.').reduce((x,k)=>x&&x[k],o)}
 // side, with opposite intentions. That is where a wrong click comes from.
 
 async function renderBackup(){
-  const c=await (await fetch('/api/v1/config')).json();
+  // No config fetch: nothing on this tab renders a stored value. The secrets checkbox starts
+  // off every time on purpose -- it is a choice about THIS download, not a setting.
   const chk=(id,label,val)=>`<label style="display:flex;gap:8px;align-items:center;margin-top:12px">
     <input id="${id}" type="checkbox" style="width:auto" ${val?'checked':''}>
     <span style="color:var(--fg);font-size:14px">${label}</span></label>`;
@@ -2096,10 +2097,14 @@ async function checkForUpdate(manual){
   return {newer,latest:updLatest.version};
 }
 
-function gotoUpdate(){
+async function gotoUpdate(){
   goTab('sys');
-  setTimeout(()=>{const c=$('#updcard'); if(c)c.scrollIntoView({block:'center',behavior:'smooth'})},150);
-  return false;
+  // Awaited, not guessed at. The card does not exist until renderSystem() has fetched and
+  // written the tab, so the old fixed 150 ms was a race: on a slow first render the scroll
+  // found nothing and silently did nothing, which reads as a badge that does not work.
+  if(!$('#sysbox').innerHTML)await renderSystem();
+  const c=$('#updcard');
+  if(c)c.scrollIntoView({block:'center',behavior:'smooth'});
 }
 
 function updRender(){
