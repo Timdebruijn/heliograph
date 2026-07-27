@@ -209,11 +209,15 @@ h = fleetStrip([{...base,id:'b',ac_power_w:1200,battery_soc_pct:64,battery_power
 check(cols(h).includes('SOC'), 'SOC column missing for a hybrid');
 check(h.includes('\u2193 1500 W'), 'charging is not marked with a down arrow');
 check(h.includes('var(--bad)'), 'charging is not coloured');
+// The word left the cell but not the document. A screen reader announcing "down arrow 2450
+// watts" cannot answer "is it charging?", and the legend that answers it is elsewhere.
+check(h.includes('title="charging"'), 'the cell does not carry the word for assistive tech');
 check(h.includes('64 %'), 'state of charge not rendered');
 
 h = fleetStrip([{...base,id:'c',battery_soc_pct:20,battery_power_w:-800}]);
 check(h.includes('\u2191 800 W'), 'discharging is not marked with an up arrow');
 check(h.includes('var(--ok)'), 'discharging is not coloured');
+check(h.includes('title="discharging"'), 'the cell does not carry the word for assistive tech');
 check(!h.includes('-800'), 'a raw negative leaked into the cell');
 
 // The legend became load-bearing the moment the word came out of the cell: it is the only
