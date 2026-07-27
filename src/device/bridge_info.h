@@ -43,6 +43,15 @@ struct BridgeInfo {
 
     bool    wifiConnected  = false;
     int16_t wifiRssiDbm    = 0;
+    /// The address in use, and how it was obtained.
+    ///
+    /// Both, because they answer different questions. `ipAddress` is what the interface ended
+    /// up with; `staticIp` is what was asked for. On a bridge that was configured static and
+    /// fell back -- or whose static address was refused by the driver -- those disagree, and
+    /// that disagreement is the only visible sign of it. Reporting only the configuration would
+    /// state an intention as if it were a fact.
+    std::string ipAddress;
+    bool        staticIp = false;
     bool    mqttConnected  = false;
     bool    modbusListening = false;
     uint16_t modbusClients  = 0;
