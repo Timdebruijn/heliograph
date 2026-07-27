@@ -399,47 +399,68 @@ Our transport layer does it properly: read until the frame is complete (length f
 byte 8), with a response timeout of **1000 ms** and **3** retries. These values are set in the
 driver's `SerialProfile` and are configurable.
 
-## Several inverters on one bus — possible in theory, not implemented
+## Several inverters on one bus
 
-**Heliograph serves one EverSolar inverter per bridge.** A second configured device is refused
-at startup with a reason on the dashboard, rather than being started (#63). This is a limit of
-this driver, not of the protocol — and it is a real gap for anyone coming from
-eversolar-monitor, which does serve several inverters on one loop.
+**Supported, and untested against real hardware.** Nobody involved has two EverSolar inverters,
+so everything below is reasoned from the protocol and from the reference implementation, which
+does serve several inverters on one loop. Read the pitfalls before you wire a second one.
 
-The protocol supports it and the reference shows exactly how, so nothing here needs guessing.
-Read out of `eversolar.pl` (line numbers are that file's):
+### How to configure it
 
-| Behaviour | Where | Detail |
-|---|---|---|
-| Register **one** inverter per pass | `:599-645` | Its own comment: "register inverter that responds first". One offline query, one serial, one address, then `$next_inverter_address++` |
-| Discovery comes from the **cadence**, not a loop | `:1008`, `:1038` | Tight loop while no inverter is known; once a minute after that. Three inverters take about three minutes |
-| RE_REGISTER is a **bus** operation | `:822`, `:582-590` | Called once from `inverter_connect()`, which also resets the address counter to `0x10`. Broadcast 8 times, despite the comment saying 3 |
-| Inverters keyed by assigned address | `:632-643` | `%inverters` holds id string, serial and counters; the poll loop walks it |
+Give each inverter its own **assigned bus address**, counting up from 16 (`0x10`): the first
+device keeps the default, the second gets 17, and so on. The address is not stored in the
+inverter — it is handed out at registration and forgotten on power loss.
 
-Why the enumeration needs no arbitration: a registered inverter ignores the broadcast offline
-query, so each pass the next unregistered one answers. If two answer at once the serial number
-fails to parse, the pass yields nothing, and the next one tries again. The reference does not
-resolve collisions — it retries past them.
+### How the enumeration works, and why it needs no loop
 
-**What stops us adopting it today is not the protocol but the device model**: this project
-builds one driver instance per configured device, while the above needs one driver that owns
-the bus and yields several devices. That is the piece to design.
+A registered inverter **ignores the broadcast offline query**. So when the second driver
+instance sends that query, the first inverter stays silent and the next unregistered one
+answers. Instances start sequentially from the configuration, and that ordering is the whole
+mechanism.
 
-Three things any implementation must not break for the installs that exist today, all of which
-have exactly one inverter:
+The reference does the same thing from a timer instead of from a config list: `register_inverter()`
+handles exactly one inverter per pass — its own comment says *"register inverter that responds
+first"* (`eversolar.pl:599-645`) — and is called once a minute (`:1038`). We call it once per
+configured device instead.
 
-- **The device id stays the serial number.** Keying on the assigned address — as the reference
-  does — would change the id of every existing install, orphaning its retained MQTT topics and
-  re-creating its Home Assistant entities. The address is volatile, reset to `0x10` on every
-  reconnect, so two inverters could even swap identities between sessions.
-- **RE_REGISTER stays available as recovery**, not only at bus startup. An inverter holding an
-  address from an earlier session ignores the offline query forever; only the broadcast breaks
-  that deadlock. Observed live, and pinned by a test.
-- **A quiet bus stays quiet.** The reference re-queries every minute forever, even with nothing
-  left to find. On a one-inverter bridge that is new traffic where there is none today.
+**RE_REGISTER is a bus operation, not a device one.** It tells every inverter on the line to
+forget its address, so only the instance holding the first address (16) broadcasts it. The
+reference is the same: one call, from `inverter_connect()` (`:822`). An unconditional broadcast
+per instance is what made a second device knock out the first (#63).
 
-Untested against two inverters — nobody involved has two. See #82, which stays open for the
-first report from someone who does.
+### Pitfalls
+
+**A cold start has both inverters answering at once.** After RE_REGISTER nothing on the line has
+an address, so the first offline query is answered by every inverter simultaneously — on half
+duplex. Our parser rejects the result (checksum, header and destination are all checked), and the
+poll retries. The protocol defines no backoff, so if two inverters answer with identical timing
+this could in principle repeat. The reference has exactly the same exposure and works in the
+field, which suggests real devices differ enough in response latency for the frames to queue
+rather than overlap; `flushInput()` before each request discards the surplus. **This is the one
+behaviour that genuinely needs two inverters to confirm.**
+
+**Which config row gets which inverter is not fixed across reboots.** Whichever answers first
+gets address 16. Device ids are derived from the serial number, so they stay stable per inverter
+— but anything keyed on the *configuration slot* can swap. The Modbus TCP unit ids are keyed
+that way. If you poll those, do not assume unit 1 is the same physical inverter after a restart.
+
+**Two devices sharing one address will not work**, and will look like an intermittent inverter
+rather than a configuration mistake. The settings page warns when two configured devices share
+an address, which is why the option is named the same as the sibling drivers'.
+
+**Discovery still assigns 16.** The wizard configures one device. A second inverter is added by
+hand afterwards, with its own address.
+
+**Recovery still needs the broadcast.** An inverter holding an address from an earlier session
+ignores the offline query forever; only RE_REGISTER breaks that deadlock. That is why the first
+instance still sends it on every start, and why a single-inverter bridge behaves exactly as it
+did before this change.
+
+### If you have two
+
+Please report what happens on #82 — including "it did not work". The startup logs and the
+`checksum_error_total` / `invalid_frame_total` counters say immediately whether the cold-start
+collision above is real.
 
 ## What we still don't know
 

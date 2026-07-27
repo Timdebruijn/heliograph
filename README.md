@@ -108,7 +108,7 @@ picture:
 
 | Inverter family | Connection | Status |
 |---|---|---|
-| EverSolar / Zeversolar legacy (TL series) | RS485 | **Beta** — running in production, in a multi-day soak toward Stable. **One inverter per bridge**: the protocol supports several on one loop and eversolar-monitor does it, but this driver does not yet — see [the notes](docs/eversolar-protocol.md#several-inverters-on-one-bus--possible-in-theory-not-implemented) and [#82](https://github.com/Timdebruijn/heliograph/issues/82) |
+| EverSolar / Zeversolar legacy (TL series) | RS485 | **Beta** — running in production, in a multi-day soak toward Stable. Several inverters on one loop are supported but **not yet confirmed on hardware** — read [the pitfalls](docs/eversolar-protocol.md#several-inverters-on-one-bus) first, and report what happens on [#82](https://github.com/Timdebruijn/heliograph/issues/82) |
 | Growatt SPH hybrid (3–6 kW) | Modbus RTU over RS485 | **Experimental** — register map transcribed from documentation, not yet confirmed against real hardware |
 | Growatt MIC TL-X (0.6–3.3 kW, single phase) | Modbus RTU over RS485 | **Experimental** — map cross-checked against two independent sources that agree, not yet confirmed against real hardware; see [docs/growatt-mic-tl-x-protocol.md](docs/growatt-mic-tl-x-protocol.md) |
 | SolaX X1 series (X1 Mini G1/G2/G3) | RS485 | **Experimental** — the first attempt on real hardware (an X1-Mini-G1) returned no data at all. Read [docs/solax-x1-protocol.md](docs/solax-x1-protocol.md) before you buy or wire anything |
