@@ -573,6 +573,53 @@ static void test_the_published_limit_comes_from_the_device_not_from_the_last_wri
     TEST_ASSERT_EQUAL_DOUBLE(0.0, on->value);
 }
 
+/// A device that advertises model 123 on the chain and then will not serve it must cost ONE
+/// failed transaction, not one per poll forever.
+///
+/// The failure this prevents is quiet: the inverter read still succeeds, so every poll reports
+/// Ok while a full response timeout is added to each cycle and each failure is tallied into the
+/// bus error counters the alerting rules watch. A healthy bus is made to look like a degrading
+/// one, by a control surface nobody is using.
+static void test_a_controls_block_that_never_answers_is_given_up_on() {
+    Rig      r;
+    uint16_t at = r.device.placeMarker();
+    at = r.device.addModel(at, sunspec::kModelInverterThreePhase,
+                           FakeSunspecDevice::asPayload(FakeSunspecDevice::blankInverterPayload()));
+    // Advertised on the chain at its full length, but the payload registers are absent, so the
+    // device answers the read with "illegal data address" -- exactly what a slave does for a
+    // model it lists and does not implement.
+    const uint16_t controlsAt = at;
+    at = r.device.addModel(at, sunspec::kModelControls,
+                           FakeSunspecDevice::asPayload(FakeSunspecDevice::blankControlsPayload()));
+    // From the PAYLOAD onwards only. The model id and its length have to stay, or the chain walk
+    // stops at this block and never records it -- which would make this a test about a truncated
+    // chain, and it would pass whether or not the retry is bounded.
+    for (uint16_t i = 2; i < sunspec::controls::kMinRegisters; ++i) {
+        r.device.registers.erase(static_cast<uint16_t>(controlsAt + i));
+    }
+    r.device.terminate(at);
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState first;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(first));
+    const uint32_t afterFirst = r.device.reads;
+
+    // The ABSOLUTE cost of a steady-state poll, not a comparison between two later polls:
+    // consecutive polls cost the same whether the block is retried forever or given up on, so
+    // comparing them proves nothing. One transaction is the inverter model. Two would be the
+    // inverter model plus another doomed attempt at the controls.
+    DeviceState second;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(second));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, r.device.reads - afterFirst,
+                                     "the unreadable controls block is still being retried");
+
+    DeviceState third;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(third));
+    TEST_ASSERT_EQUAL_UINT32(2, r.device.reads - afterFirst);
+    TEST_ASSERT_FALSE(d.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
+}
+
 /// A device carrying model 123 with no usable scale factor can be read but not written: the
 /// percentage cannot be encoded, so offering the control would be offering a guess.
 static void test_a_controls_block_without_a_scale_factor_grants_no_limit() {
@@ -625,5 +672,6 @@ void run_sunspec_driver() {
     RUN_TEST(test_a_refused_write_is_reported_as_a_refusal);
     RUN_TEST(test_a_write_whose_echo_disagrees_is_not_success);
     RUN_TEST(test_the_published_limit_comes_from_the_device_not_from_the_last_write);
+    RUN_TEST(test_a_controls_block_that_never_answers_is_given_up_on);
     RUN_TEST(test_a_controls_block_without_a_scale_factor_grants_no_limit);
 }

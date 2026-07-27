@@ -29,10 +29,11 @@ modbus::ReadOutcome SunspecDriver::read(uint16_t address, uint16_t count, uint16
     const auto outcome = modbus::readRegisters(*transport_, options_.unitId,
                                                modbus::kReadHoldingRegisters, address, count, out,
                                                capacity, timing);
-    // Every read on the wire passes through here. Note that a steady-state poll is ONE
-    // transaction: the chain walk is gated on walked_ and runs once per session, and model 103
-    // fits inside a single chunk. The dozen-transaction case is the walk itself, where only the
-    // read that stopped it ever reached the old poll-verdict counter.
+    // Every read on the wire passes through here. A steady-state poll is ONE transaction on a
+    // device without model 123 and TWO on a device with it: the chain walk is gated on walked_
+    // and runs once per session, and model 103 and model 123 each fit inside a single chunk.
+    // The dozen-transaction case is the walk itself, where only the read that stopped it ever
+    // reached the old poll-verdict counter.
     tallyModbusRead(busErrors_, outcome.status);
     return outcome;
 }
@@ -381,17 +382,31 @@ bool SunspecDriver::refreshControls() {
     // Best-effort, like the identity read: a controls block that does not answer must not fail
     // a poll whose inverter readings arrived intact. It costs the control surface for this
     // round, which the absent measurement already says.
-    if (!readModel(*controlsEntry_, regs, ignored)) {
-        return false;
-    }
+    const bool ok = readModel(*controlsEntry_, regs, ignored);
     ControlsReadings fresh;
-    if (!decodeControls(regs.data(), regs.size(), fresh)) {
-        return false;
+    if (ok && decodeControls(regs.data(), regs.size(), fresh)) {
+        controls_     = fresh;
+        controlsRead_ = true;
+        return true;
     }
-    controls_     = fresh;
-    controlsRead_ = true;
-    return true;
+
+    // Give up on a device that advertises the model and has NEVER served it -- but keep
+    // retrying one that has.
+    //
+    // Without this, such a device costs a failed transaction on every poll, forever: the full
+    // response timeout added to each cycle, and every one of those failures tallied into the
+    // bus error counters that the alerting rules watch. The inverter read still succeeds, so
+    // the poll reports Ok while the counters climb -- a healthy bus made to look like a
+    // degrading one, by a control surface nobody is using. A device that has answered before
+    // is a different case: that is a real control surface and a glitch is worth riding out.
+    if (!controlsRead_) {
+        log::warn("SUNSPEC model 123 at %u advertised but unreadable -- controls disabled",
+                  controlsEntry_->address);
+        controlsEntry_ = nullptr;
+    }
+    return false;
 }
+
 
 InverterCapabilities SunspecDriver::capabilities() const {
     // Declared from what the decoder can actually produce, not from what SunSpec defines:
