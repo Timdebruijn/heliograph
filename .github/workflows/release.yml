@@ -8,7 +8,7 @@
 # downloads redirect to a host that sends no CORS headers, and ESP Web Tools
 # fetches the image with fetch(), which that would break.
 #
-# THREE JOBS, NOT ONE, since 0.16.1. The boards used to be built one after another inside a
+# THREE JOBS, NOT ONE (PR #67). The boards used to be built one after another inside a
 # single job: 161 s of the ~296 s a release took, more than half of it spent waiting for one
 # compile to finish so an identical compile could start. They now run as a matrix, and the
 # checks moved into their own job because they need no ESP32 toolchain and so have no business
