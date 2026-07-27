@@ -50,6 +50,32 @@ static void test_begin_configures_the_only_known_profile() {
     TEST_ASSERT_EQUAL_UINT8(1, r.transport.profile().stopBits);
 }
 
+// The exact shape a bridge has after an OTA update from a firmware that predates the "address"
+// option: the key is simply not in the stored configuration. This is the case the whole
+// single-inverter upgrade path rests on, and until now nothing asserted it -- the other tests
+// all construct EversolarOptions directly and so never exercise optionsFrom() at all.
+//
+// Note WHICH branch answers it. numericOption() does not fail on an absent key: optionOr()
+// falls back to the option's declared default ("16"), so the value arrives through the success
+// path. A reviewer reading the else branch would conclude otherwise, which is why this is
+// pinned rather than left to inspection.
+static void test_a_config_without_the_address_option_still_gets_the_first_address() {
+    const heliograph::DriverOptions stored;  // exactly what a pre-0.18 bridge has
+    const EversolarOptions          options = optionsFrom(stored);
+    TEST_ASSERT_EQUAL_UINT8(kFirstInverterAddress, options.assignedAddress);
+}
+
+// And a stored value the descriptor would refuse must not leave the driver at address 0, which
+// is the PMU broadcast address -- it would answer for every inverter on the line.
+static void test_an_out_of_range_stored_address_falls_back_rather_than_to_zero() {
+    heliograph::DriverOptions stored;
+    stored["address"] = "999";  // above the declared maximum of 254
+    TEST_ASSERT_EQUAL_UINT8(kFirstInverterAddress, optionsFrom(stored).assignedAddress);
+
+    stored["address"] = "not a number";
+    TEST_ASSERT_EQUAL_UINT8(kFirstInverterAddress, optionsFrom(stored).assignedAddress);
+}
+
 static void test_begin_broadcasts_re_register() {
     Rig r;
     r.begin();
@@ -793,6 +819,8 @@ static void test_snapshots_are_immutable_and_independent() {
 
 void run_eversolar_driver() {
     RUN_TEST(test_begin_configures_the_only_known_profile);
+    RUN_TEST(test_a_config_without_the_address_option_still_gets_the_first_address);
+    RUN_TEST(test_an_out_of_range_stored_address_falls_back_rather_than_to_zero);
     RUN_TEST(test_begin_broadcasts_re_register);
     RUN_TEST(test_a_second_instance_leaves_the_first_inverter_registered);
     RUN_TEST(test_the_first_address_still_broadcasts_re_register);

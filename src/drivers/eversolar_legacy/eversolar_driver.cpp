@@ -30,14 +30,20 @@ EversolarOptions optionsFrom(const heliograph::DriverOptions& values) {
     } else {
         out.layout = LayoutSelection::Auto;
     }
+    // An install that predates this option has no "address" key stored, and that case is
+    // handled by the TRUE branch, not the false one: numericOption falls back to the option's
+    // DECLARED default when the key is absent (optionOr in driver_descriptor.h), and that
+    // default is "16" -- kFirstInverterAddress. So a single-inverter bridge upgrading from an
+    // older firmware keeps handing out 0x10 exactly as before, and keeps sending the
+    // RE_REGISTER that only the holder of that address sends.
+    //
+    // The else below is therefore reached only when the descriptor and this code disagree --
+    // no such option, not numeric, or a stored value outside the declared range. Restating the
+    // same default there is deliberate: this driver must never end up with address 0.
     long addr = 0;
     if (eversolar::descriptor().numericOption(values, "address", addr)) {
         out.assignedAddress = static_cast<uint8_t>(addr);
     } else {
-        // Not an error: the option is absent on every install that predates it, and its
-        // default IS kFirstInverterAddress -- so a single-inverter bridge keeps handing out
-        // 0x10 exactly as before, and keeps sending the RE_REGISTER that only the holder of
-        // that address sends.
         out.assignedAddress = kFirstInverterAddress;
     }
     return out;
