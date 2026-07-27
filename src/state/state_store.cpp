@@ -2,6 +2,9 @@
 
 #include "state_store.h"
 
+#include <algorithm>
+#include <utility>
+
 namespace heliograph {
 
 StateStore::StateStore() : current_(std::make_shared<const DeviceState>()) {}
@@ -17,12 +20,22 @@ StateHandle StateStore::snapshot() const {
     return current_;
 }
 
+const DeviceManager::Entry* DeviceManager::find(const DeviceId& id) const {
+    const auto it = std::find_if(entries_.begin(), entries_.end(),
+                                 [&id](const Entry& e) { return e.id == id; });
+    return it == entries_.end() ? nullptr : &*it;
+}
+
+// The const overload does the work; this one casts its result back. The object is genuinely
+// non-const on this path, so removing the const that was added a line ago is defined.
+DeviceManager::Entry* DeviceManager::find(const DeviceId& id) {
+    return const_cast<Entry*>(std::as_const(*this).find(id));
+}
+
 StateStore* DeviceManager::add(const DeviceId& id) {
     std::lock_guard<std::mutex> lock(m_);
-    for (auto& e : entries_) {
-        if (e.id == id) {
-            return e.store.get();
-        }
+    if (Entry* existing = find(id)) {
+        return existing->store.get();
     }
     if (entries_.size() >= kMaxActiveDevices) {
         return nullptr;
@@ -43,32 +56,19 @@ std::vector<DeviceId> DeviceManager::devices() const {
 
 StateHandle DeviceManager::state(const DeviceId& id) const {
     std::lock_guard<std::mutex> lock(m_);
-    for (const auto& e : entries_) {
-        if (e.id == id) {
-            return e.store->snapshot();
-        }
-    }
-    return nullptr;
+    const Entry* e = find(id);
+    return e == nullptr ? nullptr : e->store->snapshot();
 }
 
 StateStore* DeviceManager::store(const DeviceId& id) {
     std::lock_guard<std::mutex> lock(m_);
-    for (auto& e : entries_) {
-        if (e.id == id) {
-            return e.store.get();
-        }
-    }
-    return nullptr;
+    Entry* e = find(id);
+    return e == nullptr ? nullptr : e->store.get();
 }
 
 bool DeviceManager::contains(const DeviceId& id) const {
     std::lock_guard<std::mutex> lock(m_);
-    for (const auto& e : entries_) {
-        if (e.id == id) {
-            return true;
-        }
-    }
-    return false;
+    return find(id) != nullptr;
 }
 
 size_t DeviceManager::size() const {

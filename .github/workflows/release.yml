@@ -152,8 +152,15 @@ jobs:
 
       # No PlatformIO and no toolchain here: this job only moves finished binaries around.
       # Each artifact lands in fw/<artifact-name>/, so the images are at fw/fw-<board>/.
+      #
+      # v8, and the reason is the one behaviour change in it: a download whose digest does not
+      # match what the server recorded now FAILS the job instead of logging a warning. For a
+      # workflow whose whole output is firmware other people flash, a silently corrupted
+      # transfer is the worst outcome available -- worse than no release. The hash in
+      # latest.json is computed further down from these same files, so without this check a
+      # mangled image would simply be hashed faithfully and published as correct.
       - name: Download images
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: fw
 

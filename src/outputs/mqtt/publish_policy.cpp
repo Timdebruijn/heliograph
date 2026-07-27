@@ -2,6 +2,7 @@
 
 #include "publish_policy.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace heliograph::mqtt {
@@ -43,13 +44,9 @@ bool PublishThrottle::shouldPublish(const DeviceState& state, uint64_t nowMs) {
         if (!m.supported) {
             continue;
         }
-        const Sample* previous = nullptr;
-        for (const auto& s : lastPublished_) {
-            if (s.id == m.id) {
-                previous = &s;
-                break;
-            }
-        }
+        const auto    it       = std::find_if(lastPublished_.begin(), lastPublished_.end(),
+                                              [&m](const Sample& s) { return s.id == m.id; });
+        const Sample* previous = it == lastPublished_.end() ? nullptr : &*it;
         if (previous == nullptr) {
             return true;  // a channel appeared, e.g. a second MPPT was detected
         }

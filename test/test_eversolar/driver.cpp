@@ -318,6 +318,11 @@ static void test_reply_of_wrong_length_is_an_invalid_frame() {
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::InvalidFrame, r.poll(state));
     TEST_ASSERT_NULL(state.measurements.find(measurement_id::kAcPowerTotal));
+    // The counter too, not just the verdict. busErrors() copies three same-typed fields out of
+    // the driver's tally, and the other two were already pinned by real-driver tests -- the
+    // checksum one here, the timeout one through DeviceContext's diagnostics. This was the
+    // field a wrong copy could have swapped with nothing noticing.
+    TEST_ASSERT_EQUAL_UINT32(1, r.driver.busErrors().invalidFrames);
 }
 
 static void test_a_run_of_timeouts_keeps_the_registration_and_never_broadcasts() {

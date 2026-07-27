@@ -11,11 +11,6 @@
 namespace heliograph::solax {
 namespace {
 
-constexpr uint32_t kResponseTimeoutMs = 1000;
-/// Wall-clock ceiling on one transact() exchange; same reasoning as the sibling PMU driver.
-constexpr uint32_t kTransactionDeadlineMs = 3000;
-constexpr size_t   kRxBufferSize          = kMaxFrameSize + 16;
-constexpr uint32_t kBusLockTimeoutMs      = 2000;
 /// Consecutive status-report timeouts before poll() runs the non-disruptive recovery probe.
 /// One is a dropped frame; a run means the inverter dropped out (e.g. powered down at dusk).
 constexpr uint8_t kTimeoutsBeforeRecoveryProbe = 3;
@@ -89,11 +84,6 @@ SolaxDriver::TransactResult SolaxDriver::transact(Address source, CommandCode co
         return TransactResult::TransportError;
     }
 
-    TransportLock lock(*transport_, kBusLockTimeoutMs);
-    if (!lock.held()) {
-        return TransactResult::TransportError;
-    }
-
     uint8_t request[kMaxFrameSize];
     size_t  requestLen = 0;
     if (buildRequestFrom(source, command, destination, data, dataLen, request, sizeof(request),
@@ -101,117 +91,9 @@ SolaxDriver::TransactResult SolaxDriver::transact(Address source, CommandCode co
         return TransactResult::TransportError;
     }
 
-    transport_->flushInput();
-    if (transport_->write(request, requestLen) != requestLen) {
-        log::trace("RS485 tx failed: %u byte(s) not fully written",
-                   static_cast<unsigned>(requestLen));
-        return TransactResult::TransportError;
-    }
-
-    uint8_t rx[kRxBufferSize];
-    size_t  have             = 0;
-    bool    sawChecksumError = false;
-    size_t  received         = 0;
-    size_t  rejected         = 0;
-    uint8_t rejSrc[2]        = {0, 0};
-    uint8_t rejCtrl = 0, rejFn = 0;
-    const auto traceOutcome = [&](const char* outcome) {
-        if (!log::enabled(LogLevel::Trace)) {
-            return;
-        }
-        if (rejected > 0) {
-            log::trace("SOLAX %s: %u byte(s), %u frame(s) rejected, last from %02X %02X ctrl %02X fn %02X",
-                       outcome, static_cast<unsigned>(received), static_cast<unsigned>(rejected),
-                       rejSrc[0], rejSrc[1], rejCtrl, rejFn);
-        } else {
-            log::trace("SOLAX %s: %u byte(s) received", outcome, static_cast<unsigned>(received));
-        }
-        if (received > 0) {
-            log::traceHex("SOLAX RX", rx, have);
-        }
-    };
-
-    const uint64_t deadline = transport_->nowMs() + kTransactionDeadlineMs;
-
-    for (;;) {
-        if (transport_->nowMs() >= deadline) {
-            ++timeouts_;
-            traceOutcome("transaction deadline exceeded");
-            return TransactResult::Timeout;
-        }
-
-        Frame      frame;
-        const auto parsed = parseFrame(rx, have, frame);
-
-        if (parsed == ParseResult::Ok) {
-            auto valid = validateResponse(frame, command, expectedSource);
-            if (valid == ParseResult::WrongSource && altSource != nullptr) {
-                valid = validateResponse(frame, command, *altSource);
-            }
-            if (valid == ParseResult::Ok) {
-                if (frame.dataLength > payloadCapacity) {
-                    // Unreachable today (every caller passes a full-size buffer), but this is
-                    // an InvalidFrame return and every other one tallies. Left untallied it
-                    // would be a return path that silently reports nothing the moment some
-                    // future caller passes a smaller buffer.
-                    ++invalidFrames_;
-                    traceOutcome("payload too large");
-                    return TransactResult::InvalidFrame;
-                }
-                if (frame.dataLength > 0) {
-                    std::memcpy(payloadOut, frame.data, frame.dataLength);
-                }
-                payloadLen = frame.dataLength;
-                traceOutcome("ok");
-                return TransactResult::Ok;
-            }
-            // A well-formed frame that is not ours (our own echo, or another master's
-            // traffic). Drop it, record it, keep looking.
-            ++rejected;
-            rejSrc[0] = frame.source.high;
-            rejSrc[1] = frame.source.low;
-            rejCtrl   = frame.control;
-            rejFn     = frame.function;
-            std::memmove(rx, rx + frame.frameLength, have - frame.frameLength);
-            have -= frame.frameLength;
-            continue;
-        }
-
-        if (parsed == ParseResult::BadHeader) {
-            std::memmove(rx, rx + 1, have - 1);
-            --have;
-            continue;
-        }
-
-        if (parsed == ParseResult::BadChecksum) {
-            sawChecksumError = true;
-            ++checksumErrors_;
-            const size_t skip = frame.frameLength > 0 ? frame.frameLength : 1;
-            const size_t n    = skip < have ? skip : have;
-            std::memmove(rx, rx + n, have - n);
-            have -= n;
-            continue;
-        }
-
-        // Incomplete: read more.
-        if (have >= sizeof(rx)) {
-            ++invalidFrames_;
-            traceOutcome("buffer full without a valid frame");
-            return TransactResult::InvalidFrame;
-        }
-        const size_t n = transport_->read(rx + have, sizeof(rx) - have, kResponseTimeoutMs);
-        if (n == 0) {
-            if (sawChecksumError) {
-                traceOutcome("checksum error");
-                return TransactResult::ChecksumError;
-            }
-            ++timeouts_;
-            traceOutcome(received > 0 ? "timeout after partial/rejected data" : "silent");
-            return TransactResult::Timeout;
-        }
-        have += n;
-        received += n;
-    }
+    const pmu::Exchange exchange{request, requestLen, command, expectedSource, altSource};
+    return pmu::transact(*transport_, exchange, payloadOut, payloadCapacity, payloadLen, tally_,
+                         "SOLAX");
 }
 
 bool SolaxDriver::verifyByStatusQuery() {
@@ -408,7 +290,7 @@ PollResult SolaxDriver::poll(DeviceState& state) {
 
     StatusReport report;
     if (decodeStatusReport(payload, payloadLen, report) != DecodeResult::Ok) {
-        ++invalidFrames_;
+        ++tally_.invalidFrames;
         log::trace("SOLAX status report too short: %u byte(s)",
                    static_cast<unsigned>(payloadLen));
         return PollResult::InvalidFrame;

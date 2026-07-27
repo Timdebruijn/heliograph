@@ -107,8 +107,8 @@ So no partition change and no sdkconfig change is needed. That part of the brief
 
 What is **not** there:
 
-- **Nothing in the firmware ever reads the coredump.** The only occurrence of the word anywhere
-  in the tree outside the two CSVs is a line in `docs/implementation-plan.md:174`. There is no
+- **Nothing in the firmware ever reads the coredump.** Outside the two partition CSVs the word
+  appeared nowhere in the tracked tree. There is no
   `esp_core_dump_image_check()`, no summary in the diagnostics payload, no REST route. A crash
   writes a full ELF dump to flash and the operator has no way to learn it exists without
   attaching a cable and running `espcoredump.py` by hand.

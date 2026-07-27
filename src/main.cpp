@@ -391,19 +391,15 @@ std::string scanNetworksJson() {
         if (ssid.length() == 0) {
             continue;
         }
-        bool merged = false;
-        for (auto& u : unique) {
-            if (u.ssid == ssid) {
-                if (WiFi.RSSI(i) > u.rssi) {
-                    u.rssi = WiFi.RSSI(i);
-                    u.open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
-                }
-                merged = true;
-                break;
-            }
-        }
-        if (!merged) {
+        const auto seen = std::find_if(unique.begin(), unique.end(),
+                                       [&ssid](const Network& u) { return u.ssid == ssid; });
+        if (seen == unique.end()) {
             unique.push_back({ssid, WiFi.RSSI(i), WiFi.encryptionType(i) == WIFI_AUTH_OPEN});
+        } else if (WiFi.RSSI(i) > seen->rssi) {
+            // Same SSID on a second AP: keep the stronger one, so the list shows the radio the
+            // bridge would actually associate with.
+            seen->rssi = WiFi.RSSI(i);
+            seen->open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
         }
     }
 

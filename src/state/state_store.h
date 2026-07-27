@@ -67,6 +67,20 @@ private:
         DeviceId                    id;
         std::unique_ptr<StateStore> store;
     };
+
+    /// Looks up an entry by id, or nullptr.
+    ///
+    /// CALLERS MUST ALREADY HOLD m_. It is not taken here and cannot be: every public method
+    /// above locks, and std::mutex is not recursive -- locking again would deadlock rather
+    /// than fail visibly. Private precisely so that "the caller holds the lock" stays a fact
+    /// about this file instead of a hope about every future one.
+    ///
+    /// One comparison, not five. Four methods used to each carry their own copy of the id
+    /// match; changing how devices are identified meant changing all four and noticing none
+    /// if you missed one.
+    const Entry* find(const DeviceId& id) const;
+    Entry*       find(const DeviceId& id);
+
     mutable std::mutex m_;
     std::vector<Entry> entries_;
 };
