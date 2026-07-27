@@ -59,8 +59,10 @@ jobs:
       # here: a second git pin added later is covered the day it is added, which is the whole
       # failure this step exists for.
       #
-      # Reports nothing when a pin is already current, and says so out loud when a pin has no
-      # releases at all -- "no newer version" and "cannot tell" must not look the same.
+      # Reports nothing when a pin is already current, and says so out loud when the answer
+      # could not be obtained -- "no newer version" and "cannot tell" must not look the same.
+      # A month with a GitHub hiccup therefore adds a line to the tracking issue rather than
+      # silently passing; noise in that direction is the safe direction.
       - name: Check git-pinned dependencies
         id: gitpins
         env:
@@ -73,7 +75,10 @@ jobs:
             have=${slug#*#}
             latest=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name' 2>/dev/null || true)
             if [ -z "$latest" ]; then
-              REPORT="${REPORT}${repo}: pinned at ${have}; no published release to compare"$'\n'
+              # Deliberately does not claim there are no releases: an empty answer here is
+              # equally a 404 and a transient API failure, and `gh api` exits non-zero for
+              # both. Saying which one it was would be making it up.
+              REPORT="${REPORT}${repo}: pinned at ${have}; could not determine the latest release"$'\n'
             elif [ "$latest" != "$have" ]; then
               REPORT="${REPORT}${repo}: pinned at ${have}, latest is ${latest}"$'\n'
             fi
