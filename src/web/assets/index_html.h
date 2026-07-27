@@ -365,10 +365,18 @@ function fleetStrip(fleet){
     return v>0?'charging':'discharging';
   };
   const battColour={charging:'var(--bad)',discharging:'var(--ok)',idle:'var(--dim)'};
+  // An arrow on top of the word and the colour, so the meaning survives losing any one of the
+  // three: down is power going INTO the battery, up is power coming out of it. Idle gets no
+  // arrow, because nothing is moving and an arrow would have to point somewhere.
+  const battArrow={charging:'\u2193',discharging:'\u2191',idle:''};
+  // Arrow and number only. The word came out because the arrow already says it and the column
+  // was the widest in the table by a distance -- which is what broke the layout in the first
+  // place. That makes the legend load-bearing rather than supplementary: it is now the only
+  // place the arrows are spelled out, so it renders whenever the column does, never optionally.
   const batt=v=>{
     const state=battState(v);
     if(state==='idle') return 'idle';
-    return state+' '+fmt(Math.abs(v),0)+' W';
+    return battArrow[state]+' '+fmt(Math.abs(v),0)+' W';
   };
   // Each column declares what it actually needs. A flat allowance per column was fine while
   // the widest cell was a number; it stopped being fine the moment a hybrid appeared, because
@@ -380,7 +388,7 @@ function fleetStrip(fleet){
              {k:'ac_voltage_v',t:'AC voltage',d:1,u:'V',w:115},
              {k:'temperature_c',t:'Temp',d:1,u:'°C',w:90},
              {k:'battery_soc_pct',t:'SOC',d:0,u:'%',w:80},
-             {k:'battery_power_w',t:'Battery',d:0,u:'W',fn:batt,w:170}];
+             {k:'battery_power_w',t:'Battery',d:0,u:'W',fn:batt,w:110}];
   const cols=all.filter(c=>fleet.some(f=>f[c.k]!==null&&f[c.k]!==undefined));
   const rows=fleet.map(f=>{
     const answering=f.online&&f.data_valid&&!f.data_stale;
@@ -418,13 +426,15 @@ function fleetStrip(fleet){
   const width=260+cols.reduce((a,c)=>a+c.w,0)+150;
   // Only when there is a battery column to explain. A legend for a column that is not on
   // screen is noise, and this strip already filters columns no inverter can fill.
-  const swatch=(colour,text)=>`<span style="display:inline-flex;align-items:center;gap:5px">
-    <span class="dot" style="background:${colour};margin-right:0"></span>${text}</span>`;
+  // Shows the cell itself, not an abstraction of it: same arrow, same colour, same word. A
+  // legend that renders differently from the thing it explains is one more thing to decode.
+  const key=(state,text)=>`<span style="display:inline-flex;align-items:center;gap:6px">
+    <span style="color:${battColour[state]}">${battArrow[state]||'\u2014'} ${state}</span>${text}</span>`;
   const legend=cols.some(c=>c.k==='battery_power_w')
-    ? `<div class="dim" style="font-size:12px;margin-top:10px;display:flex;flex-wrap:wrap;gap:14px">
-       ${swatch('var(--bad)','charging — power going into the battery')}
-       ${swatch('var(--ok)','discharging — the house is running on it')}
-       ${swatch('var(--dim)','idle')}</div>`
+    ? `<div class="dim" style="font-size:12px;margin-top:10px;display:flex;flex-wrap:wrap;gap:18px">
+       ${key('charging','power going into the battery')}
+       ${key('discharging','the house is running on it')}
+       ${key('idle','')}</div>`
     : '';
   return `<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table style="min-width:${width}px;white-space:nowrap">
     <tr><th>Inverter</th>${cols.map(c=>`<th style="text-align:right">${c.t}</th>`).join('')}
