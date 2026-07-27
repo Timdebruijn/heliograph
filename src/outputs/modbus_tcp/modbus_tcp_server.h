@@ -20,6 +20,7 @@
 #include <mutex>
 #include <vector>
 
+#include "config/configuration.h"
 #include "device/device_state.h"
 #include "diagnostics/diagnostics.h"
 #include "register_map.h"
@@ -47,6 +48,18 @@ struct ModbusServerConfig {
     /// day a writable driver exists, the switch already has a documented default of off.
     bool writeEnabled = false;
 };
+
+/// Translates stored settings into a server configuration.
+///
+/// A free function rather than four assignments in setup() so the translation can be tested at
+/// all. It is not decoration: this class already shipped with main.cpp building a DEFAULT
+/// server and calling begin() on it, so modbus.port and modbus.unit_id did nothing, ever, and
+/// nothing failed loudly enough to notice (see setConfig below). A field that is added to the
+/// settings page and never reaches the server looks identical from the outside.
+///
+/// `deviceCount` comes from the caller because it is not a setting: it is how many devices were
+/// configured this boot.
+ModbusServerConfig serverConfigFrom(const ModbusSettings& settings, uint8_t deviceCount);
 
 /// Modbus caps a single read at 125 registers.
 inline constexpr uint16_t kMaxRegistersPerRead = 125;

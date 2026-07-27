@@ -64,6 +64,21 @@ struct ModbusSettings {
     uint16_t port              = 502;
     uint8_t  unitId            = 1;
     uint8_t  diagnosticsUnitId = 250;
+    /// How many TCP clients may be connected at once. Past this, eModbus accepts the socket
+    /// and closes it again without answering -- correct, but invisible from the outside, which
+    /// is how six clients came back as four during the 2026-07-27 hardware test (#71).
+    ///
+    /// Four is enough for Home Assistant plus a scraper, and stops being enough the moment a
+    /// SCADA poller and a laptop join. Every slot costs a socket and a per-connection buffer,
+    /// so this is bounded rather than free -- see validate() for where the ceiling comes from.
+    uint8_t  maxClients = 4;
+    /// Seconds a connected client may stay silent before the server drops it. 0 disables the
+    /// timeout entirely (eModbus treats 0 as "never"), which is a real choice for a bus with
+    /// one long-lived client and no others waiting for the slot.
+    ///
+    /// Directly coupled to maxClients: a client that connects and goes quiet holds a slot for
+    /// this long, so a generous limit with no timeout is how you run out of slots.
+    uint32_t idleTimeoutSeconds = 20;
     /// Stays false. There is no writable driver; the field exists so the default is explicit
     /// and documented rather than merely absent.
     bool writeEnabled = false;

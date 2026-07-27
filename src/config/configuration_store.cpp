@@ -183,6 +183,8 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
         if (modbus["port"].is<uint16_t>())  parsed.modbus.port = modbus["port"].as<uint16_t>();
         if (modbus["unit_id"].is<uint8_t>()) parsed.modbus.unitId = modbus["unit_id"].as<uint8_t>();
         if (modbus["diagnostics_unit_id"].is<uint8_t>()) parsed.modbus.diagnosticsUnitId = modbus["diagnostics_unit_id"].as<uint8_t>();
+        if (modbus["max_clients"].is<uint8_t>()) parsed.modbus.maxClients = modbus["max_clients"].as<uint8_t>();
+        if (modbus["idle_timeout_seconds"].is<uint32_t>()) parsed.modbus.idleTimeoutSeconds = modbus["idle_timeout_seconds"].as<uint32_t>();
         if (modbus["write_enabled"].is<bool>()) parsed.modbus.writeEnabled = modbus["write_enabled"].as<bool>();
     }
     if (JsonObjectConst polling = doc["polling"]; !polling.isNull()) {

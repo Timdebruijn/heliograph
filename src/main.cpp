@@ -586,18 +586,8 @@ void startOutputs() {
     g_time.begin(configSnapshot);
 
     if (configSnapshot.modbus.enabled) {
-        modbus::ModbusServerConfig cfg;
-        cfg.port              = configSnapshot.modbus.port;
-        cfg.inverterUnitId    = configSnapshot.modbus.unitId;
-        cfg.diagnosticsUnitId = configSnapshot.modbus.diagnosticsUnitId;
-        // Never from configuration: no driver in this build can write, so offering the switch
-        // would advertise something untrue. validate() rejects it too.
-        cfg.writeEnabled = false;
-        // One unit id per CONFIGURED device, consecutively from modbus.unit_id. Configured, not
-        // started: the unit id has to be a function of the settings page, or a device that
-        // fails to start renumbers every inverter after it. A slot with no device answers
-        // offline with no readings, which is the truth and matches what the Devices tab shows.
-        cfg.deviceCount = static_cast<uint8_t>(g_devicesConfigured);
+        const modbus::ModbusServerConfig cfg = modbus::serverConfigFrom(
+            configSnapshot.modbus, static_cast<uint8_t>(g_devicesConfigured));
         g_modbus.setConfig(cfg);
         const bool listening = g_modbus.begin();
         if (g_modbus.servedDevices() <= 1) {
@@ -1380,6 +1370,24 @@ void loop() {
         const uint16_t  nowClients        = g_modbus.activeClients();
         for (uint16_t i = prevModbusClients; i < nowClients; ++i) {
             g_diagnostics.recordModbusClient();
+        }
+        // Say when the ceiling is reached, because eModbus will not: past maxNoClients it
+        // accepts the socket, closes it and logs nothing (ModbusServerTCPasync::onClientConnect).
+        // From outside that is a client which connects and is never answered, and the only way
+        // to find out why is to go and read eModbus's source -- which is exactly what the
+        // 4-of-6 hardware result on 2026-07-27 cost (#71).
+        //
+        // This reports being AT the limit, not a refusal. Counting refusals would need a hook
+        // eModbus does not offer. Being at the limit is the condition under which the next
+        // connection is refused, which is the part worth knowing in advance.
+        //
+        // Edge-triggered: the limit stays reached for as long as the clients stay connected,
+        // and a warning every loop pass would bury the log it belongs in.
+        const uint16_t limit = g_modbus.config().maxClients;
+        if (nowClients >= limit && prevModbusClients < limit) {
+            log::warn("modbus: %u of %u client slots in use -- further connections are refused "
+                      "until one frees. Raise modbus.max_clients if this is normal here.",
+                      static_cast<unsigned>(nowClients), static_cast<unsigned>(limit));
         }
         prevModbusClients = nowClients;
     }
