@@ -10,6 +10,12 @@ standard — no per-vendor file, no per-model file.
 implemented and host-tested against a simulated device; nothing has met real hardware. See
 [Compatibility](#compatibility) for what that means for your inverter.
 
+That warning carries more weight now that this driver can **write**. A read path that is wrong
+publishes a wrong number; a write path that is wrong changes somebody's inverter. Nothing writes
+by itself — the power limit is a capability the device must publish and a caller must invoke —
+but if you are the first to point this at a real inverter, watch what it does before you trust
+it, and please say so on the issue either way.
+
 ## How it works
 
 A SunSpec device places a marker and then a self-describing chain in its holding registers:
@@ -54,6 +60,45 @@ layout, verified against the official definitions, so all three are handled iden
 | DC power | `DCW` | `dc.power.total` |
 | Temperature | `TmpCab` | `inverter.temperature` |
 | Operating state | `St` | status code |
+
+## What can be controlled today
+
+**Model 123 (immediate controls)** — read on every poll, and writable when the device publishes
+it. This is the one control surface here that needed no per-vendor research: the device says
+where its own registers are, so the addresses come from the standard and from the chain rather
+than from a transcribed vendor table. A wrong address in a power-limit map does not cost yield,
+it lands in grid protection.
+
+| Control | SunSpec point | Offset | Exposed as |
+|---|---|---|---|
+| Active power limit | `WMaxLimPct` | 5 | `control.active_power_limit` (%), writable |
+| Limit on/off | `WMaxLim_Ena` | 9 | `control.active_power_limit_enabled` |
+| Connect / disconnect | `Conn` | 4 | start / stop |
+| Limit resolution | `WMaxLimPct_SF` | 23 | the step of the control above |
+
+Rules this follows, all of them the kind that only bite in production:
+
+- **The capability is absent, not refused,** on a device that publishes no model 123 — and also
+  on one that publishes it without a usable `WMaxLimPct_SF`, because the percentage cannot then
+  be encoded and a control with invented limits is worse than none.
+- **The bounds are the device's.** 0–100% because `WMaxLimPct` is a percentage of nameplate, and
+  the *step* is whatever the device's scale factor buys: `sf = -1` accepts 62.5%, `sf = 0` does
+  not.
+- **A setpoint out of range is refused, never clamped.** Silently running at 100% when 150% was
+  asked for hides the caller's mistake behind a successful command.
+- **The value is written before the limit is armed.** The other order applies whatever limit the
+  register was holding for however long the two writes are apart.
+- **The echo is the confirmation.** A write whose echoed address or value disagrees is reported
+  as a failure, not success. On a control register the difference is between an inverter that is
+  limited and one everybody believes is limited.
+- **What is published is what the device holds**, re-read every poll — not what was last written.
+  Those differ when a second controller is on the bus, or when the inverter's own revert timer
+  fires, which model 123 defines and several devices implement.
+
+Note the spelling of the enable point: it is `WMaxLim_Ena`, **not** `WMaxLimPct_Ena`. Its
+neighbours all carry the `Pct` infix, so the natural guess is one register off — and one
+register off is `WMaxLimPct_RmpTms`, a ramp time that would accept the 1 meant as "enabled"
+and leave the limit switched off.
 
 Not read yet: nameplate and settings (120–122), and the storage/battery models (124, 160,
 802–804). Those are a separate step — battery semantics vary far more between vendors than
@@ -157,8 +202,10 @@ entries, one whose lengths walk off the address space stops, and one that simply
 answering keeps whatever was mapped — several devices do not serve the terminator at all. None
 of those fail the device outright.
 
-Read-only. SunSpec does define writable models; enabling one needs a hardware-verified map and
-a deliberate write path, and neither exists.
+Model 123 is the only writable model implemented, and the write path is single-register (0x06)
+with the echo verified, never a span. That is not caution for its own sake: the points somebody
+wants to set are interleaved with window, revert and ramp times they did not ask about, and a
+block write cannot express the difference.
 
 Sources: the official SunSpec model definitions (<https://github.com/sunspec/models>) for every
 offset used here, and the SunSpec Alliance information model for the marker, chain structure

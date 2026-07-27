@@ -13,6 +13,11 @@ namespace {
 constexpr int kMinExponent = -10;
 constexpr int kMaxExponent = 10;
 
+/// WMaxLimPct is a percentage of the nameplate maximum, so 100 is the whole machine. Not the
+/// widest value the register could hold: above 100 the standard defines nothing, and a device
+/// asked for 300% is being sent a number rather than an instruction.
+constexpr double kMaxLimitPercent = 100.0;
+
 double powerOfTen(int exponent) {
     double result = 1.0;
     if (exponent >= 0) {
@@ -131,6 +136,73 @@ bool decodeInverter(const uint16_t* regs, size_t count, InverterReadings& out) {
         out.hasState = true;
         out.state    = st;
     }
+    return true;
+}
+
+bool decodeControls(const uint16_t* regs, size_t count, ControlsReadings& out) {
+    if (regs == nullptr || count < controls::kMinRegisters) {
+        return false;
+    }
+    out = ControlsReadings{};
+
+    out.limitScale = decodeScaleFactor(regs[controls::kWMaxLimPct_SF]);
+    out.hasPowerLimit =
+        applyScale(regs[controls::kWMaxLimPct], /*isSigned=*/false, out.limitScale,
+                   out.powerLimitPct);
+
+    // The two enums carry no scale factor, so only the sentinel can make them absent. Read
+    // strictly: anything that is neither 0 nor 1 is a value this decoder has no meaning for,
+    // and guessing that "not zero means on" is how a disconnected inverter gets reported as
+    // connected.
+    const uint16_t ena = regs[controls::kWMaxLim_Ena];
+    if (ena == controls::kDisabled || ena == controls::kEnabled) {
+        out.hasLimitEnabled = true;
+        out.limitEnabled    = ena == controls::kEnabled;
+    }
+    const uint16_t conn = regs[controls::kConn];
+    if (conn == controls::kDisconnect || conn == controls::kConnect) {
+        out.hasConnection = true;
+        out.connected     = conn == controls::kConnect;
+    }
+    return true;
+}
+
+LimitBounds limitBounds(const ScaleFactor& sf) {
+    LimitBounds b;
+    if (!sf.valid) {
+        return b;  // no usable exponent: nothing can be encoded, so nothing may be offered
+    }
+    const double step = powerOfTen(sf.exponent);
+    // A device whose exponent is coarser than the whole range cannot express a limit at all --
+    // sf = 3 means the smallest step is 1000%, and offering a 0-100 control with a step it
+    // cannot honour would accept setpoints that round to nothing.
+    if (step > kMaxLimitPercent) {
+        return b;
+    }
+    b.usable  = true;
+    b.minimum = 0.0;
+    b.maximum = kMaxLimitPercent;
+    b.step    = step;
+    return b;
+}
+
+bool encodePowerLimitPct(double percent, const ScaleFactor& sf, uint16_t& raw) {
+    const LimitBounds b = limitBounds(sf);
+    if (!b.usable || !(percent >= b.minimum) || !(percent <= b.maximum)) {
+        // `!(x >= min)` rather than `x < min` so a NaN setpoint is refused too, instead of
+        // sailing through both comparisons and being cast to whatever the conversion yields.
+        return false;
+    }
+    const double scaled = percent / powerOfTen(sf.exponent);
+    // Round rather than truncate: at sf = 0 a request for 49.9% is far better served by 50 than
+    // by 49, and truncation biases every setpoint downwards.
+    const double rounded = std::floor(scaled + 0.5);
+    if (rounded < 0.0 || rounded >= static_cast<double>(kNotImplementedU16)) {
+        // The top of the uint16 range is the not-implemented sentinel, so a value that lands on
+        // it would tell the device "no value" while the caller believes it set a limit.
+        return false;
+    }
+    raw = static_cast<uint16_t>(rounded);
     return true;
 }
 

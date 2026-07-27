@@ -89,4 +89,73 @@ ReadOutcome readRegisters(Transport& transport, uint8_t unitId, uint8_t function
     }
 }
 
+TransactionOutcome writeSingleRegister(Transport& transport, uint8_t unitId, uint16_t address,
+                                       uint16_t value, const ReadTiming& timing) {
+    TransactionOutcome outcome;
+
+    uint8_t req[8];
+    size_t  reqLen = 0;
+    if (buildWriteSingleRegister(unitId, address, value, req, sizeof(req), reqLen) !=
+        BuildResult::Ok) {
+        outcome.status = TransactionStatus::Protocol;
+        return outcome;
+    }
+
+    transport.flushInput();
+    if (transport.write(req, reqLen) != reqLen) {
+        outcome.status = TransactionStatus::TransportError;
+        return outcome;
+    }
+
+    uint8_t        rx[kMaxAdu];
+    size_t         have     = 0;
+    const uint64_t deadline = transport.nowMs() + timing.transactionDeadlineMs;
+    for (;;) {
+        if (transport.nowMs() >= deadline) {
+            outcome.status = TransactionStatus::Timeout;
+            return outcome;
+        }
+
+        WriteResponse resp;
+        switch (parseWriteResponse(rx, have, unitId, kWriteSingleRegister, resp)) {
+            case ParseResult::Ok:
+                // The echo is the confirmation. A device that answers with a different address
+                // or a different value has not done what was asked, however well-formed the
+                // frame is -- and treating that as success is how a setpoint silently does not
+                // arrive.
+                if (resp.address != address || resp.value != value) {
+                    outcome.status = TransactionStatus::Protocol;
+                    return outcome;
+                }
+                outcome.status = TransactionStatus::Ok;
+                return outcome;
+            case ParseResult::Exception:
+                // The ordinary answer to a control write that is refused: read-only register,
+                // out-of-range value, or a device that wants an unlock first.
+                outcome.status        = TransactionStatus::Exception;
+                outcome.exceptionCode = resp.exceptionCode;
+                return outcome;
+            case ParseResult::Incomplete:
+                break;  // fall through and read more
+            case ParseResult::BadCrc:
+                outcome.status = TransactionStatus::Crc;
+                return outcome;
+            default:
+                outcome.status = TransactionStatus::Protocol;
+                return outcome;
+        }
+
+        if (have >= sizeof(rx)) {
+            outcome.status = TransactionStatus::Protocol;
+            return outcome;
+        }
+        const size_t n = transport.read(rx + have, sizeof(rx) - have, timing.responseTimeoutMs);
+        if (n == 0) {
+            outcome.status = TransactionStatus::Timeout;
+            return outcome;
+        }
+        have += n;
+    }
+}
+
 }  // namespace heliograph::modbus

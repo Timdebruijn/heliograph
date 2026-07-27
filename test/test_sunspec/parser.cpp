@@ -7,6 +7,7 @@
 
 #include <unity.h>
 
+#include <limits>
 #include <vector>
 
 #include "drivers/sunspec/sunspec_parser.h"
@@ -168,6 +169,99 @@ static void test_common_model_too_short_is_refused() {
     TEST_ASSERT_FALSE(decodeCommon(b.data(), b.size(), id));
 }
 
+// --- model 123, immediate controls ---------------------------------------------------------
+
+namespace {
+std::vector<uint16_t> controlsBlock(int sf, uint16_t limit, uint16_t ena, uint16_t conn) {
+    std::vector<uint16_t> b(controls::kMinRegisters, kNotImplementedU16);
+    b[controls::kWMaxLimPct]    = limit;
+    b[controls::kWMaxLim_Ena]   = ena;
+    b[controls::kConn]          = conn;
+    b[controls::kWMaxLimPct_SF] = static_cast<uint16_t>(static_cast<int16_t>(sf));
+    return b;
+}
+}  // namespace
+
+static void test_controls_decode_with_the_scale_factor() {
+    const auto       b = controlsBlock(-1, 875, controls::kEnabled, controls::kConnect);
+    ControlsReadings c;
+    TEST_ASSERT_TRUE(decodeControls(b.data(), b.size(), c));
+    TEST_ASSERT_TRUE(c.hasPowerLimit);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, 87.5, c.powerLimitPct);
+    TEST_ASSERT_TRUE(c.hasLimitEnabled);
+    TEST_ASSERT_TRUE(c.limitEnabled);
+    TEST_ASSERT_TRUE(c.hasConnection);
+    TEST_ASSERT_TRUE(c.connected);
+}
+
+/// The enums carry no scale factor, so only their sentinel can make them absent -- and anything
+/// that is neither 0 nor 1 has no defined meaning. Guessing "non-zero is on" is how a
+/// disconnected inverter gets reported as connected.
+static void test_an_out_of_range_enum_is_absent_rather_than_true() {
+    auto b = controlsBlock(0, 50, 7, 9);
+    ControlsReadings c;
+    TEST_ASSERT_TRUE(decodeControls(b.data(), b.size(), c));
+    TEST_ASSERT_FALSE(c.hasLimitEnabled);
+    TEST_ASSERT_FALSE(c.hasConnection);
+}
+
+static void test_a_truncated_controls_block_is_refused() {
+    std::vector<uint16_t> b(controls::kMinRegisters - 1, 0);
+    ControlsReadings      c;
+    TEST_ASSERT_FALSE(decodeControls(b.data(), b.size(), c));
+}
+
+static void test_the_limit_is_bounded_by_the_standard_not_by_the_register() {
+    ScaleFactor sf = decodeScaleFactor(0);  // exponent 0
+    const auto  b  = limitBounds(sf);
+    TEST_ASSERT_TRUE(b.usable);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, b.minimum);
+    // A uint16 could carry 65534, but WMaxLimPct is a percentage of nameplate: above 100 the
+    // standard defines nothing.
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, b.maximum);
+    TEST_ASSERT_EQUAL_DOUBLE(1.0, b.step);
+}
+
+static void test_a_scale_factor_coarser_than_the_range_grants_nothing() {
+    // sf = 3 means the smallest step the device can express is 1000%.
+    const auto b = limitBounds(decodeScaleFactor(3));
+    TEST_ASSERT_FALSE(b.usable);
+    uint16_t raw = 0;
+    TEST_ASSERT_FALSE(encodePowerLimitPct(50.0, decodeScaleFactor(3), raw));
+}
+
+static void test_encoding_rounds_rather_than_truncates() {
+    uint16_t raw = 0;
+    // At sf = 0 a request for 49.9% is far better served by 50 than by 49; truncation would
+    // bias every setpoint downwards.
+    TEST_ASSERT_TRUE(encodePowerLimitPct(49.9, decodeScaleFactor(0), raw));
+    TEST_ASSERT_EQUAL_UINT16(50, raw);
+    TEST_ASSERT_TRUE(encodePowerLimitPct(62.5, decodeScaleFactor(-1), raw));
+    TEST_ASSERT_EQUAL_UINT16(625, raw);
+}
+
+static void test_encoding_refuses_what_it_cannot_represent() {
+    uint16_t raw = 0;
+    TEST_ASSERT_FALSE(encodePowerLimitPct(100.1, decodeScaleFactor(0), raw));
+    TEST_ASSERT_FALSE(encodePowerLimitPct(-0.1, decodeScaleFactor(0), raw));
+    // No usable exponent: nothing can be encoded at all.
+    TEST_ASSERT_FALSE(encodePowerLimitPct(50.0, decodeScaleFactor(kNotImplementedS16), raw));
+    // NaN must not sail through the comparisons and be cast to whatever the conversion yields.
+    TEST_ASSERT_FALSE(
+        encodePowerLimitPct(std::numeric_limits<double>::quiet_NaN(), decodeScaleFactor(0), raw));
+}
+
+/// The value that would land on the not-implemented sentinel must never be written: it would
+/// tell the device "no value" while the caller believes a limit was set.
+static void test_encoding_never_produces_the_not_implemented_sentinel() {
+    uint16_t raw = 0;
+    // sf = -3 puts 65.535% at exactly 65535.
+    TEST_ASSERT_FALSE(encodePowerLimitPct(65.535, decodeScaleFactor(-3), raw));
+    // The neighbour below is fine.
+    TEST_ASSERT_TRUE(encodePowerLimitPct(65.534, decodeScaleFactor(-3), raw));
+    TEST_ASSERT_EQUAL_UINT16(65534, raw);
+}
+
 void run_sunspec_parser() {
     RUN_TEST(test_model_ids);
     RUN_TEST(test_scale_factor_is_applied_with_its_sign);
@@ -180,4 +274,12 @@ void run_sunspec_parser() {
     RUN_TEST(test_a_truncated_block_is_refused);
     RUN_TEST(test_common_model_strings);
     RUN_TEST(test_common_model_too_short_is_refused);
+    RUN_TEST(test_controls_decode_with_the_scale_factor);
+    RUN_TEST(test_an_out_of_range_enum_is_absent_rather_than_true);
+    RUN_TEST(test_a_truncated_controls_block_is_refused);
+    RUN_TEST(test_the_limit_is_bounded_by_the_standard_not_by_the_register);
+    RUN_TEST(test_a_scale_factor_coarser_than_the_range_grants_nothing);
+    RUN_TEST(test_encoding_rounds_rather_than_truncates);
+    RUN_TEST(test_encoding_refuses_what_it_cannot_represent);
+    RUN_TEST(test_encoding_never_produces_the_not_implemented_sentinel);
 }

@@ -121,6 +121,16 @@ inline constexpr const char* kBatteryDischargePower = "battery.discharge_power";
 inline constexpr const char* kGridImportPower = "grid.import_power";
 inline constexpr const char* kGridExportPower = "grid.export_power";
 
+/// What the inverter is currently limited TO, as a percentage of its nameplate maximum, and
+/// whether that limit is switched on at all.
+///
+/// A control that is written must also be readable, or nobody can tell what the device is doing
+/// -- only what it was last asked to do. Those differ whenever a write was refused, a second
+/// controller is on the bus, or the inverter reverted the limit on its own timer, which several
+/// of them do by design.
+inline constexpr const char* kActivePowerLimitPct = "control.active_power_limit";
+inline constexpr const char* kActivePowerLimitEnabled = "control.active_power_limit_enabled";
+
 /// Every id above, in one place.
 ///
 /// Needed because a device removed from the configuration leaves retained Home Assistant
@@ -135,6 +145,7 @@ inline constexpr const char* kAll[] = {
     kTemperature,    kOperatingHours, kBatterySoc,     kBatteryPower,   kBatteryVoltage,
     kBatteryCurrent, kBatteryTemperature, kBatteryEnergyCharged, kBatteryEnergyDischarged,
     kBatteryChargePower, kBatteryDischargePower, kGridImportPower, kGridExportPower,
+    kActivePowerLimitPct, kActivePowerLimitEnabled,
 };
 
 }  // namespace measurement_id

@@ -79,6 +79,14 @@ private:
     bool readModel(const ChainEntry& entry, std::vector<uint16_t>& out, PollResult& outFailure);
     modbus::ReadOutcome read(uint16_t address, uint16_t count, uint16_t* out, uint16_t capacity);
 
+    /// Reads model 123 and refreshes controls_. Returns false when the device has no controls
+    /// block or the read failed; the caller decides whether that is fatal, because a device
+    /// that reads fine and simply offers no controls is not a broken device.
+    bool refreshControls();
+    /// One control register, written and its echo verified. Refuses before touching the bus
+    /// when there is no controls block to write into.
+    CommandResult writeControl(size_t pointOffset, uint16_t value);
+
     Transport*     transport_ = nullptr;
     SunspecOptions options_;
     BusErrorCounts busErrors_{};
@@ -86,8 +94,19 @@ private:
     std::vector<ChainEntry> chain_;
     const ChainEntry*       inverterEntry_ = nullptr;  ///< into chain_
     const ChainEntry*       commonEntry_   = nullptr;
+    const ChainEntry*       controlsEntry_ = nullptr;
     DeviceIdentity          identity_;
     bool                    walked_ = false;
+
+    /// Last read of model 123, and whether it has ever been read.
+    ///
+    /// Cached because capabilities() is const and is asked what this device can do before any
+    /// caller would think to poll -- and the answer is not a property of the driver, it is a
+    /// property of the device in front of it. The bounds of the power limit come from the
+    /// device's own scale factor, so until the block has been read there is nothing honest to
+    /// advertise and the capability stays absent.
+    ControlsReadings controls_{};
+    bool             controlsRead_ = false;
 };
 
 const DriverDescriptor&         descriptor();

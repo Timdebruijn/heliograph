@@ -47,6 +47,12 @@ inline constexpr uint16_t kModelInverterThreePhase  = 103;
 
 bool isInverterModel(uint16_t modelId);
 
+/// Immediate controls. The one writable model this driver implements, and the reason it can be
+/// implemented at all: it is published and vendor-neutral, so the addresses come from the
+/// standard and from the device's own chain rather than from a transcribed vendor table. A
+/// wrong address in a power-limit map does not cost yield, it lands in grid protection.
+inline constexpr uint16_t kModelControls = 123;
+
 /// Not-implemented sentinels, straight from the specification.
 inline constexpr uint16_t kNotImplementedU16 = 0xFFFF;
 inline constexpr uint16_t kNotImplementedS16 = 0x8000;  // also the not-implemented scale factor
@@ -96,6 +102,31 @@ inline constexpr size_t kSt     = 38;
 inline constexpr size_t kMinRegisters = 39;
 }  // namespace inverter
 
+/// Model 123, transcribed from the official definition (sunspec/models, json/model_123.json).
+///
+/// Only the points this driver touches are named. The gaps are not padding: 2/3 are the connect
+/// timing window, 6/7/8 the limit's window, revert and ramp times, and 10-22 the power-factor
+/// and reactive-power controls. All of them are writable, and writing one by accident changes
+/// how the inverter behaves under a control it was never asked about -- which is why the write
+/// path below writes single registers by name and never a span.
+///
+/// Note the spelling: the enable point is `WMaxLim_Ena`, NOT `WMaxLimPct_Ena`. The neighbouring
+/// points all carry the `Pct` infix, so the obvious guess is one register off -- and one
+/// register off here is `WMaxLimPct_RmpTms`, a ramp time that would silently accept the 1 meant
+/// as "enabled" and leave the limit disabled.
+namespace controls {
+inline constexpr size_t kConn          = 4;   ///< enum16: 0 disconnect, 1 connect
+inline constexpr size_t kWMaxLimPct    = 5;   ///< uint16, scaled by kWMaxLimPct_SF
+inline constexpr size_t kWMaxLim_Ena   = 9;   ///< enum16: 0 disabled, 1 enabled
+inline constexpr size_t kWMaxLimPct_SF = 23;  ///< sunssf
+/// Every point above must exist before the block can be decoded.
+inline constexpr size_t kMinRegisters = 26;
+inline constexpr uint16_t kDisconnect = 0;
+inline constexpr uint16_t kConnect    = 1;
+inline constexpr uint16_t kDisabled   = 0;
+inline constexpr uint16_t kEnabled    = 1;
+}  // namespace controls
+
 namespace common {
 inline constexpr size_t kMn = 2;   // manufacturer, 16 registers
 inline constexpr size_t kMd = 18;  // model, 16
@@ -129,6 +160,50 @@ struct InverterReadings {
 /// block is too short to be one -- a truncated read must never be decoded from whatever
 /// happened to be in the buffer.
 bool decodeInverter(const uint16_t* regs, size_t count, InverterReadings& out);
+
+/// What one model 123 block yielded.
+///
+/// The scale factor is carried out rather than consumed, because a WRITE needs it too: the
+/// percentage has to be encoded with the device's own exponent, and re-deriving it at the write
+/// site is how the read and the write end up disagreeing about what "50%" means.
+struct ControlsReadings {
+    ScaleFactor limitScale;      ///< invalid when the device published no usable WMaxLimPct_SF
+    bool   hasPowerLimit  = false;
+    double powerLimitPct  = 0;   ///< the limit currently in the register, scaled
+    bool   hasLimitEnabled = false;
+    bool   limitEnabled    = false;
+    bool   hasConnection   = false;
+    bool   connected       = false;
+};
+
+/// Decodes a model 123 block. `regs` starts at the model id. Returns false when the block is
+/// too short -- a truncated read must never be decoded from whatever was in the buffer.
+///
+/// Returning true does NOT mean the device implements the limit: a device may carry the model
+/// and publish the not-implemented sentinel for every point in it. The `has*` flags say which.
+bool decodeControls(const uint16_t* regs, size_t count, ControlsReadings& out);
+
+/// Smallest and largest percentage the device can be asked for, given its scale factor.
+///
+/// The ceiling is SunSpec's own (100% of nameplate), not the widest number the register could
+/// hold: WMaxLimPct is a percentage of WMax, and asking for 300% is not a bigger limit, it is a
+/// value the standard does not define. The floor is 0. `step` is the resolution the exponent
+/// buys -- a device with sf = -1 accepts 12.3%, one with sf = 0 rounds it, and telling a
+/// control surface otherwise invites a setpoint that silently does not arrive.
+struct LimitBounds {
+    bool   usable  = false;
+    double minimum = 0.0;
+    double maximum = 0.0;
+    double step    = 0.0;
+};
+LimitBounds limitBounds(const ScaleFactor& sf);
+
+/// Encodes a percentage into the raw register value, using the DEVICE's scale factor.
+///
+/// Refuses rather than clamps when the value is out of range or cannot be represented. A
+/// silently clamped setpoint is the failure mode that matters here: the caller believes it
+/// asked for one thing, the inverter is doing another, and nothing anywhere says so.
+bool encodePowerLimitPct(double percent, const ScaleFactor& sf, uint16_t& raw);
 
 struct CommonIdentity {
     std::string manufacturer;
