@@ -106,6 +106,17 @@ bool RestApi::bodyAlreadyAnswered(AsyncWebServerRequest* request) {
     return true;
 }
 
+bool RestApi::bodyMissing(AsyncWebServerRequest* request, const char* expected) {
+    if (bodyAlreadyAnswered(request)) {
+        return true;
+    }
+    if (bodyOwner_ != request) {
+        sendError(request, {400, "empty_body", expected});
+        return true;
+    }
+    return false;
+}
+
 void RestApi::releaseBody() {
     bodyOwner_    = nullptr;
     bodyRejected_ = nullptr;
@@ -229,14 +240,7 @@ bool RestApi::begin() {
         [this, authorised](AsyncWebServerRequest* request) {
             // The request handler forms the response; the body handler only collects. If the
             // body never completed, nothing was queued and this is a genuinely empty POST.
-            // collectBody may already have answered (413 too large, 409 busy). send()
-            // replaces the stored response, so falling through to the generic error below
-            // would overwrite the real reason with "a JSON body is required".
-            if (bodyAlreadyAnswered(request)) {
-                return;
-            }
-            if (bodyOwner_ != request) {
-                sendError(request, {400, "empty_body", "a JSON body is required"});
+            if (bodyMissing(request, "a JSON body is required")) {
                 return;
             }
             if (!context_.portalActive || !context_.portalActive()) {
@@ -515,14 +519,7 @@ bool RestApi::begin() {
                 releaseBody();
                 return;
             }
-            // collectBody may already have answered (413 too large, 409 busy). send()
-            // replaces the stored response, so falling through to the generic error below
-            // would overwrite the real reason with "a JSON body is required".
-            if (bodyAlreadyAnswered(request)) {
-                return;
-            }
-            if (bodyOwner_ != request) {
-                sendError(request, {400, "empty_body", "a JSON body is required"});
+            if (bodyMissing(request, "a JSON body is required")) {
                 return;
             }
 
@@ -692,14 +689,7 @@ bool RestApi::begin() {
                 releaseBody();
                 return;  // authorised() stored the 401
             }
-            // collectBody may already have answered (413 too large, 409 busy). send()
-            // replaces the stored response, so falling through to the generic error below
-            // would overwrite the real reason with "a backup file is required".
-            if (bodyAlreadyAnswered(request)) {
-                return;
-            }
-            if (bodyOwner_ != request) {
-                sendError(request, {400, "empty_body", "a backup file is required"});
+            if (bodyMissing(request, "a backup file is required")) {
                 return;
             }
             BackupContents contents;
@@ -1283,6 +1273,9 @@ bool RestApi::collectBody(AsyncWebServerRequest*, const uint8_t*, size_t, size_t
     return false;
 }
 bool RestApi::bodyAlreadyAnswered(AsyncWebServerRequest*) { return false; }
+// No server, so no body ever arrives -- and nothing on this build calls it. Stubbed for the
+// same reason as its neighbours: the header declares one class for both builds.
+bool RestApi::bodyMissing(AsyncWebServerRequest*, const char*) { return true; }
 
 void RestApi::releaseBody() {
     bodyOwner_    = nullptr;

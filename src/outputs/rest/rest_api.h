@@ -139,6 +139,18 @@ private:
     /// Same lesson the OTA route learned with its _tempObject marker, arrived at from the
     /// other direction: there it was the specific error being replaced by a generic one.
     bool bodyAlreadyAnswered(AsyncWebServerRequest* request);
+
+    /// True when the handler must stop: either the body handler already answered, or no body
+    /// arrived at all. `expected` names what was wanted, because "a JSON body" and "a backup
+    /// file" are different things to whoever is reading the error.
+    ///
+    /// One function because the ORDER of those two checks is the whole point and it was
+    /// written out three times. Ask "was this already answered?" first: collectBody may have
+    /// stored a 413 or a 409, and send() replaces the stored response, so testing for a
+    /// missing body first would overwrite the real reason with a generic one. Three copies of
+    /// a rule that is only correct in one order is three chances to get it wrong, and a fourth
+    /// route would have been a fourth.
+    bool bodyMissing(AsyncWebServerRequest* request, const char* expected);
     void releaseBody();
 
     RestContext context_;
