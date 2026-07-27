@@ -115,10 +115,17 @@ namespace {
 // implements model 123 can be curtailed from Home Assistant, which is the first write path in
 // this firmware and stays behind the read-only kill switch. And the legacy PMU driver can put
 // several inverters on one bus, one device each -- untested against real hardware, since nobody
-// involved has two, so the pitfalls are written down rather than claimed away.
+// involved has two, so the pitfalls are written down rather than claimed away. 0.18.1 repairs
+// the per-inverter strip, which 0.18.0 broke the moment a battery appeared in it: the columns
+// were allowed a flat width that no longer held once a cell contained words instead of a
+// number, so every row wrapped and the table stopped lining up. Columns now declare what they
+// need. While it was open, the battery cell also stopped spelling out its direction and started
+// showing it -- a down arrow in red for charging, an up arrow in green for discharging, with a
+// legend under the table, and the word kept in the cell's title for anyone reading by anything
+// other than eye.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 18
-#define HELIOGRAPH_VERSION_PATCH 0
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
