@@ -45,6 +45,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # FIRST, and before anything is installed: this needs only the checkout, fails in under a
+      # second, and its whole point is to stop a release that would ship a firmware reporting a
+      # different version than the one being published. Everything below is wasted work when
+      # the two disagree.
+      - name: Tag matches the version the firmware reports
+        run: bash tools/check_version.sh
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
