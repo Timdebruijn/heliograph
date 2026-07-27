@@ -399,6 +399,48 @@ Our transport layer does it properly: read until the frame is complete (length f
 byte 8), with a response timeout of **1000 ms** and **3** retries. These values are set in the
 driver's `SerialProfile` and are configurable.
 
+## Several inverters on one bus — possible in theory, not implemented
+
+**Heliograph serves one EverSolar inverter per bridge.** A second configured device is refused
+at startup with a reason on the dashboard, rather than being started (#63). This is a limit of
+this driver, not of the protocol — and it is a real gap for anyone coming from
+eversolar-monitor, which does serve several inverters on one loop.
+
+The protocol supports it and the reference shows exactly how, so nothing here needs guessing.
+Read out of `eversolar.pl` (line numbers are that file's):
+
+| Behaviour | Where | Detail |
+|---|---|---|
+| Register **one** inverter per pass | `:599-645` | Its own comment: "register inverter that responds first". One offline query, one serial, one address, then `$next_inverter_address++` |
+| Discovery comes from the **cadence**, not a loop | `:1008`, `:1038` | Tight loop while no inverter is known; once a minute after that. Three inverters take about three minutes |
+| RE_REGISTER is a **bus** operation | `:822`, `:582-590` | Called once from `inverter_connect()`, which also resets the address counter to `0x10`. Broadcast 8 times, despite the comment saying 3 |
+| Inverters keyed by assigned address | `:632-643` | `%inverters` holds id string, serial and counters; the poll loop walks it |
+
+Why the enumeration needs no arbitration: a registered inverter ignores the broadcast offline
+query, so each pass the next unregistered one answers. If two answer at once the serial number
+fails to parse, the pass yields nothing, and the next one tries again. The reference does not
+resolve collisions — it retries past them.
+
+**What stops us adopting it today is not the protocol but the device model**: this project
+builds one driver instance per configured device, while the above needs one driver that owns
+the bus and yields several devices. That is the piece to design.
+
+Three things any implementation must not break for the installs that exist today, all of which
+have exactly one inverter:
+
+- **The device id stays the serial number.** Keying on the assigned address — as the reference
+  does — would change the id of every existing install, orphaning its retained MQTT topics and
+  re-creating its Home Assistant entities. The address is volatile, reset to `0x10` on every
+  reconnect, so two inverters could even swap identities between sessions.
+- **RE_REGISTER stays available as recovery**, not only at bus startup. An inverter holding an
+  address from an earlier session ignores the offline query forever; only the broadcast breaks
+  that deadlock. Observed live, and pinned by a test.
+- **A quiet bus stays quiet.** The reference re-queries every minute forever, even with nothing
+  left to find. On a one-inverter bridge that is new traffic where there is none today.
+
+Untested against two inverters — nobody involved has two. See #82, which stays open for the
+first report from someone who does.
+
 ## What we still don't know
 
 | Unknown | Impact | Approach |
