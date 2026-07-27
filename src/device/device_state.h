@@ -39,6 +39,15 @@ struct DeviceState {
     uint32_t consecutiveFailures  = 0;
 
     DeviceIdentity       identity;
+    /// What the operator calls this inverter ("Schuur"), from the configured device row.
+    /// Empty means unlabelled, and every surface then shows the registered id, exactly as
+    /// before the field existed.
+    ///
+    /// DISPLAY ONLY, and separate from `identity` on purpose. `identity` is what the device
+    /// told us and it carries deviceId(), the key behind REST paths, MQTT topics and Home
+    /// Assistant unique_ids. A label that leaked into any of those would move an operator's
+    /// whole history the moment they renamed an inverter (#76).
+    std::string          label;
     InverterCapabilities capabilities;
     MeasurementSet       measurements;
 

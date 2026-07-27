@@ -943,6 +943,77 @@ static void test_modbus_write_cannot_be_enabled() {
     TEST_ASSERT_EQUAL_STRING("modbus.write_enabled", e.field.c_str());
 }
 
+// --- Device labels (#76) -------------------------------------------------------------------
+
+// The whole feature rests on this: a label is additional, never a rename. `id` keys
+// /api/v1/devices/<id>, the state store, the MQTT topic tree and the Modbus unit mapping, and
+// rest_payloads.h already carries a note about a payload that reported a different id there and
+// sent clients to a path that 404s.
+static void test_a_label_is_reported_beside_the_id_never_instead_of_it() {
+    DeviceState state;
+    state.identity.driverId = "mock_inverter";
+    state.label             = "Schuur";
+
+    std::string out;
+    TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "mock_inverter-1", nullptr, 1000, out, 4096));
+    auto doc = parse(out);
+    TEST_ASSERT_EQUAL_STRING("mock_inverter-1", doc["id"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("Schuur", doc["label"].as<const char*>());
+}
+
+// An unlabelled bridge must be byte-identical to before the field existed, so a client that
+// never heard of labels cannot start seeing an empty string where it expects a missing key.
+static void test_no_label_means_no_key_at_all() {
+    DeviceState state;
+    state.identity.driverId = "mock_inverter";
+
+    std::string out;
+    TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "mock_inverter-1", nullptr, 1000, out, 4096));
+    auto doc = parse(out);
+    TEST_ASSERT_TRUE(doc["label"].isNull());
+}
+
+static void test_the_fleet_entry_carries_the_label() {
+    DeviceState state;
+    state.label = "Balkon";
+    const auto summary = rest::summariseDevice(state, "mock_inverter-2", 1000);
+    TEST_ASSERT_EQUAL_STRING("Balkon", summary.label.c_str());
+    // displayName is what every human-facing line uses. Label when set, id otherwise.
+    TEST_ASSERT_EQUAL_STRING("Balkon", rest::displayName(summary).c_str());
+
+    DeviceState plain;
+    TEST_ASSERT_EQUAL_STRING("mock_inverter-3",
+                             rest::displayName(rest::summariseDevice(plain, "mock_inverter-3", 1000)).c_str());
+}
+
+// A label is free text on purpose -- "Schuur", "Balkon achter" -- but it is announced to Home
+// Assistant as a device name and written into log lines, and a newline there splits one log
+// line into two with the second one unattributed.
+static void test_a_label_may_not_carry_control_characters() {
+    Configuration c;
+    ConfigError   e;
+    TEST_ASSERT_FALSE(applyConfigPatch("{\"driver\":{\"label\":\"Schuur\\nBalkon\"}}", c, e));
+    TEST_ASSERT_EQUAL_STRING("driver.label", e.field.c_str());
+    // Accented and non-ASCII names are fine: they are multi-byte UTF-8, not control bytes.
+    TEST_ASSERT_TRUE(applyConfigPatch("{\"driver\":{\"label\":\"Schuur achter\"}}", c, e));
+    TEST_ASSERT_EQUAL_STRING("Schuur achter", c.driver.label.c_str());
+}
+
+static void test_renaming_a_device_needs_a_restart() {
+    // The label is applied when the device is created in setup() and announced to Home Assistant
+    // at connect. A page that said "applied immediately" would show the old name until reboot.
+    Configuration a;
+    Configuration b = a;
+    b.driver.label  = "Schuur";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(a, b));
+
+    Configuration c = a;
+    c.additionalDevices.push_back(DriverSettings{"mock_inverter", false, {}, "Balkon"});
+    Configuration d = c;
+    d.additionalDevices[0].label = "Garage";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(c, d));
+}
+
 static void test_diagnostics_unit_id_must_differ_from_the_inverter() {
     Configuration c;
     ConfigError   e;
@@ -2284,6 +2355,11 @@ int main(int, char**) {
     RUN_TEST(test_invalid_json_is_refused);
     RUN_TEST(test_out_of_range_values_are_refused);
     RUN_TEST(test_modbus_write_cannot_be_enabled);
+    RUN_TEST(test_a_label_is_reported_beside_the_id_never_instead_of_it);
+    RUN_TEST(test_no_label_means_no_key_at_all);
+    RUN_TEST(test_the_fleet_entry_carries_the_label);
+    RUN_TEST(test_a_label_may_not_carry_control_characters);
+    RUN_TEST(test_renaming_a_device_needs_a_restart);
     RUN_TEST(test_diagnostics_unit_id_must_differ_from_the_inverter);
     RUN_TEST(test_a_value_too_large_for_the_field_is_refused_not_wrapped);
     RUN_TEST(test_driver_options_are_opaque_to_the_config_model);

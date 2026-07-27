@@ -8,6 +8,7 @@
 #pragma once
 
 #include <functional>
+#include <string>
 
 #include "device/clock.h"
 #include "device/device_state.h"
@@ -28,8 +29,13 @@ struct PollPolicy {
 
 class DeviceContext {
 public:
+    /// `label` is the operator's name for this device, or empty. Taken at construction rather
+    /// than through a setter because the constructor publishes a first snapshot, and rs485Task
+    /// is already running by the time setup() gets here: a setter called afterwards would race
+    /// the poll task for state_, which is exactly what the missing workingState() accessor
+    /// below exists to prevent.
     DeviceContext(InverterDriver& driver, StateStore& store, Diagnostics& diagnostics,
-                  ClockFn clock, const PollPolicy& policy = {});
+                  ClockFn clock, const PollPolicy& policy = {}, std::string label = {});
 
     /// One poll attempt. Publishes a new snapshot either way, so that consumers always see
     /// current liveness even while the device is unreachable.

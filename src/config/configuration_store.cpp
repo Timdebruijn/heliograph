@@ -199,6 +199,7 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
     if (JsonObjectConst driver = doc["driver"]; !driver.isNull()) {
         if (driver["id"].is<const char*>())    parsed.driver.id = driver["id"].as<const char*>();
         if (driver["auto_detect"].is<bool>())  parsed.driver.autoDetect = driver["auto_detect"].as<bool>();
+        if (driver["label"].is<const char*>()) parsed.driver.label = driver["label"].as<const char*>();
         if (JsonObjectConst options = driver["options"]; !options.isNull()) {
             for (JsonPairConst kv : options) {
                 if (kv.value().is<const char*>()) {
@@ -218,6 +219,7 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
         for (JsonObjectConst e : extra) {
             DriverSettings d;
             if (e["driver_id"].is<const char*>()) d.id = e["driver_id"].as<const char*>();
+            if (e["label"].is<const char*>()) d.label = e["label"].as<const char*>();
             if (JsonObjectConst o = e["options"]; !o.isNull()) {
                 for (JsonPairConst kv : o) {
                     if (kv.value().is<const char*>()) {

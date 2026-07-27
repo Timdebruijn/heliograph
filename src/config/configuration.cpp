@@ -142,6 +142,26 @@ bool checkLength(const std::string& value, size_t max, const char* field, Config
     return true;
 }
 
+/// A device label is free text, with one restriction: no control characters.
+///
+/// Not squeamishness. The label is announced to Home Assistant as a device name, written into
+/// log lines and rendered on the dashboard, and a stray newline or NUL splits a log line in two
+/// or truncates the name at a point nobody chose. Everything printable is allowed, accents and
+/// emoji included -- "Schuur" and "Balkon achter" are the point of the feature.
+bool checkLabel(const std::string& value, const char* field, ConfigError& error) {
+    if (!checkLength(value, 32, field, error)) return false;
+    for (const unsigned char c : value) {
+        // < 0x20 and 0x7F are the C0 controls and DEL. Bytes above 0x7F are left alone: they are
+        // UTF-8 continuation bytes, not characters, and judging them one byte at a time would
+        // reject every accented name.
+        if (c < 0x20 || c == 0x7F) {
+            error = {field, "must not contain control characters"};
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 namespace {
@@ -271,6 +291,7 @@ bool validate(const Configuration& config, ConfigError& error) {
     if (!checkLength(config.mqtt.baseTopic, 64, "mqtt.base_topic", error)) return false;
     if (!checkLength(config.mqtt.discoveryPrefix, 64, "mqtt.discovery_prefix", error)) return false;
     if (!checkLength(config.driver.id, 64, "driver.id", error)) return false;
+    if (!checkLabel(config.driver.label, "driver.label", error)) return false;
     if (!checkLength(config.security.adminUsername, 32, "security.admin_username", error)) return false;
     if (!checkLength(config.security.adminPassword, 64, "security.admin_password", error)) return false;
     // Driver options are free-form, so bound them too rather than trust the driver.
@@ -377,6 +398,7 @@ bool validate(const Configuration& config, ConfigError& error) {
             return false;
         }
         if (!checkLength(d.id, 64, (where + ".driver_id").c_str(), error)) return false;
+        if (!checkLabel(d.label, (where + ".label").c_str(), error)) return false;
         for (const auto& [key, value] : d.options) {
             if (!checkLength(key, 32, (where + ".options").c_str(), error)) return false;
             if (!checkLength(value, 128, (where + ".options").c_str(), error)) return false;
@@ -472,6 +494,7 @@ void writeCommon(JsonDocument& doc, const Configuration& config) {
     JsonObject driver     = doc["driver"].to<JsonObject>();
     driver["id"]          = config.driver.id;
     driver["auto_detect"] = config.driver.autoDetect;
+    driver["label"]       = config.driver.label;
     JsonObject options    = driver["options"].to<JsonObject>();
     for (const auto& [key, value] : config.driver.options) {
         options[key] = value;
@@ -483,6 +506,7 @@ void writeCommon(JsonDocument& doc, const Configuration& config) {
     for (const auto& d : config.additionalDevices) {
         JsonObject e   = extra.add<JsonObject>();
         e["driver_id"] = d.id;
+        e["label"]     = d.label;
         JsonObject o   = e["options"].to<JsonObject>();
         for (const auto& [key, value] : d.options) {
             o[key] = value;
@@ -579,6 +603,12 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
            a.modbus.diagnosticsUnitId != b.modbus.diagnosticsUnitId ||
            a.polling.intervalSeconds != b.polling.intervalSeconds ||
            a.driver.id != b.driver.id || a.driver.options != b.driver.options ||
+           // Field by field here, NOT via DriverSettings::operator==, so a new field on that
+           // struct does not silently join this list. The label is applied when the device is
+           // created in setup(), so it belongs -- and a test caught that adding it to
+           // operator== alone was not enough, because additionalDevices uses the operator and
+           // `driver` does not.
+           a.driver.label != b.driver.label ||
            // The drivers and their poll contexts are built once, in setup(). Adding or
            // removing an inverter therefore changes nothing until the next boot.
            a.additionalDevices != b.additionalDevices ||
@@ -654,6 +684,7 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
     if (JsonObjectConst driver = doc["driver"]; !driver.isNull()) {
         if (!patchString(driver["id"], merged.driver.id, "driver.id", error)) return false;
         if (!patchBool(driver["auto_detect"], merged.driver.autoDetect, "driver.auto_detect", error)) return false;
+        if (!patchString(driver["label"], merged.driver.label, "driver.label", error)) return false;
         if (JsonObjectConst options = driver["options"]; !options.isNull()) {
             for (JsonPairConst kv : options) {
                 if (!kv.value().is<const char*>()) {
@@ -782,6 +813,8 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
             JsonObjectConst obj = item.as<JsonObjectConst>();
             DriverSettings  d;
             if (!patchString(obj["driver_id"], d.id, (where + ".driver_id").c_str(), error))
+                return false;
+            if (!patchString(obj["label"], d.label, (where + ".label").c_str(), error))
                 return false;
             if (JsonObjectConst options = obj["options"]; !options.isNull()) {
                 for (JsonPairConst kv : options) {

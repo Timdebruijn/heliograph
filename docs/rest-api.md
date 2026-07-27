@@ -99,8 +99,8 @@ once a driver has write capabilities.
     "ac.power.total": { "value": 1842.0, "unit": "W", "valid": true, "stale": false }
   },
   "devices": [
-    { "id": "growatt_modbus-1", "online": true, "data_valid": true, "data_stale": false,
-      "last_successful_poll_seconds_ago": 3, "ac_power_w": 1240.0 },
+    { "id": "growatt_modbus-1", "label": "Schuur", "online": true, "data_valid": true,
+      "data_stale": false, "last_successful_poll_seconds_ago": 3, "ac_power_w": 1240.0 },
     { "id": "growatt_modbus-2", "online": false, "data_valid": false, "data_stale": false,
       "last_successful_poll_seconds_ago": null, "ac_power_w": null }
   ],
@@ -112,6 +112,12 @@ once a driver has write capabilities.
   }
 }
 ```
+
+`label` is the name an operator gave the device on the settings page. It is **optional and
+additional**: absent when nothing was set, and never a replacement for `id`. `id` is the key —
+it addresses `/api/v1/devices/<id>`, the MQTT topic tree and the Modbus unit mapping — so a
+client that followed the label would 404 the first time somebody renamed an inverter. Show the
+label, address by the id. Renaming is safe precisely because nothing keys on it.
 
 `device` and `measurements` describe the **first** device and always will — that is what existing
 clients read; `devices[0]` is built from the same snapshot, so the two cannot contradict each
@@ -188,7 +194,7 @@ authenticate must ask the user for it rather than read it back; the factory valu
   "serial": { "override": false, "baud_rate": 9600, "parity": "none",
               "data_bits": 8, "stop_bits": 1 },
   "security": { "password_set": true, "read_only_mode": false },
-  "driver": { "id": "eversolar_legacy", "auto_detect": false },
+  "driver": { "id": "eversolar_legacy", "auto_detect": false, "label": "Schuur" },
   "logging": { "level": "info" }
 }
 ```

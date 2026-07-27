@@ -82,9 +82,27 @@ struct DriverSettings {
     /// Driver-specific settings, opaque here. The driver declares which keys exist and what
     /// they accept (DriverDescriptor::options); validateDriverOptions checks them against it.
     DriverOptions options;
+    /// What the operator calls this inverter: "Schuur", "Balkon". Optional, and empty means
+    /// exactly what it means today -- every surface falls back to the registered id.
+    ///
+    /// DISPLAY ONLY. It must never reach an identifier: not the registered device id, not a
+    /// REST path, not an MQTT topic, not a Home Assistant unique_id. Those are keys, and a
+    /// rename would silently strand every entity's history behind a new one. It is stored here,
+    /// beside the device row, rather than on DeviceIdentity for the same reason -- deviceId()
+    /// lives on that struct, and a label in scope there is one line away from ending up in it.
+    ///
+    /// Home Assistant is the exception that proves the rule: discovery announces it as the
+    /// device NAME, which HA is free to change on an existing device, while the unique_id it
+    /// keys entities by stays derived from the id (#76).
+    std::string label;
 
     friend bool operator==(const DriverSettings& a, const DriverSettings& b) {
-        return a.id == b.id && a.autoDetect == b.autoDetect && a.options == b.options;
+        // label included deliberately: it is applied when the device is created in setup() and
+        // announced to Home Assistant at connect, so a changed label needs a restart like every
+        // other property of a device row. Leaving it out would make the settings page report no
+        // restart needed and then show the old name until the next reboot anyway.
+        return a.id == b.id && a.autoDetect == b.autoDetect && a.label == b.label &&
+               a.options == b.options;
     }
     friend bool operator!=(const DriverSettings& a, const DriverSettings& b) { return !(a == b); }
 };

@@ -41,9 +41,10 @@ static Configuration populated() {
     c.modbus.diagnosticsUnitId = 240;
     c.polling.intervalSeconds = 30;
     c.driver.id              = "mock";
+    c.driver.label           = "Schuur";
     c.driver.autoDetect      = true;
     c.driver.options["unit_id"] = "3";
-    c.additionalDevices.push_back({"mock", false, {{"unit_id", "4"}}});
+    c.additionalDevices.push_back({"mock", false, {{"unit_id", "4"}}, "Balkon"});
     c.relays.enabled         = true;
     c.relays.roles           = {"drm0", "none"};
     c.ntp.enabled            = false;
@@ -98,6 +99,11 @@ static void test_round_trip_with_secrets_is_lossless() {
     TEST_ASSERT_EQUAL_UINT8(240, restored.modbus.diagnosticsUnitId);
     TEST_ASSERT_EQUAL_UINT32(30, restored.polling.intervalSeconds);
     TEST_ASSERT_TRUE(original.driver == restored.driver);
+    // Named explicitly rather than left to operator==: a label that failed to round-trip would
+    // come back empty, every surface would silently fall back to the id, and the operator would
+    // find their inverters renamed to serial numbers after a restore.
+    TEST_ASSERT_EQUAL_STRING("Schuur", restored.driver.label.c_str());
+    TEST_ASSERT_EQUAL_STRING("Balkon", restored.additionalDevices[0].label.c_str());
     TEST_ASSERT_EQUAL_size_t(1, restored.additionalDevices.size());
     TEST_ASSERT_EQUAL_STRING("4", restored.additionalDevices[0].options.at("unit_id").c_str());
     TEST_ASSERT_TRUE(restored.relays.enabled);
