@@ -44,7 +44,7 @@ public:
         ++flushCalls;
     }
 
-    size_t write(const uint8_t* data, size_t len) override {
+    size_t writeBytes(const uint8_t* data, size_t len) override {
         writes.emplace_back(data, data + len);
         if (writeFails) {
             return 0;
@@ -67,7 +67,7 @@ public:
         return len;
     }
 
-    size_t read(uint8_t* buf, size_t len, uint32_t timeoutMs) override {
+    size_t readBytes(uint8_t* buf, size_t len, uint32_t timeoutMs) override {
         (void)timeoutMs;
         // A read advances the simulated clock so tests can drive an overall transaction
         // deadline: `msPerRead` models bytes that trickle in just under each read's own

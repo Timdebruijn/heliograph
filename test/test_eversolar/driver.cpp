@@ -656,6 +656,48 @@ static void test_backoff_is_bounded() {
 // That snprintf is reached only at Trace level during a real transaction, so nothing exercised
 // it -- it was verified once by reading a log off a bridge, which is not a test. A wrong label
 // costs no function, but it is the one piece of output the refactor could quietly change.
+/// A tap on the transport must see BOTH sides of a real driver's conversation, and see them
+/// without the driver knowing it is there.
+///
+/// This is the property the active capture is built on. A tap that recorded only what arrived
+/// would produce a file in which the bridge's own requests are missing -- which does not read as
+/// an incomplete recording, it reads as a device answering unprompted, and that is a worse
+/// artefact than none. It is also why the tap sits in Transport rather than in each driver:
+/// write() and read() are not virtual, so there is no path around it, and every driver written
+/// afterwards is recorded without anyone remembering to add it.
+static void test_a_transport_tap_sees_both_sides_of_a_real_exchange() {
+    struct Recorder : heliograph::Transport::Tap {
+        std::vector<std::pair<Direction, size_t>> events;
+        size_t                                    txBytes = 0, rxBytes = 0;
+        void onBytes(Direction direction, const uint8_t* data, size_t len) override {
+            TEST_ASSERT_NOT_NULL(data);
+            events.emplace_back(direction, len);
+            (direction == Direction::Tx ? txBytes : rxBytes) += len;
+        }
+    };
+
+    Rig      r;
+    Recorder tap;
+    r.transport.setTap(&tap);
+    r.begin();
+    DeviceState state;
+    r.poll(state);
+
+    TEST_ASSERT_TRUE_MESSAGE(tap.txBytes > 0, "the driver's own requests were not recorded");
+    TEST_ASSERT_TRUE_MESSAGE(tap.rxBytes > 0, "the device's replies were not recorded");
+    // Ours first: this bus has one master, so an exchange that opens with an RX would mean the
+    // recording started mid-conversation.
+    TEST_ASSERT_EQUAL(Recorder::Direction::Tx, tap.events.front().first);
+
+    // And removing it stops the recording dead -- a capture window that outlived its request
+    // would keep growing on a bridge nobody is looking at.
+    r.transport.setTap(nullptr);
+    const size_t before = tap.events.size();
+    DeviceState  again;
+    r.poll(again);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(before, tap.events.size(), "the tap kept recording");
+}
+
 static void test_the_trace_label_names_the_bus_and_the_direction() {
     // Fully qualified: `log` alone resolves to ::log from <cmath> under the using-directives
     // at the top of this file.
@@ -771,6 +813,7 @@ void run_eversolar_driver() {
     RUN_TEST(test_sunrise_recovers_without_intervention);
     RUN_TEST(test_a_single_dropped_frame_does_not_disturb_anything);
     RUN_TEST(test_backoff_is_bounded);
+    RUN_TEST(test_a_transport_tap_sees_both_sides_of_a_real_exchange);
     RUN_TEST(test_the_trace_label_names_the_bus_and_the_direction);
     RUN_TEST(test_diagnostics_track_the_cycle_without_leaking_payload);
     RUN_TEST(test_snapshots_are_immutable_and_independent);

@@ -27,15 +27,17 @@ public:
     /// the peripheral as RTS. Safe to call again to switch profiles.
     bool configure(const SerialProfile& profile) override;
 
-    void   flushInput() override;
-    size_t   write(const uint8_t* data, size_t len) override;
-    size_t   read(uint8_t* buf, size_t len, uint32_t timeoutMs) override;
+    void     flushInput() override;
     uint64_t nowMs() const override;
 
     bool lock(uint32_t timeoutMs) override;
     void unlock() override;
 
     const TransportStats& stats() const override { return stats_; }
+
+protected:
+    size_t writeBytes(const uint8_t* data, size_t len) override;
+    size_t readBytes(uint8_t* buf, size_t len, uint32_t timeoutMs) override;
 
 private:
     TransportStats stats_;

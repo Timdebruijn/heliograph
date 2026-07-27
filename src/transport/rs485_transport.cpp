@@ -75,7 +75,7 @@ void Rs485Transport::flushInput() {
     }
 }
 
-size_t Rs485Transport::write(const uint8_t* data, size_t len) {
+size_t Rs485Transport::writeBytes(const uint8_t* data, size_t len) {
     const size_t n = uart_.write(data, len);
     // Block until the last bit is on the wire. Without this the UART could drop RTS while
     // the tail of the frame is still shifting out.
@@ -91,7 +91,7 @@ size_t Rs485Transport::write(const uint8_t* data, size_t len) {
     return n;
 }
 
-size_t Rs485Transport::read(uint8_t* buf, size_t len, uint32_t timeoutMs) {
+size_t Rs485Transport::readBytes(uint8_t* buf, size_t len, uint32_t timeoutMs) {
     // Elapsed-time form, not `millis() + timeoutMs`: the sum wraps once every ~49.7 days of
     // uptime and would return an instant spurious timeout on that tick. `millis() - start`
     // stays correct across the rollover.
@@ -147,8 +147,8 @@ namespace heliograph {
 Rs485Transport::Rs485Transport() = default;
 bool   Rs485Transport::configure(const SerialProfile&) { return false; }
 void   Rs485Transport::flushInput() {}
-size_t Rs485Transport::write(const uint8_t*, size_t) { return 0; }
-size_t   Rs485Transport::read(uint8_t*, size_t, uint32_t) { return 0; }
+size_t Rs485Transport::writeBytes(const uint8_t*, size_t) { return 0; }
+size_t   Rs485Transport::readBytes(uint8_t*, size_t, uint32_t) { return 0; }
 uint64_t Rs485Transport::nowMs() const { return 0; }
 bool     Rs485Transport::lock(uint32_t) { return busMutex_.try_lock(); }
 void     Rs485Transport::unlock() { busMutex_.unlock(); }
