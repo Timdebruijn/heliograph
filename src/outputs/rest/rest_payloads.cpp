@@ -86,6 +86,13 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     // downstream could otherwise tell a Relay-6CH image from an RS485-CAN one, and the wrong
     // one runs happily on the wrong pins.
     b["board_id"]           = bridge.boardId;
+    // What the interface HAS, and how it was asked for -- see BridgeInfo. Empty while the
+    // portal is up and nothing has been assigned yet, so it is omitted rather than reported
+    // as "" (the house rule: absent means "no answer", never a blank that reads like one).
+    if (!bridge.ipAddress.empty()) {
+        b["ip_address"] = bridge.ipAddress;
+    }
+    b["ip_mode"] = bridge.staticIp ? "static" : "dhcp";
     // A firmware constant, not configuration: the settings page needs it to stop offering an
     // "Add a device" button past the point the bridge would refuse the save.
     b["max_devices"]        = static_cast<unsigned>(kMaxDevices);

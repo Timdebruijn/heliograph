@@ -1133,6 +1133,16 @@ function tzOptions(ntp){
   return h+`<option value="__custom" ${sel===null?'selected':''}>Custom (POSIX string)…</option>`;
 }
 window.tzToggle=()=>{$('#tzcustom').classList.toggle('hide',$('#c_ntptz').value!=='__custom')};
+// Hidden rather than disabled on DHCP: an empty field that is still on screen reads as "you may
+// fill this in", and on DHCP filling it in is exactly what validate() refuses. window.-scoped
+// like tzToggle, because it is called from an inline onchange.
+window.ipModeToggle=()=>{
+  const on=$('#c_ipmode').value==='static';
+  $('#c_ipfields').classList.toggle('hide',!on);
+  // A first switch to static lands on a blank form, and the mask is the one field nobody can
+  // guess from the others -- so offer the one almost every home network uses.
+  if(on&&!$('#c_sn').value)$('#c_sn').value='255.255.255.0';
+};
 
 // ---------------- Settings ----------------
 let cfgDrivers=null, cfgBefore=null;
@@ -1146,6 +1156,8 @@ const RESTART_NEEDED={
   'wifi.ssid':'WiFi network',
   'wifi.password':'WiFi password',
   'wifi.hostname':'Hostname',
+  'wifi.ip':'IP address','wifi.gateway':'Gateway','wifi.subnet':'Subnet mask',
+  'wifi.dns1':'DNS server','wifi.dns2':'Second DNS server',
   'mqtt.enabled':'MQTT on/off','mqtt.host':'MQTT broker','mqtt.port':'MQTT port',
   'mqtt.username':'MQTT username','mqtt.password':'MQTT password',
   'mqtt.base_topic':'MQTT base topic','mqtt.discovery_enabled':'Home Assistant discovery',
@@ -1405,6 +1417,27 @@ async function renderConfig(){
     <select id="c_ssidpick" style="display:none;margin-top:6px"
       onchange="if(this.value){document.querySelector('#c_ssid').value=this.value}"></select>
     ${pw('c_wpw','Password',c.wifi.password_set)}</div>
+  <div class="card"><b>Addressing</b> <span class="tag" style="font-weight:400">needs restart</span>
+    <label for="c_ipmode">How this bridge gets its address</label>
+    <select id="c_ipmode" onchange="ipModeToggle()">
+      <option value="dhcp"${c.wifi.ip?'':' selected'}>Automatic (DHCP)</option>
+      <option value="static"${c.wifi.ip?' selected':''}>Static</option>
+    </select>
+    <div class="dim" style="font-size:12px">DHCP suits almost everyone. Choose static when the
+    network has no DHCP server, or when something else refers to this bridge by a fixed
+    address.</div>
+    <div id="c_ipfields" class="${c.wifi.ip?'':'hide'}" style="margin-top:12px">
+      ${txt('c_ip','IP address',c.wifi.ip,'This bridge, for example 192.168.1.50.')}
+      ${txt('c_gw','Gateway',c.wifi.gateway,'Usually your router, and it must sit inside the same subnet as the address above.')}
+      ${txt('c_sn','Subnet mask',c.wifi.subnet,'255.255.255.0 unless your network says otherwise.')}
+      ${txt('c_dns1','DNS server',c.wifi.dns1,'Required as soon as anything here is configured by name — an NTP server or an MQTT broker. Without it the clock never syncs and nothing says so.')}
+      ${txt('c_dns2','Second DNS server (optional)',c.wifi.dns2)}
+      <div class="dim" style="font-size:12px;margin-top:8px"><b>Get this wrong and the bridge
+      disappears.</b> A wrong address does not stop it joining the WiFi — it joins, and is then
+      simply unreachable. The settings are checked before they are stored, but the check cannot
+      know whether the address is already taken. If it does go missing: hold BOOT for five
+      seconds to factory-reset and start again from the setup portal.</div>
+    </div></div>
   <div class="card"><b>Time (NTP)</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_ntpe','Enabled',c.ntp.enabled)}
     ${chk('c_ntpd','Use NTP server from DHCP',c.ntp.use_dhcp)}
     ${txt('c_ntps','NTP server (fallback)',c.ntp.server)}
@@ -1640,7 +1673,14 @@ async function saveConfig(){
   const body={bridge_name:v('c_name'),
     ...(window.g_relayCount>0?{relays:{enabled:b('c_rle'),
       roles:Array.from({length:window.g_relayCount},(_,i)=>v('c_rlr'+i))}}:{}),
-    wifi:{ssid:v('c_ssid'),hostname:v('c_host')},
+    // On DHCP every address field is sent EMPTY, not omitted: clearing is how a bridge goes back
+    // from static, and an omitted key means "leave alone" to the patch handler. Trimmed, because
+    // a trailing space fails the parse while the field still looks right.
+    wifi:{ssid:v('c_ssid'),hostname:v('c_host'),
+          ...(v('c_ipmode')==='static'
+              ?{ip:v('c_ip').trim(),gateway:v('c_gw').trim(),subnet:v('c_sn').trim(),
+                dns1:v('c_dns1').trim(),dns2:v('c_dns2').trim()}
+              :{ip:'',gateway:'',subnet:'',dns1:'',dns2:''})},
     mqtt:{enabled:b('c_mqe'),host:v('c_mqh'),port:n('c_mqp'),
           base_topic:v('c_mqt'),discovery_enabled:b('c_mqd')},
     modbus:{enabled:b('c_mbe'),port:n('c_mbp'),unit_id:n('c_mbu')},

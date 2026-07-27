@@ -642,15 +642,272 @@ static void test_the_stored_blob_fits_nvs_comfortably() {
     c.security.adminPassword = std::string(64, 'x');
     c.driver.options["layout"] = std::string(128, 'x');
 
+    c.wifi.ip      = "192.168.100.200";
+    c.wifi.gateway = "192.168.100.254";
+    c.wifi.subnet  = "255.255.255.0";
+    c.wifi.dns1    = "192.168.100.253";
+    c.wifi.dns2    = "192.168.100.252";
+
     ConfigError e;
     TEST_ASSERT_TRUE_MESSAGE(validate(c, e), "a maximal config must still be valid");
     std::string blob;
     TEST_ASSERT_TRUE(serializeConfigForStorage(c, blob));
-    TEST_ASSERT_TRUE(blob.size() < 3900);
+    TEST_ASSERT_TRUE(blob.size() < kMaxStoredConfigBytes);
+
+    // The property that actually matters: even everything-at-maximum leaves most of the entry
+    // free, so the next field to be added is not a cliff. Measured 1822 of 3900 when static
+    // addressing was added (0.16.0); the assertion is half the cap, so it has room to drift and
+    // still fails before anything is at risk.
+    TEST_ASSERT_TRUE_MESSAGE(blob.size() < kMaxStoredConfigBytes / 2,
+                             std::to_string(blob.size()).c_str());
 
     std::string typical;
     TEST_ASSERT_TRUE(serializeConfigForStorage(provisionedConfig(), typical));
-    TEST_ASSERT_TRUE(typical.size() < 1000);
+    // A canary, not a limit. Moved from 1000 to 1200 when the five addressing fields were added
+    // -- they are emitted empty on a DHCP bridge, which costs ~55 bytes and took a typical blob
+    // from 983 to 1038. Raised deliberately and with the numbers written down, because a
+    // threshold quietly nudged whenever it trips stops being evidence of anything.
+    TEST_ASSERT_TRUE_MESSAGE(typical.size() < 1200, std::to_string(typical.size()).c_str());
+}
+
+static Configuration staticConfig() {
+    auto c         = provisionedConfig();
+    c.wifi.ip      = "192.168.1.50";
+    c.wifi.gateway = "192.168.1.1";
+    c.wifi.subnet  = "255.255.255.0";
+    c.wifi.dns1    = "192.168.1.1";
+    return c;
+}
+
+/// Whatever the writer emits, the reader must take back — all of it.
+///
+/// Serialise, parse, serialise again: if the reader ignores a field the writer produced, the
+/// second blob differs and this fails, naming nothing in particular but failing reliably. That
+/// is the point — it needs no per-field maintenance, so it keeps working for fields nobody has
+/// thought of yet.
+///
+/// Written because exactly this went wrong while adding static addressing: the five new keys
+/// were added to writeCommon and forgotten in deserializeConfigFromStorage, so a bridge would
+/// have saved its static address and come back on DHCP after a reboot. The writer-vs-writer
+/// drift check could not see it — it compares the two documents to each other, and both were
+/// correct. Nothing else in the suite covered the return trip in full.
+static void test_everything_the_writer_emits_the_reader_takes_back() {
+    auto c = staticConfig();
+    c.additionalDevices.push_back([] {
+        DriverSettings d;
+        d.id                = "sunspec";
+        d.options["unit_id"] = "2";
+        return d;
+    }());
+    c.relays.roles          = {"drm0", "drm5"};
+    c.relays.enabled        = true;
+    c.serial.enabled        = true;
+    c.serial.profile.parity = SerialParity::Even;
+    c.updates.checkEnabled  = false;
+    c.logLevel              = LogLevel::Debug;
+
+    std::string first;
+    TEST_ASSERT_TRUE(serializeConfigForStorage(c, first));
+
+    Configuration back;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, deserializeConfigFromStorage(first, back));
+
+    std::string second;
+    TEST_ASSERT_TRUE(serializeConfigForStorage(back, second));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(first.c_str(), second.c_str(),
+                                     "a field the writer emits is not read back");
+}
+
+// --- static addressing ------------------------------------------------------------------------
+//
+// Each of these refuses a configuration that would otherwise be stored, applied at the next
+// boot, and leave a bridge unreachable at whatever height it is mounted. The PATCH handler is
+// the last moment anyone is looking at it, so that is where they live.
+
+static void test_a_sound_static_configuration_is_accepted() {
+    ConfigError e;
+    TEST_ASSERT_TRUE_MESSAGE(validate(staticConfig(), e), e.field.c_str());
+}
+
+static void test_an_empty_ip_means_dhcp_and_needs_nothing_else() {
+    auto        c = provisionedConfig();
+    ConfigError e;
+    TEST_ASSERT_TRUE(validate(c, e));
+    TEST_ASSERT_FALSE(c.wifi.staticIp());
+}
+
+/// A gateway left behind after clearing the address is a half-configuration that reads as if it
+/// were in effect. Refused so the form cannot lie about what the bridge will do.
+static void test_leftover_fields_without_an_ip_are_refused() {
+    auto        c = provisionedConfig();
+    ConfigError e;
+    c.wifi.gateway = "192.168.1.1";
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("wifi.gateway", e.field.c_str());
+}
+
+static void test_the_address_fields_must_parse() {
+    ConfigError e;
+    struct { const char* value; const char* field; } cases[] = {
+        {"192.168.1", "wifi.ip"},
+        {"010.0.0.5", "wifi.ip"},
+        {"not-an-ip", "wifi.ip"},
+    };
+    for (const auto& tc : cases) {
+        auto c    = staticConfig();
+        c.wifi.ip = tc.value;
+        TEST_ASSERT_FALSE_MESSAGE(validate(c, e), tc.value);
+        TEST_ASSERT_EQUAL_STRING(tc.field, e.field.c_str());
+    }
+}
+
+/// The mask rule is not style. WiFiSTAClass::config() reinterprets its arguments as the ESP8266
+/// ordering when the mask's first octet is not 255 -- so an odd mask does not fail, it silently
+/// configures a different gateway.
+static void test_a_mask_the_arduino_core_would_reinterpret_is_refused() {
+    ConfigError e;
+    for (const char* mask : {"0.0.0.0", "255.0.255.0", "128.0.0.0", "255.255.255.255"}) {
+        auto c        = staticConfig();
+        c.wifi.subnet = mask;
+        TEST_ASSERT_FALSE_MESSAGE(validate(c, e), mask);
+        TEST_ASSERT_EQUAL_STRING("wifi.subnet", e.field.c_str());
+    }
+}
+
+static void test_an_unreachable_gateway_is_refused() {
+    auto        c  = staticConfig();
+    ConfigError e;
+    c.wifi.gateway = "10.0.0.1";  // not inside 192.168.1.0/24
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("wifi.gateway", e.field.c_str());
+}
+
+static void test_the_network_and_broadcast_addresses_are_refused() {
+    ConfigError e;
+    auto        c = staticConfig();
+    c.wifi.ip     = "192.168.1.0";
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("wifi.ip", e.field.c_str());
+
+    c         = staticConfig();
+    c.wifi.ip = "192.168.1.255";
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("wifi.ip", e.field.c_str());
+}
+
+static void test_taking_the_gateways_own_address_is_refused() {
+    auto        c = staticConfig();
+    ConfigError e;
+    c.wifi.ip     = c.wifi.gateway;
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("wifi.ip", e.field.c_str());
+}
+
+/// THE quiet one. With no DNS the stack resolves nothing: the bridge boots, answers on its
+/// address, looks healthy -- and never syncs its clock, because pool.ntp.org is a name. Nothing
+/// throws. This is the only moment anyone is looking.
+static void test_a_static_address_with_no_dns_is_refused_while_a_name_is_configured() {
+    ConfigError e;
+
+    auto c      = staticConfig();
+    c.wifi.dns1 = "";
+    c.wifi.dns2 = "";
+    c.ntp.enabled = true;
+    c.ntp.server  = "pool.ntp.org";
+    TEST_ASSERT_FALSE_MESSAGE(validate(c, e), "a named NTP server needs a resolver");
+    TEST_ASSERT_EQUAL_STRING("wifi.dns1", e.field.c_str());
+
+    // An MQTT broker named rather than numbered is the same problem.
+    c            = staticConfig();
+    c.wifi.dns1  = "";
+    c.wifi.dns2  = "";
+    c.ntp.server = "192.168.1.1";  // numbered, so NTP is fine
+    c.mqtt.enabled = true;
+    c.mqtt.host    = "homeassistant.local";
+    TEST_ASSERT_FALSE_MESSAGE(validate(c, e), "a named broker needs a resolver");
+    TEST_ASSERT_EQUAL_STRING("wifi.dns1", e.field.c_str());
+}
+
+/// ...and the complement: everything numbered needs no resolver, so demanding one would be a
+/// rule that refuses a perfectly workable network.
+static void test_no_dns_is_fine_when_nothing_is_configured_by_name() {
+    auto c         = staticConfig();
+    c.wifi.dns1    = "";
+    c.wifi.dns2    = "";
+    c.ntp.enabled  = true;
+    c.ntp.server   = "192.168.1.1";
+    c.mqtt.enabled = true;
+    c.mqtt.host    = "192.168.1.10";
+    ConfigError e;
+    TEST_ASSERT_TRUE_MESSAGE(validate(c, e), e.field.c_str());
+
+    // A disabled output does not count either -- its host is never resolved.
+    c.mqtt.enabled = false;
+    c.mqtt.host    = "homeassistant.local";
+    TEST_ASSERT_TRUE_MESSAGE(validate(c, e), e.field.c_str());
+}
+
+/// The other quiet one, found reviewing the first. ntp.use_dhcp means "take the server from the
+/// DHCP lease" -- and a static address has no lease. Index 0 is never filled, and with an empty
+/// ntp.server index 1 is never set either, so NTP runs with no server at all: the clock never
+/// syncs and every log line stays stamped from uptime. The DHCP path may leave the server empty
+/// because the lease covers it; that reasoning does not survive a static address.
+static void test_a_static_address_needs_an_ntp_server_even_with_use_dhcp_on() {
+    auto c        = staticConfig();
+    c.ntp.enabled = true;
+    c.ntp.useDhcp = true;
+    c.ntp.server.clear();
+    ConfigError e;
+    TEST_ASSERT_FALSE(validate(c, e));
+    TEST_ASSERT_EQUAL_STRING("ntp.server", e.field.c_str());
+
+    // Naming one is enough -- use_dhcp then merely means "prefer the lease if there ever is one".
+    c.ntp.server = "192.168.1.1";
+    TEST_ASSERT_TRUE_MESSAGE(validate(c, e), e.field.c_str());
+
+    // And on DHCP the empty server stays legal, because the lease really does supply it.
+    auto d        = provisionedConfig();
+    d.ntp.enabled = true;
+    d.ntp.useDhcp = true;
+    d.ntp.server.clear();
+    TEST_ASSERT_TRUE_MESSAGE(validate(d, e), e.field.c_str());
+}
+
+static void test_static_addressing_round_trips_through_storage_and_patch() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    TEST_ASSERT_TRUE(store.save(staticConfig()));
+
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_EQUAL_STRING("192.168.1.50", loaded.wifi.ip.c_str());
+    TEST_ASSERT_EQUAL_STRING("255.255.255.0", loaded.wifi.subnet.c_str());
+    TEST_ASSERT_TRUE(loaded.wifi.staticIp());
+
+    // Back to DHCP: clearing every field is a legal patch, and must leave nothing behind.
+    ConfigError e;
+    TEST_ASSERT_TRUE(applyConfigPatch(
+        R"({"wifi":{"ip":"","gateway":"","subnet":"","dns1":"","dns2":""}})", loaded, e));
+    TEST_ASSERT_FALSE(loaded.wifi.staticIp());
+    TEST_ASSERT_TRUE(validate(loaded, e));
+    TEST_ASSERT_TRUE(loaded.wifi.gateway.empty());
+}
+
+/// The network is read once, between WiFi.mode() and WiFi.begin(). Changing it live would tear
+/// down every listening socket underneath the request that asked for the change.
+static void test_changing_the_address_requires_a_restart() {
+    const auto before = staticConfig();
+    auto       after  = before;
+    after.wifi.ip     = "192.168.1.51";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(before, after));
+
+    after         = before;
+    after.wifi.dns2 = "9.9.9.9";
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(before, after));
+
+    after            = before;
+    after.bridgeName = "Something else";
+    TEST_ASSERT_FALSE(configChangeRequiresReboot(before, after));
 }
 
 static void test_overlong_strings_are_refused_at_the_boundary() {
@@ -1121,6 +1378,20 @@ int main(int, char**) {
     RUN_TEST(test_a_stored_config_that_no_longer_validates_is_corrupt);
     RUN_TEST(test_missing_fields_fall_back_to_defaults);
     RUN_TEST(test_the_stored_blob_fits_nvs_comfortably);
+    RUN_TEST(test_everything_the_writer_emits_the_reader_takes_back);
+    RUN_TEST(test_a_sound_static_configuration_is_accepted);
+    RUN_TEST(test_an_empty_ip_means_dhcp_and_needs_nothing_else);
+    RUN_TEST(test_leftover_fields_without_an_ip_are_refused);
+    RUN_TEST(test_the_address_fields_must_parse);
+    RUN_TEST(test_a_mask_the_arduino_core_would_reinterpret_is_refused);
+    RUN_TEST(test_an_unreachable_gateway_is_refused);
+    RUN_TEST(test_the_network_and_broadcast_addresses_are_refused);
+    RUN_TEST(test_taking_the_gateways_own_address_is_refused);
+    RUN_TEST(test_a_static_address_with_no_dns_is_refused_while_a_name_is_configured);
+    RUN_TEST(test_no_dns_is_fine_when_nothing_is_configured_by_name);
+    RUN_TEST(test_a_static_address_needs_an_ntp_server_even_with_use_dhcp_on);
+    RUN_TEST(test_static_addressing_round_trips_through_storage_and_patch);
+    RUN_TEST(test_changing_the_address_requires_a_restart);
     RUN_TEST(test_overlong_strings_are_refused_at_the_boundary);
     RUN_TEST(test_no_credentials_means_portal);
     RUN_TEST(test_a_few_failures_keep_trying_rather_than_open_a_portal);

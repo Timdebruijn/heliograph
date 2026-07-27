@@ -10,6 +10,7 @@
 #include <esp_mac.h>
 
 #include "diagnostics/logger.h"
+#include "network/ipv4.h"
 
 namespace heliograph {
 
@@ -125,10 +126,81 @@ void WifiManager::startMdns() {
     log::info("mdns: %s.local", config_.wifi.hostname.c_str());
 }
 
+/// Hands the addressing to the driver, before any association is attempted.
+///
+/// ORDER MATTERS AND IS NOT OPTIONAL. WiFi.config() must run before WiFi.begin(): the static
+/// address has to be in place when the association completes, or the DHCP client the stack
+/// starts by default wins the race and the configured address is never used. This sits right
+/// after mode() for the same reason fireStackReadyHook() does -- the netif exists, DHCP has not
+/// run yet.
+///
+/// NOT INADDR_NONE, AND THIS IS A TRAP WORTH THE PARAGRAPH. Every tutorial spells "go back to
+/// DHCP" as WiFi.config(INADDR_NONE, ...), and the Arduino layer does treat INADDR_NONE as its
+/// "unset" sentinel -- but lwip defines it as 0xFFFFFFFF, while the layer that actually decides,
+/// NetworkInterface::config(), clears and restarts the DHCP client only when the address is
+/// ZERO. Handing it INADDR_NONE therefore stops the DHCP client, configures 255.255.255.255 as
+/// a static address, and never starts DHCP again -- on the default path every bridge takes.
+/// Verified against core 3.3.9's own source, not inferred. All-zeroes is the form that reaches
+/// the clearing branch.
+///
+/// The call is made explicitly rather than skipped so a bridge that has just been switched back
+/// from a static address behaves the same as one that never had one, without a reboot-shaped
+/// difference between them.
+///
+/// Nothing is validated here. validate() already refused everything that does not parse, and
+/// repeating the rules in a second place is how two answers to the same question appear.
+void WifiManager::applyAddressing() {
+    const auto&     w    = config_.wifi;
+    const IPAddress none(0, 0, 0, 0);
+    if (!w.staticIp()) {
+        WiFi.config(none, none, none);
+        log::info("net: DHCP");
+        return;
+    }
+    uint32_t   maskRaw = 0;
+    const auto toAddr  = [&none](const std::string& text) {
+        uint32_t raw = 0;
+        if (!net::parseIpv4(text, raw)) {
+            return none;  // unreachable: validate() refused anything that does not parse
+        }
+        // parseIpv4 yields host byte order, most significant octet first.
+        return IPAddress((raw >> 24) & 0xFF, (raw >> 16) & 0xFF, (raw >> 8) & 0xFF, raw & 0xFF);
+    };
+    net::parseIpv4(w.subnet, maskRaw);
+    const IPAddress ip   = toAddr(w.ip);
+    const IPAddress gw   = toAddr(w.gateway);
+    const IPAddress mask = toAddr(w.subnet);
+    // An omitted DNS server is all-zeroes, which esp_netif reads as "none set" -- the same
+    // encoding the clearing path above relies on.
+    const IPAddress dns1 = w.dns1.empty() ? none : toAddr(w.dns1);
+    const IPAddress dns2 = w.dns2.empty() ? none : toAddr(w.dns2);
+
+    if (!WiFi.config(ip, gw, mask, dns1, dns2)) {
+        // Reported, then carried on with. A refusal here leaves the DHCP client running, which
+        // is the outcome most likely to keep the bridge reachable -- and the log line is the
+        // only way anyone learns the address they configured is not the one in use.
+        log::error("net: static address %s was refused by the driver; falling back to DHCP",
+                   w.ip.c_str());
+        WiFi.config(none, none, none);
+        return;
+    }
+    log::info("net: static %s/%u gw %s dns %s", w.ip.c_str(),
+              static_cast<unsigned>(net::maskPrefixLength(maskRaw)), w.gateway.c_str(),
+              w.dns1.empty() ? "(none)" : w.dns1.c_str());
+}
+
 void WifiManager::attemptConnect() {
     ++attempt_;
     attemptInFlight_  = true;
     attemptStartedMs_ = 0;  // set by loop() on the next tick
+    // Immediately before every begin(), not once at startup. Three paths reach an association:
+    // the first attempt, a back-off retry, and the return from the setup portal -- and that last
+    // one goes through stopPortal()'s WiFi.mode(WIFI_STA), which may rebuild the STA netif and
+    // take the addressing with it. Applying it once in begin() left that to chance, and the way
+    // it fails is a static bridge quietly coming back on DHCP at a different address. Here the
+    // invariant is simply "the addressing is in place before every begin()", with no transition
+    // to reason about. config() is idempotent, and on a reconnect there is no lease to disturb.
+    applyAddressing();
     WiFi.begin(config_.wifi.ssid.c_str(), config_.wifi.password.c_str());
 }
 
@@ -254,6 +326,7 @@ void        WifiManager::startPortal() { portalActive_ = true; }
 void        WifiManager::stopPortal() { portalActive_ = false; }
 void        WifiManager::startMdns() {}
 void        WifiManager::attemptConnect() {}
+void        WifiManager::applyAddressing() {}
 void        WifiManager::fireStackReadyHook() {}
 
 }  // namespace heliograph

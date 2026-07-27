@@ -180,7 +180,8 @@ authenticate must ask the user for it rather than read it back; the factory valu
 
 ```json
 {
-  "wifi":  { "ssid": "thuis", "password_set": true },
+  "wifi":  { "ssid": "thuis", "password_set": true,
+             "ip": "", "gateway": "", "subnet": "", "dns1": "", "dns2": "" },
   "mqtt":  { "host": "10.0.0.5", "port": 1883, "username_set": true, "password_set": true },
   "modbus": { "enabled": true, "port": 502, "unit_id": 1, "write_enabled": false },
   "polling": { "interval_seconds": 10 },
@@ -191,6 +192,34 @@ authenticate must ask the user for it rather than read it back; the factory valu
   "logging": { "level": "info" }
 }
 ```
+
+## Addressing
+
+`wifi.ip` empty means DHCP, and that is the whole switch — there is no separate enable flag.
+Setting it makes the other four fields meaningful; clearing it must clear them too, or the
+`PATCH` is refused rather than storing a half-configuration that reads as if it were in effect.
+
+`GET /api/v1/status` reports both `bridge.ip_mode` (`"dhcp"` or `"static"` — how the address was
+**asked for**) and `bridge.ip_address` (what the interface **ended up with**, absent while none
+has been assigned). They are separate on purpose: on a bridge whose static address the driver
+refused, they disagree, and that disagreement is the only visible sign of it.
+
+Changing any addressing field needs a restart, like the rest of the network settings.
+
+**A wrong static address does not fail loudly.** The association still succeeds — WiFi is layer 2
+and addressing is layer 3 — so the bridge joins the network and is simply unreachable. `PATCH`
+therefore refuses everything it can see from here: anything that is not four decimal octets, a
+mask with a hole in it or not starting at 255, an address naming the network or the broadcast, a
+gateway outside the subnet or equal to our own, and leftover fields after the address was
+cleared. Two more rules exist because their failure is silent rather than loud:
+
+- a static address with **no DNS server** while an NTP server or MQTT broker is configured by
+  name — the stack would resolve nothing, the clock would never sync, and nothing would say so
+- a static address with NTP enabled and **no `ntp.server`**, even with `ntp.use_dhcp` on: there
+  is no lease to provide one
+
+What no check can know is whether the address is already taken. If a bridge does go missing,
+hold BOOT for five seconds to factory-reset and start again from the setup portal.
 
 `PATCH` accepts `"password": "..."` / `"username": "..."` to set either. An omitted field stays
 unchanged. Credentials never appear in logs, in SSE, in MQTT, or in Prometheus.

@@ -286,6 +286,8 @@ BridgeInfo bridgeInfo() {
     info.resetReason      = static_cast<uint16_t>(esp_reset_reason());
     info.wifiConnected    = g_wifi.connected();
     info.wifiRssiDbm      = g_wifi.rssi();
+    info.ipAddress        = g_wifi.ipAddress();
+    info.staticIp         = g_config.wifi.staticIp();
     info.mqttConnected    = g_mqtt && g_mqtt->connected();
     info.modbusListening  = g_modbus.running();
     info.modbusClients    = g_modbus.activeClients();

@@ -413,6 +413,40 @@ static void test_the_device_manager_refuses_past_its_cap() {
 // The settings page stops offering "Add a device" at this number, so it is a contract between
 // the firmware and the page, not a decoration. Nothing guarded it: renaming or dropping the
 // field would have degraded the UI to its hardcoded fallback with every test still green.
+/// ip_mode says how the address was ASKED FOR; ip_address says what the interface ended up
+/// with. Both, because on a bridge whose static address was refused they disagree -- and that
+/// disagreement is the only visible sign of it. Reporting only the configuration would state an
+/// intention as if it were a fact.
+static void test_the_status_payload_reports_the_address_and_how_it_was_obtained() {
+    Rig         r;
+    const auto  state = r.poll();
+    std::string json;
+
+    auto bridge      = makeBridge();
+    bridge.ipAddress = "192.168.1.50";
+    bridge.staticIp  = true;
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", bridge,
+                                              r.diagnostics.snapshot(),
+                                              &eversolar::descriptor(), g_now, {}, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_STRING("static", doc["bridge"]["ip_mode"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("192.168.1.50", doc["bridge"]["ip_address"].as<const char*>());
+
+    bridge.staticIp = false;
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", bridge,
+                                              r.diagnostics.snapshot(),
+                                              &eversolar::descriptor(), g_now, {}, json));
+    TEST_ASSERT_EQUAL_STRING("dhcp", parse(json)["bridge"]["ip_mode"].as<const char*>());
+
+    // No address yet -- the portal is up, nothing has been assigned. Omitted rather than "",
+    // which would read like an answer.
+    bridge.ipAddress.clear();
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", bridge,
+                                              r.diagnostics.snapshot(),
+                                              &eversolar::descriptor(), g_now, {}, json));
+    TEST_ASSERT_TRUE(parse(json)["bridge"]["ip_address"].isNull());
+}
+
 static void test_the_status_payload_publishes_the_device_cap() {
     Rig         r;
     const auto  state = r.poll();
@@ -2170,6 +2204,7 @@ int main(int, char**) {
     RUN_TEST(test_a_lone_device_without_either_keeps_the_bare_driver_id);
     RUN_TEST(test_re_adding_an_id_returns_the_same_store_rather_than_failing);
     RUN_TEST(test_the_device_manager_refuses_past_its_cap);
+    RUN_TEST(test_the_status_payload_reports_the_address_and_how_it_was_obtained);
     RUN_TEST(test_the_status_payload_publishes_the_device_cap);
     RUN_TEST(test_the_status_payload_totals_every_polled_device);
     RUN_TEST(test_a_device_that_reports_nothing_does_not_count_towards_a_total);

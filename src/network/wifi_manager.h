@@ -60,6 +60,9 @@ private:
     void stopPortal();
     void startMdns();
     void attemptConnect();
+    /// Applies wifi.ip/gateway/subnet/dns to the driver. Must run after WiFi.mode() and
+    /// before WiFi.begin(); see the definition for why that ordering is not negotiable.
+    void applyAddressing();
     void fireStackReadyHook();
     /// Captive-portal DNS: while the setup AP is up, every name resolves to us, so the
     /// phone's connectivity probe lands on our web server and the OS pops the setup page

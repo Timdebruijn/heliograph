@@ -30,6 +30,21 @@ struct WifiConfig {
     std::string ssid;
     std::string password;  ///< never serialised, never logged
     std::string hostname = "heliograph";
+
+    /// Static addressing. An empty `ip` means DHCP, and that is the whole switch -- there is no
+    /// separate enable flag, because a flag and an address can disagree and then something has
+    /// to decide which one wins while the operator is looking at the other.
+    ///
+    /// Kept as text rather than packed integers to match the rest of the config model, to make
+    /// a backup file readable, and because "what did I type" is the question an operator asks
+    /// when a bridge does not come back. validate() refuses anything that does not parse.
+    std::string ip;
+    std::string gateway;
+    std::string subnet;
+    std::string dns1;
+    std::string dns2;
+
+    bool staticIp() const { return !ip.empty(); }
 };
 
 struct MqttSettings {
