@@ -10,6 +10,7 @@
 #include <esp_mac.h>
 
 #include "diagnostics/logger.h"
+#include "network/ipv4.h"
 
 namespace heliograph {
 
@@ -125,6 +126,61 @@ void WifiManager::startMdns() {
     log::info("mdns: %s.local", config_.wifi.hostname.c_str());
 }
 
+/// Hands the addressing to the driver, before any association is attempted.
+///
+/// ORDER MATTERS AND IS NOT OPTIONAL. WiFi.config() must run before WiFi.begin(): the static
+/// address has to be in place when the association completes, or the DHCP client the stack
+/// starts by default wins the race and the configured address is never used. This sits right
+/// after mode() for the same reason fireStackReadyHook() does -- the netif exists, DHCP has not
+/// run yet.
+///
+/// The all-INADDR_NONE call is not a no-op and is not skipped: NetworkInterface::config() reads
+/// an all-zero address as "clear", stops the DHCP client, wipes the IP info, and then restarts
+/// the DHCP client. Calling it explicitly on the DHCP path makes a bridge that has just been
+/// switched back from a static address behave the same as one that never had one, without a
+/// reboot-shaped difference between them.
+///
+/// Nothing is validated here. validate() already refused everything that does not parse, and
+/// repeating the rules in a second place is how two answers to the same question appear.
+void WifiManager::applyAddressing() {
+    const auto& w = config_.wifi;
+    if (!w.staticIp()) {
+        WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+        log::info("net: DHCP");
+        return;
+    }
+    const auto toAddr = [](const std::string& text) {
+        uint32_t raw = 0;
+        if (!net::parseIpv4(text, raw)) {
+            return IPAddress(INADDR_NONE);
+        }
+        // parseIpv4 yields host byte order, most significant octet first.
+        return IPAddress((raw >> 24) & 0xFF, (raw >> 16) & 0xFF, (raw >> 8) & 0xFF, raw & 0xFF);
+    };
+    const IPAddress ip   = toAddr(w.ip);
+    const IPAddress gw   = toAddr(w.gateway);
+    const IPAddress mask = toAddr(w.subnet);
+    const IPAddress dns1 = w.dns1.empty() ? IPAddress(INADDR_NONE) : toAddr(w.dns1);
+    const IPAddress dns2 = w.dns2.empty() ? IPAddress(INADDR_NONE) : toAddr(w.dns2);
+
+    if (!WiFi.config(ip, gw, mask, dns1, dns2)) {
+        // Reported, then carried on with. A refusal here leaves the DHCP client running, which
+        // is the outcome most likely to keep the bridge reachable -- and the log line is the
+        // only way anyone learns the address they configured is not the one in use.
+        log::error("net: static address %s was refused by the driver; falling back to DHCP",
+                   w.ip.c_str());
+        WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+        return;
+    }
+    log::info("net: static %s/%u gw %s dns %s", w.ip.c_str(),
+              static_cast<unsigned>(net::maskPrefixLength([&] {
+                  uint32_t raw = 0;
+                  net::parseIpv4(w.subnet, raw);
+                  return raw;
+              }())),
+              w.gateway.c_str(), w.dns1.empty() ? "(none)" : w.dns1.c_str());
+}
+
 void WifiManager::attemptConnect() {
     ++attempt_;
     attemptInFlight_  = true;
@@ -168,6 +224,7 @@ void WifiManager::begin(const Configuration& config) {
     // The mode() call above initialised the network stack; DHCP has not run yet -- the
     // one safe moment for pre-lease lwip configuration (see setNetworkStackReadyHook).
     fireStackReadyHook();
+    applyAddressing();
     state_ = ProvisioningState::Connecting;
     attemptConnect();
 }
@@ -254,6 +311,7 @@ void        WifiManager::startPortal() { portalActive_ = true; }
 void        WifiManager::stopPortal() { portalActive_ = false; }
 void        WifiManager::startMdns() {}
 void        WifiManager::attemptConnect() {}
+void        WifiManager::applyAddressing() {}
 void        WifiManager::fireStackReadyHook() {}
 
 }  // namespace heliograph

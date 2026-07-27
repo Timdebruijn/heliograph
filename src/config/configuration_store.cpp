@@ -161,6 +161,11 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
         if (wifi["ssid"].is<const char*>())     parsed.wifi.ssid     = wifi["ssid"].as<const char*>();
         if (wifi["password"].is<const char*>()) parsed.wifi.password = wifi["password"].as<const char*>();
         if (wifi["hostname"].is<const char*>()) parsed.wifi.hostname = wifi["hostname"].as<const char*>();
+        if (wifi["ip"].is<const char*>())       parsed.wifi.ip       = wifi["ip"].as<const char*>();
+        if (wifi["gateway"].is<const char*>())  parsed.wifi.gateway  = wifi["gateway"].as<const char*>();
+        if (wifi["subnet"].is<const char*>())   parsed.wifi.subnet   = wifi["subnet"].as<const char*>();
+        if (wifi["dns1"].is<const char*>())     parsed.wifi.dns1     = wifi["dns1"].as<const char*>();
+        if (wifi["dns2"].is<const char*>())     parsed.wifi.dns2     = wifi["dns2"].as<const char*>();
     }
     if (JsonObjectConst mqtt = doc["mqtt"]; !mqtt.isNull()) {
         if (mqtt["enabled"].is<bool>())            parsed.mqtt.enabled = mqtt["enabled"].as<bool>();

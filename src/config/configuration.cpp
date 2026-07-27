@@ -4,11 +4,13 @@
 
 #include "config_sections.h"
 #include "json_limits.h"
+#include "network/ipv4.h"
 #include "relays/drm.h"
 
 #include <ArduinoJson.h>
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 #include <cstdlib>
 #include <cstring>
@@ -136,6 +138,108 @@ bool checkLength(const std::string& value, size_t max, const char* field, Config
     if (value.size() > max) {
         error = {field, "must be at most " + std::to_string(max) + " characters"};
         return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+namespace {
+
+/// Every way a static address can be wrong that we can see from here.
+///
+/// This is the cheapest place in the whole system to catch these, and the most expensive place
+/// to miss them: a refusal at PATCH time costs the operator a corrected form, while a stored
+/// mistake costs a bridge that never comes back and a walk to wherever it is mounted. So the
+/// rules are deliberately strict, and each one refuses a configuration that would have been
+/// accepted, stored, and then silently unreachable.
+bool validateStaticIp(const Configuration& config, ConfigError& error) {
+    const auto& w = config.wifi;
+
+    // DHCP: the address fields must be empty too. Leaving a gateway behind after clearing the
+    // address stores a half-configuration that reads as if it were in effect.
+    if (!w.staticIp()) {
+        for (const auto& [value, field] :
+             {std::pair{std::cref(w.gateway), "wifi.gateway"},
+              std::pair{std::cref(w.subnet), "wifi.subnet"},
+              std::pair{std::cref(w.dns1), "wifi.dns1"},
+              std::pair{std::cref(w.dns2), "wifi.dns2"}}) {
+            if (!value.get().empty()) {
+                error = {field, "must be empty when wifi.ip is empty (DHCP)"};
+                return false;
+            }
+        }
+        return true;
+    }
+
+    uint32_t ip = 0, gateway = 0, subnet = 0;
+    if (!net::parseIpv4(w.ip, ip)) {
+        error = {"wifi.ip", "must be four decimal octets, for example 192.168.1.50"};
+        return false;
+    }
+    if (!net::parseIpv4(w.gateway, gateway)) {
+        error = {"wifi.gateway", "required with a static address, as four decimal octets"};
+        return false;
+    }
+    if (!net::parseIpv4(w.subnet, subnet)) {
+        error = {"wifi.subnet", "required with a static address, for example 255.255.255.0"};
+        return false;
+    }
+    // A mask with a hole in it is not something anyone means to type, and lwip's behaviour with
+    // one is not worth discovering in production. This ALSO covers a trap in the Arduino core:
+    // WiFiSTAClass::config() silently reinterprets its arguments as the ESP8266 ordering
+    // (ip, dns, gw, subnet) when the mask's first octet is not 255 -- so an unusual mask does
+    // not fail, it configures something else entirely. Every contiguous mask from /1 to /31
+    // that is worth using starts with 255; /1..7 do not, and are refused here as well.
+    if (!net::isContiguousMask(subnet) || (subnet >> 24) != 0xFFu) {
+        error = {"wifi.subnet", "must be a contiguous mask starting at 255, for example "
+                                "255.255.255.0"};
+        return false;
+    }
+    if (net::isNetworkAddress(ip, subnet)) {
+        error = {"wifi.ip", "names the network, not a host on it"};
+        return false;
+    }
+    if (net::isBroadcastAddress(ip, subnet)) {
+        error = {"wifi.ip", "is the broadcast address, not a host"};
+        return false;
+    }
+    if (!net::sameSubnet(ip, gateway, subnet)) {
+        error = {"wifi.gateway", "is not reachable from wifi.ip with this subnet mask"};
+        return false;
+    }
+    if (ip == gateway) {
+        error = {"wifi.ip", "is the same as wifi.gateway"};
+        return false;
+    }
+    uint32_t dns = 0;
+    for (const auto& [value, field] : {std::pair{std::cref(w.dns1), "wifi.dns1"},
+                                       std::pair{std::cref(w.dns2), "wifi.dns2"}}) {
+        if (!value.get().empty() && !net::parseIpv4(value.get(), dns)) {
+            error = {field, "must be four decimal octets"};
+            return false;
+        }
+    }
+
+    // The rule that keeps a static bridge from being quietly half-dead.
+    //
+    // With no DNS server the stack resolves nothing. The bridge still boots, still answers on
+    // its address, and still looks healthy -- while NTP never syncs and an MQTT broker named
+    // rather than numbered is never found. Nothing throws; the clock simply stays wrong and the
+    // logs stay stamped from uptime. Refusing here is the only point at which anyone is looking.
+    if (w.dns1.empty() && w.dns2.empty()) {
+        if (config.ntp.enabled && !config.ntp.server.empty() &&
+            !net::looksLikeIpLiteral(config.ntp.server)) {
+            error = {"wifi.dns1", "required: ntp.server is a name (" + config.ntp.server +
+                                      ") and a static address has no other resolver"};
+            return false;
+        }
+        if (config.mqtt.enabled && !config.mqtt.host.empty() &&
+            !net::looksLikeIpLiteral(config.mqtt.host)) {
+            error = {"wifi.dns1", "required: mqtt.host is a name (" + config.mqtt.host +
+                                      ") and a static address has no other resolver"};
+            return false;
+        }
     }
     return true;
 }
@@ -303,6 +407,9 @@ bool validate(const Configuration& config, ConfigError& error) {
         error = {"ntp.server", "required when ntp is enabled and dhcp is off"};
         return false;
     }
+    if (!validateStaticIp(config, error)) {
+        return false;
+    }
     return true;
 }
 
@@ -315,6 +422,14 @@ void writeCommon(JsonDocument& doc, const Configuration& config) {
     JsonObject wifi  = doc["wifi"].to<JsonObject>();
     wifi["ssid"]     = config.wifi.ssid;
     wifi["hostname"] = config.wifi.hostname;
+    // Addressing is not a credential, so it is the same in both documents. Always emitted,
+    // empty or not: a client has to be able to tell "this bridge uses DHCP" from "this firmware
+    // has no idea about static addressing", and an absent key says only the second.
+    wifi["ip"]      = config.wifi.ip;
+    wifi["gateway"] = config.wifi.gateway;
+    wifi["subnet"]  = config.wifi.subnet;
+    wifi["dns1"]    = config.wifi.dns1;
+    wifi["dns2"]    = config.wifi.dns2;
 
     JsonObject mqtt           = doc["mqtt"].to<JsonObject>();
     mqtt["enabled"]           = config.mqtt.enabled;
@@ -433,7 +548,13 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
     // it). timezone_name and write_enabled carry no runtime effect. This set mirrors
     // RESTART_NEEDED in the web UI.
     return a.wifi.ssid != b.wifi.ssid || a.wifi.password != b.wifi.password ||
-           a.wifi.hostname != b.wifi.hostname || a.mqtt.enabled != b.mqtt.enabled ||
+           a.wifi.hostname != b.wifi.hostname ||
+           // Addressing is applied once, between WiFi.mode() and WiFi.begin(). Changing it
+           // live would mean tearing down every listening socket underneath the request that
+           // asked for the change, so it waits for a restart like the rest of this list.
+           a.wifi.ip != b.wifi.ip || a.wifi.gateway != b.wifi.gateway ||
+           a.wifi.subnet != b.wifi.subnet || a.wifi.dns1 != b.wifi.dns1 ||
+           a.wifi.dns2 != b.wifi.dns2 || a.mqtt.enabled != b.mqtt.enabled ||
            a.mqtt.host != b.mqtt.host || a.mqtt.port != b.mqtt.port ||
            a.mqtt.username != b.mqtt.username || a.mqtt.password != b.mqtt.password ||
            a.mqtt.baseTopic != b.mqtt.baseTopic ||
@@ -483,6 +604,13 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
         if (!patchString(wifi["ssid"], merged.wifi.ssid, "wifi.ssid", error)) return false;
         if (!patchString(wifi["hostname"], merged.wifi.hostname, "wifi.hostname", error)) return false;
         if (!patchSecret(wifi, "password", merged.wifi.password, "wifi.password", error)) return false;
+        // Plain strings, not secrets: an empty one means "no static address" and is a value the
+        // operator can legitimately send to go back to DHCP. validate() checks the combination.
+        if (!patchString(wifi["ip"], merged.wifi.ip, "wifi.ip", error)) return false;
+        if (!patchString(wifi["gateway"], merged.wifi.gateway, "wifi.gateway", error)) return false;
+        if (!patchString(wifi["subnet"], merged.wifi.subnet, "wifi.subnet", error)) return false;
+        if (!patchString(wifi["dns1"], merged.wifi.dns1, "wifi.dns1", error)) return false;
+        if (!patchString(wifi["dns2"], merged.wifi.dns2, "wifi.dns2", error)) return false;
     }
 
     if (JsonObjectConst mqtt = doc["mqtt"]; !mqtt.isNull()) {
