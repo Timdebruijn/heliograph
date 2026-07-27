@@ -4,6 +4,8 @@
 
 #include <ArduinoJson.h>
 
+#include <optional>
+
 #include "device/command.h"  // commandTypeName
 #include "outputs/json_util.h"
 
