@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: MIT
+#
+# Warms the ESP32 toolchain cache on main. Nothing here validates anything.
+#
+# SPLIT OUT OF ci.yml ON PURPOSE, and the reason is about waiting rather than tidiness. This job
+# takes ~128 s while the checks that actually decide whether a commit is good finish in ~64 s.
+# While it lived in the CI workflow it was the longest job, so the CI run was not "completed"
+# until it was done -- and tagging a release waits for CI to be green. Half of that wait was for
+# a cache.
+#
+# It also could not fail safely there. Its own comment said "the job only warms a cache, so its
+# failure never blocks a release", which was not true while a failure turned the whole CI run
+# red: the release process reads that run's conclusion. Now a failed warm is a failed warm.
+#
+# Everything below is unchanged from where it used to live; the comments are the original ones
+# because the reasoning has not changed, only the file.
+
+name: Cache warm
+
+on:
+  push:
+    branches: [main]
+
+# Never two at once on the same key -- they would race to write the same cache entry and the
+# loser's ~1.7 GB upload is pure waste. Superseding is right here in a way it is not for CI:
+# only the newest tree is worth caching.
+concurrency:
+  group: cache-warm
+  cancel-in-progress: true
+
+jobs:
+  # The ONLY writer of the ESP32 toolchain cache, and the reason it exists on main rather than in
+  # firmware.yml or release.yml where the builds actually are.
+  #
+  # GitHub scopes a cache to the ref that wrote it. A cache written on refs/pull/21/merge is
+  # invisible to refs/tags/v0.12.0 and to every other PR; caches on the DEFAULT BRANCH are the
+  # only ones readable from any ref. Since firmware.yml runs on pull_request and release.yml on
+  # tags, nothing was ever writing to a scope the others could read: every PR build and every
+  # release downloaded the ~1.7 GB toolchain fresh and then saved its own private copy. Five of
+  # those copies were sitting in the 10 GB repo budget, evicting the small useful caches, and
+  # none had ever been restored by anything. A transient 504 on that download broke the 0.12.0
+  # release (2026-07-24), which is what turned this up.
+  #
+  # This job compiles one board and throws the result away. That it BUILDS is the point, not an
+  # accident: pioarduino does not fetch the ~200 MB xtensa toolchain during `pio pkg install`
+  # (that only lands the platform and the tool-esp_install helper). The toolchain is pulled by
+  # a build-time script -- platform.py's _run_idf_tools_install, invoked from `pio run` -- so a
+  # cache warmed by `pkg install` alone would miss the very thing worth caching and every
+  # consumer would still cold-download it. One real build populates ~/.platformio completely.
+  #
+  # One board covers all four esp32 envs: rs485-can, both relay boards and mock share the same
+  # platform, board and toolchain (they differ only in build flags and partitions), so the
+  # packages this build lands are exactly the ones every env restores.
+  warm-toolchain-cache:
+    name: Warm firmware toolchain cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Restore-and-save. On a hit the packages are already present, so the build below reuses
+      # them and only recompiles; a miss repopulates the entry every consumer depends on.
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-fw-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      # Retried, because a cold run downloads from GitHub release assets and that is exactly
+      # what broke the 0.12.0 release: platform-espressif32.zip returned 504 for several minutes
+      # while GitHub reported all systems operational. Retrying `pio run` also re-attempts a
+      # network failure part-way through the toolchain fetch. A genuine compile error would
+      # retry too, but this same tree already compiled green on its PR, so on main that path is
+      # not expected -- and the job only warms a cache, so its failure never blocks a release.
+      - name: Build one board to populate the toolchain cache
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if pio run -e waveshare-rs485-can; then
+              exit 0
+            fi
+            echo "build failed (attempt ${attempt}); retrying in $((attempt * 20))s"
+            sleep $((attempt * 20))
+          done
+          echo "build still failing after 5 attempts" >&2
+          exit 1

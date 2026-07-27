@@ -9,9 +9,10 @@
 # main posts no firmware check and a release does not rebuild what the PR already built. See
 # that file for the reasoning.
 #
-# This workflow does own one firmware-adjacent job: warming the ESP32 toolchain cache on main.
-# That has to happen on the default branch because of how GitHub scopes caches -- see the
-# comment on the job itself.
+# Checks only. The ESP32 toolchain cache is warmed by cache-warm.yml, which runs on main for
+# the cache-scoping reason documented there -- it lived here until 0.16.1 and made this run take
+# twice as long as the checks it reports on, which mattered because tagging a release waits for
+# that conclusion.
 
 name: CI
 
@@ -97,69 +98,3 @@ jobs:
 
       - name: Native test suite
         run: pio test -e native
-
-  # The ONLY writer of the ESP32 toolchain cache, and the reason it exists here rather than in
-  # firmware.yml or release.yml where the builds actually are.
-  #
-  # GitHub scopes a cache to the ref that wrote it. A cache written on refs/pull/21/merge is
-  # invisible to refs/tags/v0.12.0 and to every other PR; caches on the DEFAULT BRANCH are the
-  # only ones readable from any ref. Since firmware.yml runs on pull_request and release.yml on
-  # tags, nothing was ever writing to a scope the others could read: every PR build and every
-  # release downloaded the ~1.7 GB toolchain fresh and then saved its own private copy. Five of
-  # those copies were sitting in the 10 GB repo budget, evicting the small useful caches, and
-  # none had ever been restored by anything. A transient 504 on that download broke the 0.12.0
-  # release (2026-07-24), which is what turned this up.
-  #
-  # This job compiles one board and throws the result away. That it BUILDS is the point, not an
-  # accident: pioarduino does not fetch the ~200 MB xtensa toolchain during `pio pkg install`
-  # (that only lands the platform and the tool-esp_install helper). The toolchain is pulled by
-  # a build-time script -- platform.py's _run_idf_tools_install, invoked from `pio run` -- so a
-  # cache warmed by `pkg install` alone would miss the very thing worth caching and every
-  # consumer would still cold-download it. One real build populates ~/.platformio completely.
-  #
-  # One board covers all four esp32 envs: rs485-can, both relay boards and mock share the same
-  # platform, board and toolchain (they differ only in build flags and partitions), so the
-  # packages this build lands are exactly the ones every env restores.
-  warm-toolchain-cache:
-    name: Warm firmware toolchain cache
-    # Pushes to main only. On a pull request the build jobs restore this cache but must never
-    # write one -- a PR-scoped copy is the exact waste described above.
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      # Restore-and-save. On a hit the packages are already present, so the build below reuses
-      # them and only recompiles; a miss repopulates the entry every consumer depends on.
-      - name: Cache PlatformIO
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.platformio
-            ~/.cache/pip
-          key: pio-fw-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-
-      - name: Install PlatformIO
-        run: pip install platformio
-
-      # Retried, because a cold run downloads from GitHub release assets and that is exactly
-      # what broke the 0.12.0 release: platform-espressif32.zip returned 504 for several minutes
-      # while GitHub reported all systems operational. Retrying `pio run` also re-attempts a
-      # network failure part-way through the toolchain fetch. A genuine compile error would
-      # retry too, but this same tree already compiled green on its PR, so on main that path is
-      # not expected -- and the job only warms a cache, so its failure never blocks a release.
-      - name: Build one board to populate the toolchain cache
-        run: |
-          for attempt in 1 2 3 4 5; do
-            if pio run -e waveshare-rs485-can; then
-              exit 0
-            fi
-            echo "build failed (attempt ${attempt}); retrying in $((attempt * 20))s"
-            sleep $((attempt * 20))
-          done
-          echo "build still failing after 5 attempts" >&2
-          exit 1
