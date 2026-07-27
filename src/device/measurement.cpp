@@ -2,7 +2,9 @@
 
 #include "measurement.h"
 
+#include <algorithm>
 #include <cstring>
+#include <utility>
 
 namespace heliograph {
 
@@ -29,22 +31,16 @@ const char* unitSymbol(Unit unit) {
     return "";
 }
 
-Measurement* MeasurementSet::findMutable(const char* id) {
-    for (auto& m : measurements_) {
-        if (idEquals(m.id, id)) {
-            return &m;
-        }
-    }
-    return nullptr;
+const Measurement* MeasurementSet::find(const char* id) const {
+    const auto it = std::find_if(measurements_.begin(), measurements_.end(),
+                                 [id](const Measurement& m) { return idEquals(m.id, id); });
+    return it == measurements_.end() ? nullptr : &*it;
 }
 
-const Measurement* MeasurementSet::find(const char* id) const {
-    for (const auto& m : measurements_) {
-        if (idEquals(m.id, id)) {
-            return &m;
-        }
-    }
-    return nullptr;
+// Delegates rather than repeating the search: idEquals is the definition of "same
+// measurement", and it belongs in one place.
+Measurement* MeasurementSet::findMutable(const char* id) {
+    return const_cast<Measurement*>(std::as_const(*this).find(id));
 }
 
 void MeasurementSet::declare(const char* id, MeasurementType type, Unit unit,

@@ -2,6 +2,8 @@
 
 #include "drm.h"
 
+#include <algorithm>
+
 namespace heliograph::drm {
 
 bool isValidRole(const std::string& role) {
@@ -20,14 +22,7 @@ std::vector<std::string> optionsFor(const std::vector<std::string>& roles) {
         if (role == "none" || !isValidRole(role)) {
             continue;
         }
-        bool seen = false;
-        for (const auto& existing : options) {
-            if (existing == role) {
-                seen = true;
-                break;
-            }
-        }
-        if (!seen) {
+        if (std::find(options.begin(), options.end(), role) == options.end()) {
             options.push_back(role);
         }
     }

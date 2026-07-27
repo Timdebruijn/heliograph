@@ -134,19 +134,13 @@ bool FrameCapture::done(uint64_t nowMs) const {
 }
 
 uint32_t FrameCapture::modbusFrames() const {
-    uint32_t n = 0;
-    for (const auto& f : frames_) {
-        if (f.modbusCrcValid) ++n;
-    }
-    return n;
+    return static_cast<uint32_t>(std::count_if(
+        frames_.begin(), frames_.end(), [](const CapturedFrame& f) { return f.modbusCrcValid; }));
 }
 
 uint32_t FrameCapture::pmuFrames() const {
-    uint32_t n = 0;
-    for (const auto& f : frames_) {
-        if (f.pmuFrameValid) ++n;
-    }
-    return n;
+    return static_cast<uint32_t>(std::count_if(
+        frames_.begin(), frames_.end(), [](const CapturedFrame& f) { return f.pmuFrameValid; }));
 }
 
 }  // namespace heliograph::diag
