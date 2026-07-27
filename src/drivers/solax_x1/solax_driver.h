@@ -22,6 +22,7 @@
 
 #include "drivers/inverter_driver.h"
 #include "drivers/solax_x1/solax_parser.h"
+#include "protocols/pmu/pmu_transaction.h"
 
 namespace heliograph::solax {
 
@@ -53,7 +54,8 @@ public:
     bool registered() const { return registered_; }
 
 private:
-    enum class TransactResult { Ok, Timeout, ChecksumError, InvalidFrame, TransportError };
+    /// The shared loop's outcome, under the name every call site here already uses.
+    using TransactResult = pmu::TransactStatus;
 
     /// Sends a request and waits for its matching response, resynchronising past bus noise
     /// and echoes. `source` exists because the reference sends the SEND_ADDRESS frame with
@@ -91,13 +93,18 @@ private:
     /// has one; the payload carries two). See poll().
     bool pv2Declared_ = false;
 
-    uint32_t checksumErrors_ = 0;
-    uint32_t invalidFrames_  = 0;
-    uint32_t timeouts_       = 0;
+    /// Bumped by pmu::transact. See the note on the sibling driver's copy.
+    pmu::Tally tally_;
 
 public:
     BusErrorCounts busErrors() const override {
-        return {checksumErrors_, timeouts_, invalidFrames_};
+        // Field by field, not brace-init: Tally and BusErrorCounts agree on order today, and
+        // a positional copy would swap two counters silently if either ever gained a field.
+        BusErrorCounts out;
+        out.checksumErrors = tally_.checksumErrors;
+        out.timeouts       = tally_.timeouts;
+        out.invalidFrames  = tally_.invalidFrames;
+        return out;
     }
 };
 

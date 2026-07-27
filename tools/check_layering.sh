@@ -32,6 +32,8 @@ core_paths=(
     src/protocols/modbus/modbus_rtu.cpp
     src/protocols/pmu/pmu_protocol.h
     src/protocols/pmu/pmu_protocol.cpp
+    src/protocols/pmu/pmu_transaction.h
+    src/protocols/pmu/pmu_transaction.cpp
     src/network/rtc_time.h
     src/network/rtc_time.cpp
     src/drivers/eversolar_legacy/eversolar_parser.h

@@ -13,6 +13,7 @@
 #include "drivers/inverter_driver.h"
 #include "eversolar_parser.h"
 #include "protocols/pmu/pmu_protocol.h"
+#include "protocols/pmu/pmu_transaction.h"
 
 namespace heliograph::eversolar {
 
@@ -56,7 +57,8 @@ public:
     bool registered() const { return registered_; }
 
 private:
-    enum class TransactResult { Ok, Timeout, ChecksumError, InvalidFrame, TransportError };
+    /// The shared loop's outcome, under the name every call site here already uses.
+    using TransactResult = pmu::TransactStatus;
 
     /// Sends a request and waits for its matching response, resynchronising past bus noise
     /// and any echo of our own transmission.
@@ -103,13 +105,20 @@ private:
     bool                 channelsDeclared_ = false;
     bool                 declaredDual_     = false;
 
-    uint32_t checksumErrors_ = 0;
-    uint32_t invalidFrames_  = 0;
-    uint32_t timeouts_       = 0;
+    /// Bumped by pmu::transact, which does the counting because it is where the failures are
+    /// seen -- a single exchange can meet several bad frames.
+    pmu::Tally tally_;
 
 public:
     BusErrorCounts busErrors() const override {
-        return {checksumErrors_, timeouts_, invalidFrames_};
+        // Field by field, not brace-init. Tally and BusErrorCounts happen to agree on order
+        // today; a positional copy would swap two counters silently the day one of them gains
+        // a field, and nothing that reads these numbers would look wrong -- only be wrong.
+        BusErrorCounts out;
+        out.checksumErrors = tally_.checksumErrors;
+        out.timeouts       = tally_.timeouts;
+        out.invalidFrames  = tally_.invalidFrames;
+        return out;
     }
 };
 

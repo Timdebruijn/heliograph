@@ -10,13 +10,6 @@
 namespace heliograph::eversolar {
 namespace {
 
-constexpr uint32_t kResponseTimeoutMs = 1000;
-/// Wall-clock ceiling on one transact() exchange. A real reply lands well inside a second
-/// (first byte within the response timeout, then ~90 bytes stream in milliseconds); 3 s leaves
-/// ample slack while still bounding a pathological trickle that never completes a frame.
-constexpr uint32_t kTransactionDeadlineMs = 3000;
-constexpr size_t   kRxBufferSize      = kMaxFrameSize + 16;
-constexpr uint32_t kBusLockTimeoutMs  = 2000;
 /// The reference sends the re-register broadcast 8 times, its own comment says the spec
 /// calls for 3. We follow the comment: it is the only statement about the spec we have, and
 /// 8 was never justified.
@@ -100,11 +93,6 @@ EversolarDriver::TransactResult EversolarDriver::transact(CommandCode command,
         return TransactResult::TransportError;
     }
 
-    TransportLock lock(*transport_, kBusLockTimeoutMs);
-    if (!lock.held()) {
-        return TransactResult::TransportError;
-    }
-
     uint8_t request[kMaxFrameSize];
     size_t  requestLen = 0;
     if (buildRequest(command, destination, data, dataLen, request, sizeof(request), requestLen) !=
@@ -112,144 +100,16 @@ EversolarDriver::TransactResult EversolarDriver::transact(CommandCode command,
         return TransactResult::TransportError;
     }
 
-    transport_->flushInput();
-    if (transport_->write(request, requestLen) != requestLen) {
-        // The one terminal state before the traceOutcome scaffolding exists. Left silent it
-        // would be the only failure without a trace -- the exact blind spot this logging is
-        // for (review, 2026-07-20).
-        log::trace("RS485 tx failed: %u byte(s) not fully written",
-                   static_cast<unsigned>(requestLen));
-        return TransactResult::TransportError;
-    }
-
-    uint8_t rx[kRxBufferSize];
-    size_t  have = 0;
-    bool    sawChecksumError = false;
-
-    // Tracing used to happen per read() in the transport, and a single reply arrives in ~40
-    // one-byte chunks: one frame filled the entire log ring, so a captured failure showed a
-    // byte and a half of context (2026-07-20). One line per transaction instead -- and it
-    // reports a REJECTED frame, which previously vanished into the "timeout" bucket and made
-    // a talking inverter indistinguishable from a dead bus.
-    size_t  received  = 0;  ///< bytes ever read in this transaction, before any are consumed
-    size_t  rejected  = 0;
-    uint8_t rejSrc[2] = {0, 0};
-    uint8_t rejCtrl = 0, rejFn = 0;
-    const auto traceOutcome = [&](const char* outcome) {
-        if (!log::enabled(LogLevel::Trace)) {
-            return;
-        }
-        if (rejected > 0) {
-            log::trace("RS485 %s: %u byte(s), %u frame(s) rejected, last from %02X %02X ctrl %02X fn %02X",
-                       outcome, static_cast<unsigned>(received), static_cast<unsigned>(rejected),
-                       rejSrc[0], rejSrc[1], rejCtrl, rejFn);
-        } else {
-            log::trace("RS485 %s: %u byte(s) received", outcome, static_cast<unsigned>(received));
-        }
-        if (received > 0) {
-            log::traceHex("RS485 RX", rx, have);
-        }
-    };
-
-    const uint64_t deadline = transport_->nowMs() + kTransactionDeadlineMs;
-
-    for (;;) {
-        // Overall wall-clock bound on the whole exchange. Each read() renews its own 1 s
-        // timeout, so a sustained trickle of bytes never trips the n==0 branch below and the
-        // loop -- holding the bus lock -- could otherwise run unbounded until the watchdog
-        // reboots (review, 2026-07-20).
-        if (transport_->nowMs() >= deadline) {
-            ++timeouts_;
-            traceOutcome("transaction deadline exceeded");
-            return TransactResult::Timeout;
-        }
-
-        Frame      frame;
-        const auto parsed = parseFrame(rx, have, frame);
-
-        if (parsed == ParseResult::Ok) {
-            auto valid = validateResponse(frame, command, expectedSource);
-            if (valid == ParseResult::WrongSource && altSource != nullptr) {
-                valid = validateResponse(frame, command, *altSource);
-            }
-            if (valid == ParseResult::Ok) {
-                if (frame.dataLength > payloadCapacity) {
-                    // Unreachable today (every caller passes a full-size buffer), but this is
-                    // an InvalidFrame return and every other one tallies. Left untallied it
-                    // would be a return path that silently reports nothing the moment some
-                    // future caller passes a smaller buffer.
-                    ++invalidFrames_;
-                    traceOutcome("payload too large");
-                    return TransactResult::InvalidFrame;
-                }
-                if (frame.dataLength > 0) {
-                    std::memcpy(payloadOut, frame.data, frame.dataLength);
-                }
-                payloadLen = frame.dataLength;
-                traceOutcome("ok");
-                return TransactResult::Ok;
-            }
-            // A well-formed frame that is not ours: our own transmission echoed back by the
-            // half-duplex bus, or traffic for another inverter. Drop it and keep looking
-            // rather than treat the whole exchange as failed. Recorded, though -- if the
-            // inverter answers with something unexpected, that is the single most useful
-            // fact about the failure and it used to leave no trace at all.
-            ++rejected;
-            rejSrc[0] = frame.source.high;
-            rejSrc[1] = frame.source.low;
-            rejCtrl   = frame.control;
-            rejFn     = frame.function;
-            std::memmove(rx, rx + frame.frameLength, have - frame.frameLength);
-            have -= frame.frameLength;
-            continue;
-        }
-
-        if (parsed == ParseResult::BadHeader) {
-            // Resync: drop one byte and rescan. Line noise at the start of a reply must not
-            // cost us the reply itself.
-            std::memmove(rx, rx + 1, have - 1);
-            --have;
-            continue;
-        }
-
-        if (parsed == ParseResult::BadChecksum) {
-            sawChecksumError = true;
-            ++checksumErrors_;
-            const size_t skip = frame.frameLength > 0 ? frame.frameLength : 1;
-            const size_t n    = skip < have ? skip : have;
-            std::memmove(rx, rx + n, have - n);
-            have -= n;
-            continue;
-        }
-
-        // Incomplete: read more.
-        if (have >= sizeof(rx)) {
-            ++invalidFrames_;
-            traceOutcome("buffer full without a valid frame");
-            return TransactResult::InvalidFrame;
-        }
-        const size_t n = transport_->read(rx + have, sizeof(rx) - have, kResponseTimeoutMs);
-        if (n == 0) {
-            if (sawChecksumError) {
-                traceOutcome("checksum error");
-                return TransactResult::ChecksumError;
-            }
-            ++timeouts_;
-            // "silent" only when nothing arrived at all; otherwise something answered and we
-            // did not accept it, which is a different problem with a different fix.
-            traceOutcome(received > 0 ? "timeout after partial/rejected data" : "silent");
-            return TransactResult::Timeout;
-        }
-        have += n;
-        received += n;
-    }
+    const pmu::Exchange exchange{request, requestLen, command, expectedSource, altSource};
+    return pmu::transact(*transport_, exchange, payloadOut, payloadCapacity, payloadLen, tally_,
+                         "RS485");
 }
 
 void EversolarDriver::reRegisterAll() {
     if (transport_ == nullptr) {
         return;
     }
-    TransportLock lock(*transport_, kBusLockTimeoutMs);
+    TransportLock lock(*transport_, pmu::kBusLockTimeoutMs);
     if (!lock.held()) {
         return;
     }
@@ -449,7 +309,7 @@ PollResult EversolarDriver::poll(DeviceState& state) {
 
     NormalInfo info;
     if (decodeNormalInfo(payload, payloadLen, info, options_.layout) != DecodeResult::Ok) {
-        ++invalidFrames_;
+        ++tally_.invalidFrames;
         return PollResult::InvalidFrame;
     }
 
