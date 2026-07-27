@@ -56,18 +56,18 @@ a.tag{text-decoration:none;border-color:#2f81f7;color:#2f81f7}
    margin on .card that would then have to be undone for the grid.
    Two scales on purpose: 12 px between cards that belong to one subject, 26 px between
    subjects, so the grouping is visible without a single border. */
-#cfgform{display:flex;flex-direction:column;gap:26px}
+.cfgpage{display:flex;flex-direction:column;gap:26px}
 .cfgsec{display:flex;flex-direction:column;gap:12px}
 .cfgsec>h3{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}
 /* The gap already separates it. Without this the global button margin stacks on top of the
    flex gap and Save floats a long way from the settings it saves. */
 .cfgsave>button{margin-top:0}
-#cfgform code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg)}
+.cfgpage code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg)}
 /* Last row of a table inside a card: the card's own padding is the bottom edge, so the row
    rule underneath it draws a line to nowhere. Scoped to this tab rather than to .card, which
    the dashboard and the Device tab also use -- they have the same dangling rule, but changing
    how they look is not what this is about. */
-#cfgform .card table tr:last-child td{border-bottom:0}
+.cfgpage .card table tr:last-child td{border-bottom:0}
 dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:20px;width:90%;max-width:340px}
 dialog::backdrop{background:#000a}
 .err{background:#f8514922;border:1px solid var(--bad);padding:10px;border-radius:8px;margin-bottom:12px}
@@ -91,6 +91,8 @@ dialog::backdrop{background:#000a}
 <button data-t="logs">Logs</button>
 <button data-t="disc">Discovery</button>
 <button data-t="cfg">Settings</button>
+<button data-t="backup">Backup</button>
+<button data-t="sys">System</button>
 </nav>
 <main>
 <div id="banner" class="err hide"></div>
@@ -107,7 +109,9 @@ dialog::backdrop{background:#000a}
   <div id="logbox"></div>
 </section>
 <section id="disc" class="hide"><div id="wiz"></div></section>
-<section id="cfg" class="hide"><div id="cfgform"></div></section>
+<section id="cfg" class="hide"><div id="cfgform" class="cfgpage"></div></section>
+<section id="backup" class="hide"><div id="backupbox"></div></section>
+<section id="sys" class="hide"><div id="sysbox"></div></section>
 </main>
 <dialog id="authdlg">
 <form method="dialog">
@@ -137,12 +141,21 @@ is only <b>admin</b> if you never changed it.</div>
 // rely on every call site remembering which page it is on, take both.
 const $=s=>document.querySelector(s[0]==='#'||s[0]==='.'?s:'#'+s);
 let tab='dash';
+// Derived from the nav, not restated beside it. The list used to be a hardcoded array here as
+// well, so adding a tab meant editing two places and forgetting the second one left a tab that
+// highlighted but never appeared.
+const TABS=[...document.querySelectorAll('nav button')].map(b=>b.dataset.t);
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   tab=b.dataset.t;
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
-  ['dash','dev','diag','logs','disc','cfg'].forEach(t=>$('#'+t).classList.toggle('hide',t!==tab));
+  TABS.forEach(t=>$('#'+t).classList.toggle('hide',t!==tab));
   refresh();
 });
+/// Switches to a tab from code, by the same path a click takes -- so nothing can drift between
+/// "the user clicked it" and "we went there".
+function goTab(name){
+  document.querySelectorAll('nav button').forEach(b=>{if(b.dataset.t===name)b.click()});
+}
 // null means unknown, and it must never render as 0 -- that is the whole point of the
 // firmware sending null in the first place.
 const fmt=(v,d=1)=>v===null||v===undefined?'—':Number(v).toFixed(d);
@@ -1178,6 +1191,127 @@ const RESTART_NEEDED={
 
 function pick(o,path){return path.split('.').reduce((x,k)=>x&&x[k],o)}
 
+
+// ---------------- Backup and System tabs ----------------
+// Split out of Settings because that page had grown to nine sections. The line is what each
+// thing IS: Settings holds values you set, these two hold operations you perform on the device
+// as a whole.
+//
+// Backup stays separate from System rather than sharing it, and not only for length: putting
+// Restore next to Factory reset places two buttons that both replace your configuration side by
+// side, with opposite intentions. That is where a wrong click comes from.
+
+async function renderBackup(){
+  const c=await (await fetch('/api/v1/config')).json();
+  const chk=(id,label,val)=>`<label style="display:flex;gap:8px;align-items:center;margin-top:12px">
+    <input id="${id}" type="checkbox" style="width:auto" ${val?'checked':''}>
+    <span style="color:var(--fg);font-size:14px">${label}</span></label>`;
+  $('#backupbox').innerHTML=`<div class="cfgpage">
+  <section class="cfgsec"><h3>Backup &amp; restore</h3>
+  <div class="card"><b>Download a backup</b>
+    <div class="dim" style="font-size:12px;margin-top:10px">One file with every setting on this
+    page. Keep it somewhere other than this bridge — it is what turns a dead board into a
+    twenty-minute job instead of an evening of remembering what you configured.</div>
+    ${chk('bk_sec','Include passwords (WiFi, MQTT, admin)',false)}
+    <div class="dim" style="font-size:12px;margin-top:4px"><b>Off by default, and think before
+    turning it on.</b> With it on the file holds those passwords <b>in plain text</b>, and it
+    will sit in your downloads folder, sync to whatever cloud drive is watching it, and be the
+    obvious thing to attach to a bug report. With it off there is no password in the file, and
+    restoring it onto <i>this</i> bridge still works — an absent password means “keep the one
+    the bridge already has”. Only a factory-reset board needs them typed again.</div>
+    <div class="dim" style="font-size:12px;margin-top:4px">Even without passwords the file is
+    not nothing: it holds your WiFi network name, the broker address and both usernames —
+    including the admin one, which this bridge deliberately never serves over the API. Treat it
+    as private either way.</div>
+    <button type="button" onclick="downloadBackup()">Download backup</button>
+    <div id="bkm" class="msg" style="display:none"></div></div>
+  <div class="card"><b>Restore from a backup</b>
+    <div class="dim" style="font-size:12px;margin-top:10px">Nothing is applied until you have
+    seen exactly what would change and pressed the second button.</div>
+    <label for="rs_file">Backup file (.json)</label>
+    <input id="rs_file" type="file" accept=".json,application/json">
+    <button type="button" onclick="previewRestore()">Show what would change</button>
+    <div id="rsm" class="msg" style="display:none"></div>
+    <div id="rspv"></div></div>
+  <div class="card"><b>Undo the last restore</b>
+    <div class="dim" style="font-size:12px;margin-top:10px">The bridge keeps the configuration
+    it had immediately before the most recent restore, so a wrong file does not cost you a
+    factory reset. Only that one: an ordinary Save does not create a restore point.</div>
+    <button type="button" style="background:none;border:1px solid var(--line);color:var(--fg)"
+      onclick="undoRestore()">Go back to the previous configuration</button>
+    <div id="rbm" class="msg" style="display:none"></div></div>
+  </section>
+  </div>`;
+}
+
+/// The update check is the one SETTING on this tab, and it applies on the spot rather than
+/// waiting for a Save button that no longer exists here. Legitimate because the firmware never
+/// acts on it -- configChangeRequiresReboot() lists it among the settings applied live, since
+/// the check runs in the browser and the bridge only stores the preference.
+async function saveUpdateCheck(on){
+  const msg=$('#updtogglemsg');
+  msg.textContent='Saving…';
+  const r=await authFetch('/api/v1/config',{method:'PATCH',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({updates:{check_enabled:on}})});
+  if(!r.ok){
+    // Put the box back where it was: a checkbox that stayed flipped after a refused save would
+    // report a preference the bridge does not hold.
+    $('#c_upd').checked=!on;
+    msg.textContent='Could not save: '+httpWhy(r);
+    return;
+  }
+  msg.textContent=on?'Checking for updates is on.':'Checking for updates is off.';
+}
+
+async function renderSystem(){
+  const c=await (await fetch('/api/v1/config')).json();
+  const checkEnabled=c.updates?c.updates.check_enabled!==false:true;
+  $('#sysbox').innerHTML=`<div class="cfgpage">
+  <section class="cfgsec"><h3>Firmware &amp; recovery</h3>
+  <div class="card" id="updcard"><b>Firmware release</b>
+    <div id="updbox"><div class="dim" style="font-size:12px">Checking…</div></div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px">
+      <input id="c_upd" type="checkbox" style="width:auto" ${checkEnabled?'checked':''}
+        onchange="saveUpdateCheck(this.checked)">
+      <span style="color:var(--fg);font-size:14px">Check for new releases automatically</span></label>
+    <div id="updtogglemsg" class="dim" style="font-size:12px"></div>
+    <div class="dim" style="font-size:12px;margin-top:4px">The check runs in <b>this browser</b>,
+    not on the bridge — it fetches one small file from the project's GitHub Pages site and
+    compares it with the version this bridge reports. The bridge never opens a connection to
+    the internet for it. With this off nothing is fetched in the background; the button below
+    still works when you ask for it.</div>
+    <button type="button" style="background:none;border:1px solid var(--line);color:var(--fg)"
+      onclick="manualCheck()">Check now</button></div>
+  <div class="card"><b>Firmware update (OTA)</b>
+    <label for="c_fw">Firmware image (.bin)</label>
+    <input id="c_fw" type="file" accept=".bin">
+    <button id="ob" onclick="otaUpload()">Upload and install</button>
+    <div id="opb" style="display:none;height:8px;max-width:420px;margin-top:12px;border:1px solid var(--line);border-radius:99px;overflow:hidden">
+      <div id="opf" style="height:100%;width:0%;background:#2f81f7;transition:width .2s"></div></div>
+    <div id="om" class="msg" style="display:none"></div>
+    <div class="dim" style="font-size:12px;margin-top:8px">The image is verified before the
+    boot partition switches; a rejected upload leaves the running firmware untouched.</div></div>
+  <div class="card">
+    <b>Restart</b>
+    <p class="dim">Reboots the bridge; all settings are kept. Polling resumes by itself and
+    the dashboard reconnects in ~30 seconds.</p>
+    <button onclick="rebootFromSettings()">Restart bridge</button>
+  </div>
+  <div class="card" style="border-color:var(--bad)">
+    <b>Factory reset</b>
+    <p class="dim">Erases everything, including WiFi and passwords, and restarts into the setup
+    portal. The board's physical RESET button only reboots — this page is the way back from a
+    bad configuration, as long as you can still reach it.</p>
+    <button style="background:var(--bad)" onclick="factoryReset()">Erase and restart</button>
+  </div>
+  </section>
+  </div>`;
+  // The card exists only now. Uses whatever the last check found, so opening this tab does not
+  // fire another request at github.io.
+  updRender();
+}
+
 async function renderConfig(){
   const c=await (await fetch('/api/v1/config')).json();
   cfgBefore=c;
@@ -1574,81 +1708,10 @@ async function renderConfig(){
   <div class="cfgsave">
     <button onclick="saveConfig()">Save settings</button>
     <div id="cm" class="msg" style="display:none"></div>
-  </div>
-  <section class="cfgsec"><h3>Backup &amp; restore</h3>
-  <div class="card"><b>Download a backup</b>
-    <div class="dim" style="font-size:12px;margin-top:10px">One file with every setting on this
-    page. Keep it somewhere other than this bridge — it is what turns a dead board into a
-    twenty-minute job instead of an evening of remembering what you configured.</div>
-    ${chk('bk_sec','Include passwords (WiFi, MQTT, admin)',false)}
-    <div class="dim" style="font-size:12px;margin-top:4px"><b>Off by default, and think before
-    turning it on.</b> With it on the file holds those passwords <b>in plain text</b>, and it
-    will sit in your downloads folder, sync to whatever cloud drive is watching it, and be the
-    obvious thing to attach to a bug report. With it off there is no password in the file, and
-    restoring it onto <i>this</i> bridge still works — an absent password means “keep the one
-    the bridge already has”. Only a factory-reset board needs them typed again.</div>
-    <div class="dim" style="font-size:12px;margin-top:4px">Even without passwords the file is
-    not nothing: it holds your WiFi network name, the broker address and both usernames —
-    including the admin one, which this bridge deliberately never serves over the API. Treat it
-    as private either way.</div>
-    <button type="button" onclick="downloadBackup()">Download backup</button>
-    <div id="bkm" class="msg" style="display:none"></div></div>
-  <div class="card"><b>Restore from a backup</b>
-    <div class="dim" style="font-size:12px;margin-top:10px">Nothing is applied until you have
-    seen exactly what would change and pressed the second button.</div>
-    <label for="rs_file">Backup file (.json)</label>
-    <input id="rs_file" type="file" accept=".json,application/json">
-    <button type="button" onclick="previewRestore()">Show what would change</button>
-    <div id="rsm" class="msg" style="display:none"></div>
-    <div id="rspv"></div></div>
-  <div class="card"><b>Undo the last restore</b>
-    <div class="dim" style="font-size:12px;margin-top:10px">The bridge keeps the configuration
-    it had immediately before the most recent restore, so a wrong file does not cost you a
-    factory reset. Only that one: an ordinary Save does not create a restore point.</div>
-    <button type="button" style="background:none;border:1px solid var(--line);color:var(--fg)"
-      onclick="undoRestore()">Go back to the previous configuration</button>
-    <div id="rbm" class="msg" style="display:none"></div></div>
-  </section>
-  <section class="cfgsec"><h3>Firmware &amp; recovery</h3>
-  <div class="card" id="updcard"><b>Firmware release</b>
-    <div id="updbox"><div class="dim" style="font-size:12px">Checking…</div></div>
-    ${chk('c_upd','Check for new releases automatically',c.updates?c.updates.check_enabled!==false:true)}
-    <div class="dim" style="font-size:12px;margin-top:4px">The check runs in <b>this browser</b>,
-    not on the bridge — it fetches one small file from the project's GitHub Pages site and
-    compares it with the version this bridge reports. The bridge never opens a connection to
-    the internet for it. With this off nothing is fetched in the background; the button below
-    still works when you ask for it.</div>
-    <button type="button" style="background:none;border:1px solid var(--line);color:var(--fg)"
-      onclick="manualCheck()">Check now</button></div>
-  <div class="card"><b>Firmware update (OTA)</b>
-    <label for="c_fw">Firmware image (.bin)</label>
-    <input id="c_fw" type="file" accept=".bin">
-    <button id="ob" onclick="otaUpload()">Upload and install</button>
-    <div id="opb" style="display:none;height:8px;max-width:420px;margin-top:12px;border:1px solid var(--line);border-radius:99px;overflow:hidden">
-      <div id="opf" style="height:100%;width:0%;background:#2f81f7;transition:width .2s"></div></div>
-    <div id="om" class="msg" style="display:none"></div>
-    <div class="dim" style="font-size:12px;margin-top:8px">The image is verified before the
-    boot partition switches; a rejected upload leaves the running firmware untouched.</div></div>
-  <div class="card">
-    <b>Restart</b>
-    <p class="dim">Reboots the bridge; all settings are kept. Polling resumes by itself and
-    the dashboard reconnects in ~30 seconds.</p>
-    <button onclick="rebootFromSettings()">Restart bridge</button>
-  </div>
-  <div class="card" style="border-color:var(--bad)">
-    <b>Factory reset</b>
-    <p class="dim">Erases everything, including WiFi and passwords, and restarts into the setup
-    portal. The board's physical RESET button only reboots — this page is the way back from a
-    bad configuration, as long as you can still reach it.</p>
-    <button style="background:var(--bad)" onclick="factoryReset()">Erase and restart</button>
-  </div>
-  </section>`;
+  </div>`;
 
   // After the card exists in the DOM, not before: renderExtraDevices() writes into #xdevs.
   renderExtraDevices();
-  // Same reason: #updbox only exists now. Uses whatever the last check found, so opening
-  // Settings does not fire another request.
-  updRender();
 
   // Keep the Relays card's gate warning in step with both checkboxes as they are clicked --
   // the user is told the combination is dead before saving it, not after wondering why the
@@ -1698,7 +1761,6 @@ async function saveConfig(){
     serial:{override:b('c_ser'),baud_rate:n('c_serbaud'),parity:v('c_serpar'),
             data_bits:n('c_serdb'),stop_bits:n('c_sersb')},
     security:{read_only_mode:b('c_ro')},
-    updates:{check_enabled:b('c_upd')},
     logging:{level:v('c_lg')}};
   // A blank password field means "keep": sending "" would clear it, which is never what an
   // untouched field means.
@@ -2035,7 +2097,7 @@ async function checkForUpdate(manual){
 }
 
 function gotoUpdate(){
-  document.querySelectorAll('nav button').forEach(b=>{if(b.dataset.t==='cfg')b.click()});
+  goTab('sys');
   setTimeout(()=>{const c=$('#updcard'); if(c)c.scrollIntoView({block:'center',behavior:'smooth'})},150);
   return false;
 }
@@ -2237,6 +2299,8 @@ async function refresh(){
     if(tab==='logs')await loadLogs();
     if(tab==='disc'&&!$('#wiz').innerHTML)renderWizard();
     if(tab==='cfg'&&!$('#cfgform').innerHTML)await renderConfig();
+    if(tab==='backup'&&!$('#backupbox').innerHTML)await renderBackup();
+    if(tab==='sys'&&!$('#sysbox').innerHTML)await renderSystem();
     // Cleared first, then possibly re-raised: the reachability banner owns this element, and
     // a device warning must not survive a later refresh that finds everything fine.
     $('#banner').classList.add('hide');
