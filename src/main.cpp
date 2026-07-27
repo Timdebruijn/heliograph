@@ -85,10 +85,18 @@ namespace {
 // box on the Logs tab fillable again -- the 5 s refresh re-opened the prompt while it was being
 // typed into and blanked the field, so the only way in was to sign in on Settings first (found
 // on hardware) -- and stops a late 401 from discarding credentials another request had just had
-// accepted.
+// accepted; 0.16.0 lets the bridge take a static address instead of only a DHCP lease -- with
+// the validation doing the real work, because a wrong address does not fail loudly (the WiFi
+// association still succeeds, the bridge simply becomes unreachable), so every mistake visible
+// from the settings form is refused before it is stored, including the two whose symptom is an
+// absence rather than an error: no DNS while something is configured by name, and no NTP server
+// on a network that has no lease to supply one. It also records which MQTT topic tree was
+// announced, so a bridge whose base topic or discovery prefix changes can at least say what it
+// left behind, and splits Backup and System out of a settings page that had grown to nine
+// sections.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 15
-#define HELIOGRAPH_VERSION_PATCH 2
+#define HELIOGRAPH_VERSION_MINOR 16
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
