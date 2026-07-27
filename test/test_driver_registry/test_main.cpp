@@ -552,6 +552,153 @@ static void test_an_instance_beyond_the_device_table_is_refused() {
                                            DriverOptions{{"unit_id", "8"}}, error));
 }
 
+// --- the mock's counters and battery -----------------------------------------------------
+
+#if ENABLE_DRIVER_MOCK
+/// A mock on a clock the test moves by hand, so a whole simulated day fits in one loop.
+///
+/// `dayLengthMs` of 1000 makes a tick a thousandth of a day; the day boundary then sits at
+/// now = 500, because the curve's origin is midday rather than midnight.
+namespace {
+constexpr uint64_t kDay      = 1000;   ///< one simulated day, in ticks
+constexpr uint64_t kMidnight = 500;    ///< the tick at which a simulated day begins
+constexpr double   kDailyYieldKwh = 12.5;
+
+struct SteppedMock {
+    uint64_t         now = kMidnight;
+    MockTransport    transport;
+    mock::MockDriver driver;
+
+    SteppedMock() : driver([this] { return now; }, [] {
+        mock::MockOptions o;
+        o.dayLengthMs = kDay;
+        return o;
+    }()) {
+        driver.begin(transport);
+    }
+
+    /// One poll at the current tick, returning the value of a channel. Fails the test rather
+    /// than dereferencing null, so a channel that stops being published is a named failure.
+    double read(const char* id) {
+        DeviceState state;
+        state.lastPollAttemptMs = now + 1;
+        TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
+        const auto* m = state.measurements.find(id);
+        TEST_ASSERT_NOT_NULL_MESSAGE(m, id);
+        return m->value;
+    }
+};
+}  // namespace
+#endif
+
+/// The defect: `energy.today` was the power curve scaled, so it climbed to midday and then fell
+/// back to zero by sunset. The afternoon is where that shows -- at equal power either side of
+/// noon the old code returned equal energy, which is only true if the morning produced nothing.
+static void test_energy_today_only_ever_climbs_within_a_day() {
+#if ENABLE_DRIVER_MOCK
+    SteppedMock m;
+
+    m.now = kMidnight;
+    TEST_ASSERT_TRUE_MESSAGE(m.read(measurement_id::kEnergyToday) == 0.0,
+                             "a day must start at zero");
+
+    double previous = 0.0;
+    for (uint64_t tick = kMidnight; tick < kMidnight + kDay; ++tick) {
+        m.now              = tick;
+        const double today = m.read(measurement_id::kEnergyToday);
+        TEST_ASSERT_TRUE_MESSAGE(today >= previous, "energy.today went backwards");
+        previous = today;
+    }
+
+    // Morning and afternoon at the same instantaneous power: the same reading under the old
+    // code, and necessarily different once it is an integral.
+    m.now                 = kMidnight + 375;  // phase 0.375, climbing
+    const double morning  = m.read(measurement_id::kEnergyToday);
+    m.now                 = kMidnight + 625;  // phase 0.625, same power, falling
+    const double afternoon = m.read(measurement_id::kEnergyToday);
+    TEST_ASSERT_TRUE_MESSAGE(afternoon > morning, "the afternoon must add to the day, not undo it");
+
+    m.now = kMidnight + 750;  // sunset
+    TEST_ASSERT_TRUE(std::fabs(m.read(measurement_id::kEnergyToday) - kDailyYieldKwh) < 1e-9);
+    m.now = kMidnight + 900;  // after dark, held rather than decaying
+    TEST_ASSERT_TRUE(std::fabs(m.read(measurement_id::kEnergyToday) - kDailyYieldKwh) < 1e-9);
+#else
+    TEST_IGNORE_MESSAGE("mock driver not compiled in");
+#endif
+}
+
+/// The lifetime counter has to survive the seam that resets the daily one -- the moment the two
+/// disagree it either jumps or goes backwards, and a total that goes backwards is a meter reset
+/// to everything downstream. It used to be a constant, so nothing here was exercised at all.
+static void test_energy_total_crosses_midnight_without_a_step() {
+#if ENABLE_DRIVER_MOCK
+    SteppedMock m;
+
+    double previous = 0.0;
+    for (uint64_t tick = kMidnight; tick <= kMidnight + 2 * kDay; ++tick) {
+        m.now              = tick;
+        const double total = m.read(measurement_id::kEnergyTotal);
+        TEST_ASSERT_TRUE_MESSAGE(total >= previous, "energy.total went backwards");
+        previous = total;
+    }
+
+    // Two days on: exactly two days' yield richer. Asserted as a difference, not against an
+    // absolute figure -- the absolute one also encodes where the simulation's epoch happens to
+    // fall (it starts at midday, so a day is already banked by the first midnight), which is
+    // incidental and would make this test fail for the wrong reason.
+    m.now                = kMidnight;
+    const double atStart = m.read(measurement_id::kEnergyTotal);
+    m.now                = kMidnight + 2 * kDay;
+    TEST_ASSERT_TRUE(std::fabs((m.read(measurement_id::kEnergyTotal) - atStart)
+                               - 2 * kDailyYieldKwh) < 1e-9);
+
+    // Either side of a single tick across midnight: continuous, not a jump of a day's yield.
+    m.now              = kMidnight + kDay - 1;
+    const double before = m.read(measurement_id::kEnergyTotal);
+    m.now              = kMidnight + kDay;
+    const double after  = m.read(measurement_id::kEnergyTotal);
+    TEST_ASSERT_TRUE_MESSAGE(std::fabs(after - before) < 0.01, "the day rolled over with a step");
+#else
+    TEST_IGNORE_MESSAGE("mock driver not compiled in");
+#endif
+}
+
+/// measurement.h asks a driver reading separate charge/discharge rails to publish the combined
+/// `battery.power` as well. The mock read them separately and published only the rails, so the
+/// sign convention had no test and every consumer of the combined channel -- the dashboard
+/// column, the Home Assistant entity, the MQTT topic -- had nothing to show on the one
+/// device that runs without hardware.
+static void test_the_mock_publishes_combined_battery_power() {
+#if ENABLE_DRIVER_MOCK
+    SteppedMock m;
+    bool sawCharging = false, sawDischarging = false, sawIdle = false;
+
+    for (uint64_t tick = kMidnight; tick < kMidnight + kDay; tick += 5) {
+        m.now                  = tick;
+        const double power     = m.read(measurement_id::kBatteryPower);
+        const double charge    = m.read(measurement_id::kBatteryChargePower);
+        const double discharge = m.read(measurement_id::kBatteryDischargePower);
+        TEST_ASSERT_TRUE_MESSAGE(std::fabs(power - (charge - discharge)) < 1e-9,
+                                 "battery.power must agree with the rails it is made of");
+        if (power > 0.0) {
+            sawCharging = true;
+        } else if (power < 0.0) {
+            sawDischarging = true;
+        } else {
+            sawIdle = true;
+        }
+    }
+
+    // All three states within one simulated day: a column that can only ever render one of them
+    // is not a demonstration of anything.
+    TEST_ASSERT_TRUE_MESSAGE(sawCharging, "never charged");
+    TEST_ASSERT_TRUE_MESSAGE(sawDischarging, "never discharged");
+    TEST_ASSERT_TRUE_MESSAGE(sawIdle, "never idle");
+#else
+    TEST_IGNORE_MESSAGE("mock driver not compiled in");
+#endif
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_a_numeric_option_out_of_range_is_refused);
@@ -587,5 +734,8 @@ int main(int, char**) {
     RUN_TEST(test_instances_are_staggered_so_they_do_not_report_in_lockstep);
     RUN_TEST(test_a_running_fleet_ends_up_part_producing_and_part_dark);
     RUN_TEST(test_an_instance_beyond_the_device_table_is_refused);
+    RUN_TEST(test_energy_today_only_ever_climbs_within_a_day);
+    RUN_TEST(test_energy_total_crosses_midnight_without_a_step);
+    RUN_TEST(test_the_mock_publishes_combined_battery_power);
     return UNITY_END();
 }

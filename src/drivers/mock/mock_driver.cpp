@@ -27,9 +27,25 @@ uint64_t defaultClock() {
 
 constexpr double kPi          = 3.14159265358979323846;
 constexpr double kPeakDcWatts = 6000.0;
+/// One simulated day's yield, and where the lifetime counter starts. Named rather than written
+/// out at the point of use because three channels have to agree on them: today integrates to
+/// exactly kDailyYieldKwh by sunset, and the lifetime total is that yield times the days behind
+/// us plus whatever today has produced so far.
+constexpr double kDailyYieldKwh   = 12.5;
+constexpr double kInitialTotalKwh = 24680.0;
 
-/// Bell-shaped output over the middle half of the day, zero at night. Zero here is a real
-/// measurement, exactly as it is for a real inverter after sunset.
+/// Where an instance sits in its simulated day.
+struct SimDay {
+    /// Whole simulated days behind us. Only the lifetime counter needs this, and it needs it to
+    /// keep climbing across a midnight instead of restarting.
+    uint64_t completed = 0;
+    /// 0.0 = midnight, 0.25 = sunrise, 0.5 = midday, 0.75 = sunset.
+    double phase = 0.0;
+};
+
+/// The one place the simulated clock is turned into a position in the day. The curve and both
+/// energy counters read it, so they cannot drift apart -- the counters have to roll over at
+/// exactly the moment the curve calls it midnight, or the lifetime total jumps at the seam.
 ///
 /// The cycle starts at midday rather than midnight. The phase origin is arbitrary in a
 /// simulation, and starting at midnight means a freshly booted bridge reports 0 W until a
@@ -55,18 +71,55 @@ constexpr double kPeakDcWatts = 6000.0;
 /// rose and set in unison would never reach that state at all.
 ///
 /// Instance 1 gets no offset, so the single-mock case is bit-for-bit what it always was.
-double solarFraction(uint64_t nowMs, uint64_t dayLengthMs, uint8_t instance) {
+SimDay simulatedDay(uint64_t nowMs, uint64_t dayLengthMs, uint8_t instance) {
     if (dayLengthMs == 0) {
-        return 0.0;
+        return {};  // midnight forever: no curve, no yield, lifetime total left at its start
     }
     const uint64_t offset = (instance > 0 ? instance - 1u : 0u) * (dayLengthMs / 32ULL);
-    nowMs += offset;
-    const double raw = static_cast<double>(nowMs % dayLengthMs) / static_cast<double>(dayLengthMs);
-    const double phase = raw < 0.5 ? raw + 0.5 : raw - 0.5;  // shift midnight -> midday
+    // Half a cycle forward, rather than folding the phase afterwards. Both express the same
+    // midday origin, but shifting the input is what lets the day count and the phase fall out
+    // of one division and therefore agree at the rollover.
+    const uint64_t t = nowMs + offset + dayLengthMs / 2;
+    return {t / dayLengthMs, static_cast<double>(t % dayLengthMs) / static_cast<double>(dayLengthMs)};
+}
+
+/// Bell-shaped output over the middle half of the day, zero at night. Zero here is a real
+/// measurement, exactly as it is for a real inverter after sunset.
+double solarFraction(double phase) {
     if (phase < 0.25 || phase > 0.75) {
         return 0.0;  // night
     }
     return std::sin((phase - 0.25) * 2.0 * kPi);
+}
+
+/// Energy generated since the simulated midnight -- the INTEGRAL of the curve above, not a
+/// scaled copy of it.
+///
+/// This used to be `12.5 * fraction`, which meant "today" climbed until midday and then fell
+/// back to zero by sunset. A daily counter that decreases is not merely a wrong number, it is a
+/// different kind of number: every consumer downstream treats a drop as a meter reset, Home
+/// Assistant's `total_increasing` classes included. Because it is the integral, its slope is
+/// the instantaneous power -- so the two channels now describe the same inverter.
+double energyToday(double phase) {
+    if (phase <= 0.25) {
+        return 0.0;  // between midnight and sunrise the new day has produced nothing yet
+    }
+    if (phase >= 0.75) {
+        return kDailyYieldKwh;  // after sunset: the day's total, held until midnight
+    }
+    const double daylight = (phase - 0.25) / 0.5;  // 0 at sunrise, 1 at sunset
+    return kDailyYieldKwh * (1.0 - std::cos(daylight * kPi)) / 2.0;
+}
+
+/// Lifetime yield: a fixed starting point plus every day behind us plus today's progress.
+///
+/// Continuous across midnight by construction -- `completed` gains the day at the same instant
+/// `energyToday` drops it -- which is the property that makes it safe to hand to a counter that
+/// may never go backwards. It was a hardcoded 24680 that never moved at all, so nothing
+/// downstream that accumulates or rate-limits on this channel was ever exercised.
+double energyTotal(const SimDay& day) {
+    return kInitialTotalKwh + static_cast<double>(day.completed) * kDailyYieldKwh
+           + energyToday(day.phase);
 }
 
 DriverDescriptor makeDescriptor(bool writable) {
@@ -247,7 +300,8 @@ PollResult MockDriver::poll(DeviceState& state) {
     }
 
     const uint64_t now      = clock_ ? clock_() : 0;
-    const double   fraction = solarFraction(now, options_.dayLengthMs, options_.instance);
+    const SimDay   day      = simulatedDay(now, options_.dayLengthMs, options_.instance);
+    const double   fraction = solarFraction(day.phase);
     const double   dcPower  = kPeakDcWatts * fraction;
     const double   acPower  = dcPower * 0.97;
 
@@ -320,17 +374,33 @@ PollResult MockDriver::poll(DeviceState& state) {
               "Battery Charge Power");
     m.declare(measurement_id::kBatteryDischargePower, MeasurementType::Power, Unit::Watt,
               "Battery Discharge Power");
+    // The combined channel as well as the two rails. measurement.h asks a driver that reads
+    // them separately to publish this one too, and the only driver that reads them separately
+    // was the one ignoring that -- so the sign convention itself went untested, and everything
+    // keyed on battery.power (the dashboard's charge/discharge column, the Home Assistant
+    // entity, the MQTT topic) had nothing to show on the one device anybody can run without
+    // hardware. Modbus TCP is the exception: its map carries the two rails at 304/306 and has
+    // no register for the combined value, so that output is unchanged by this.
+    m.declare(measurement_id::kBatteryPower, MeasurementType::Power, Unit::Watt, "Battery Power");
     const double soc = 40.0 + 40.0 * fraction;
+    // `<= 0.0` rather than `== 0.0` only to avoid resting on an exact float compare; it does
+    // NOT change which samples count as night, since both forms are true at exactly zero.
+    // Sunrise, where the sine is a genuine zero in daylight, therefore still reads as night for
+    // the one sample that lands on it -- harmless in a simulation, and cheaper to say than to
+    // carry a phase check down here for.
+    const double chargeW    = fraction > 0.3 ? 1000.0 : 0.0;
+    const double dischargeW = fraction <= 0.0 ? 400.0 : 0.0;
     m.set(measurement_id::kBatterySoc, soc, ts);
     m.set(measurement_id::kBatteryVoltage, 48.0 + soc * 0.05, ts);
-    m.set(measurement_id::kBatteryChargePower, fraction > 0.3 ? 1000.0 : 0.0, ts);
-    m.set(measurement_id::kBatteryDischargePower, fraction == 0.0 ? 400.0 : 0.0, ts);
+    m.set(measurement_id::kBatteryChargePower, chargeW, ts);
+    m.set(measurement_id::kBatteryDischargePower, dischargeW, ts);
+    m.set(measurement_id::kBatteryPower, chargeW - dischargeW, ts);  // + charging, - discharging
 
     m.set(measurement_id::kAcPowerTotal, acPower, ts);
     m.set(measurement_id::kAcFrequency, 50.0, ts);
     m.set(measurement_id::kDcPowerTotal, dcPower, ts);
-    m.set(measurement_id::kEnergyToday, 12.5 * fraction, ts);
-    m.set(measurement_id::kEnergyTotal, 24680.0, ts);
+    m.set(measurement_id::kEnergyToday, energyToday(day.phase), ts);
+    m.set(measurement_id::kEnergyTotal, energyTotal(day), ts);
     m.set(measurement_id::kTemperature, 25.0 + 20.0 * fraction, ts);
 
     state.statusCode          = fraction > 0.0 ? 1 : 0;
