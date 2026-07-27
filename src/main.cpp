@@ -94,9 +94,21 @@ namespace {
 // on a network that has no lease to supply one. It also records which MQTT topic tree was
 // announced, so a bridge whose base topic or discovery prefix changes can at least say what it
 // left behind, and splits Backup and System out of a settings page that had grown to nine
-// sections.
+// sections; 0.17.0 makes a bridge with several inverters legible. The per-inverter strip on the
+// Dashboard carried watts and nothing else, so the only comparison available was who is
+// producing more right now -- it now also shows energy today, AC voltage, temperature and, for
+// hybrids, battery state of charge and whether the battery is charging or discharging and by
+// how much, said in words rather than as a signed number. Only columns some inverter can
+// actually fill appear, because a column of em dashes reads as broken rather than as not
+// applicable. The ten-second log heartbeat stops describing the first device as though it were
+// the bridge -- it reported one inverter's power and printed a bool under a name that read as a
+// count, so four inverters looked exactly like one -- and now gives the fleet, naming every
+// inverter that is not answering, why, and how long ago it last replied. Underneath: the two
+// PMU drivers stop carrying the same hundred-line transaction loop twice, and AsyncTCP and
+// ESPAsyncWebServer move up for two use-after-free fixes on the teardown path the dashboard's
+// live updates run over.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 16
+#define HELIOGRAPH_VERSION_MINOR 17
 #define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
