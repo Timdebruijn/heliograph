@@ -349,9 +349,12 @@ function fleetStrip(fleet){
   // Battery power says the direction in words rather than as a sign. The payload follows the
   // project's convention (positive charging, negative discharging), but a reader should not
   // have to know it to answer "is it charging?" -- and a bare -800 W invites the wrong guess.
+  // The word is derived from the number as DISPLAYED, not from the raw value: a trickle of
+  // 0.4 W rounds to 0 at this precision, and "charging 0 W" is a cell that argues with itself.
   const batt=v=>{
-    if(v===0) return 'idle';
-    return (v>0?'charging ':'discharging ')+fmt(Math.abs(v),0)+' W';
+    const w=fmt(Math.abs(v),0);
+    if(Number(w)===0) return 'idle';
+    return (v>0?'charging ':'discharging ')+w+' W';
   };
   const all=[{k:'ac_power_w',t:'AC power',d:0,u:'W'},
              {k:'energy_today_kwh',t:'Today',d:2,u:'kWh'},

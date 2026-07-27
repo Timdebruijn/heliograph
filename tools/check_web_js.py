@@ -209,6 +209,10 @@ check(!h.includes('-800'), 'a raw negative leaked into the cell');
 h = fleetStrip([{...base,id:'d',battery_soc_pct:50,battery_power_w:0}]);
 check(h.includes('idle'), 'a resting battery is not reported as idle');
 
+h = fleetStrip([{...base,id:'g',battery_soc_pct:50,battery_power_w:0.4}]);
+check(h.includes('idle'), 'a trickle that rounds to 0 W still claims a direction');
+check(!h.includes('charging 0 W'), 'the cell argues with itself: a direction next to zero watts');
+
 h = fleetStrip([{...base,id:'e',temperature_c:40},{...base,id:'f',temperature_c:null}]);
 check(cols(h).includes('Temp'), 'column dropped although one device reports it');
 check(h.includes('\u2014'), 'the device without the channel is not an em dash');
