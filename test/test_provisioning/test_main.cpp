@@ -1109,15 +1109,70 @@ static void test_a_nameless_stored_device_is_dropped_not_fatal() {
 // knowing -- and without it a removed device's retained Home Assistant entities can never be
 // cleared. Kept out of Configuration on purpose: it is not a user setting, must not appear in
 // GET /config, and must not take part in the reboot-required diff.
+/// The prefixes are recorded WITH the ids, because every topic MqttOutput builds comes from the
+/// current configuration: once base_topic or discovery_prefix changes there is nothing left that
+/// knows where the previous tree was. Recording it after the fact is impossible, which is why
+/// this lands before anything that uses it.
+static void test_the_announcement_records_the_tree_it_went_to() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+
+    mqtt::AnnouncementRecord record;
+    record.baseTopic       = "solarbridge";
+    record.discoveryPrefix = "homeassistant";
+    record.devices         = {{"eversolar_legacy-16", true}, {"growatt_modbus-2", false}};
+    TEST_ASSERT_TRUE(store.setAnnouncement(record));
+
+    ConfigurationStore reloaded(backend);
+    const auto         back = reloaded.announcement();
+    TEST_ASSERT_TRUE(back.prefixesKnown());
+    TEST_ASSERT_EQUAL_STRING("solarbridge", back.baseTopic.c_str());
+    TEST_ASSERT_EQUAL_STRING("homeassistant", back.discoveryPrefix.c_str());
+    TEST_ASSERT_EQUAL_UINT32(2, back.devices.size());
+    TEST_ASSERT_TRUE(back.devices[0].primary);
+    TEST_ASSERT_FALSE(back.devices[1].primary);
+    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", back.devices[1].id.c_str());
+}
+
+/// Both older shapes still read. Their ids survive; their prefixes are UNKNOWN rather than
+/// assumed to be the defaults -- a record that never said where its topics went must not be
+/// read as saying they were somewhere in particular, or a later cleanup would aim at the tree
+/// that is live right now.
+static void test_older_announcement_records_still_read_with_unknown_prefixes() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+
+    // Oldest: bare strings, before the primary flag existed.
+    backend.write(kStorageKeyAnnounced, R"(["eversolar_legacy-16","growatt_modbus-2"])");
+    auto bare = store.announcement();
+    TEST_ASSERT_FALSE(bare.prefixesKnown());
+    TEST_ASSERT_EQUAL_UINT32(2, bare.devices.size());
+    TEST_ASSERT_FALSE_MESSAGE(bare.devices[0].primary, "a bare string always meant non-primary");
+
+    // Second: objects with the flag, still no tree.
+    backend.write(kStorageKeyAnnounced,
+                  R"([{"id":"eversolar_legacy-16","primary":true}])");
+    auto flagged = store.announcement();
+    TEST_ASSERT_FALSE(flagged.prefixesKnown());
+    TEST_ASSERT_EQUAL_UINT32(1, flagged.devices.size());
+    TEST_ASSERT_TRUE(flagged.devices[0].primary);
+
+    // Unreadable bookkeeping is forgotten, never fatal.
+    backend.write(kStorageKeyAnnounced, "{not json");
+    TEST_ASSERT_EQUAL_UINT32(0, store.announcement().devices.size());
+}
+
 static void test_announced_devices_round_trip_and_start_empty() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
-    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+    TEST_ASSERT_TRUE(store.announcement().devices.empty());
 
-    const std::vector<mqtt::AnnouncedDevice> announced{{"growatt_modbus-1", true},
-                                                       {"growatt_modbus-2", false}};
-    TEST_ASSERT_TRUE(store.setAnnouncedDevices(announced));
-    const auto back = store.announcedDevices();
+    mqtt::AnnouncementRecord announced;
+    announced.baseTopic       = "heliograph";
+    announced.discoveryPrefix = "homeassistant";
+    announced.devices         = {{"growatt_modbus-1", true}, {"growatt_modbus-2", false}};
+    TEST_ASSERT_TRUE(store.setAnnouncement(announced));
+    const auto back = store.announcement().devices;
     TEST_ASSERT_EQUAL_UINT32(2, back.size());
     TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", back[1].id.c_str());
     // Which tree a device was announced on is half the fact: without it, a device promoted into
@@ -1127,8 +1182,8 @@ static void test_announced_devices_round_trip_and_start_empty() {
     TEST_ASSERT_FALSE(back[1].primary);
 
     // Removing the last device must be storable as such, not indistinguishable from "never set".
-    TEST_ASSERT_TRUE(store.setAnnouncedDevices({}));
-    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+    TEST_ASSERT_TRUE(store.setAnnouncement({}));
+    TEST_ASSERT_TRUE(store.announcement().devices.empty());
 }
 
 // The key first shipped as a plain array of ids. Reading one back as non-primary is not a
@@ -1139,7 +1194,7 @@ static void test_announced_bookkeeping_reads_the_flat_id_list() {
     ConfigurationStore store(backend);
     backend.write(kStorageKeyAnnounced, R"(["eversolar-1","growatt_modbus-2"])");
 
-    const auto back = store.announcedDevices();
+    const auto back = store.announcement().devices;
     TEST_ASSERT_EQUAL_UINT32(2, back.size());
     TEST_ASSERT_EQUAL_STRING("eversolar-1", back[0].id.c_str());
     TEST_ASSERT_FALSE(back[0].primary);
@@ -1152,7 +1207,7 @@ static void test_corrupt_announced_bookkeeping_is_not_fatal() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
     backend.write(kStorageKeyAnnounced, "{not json");
-    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+    TEST_ASSERT_TRUE(store.announcement().devices.empty());
 
     auto c = provisionedConfig();
     TEST_ASSERT_TRUE(store.save(c));
@@ -1165,9 +1220,9 @@ static void test_corrupt_announced_bookkeeping_is_not_fatal() {
 static void test_a_factory_reset_forgets_what_was_announced() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
-    store.setAnnouncedDevices(std::vector<mqtt::AnnouncedDevice>{{"growatt_modbus-1", true}});
+    store.setAnnouncement({"heliograph", "homeassistant", {{"growatt_modbus-1", true}}});
     TEST_ASSERT_TRUE(store.factoryReset());
-    TEST_ASSERT_TRUE(store.announcedDevices().empty());
+    TEST_ASSERT_TRUE(store.announcement().devices.empty());
 }
 
 static void test_ota_rejects_a_non_firmware_upload_before_writing() {
@@ -1407,6 +1462,8 @@ int main(int, char**) {
     RUN_TEST(test_extra_devices_survive_a_restart);
     RUN_TEST(test_a_config_without_the_device_list_stays_single_device);
     RUN_TEST(test_a_nameless_stored_device_is_dropped_not_fatal);
+    RUN_TEST(test_the_announcement_records_the_tree_it_went_to);
+    RUN_TEST(test_older_announcement_records_still_read_with_unknown_prefixes);
     RUN_TEST(test_announced_devices_round_trip_and_start_empty);
     RUN_TEST(test_announced_bookkeeping_reads_the_flat_id_list);
     RUN_TEST(test_corrupt_announced_bookkeeping_is_not_fatal);

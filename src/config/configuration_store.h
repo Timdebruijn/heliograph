@@ -102,8 +102,16 @@ public:
     /// re-addressed leaves its entities behind -- and because availability is bridge-scoped they
     /// report ONLINE forever with their last value, straight into an energy dashboard. Clearing
     /// them needs the one fact nothing else survives a reboot with: what we announced last time.
-    std::vector<mqtt::AnnouncedDevice> announcedDevices();
-    bool setAnnouncedDevices(const std::vector<mqtt::AnnouncedDevice>& devices);
+    /// What was last successfully announced, and the tree it went to. An older record carries
+    /// the ids with empty prefixes -- unknown, not "the default".
+    ///
+    /// Deliberately the only accessor. A convenience that returned the device list alone existed
+    /// briefly and had no caller outside its own tests: every real user of this needs to know
+    /// WHERE the ids were announced, because that is the fact nothing else survives a reboot
+    /// with. Handing out the list without it invites exactly the reasoning this record exists to
+    /// prevent.
+    mqtt::AnnouncementRecord announcement();
+    bool setAnnouncement(const mqtt::AnnouncementRecord& record);
 
     /// Copies the stored configuration into the rollback slot, so the restore about to
     /// overwrite it can be undone. Call immediately before a restore, and nowhere else: doing

@@ -259,3 +259,72 @@ discovers that half the outputs ignored it. Now the behavior is enforced by test
 Exponential back-off 1 s → 2 s → 4 s → … → max 60 s. After connecting: availability `online`,
 then identity/capabilities/discovery, then state. The poll cycle keeps running in the
 meantime — `mqttTask` and `rs485Task` share nothing but the `StateStore`.
+
+## Changing the base topic or the discovery prefix
+
+Both need a restart, and both leave the previous topic tree behind on the broker. **The bridge
+does not clear it**, and the two fields do not strand the same things.
+
+### `mqtt.base_topic`
+
+The Home Assistant discovery configs do **not** move. Their topics are built from the bridge id,
+not from the base topic, so the next announcement overwrites them in place with `state_topic`
+pointing at the new tree. Your entities keep working and keep their history.
+
+What is stranded is the retained data under the old tree — `state`, `identity`, `capabilities`,
+`diagnostics`, `availability`, and the same three for every extra device. Invisible in Home
+Assistant, clutter on the broker.
+
+### `mqtt.discovery_prefix`
+
+Here the configs really do move. The old ones stay retained, so Home Assistant keeps a full set
+of stale entities beside the new ones — reporting online forever with their last value, because
+availability is bridge-scoped and nothing publishes to the old tree any more.
+
+**Deleting the device in Home Assistant does not fix this.** The retained config is still on the
+broker, so it is rediscovered on the next Home Assistant restart. It has to be cleared at the
+broker.
+
+### Clearing it
+
+The bridge logs the old and new prefixes when it notices the change, so the tree to clear is
+named in the boot log rather than left for you to work out.
+
+Retained messages are deleted by publishing an empty payload to the same topic with the retain
+flag set. With mosquitto's tools, for a base topic that moved:
+
+```bash
+mosquitto_sub -h BROKER -t 'OLD_BASE/BRIDGE_ID/#' -v --retained-only -W 2 \
+  | cut -d' ' -f1 \
+  | xargs -I{} mosquitto_pub -h BROKER -t {} -r -n
+```
+
+For a discovery prefix that moved, the entities live under several component types
+(`sensor`, `binary_sensor`, `switch`, `select`) and under two id shapes — `BRIDGE_ID` for the
+first device and the bridge's own entities, `BRIDGE_ID_DEVICEID` for every other. **MQTT has no
+wildcard within a topic level** — `+` matches exactly one whole level and `#` the rest, so
+`BRIDGE_ID*` matches nothing. Subscribe to the whole prefix and filter:
+
+```bash
+mosquitto_sub -h BROKER -t 'OLD_PREFIX/#' -v --retained-only -W 2 \
+  | grep "BRIDGE_ID" \
+  | cut -d' ' -f1 \
+  | xargs -I{} mosquitto_pub -h BROKER -t {} -r -n
+```
+
+Two things about `--retained-only`: it exits as soon as a **non**-retained message arrives, which
+on an orphaned tree never happens (nothing publishes there any more) but will cut the listing
+short if you point it at a live one. And `-W 2` is the safety net — without a timeout the client
+waits forever on a quiet tree.
+
+Check what would be deleted before deleting it: drop the `xargs` line and read the list first.
+
+### Why the firmware does not do it for you
+
+An automatic sweep on boot has to get the distinction above exactly right, and the failure mode
+of getting it wrong is deleting the discovery configs that were just correctly rewritten —
+turning broker clutter into a device that vanishes from someone's dashboard, unattended. No
+comparable project does this in firmware either: ESPHome ships `esphome clean-mqtt` and Tasmota
+points at Tasmota Device Manager, both host-side tools a human runs deliberately.
+
+Tracked in [#41](https://github.com/Timdebruijn/heliograph/issues/41).

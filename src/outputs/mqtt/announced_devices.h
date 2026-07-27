@@ -18,6 +18,29 @@ struct AnnouncedDevice {
     bool        primary = false;
 };
 
+/// What was last SUCCESSFULLY announced, and the tree it went to.
+///
+/// The prefixes are recorded with the ids because without them nothing can find the old tree
+/// after a rename: every topic MqttOutput builds comes from the CURRENT config, so once the
+/// setting changes there is no longer anything that knows where the previous one was.
+///
+/// "Successfully" is the whole design of the retry question. The record is updated only after a
+/// publish that actually left, so it always names the last tree that received anything -- which
+/// is the only tree with something to clear. Two renames in a row with a broker outage between
+/// them need no list of previous prefixes to resolve: the second rename finds the record still
+/// naming the first tree, because the middle one never published.
+///
+/// Empty prefixes mean UNKNOWN, not "the default". A record written before this bridge tracked
+/// them says nothing about where its topics went, and guessing would risk clearing the live
+/// tree.
+struct AnnouncementRecord {
+    std::string                  baseTopic;
+    std::string                  discoveryPrefix;
+    std::vector<AnnouncedDevice> devices;
+
+    bool prefixesKnown() const { return !baseTopic.empty() && !discoveryPrefix.empty(); }
+};
+
 /// Which previously announced devices left a DEVICE-SCOPED topic tree that nothing publishes to
 /// any more, and whose retained payloads therefore have to be cleared.
 ///
