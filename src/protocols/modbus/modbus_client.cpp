@@ -114,7 +114,9 @@ ReadOutcome readRegisters(Transport& transport, uint8_t unitId, uint8_t function
         transport, req, reqLen, timing, [&](const uint8_t* rx, size_t have) {
             ParseStep    step;
             ReadResponse resp;
-            step.result        = parseReadResponse(rx, have, unitId, functionCode, out, count, resp);
+            step.result = parseReadResponse(rx, have, unitId, functionCode, out, count, resp);
+            // Read on every pass, acted on only when the result is Exception. Zero otherwise,
+            // because both response structs default-initialise every member.
             step.exceptionCode = resp.exceptionCode;
             // A reply that decodes cleanly but carries FEWER registers than were asked for is
             // not success. The codec only checks the byte count against the caller's buffer
@@ -146,9 +148,12 @@ TransactionOutcome writeSingleRegister(Transport& transport, uint8_t unitId, uin
         transport, req, reqLen, timing, [&](const uint8_t* rx, size_t have) {
             ParseStep     step;
             WriteResponse resp;
-            step.result        = parseWriteResponse(rx, have, unitId, kWriteSingleRegister, resp);
-            // The ordinary answer to a control write that is refused: read-only register,
-            // out-of-range value, or a device that wants an unlock first.
+            step.result = parseWriteResponse(rx, have, unitId, kWriteSingleRegister, resp);
+            // Carried out of the response whatever the verdict; the skeleton reads it only
+            // when the result IS Exception. That case is the ordinary answer to a refused
+            // control write -- a read-only register, an out-of-range value, or a device that
+            // wants an unlock first -- which is why it is a status of its own rather than a
+            // protocol error.
             step.exceptionCode = resp.exceptionCode;
             // The echo is the confirmation. A device that answers with a different address or
             // a different value has not done what was asked, however well-formed the frame is
