@@ -5,8 +5,6 @@
 
 #include <cstring>
 
-#include "diagnostics/logger.h"
-
 namespace heliograph::eversolar {
 namespace {
 
