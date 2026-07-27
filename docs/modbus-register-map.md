@@ -20,6 +20,27 @@ Schema version: **1** (register 0-1). Increment on every breaking change.
 | Port | 502 (configurable) |
 | Unit ID inverter | `modbus.unit_id` (default 1) for device 1, **+1 per further device** |
 | Unit ID diagnostics | 250 (configurable) |
+| Concurrent clients | `modbus.max_clients` (default 4, max 8) |
+| Idle timeout | `modbus.idle_timeout_seconds` (default 20, `0` = never) |
+
+## How many clients can connect at once
+
+Four by default, and the limit is real: past it the bridge accepts the TCP connection and closes
+it again without answering a single request. From the client's side that looks like a server
+that ignores you, not like a server that is full — so if a poller has gone quiet while others
+work, check this first. The bridge logs a warning the moment every slot is in use.
+
+Four covers Home Assistant plus a Prometheus scraper. It stops covering a bridge that also feeds
+a SCADA poller and somebody's laptop, which is when to raise `modbus.max_clients`. The ceiling is
+8: every slot costs a socket and a per-connection buffer, and the boards without PSRAM have no
+room to find the real limit by hitting it.
+
+`modbus.idle_timeout_seconds` decides how long a connected-but-silent client keeps its slot.
+The two settings work against each other — a generous client limit with no timeout is how a
+bridge ends up with every slot held by a client that stopped talking hours ago. Set it to `0`
+only when you know the clients are long-lived and no one else is waiting for a slot.
+
+Both take effect at the next restart.
 
 ## Several inverters: one unit id each
 

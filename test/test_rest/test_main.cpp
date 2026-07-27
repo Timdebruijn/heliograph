@@ -1020,6 +1020,47 @@ static void test_diagnostics_unit_id_must_differ_from_the_inverter() {
     TEST_ASSERT_FALSE(applyConfigPatch(R"({"modbus":{"diagnostics_unit_id":1}})", c, e));
 }
 
+static void test_max_clients_is_bounded_at_both_ends() {
+    Configuration c;
+    ConfigError   e;
+    // 0 would leave a server listening that answers nobody, which is not what "off" looks like.
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"modbus":{"max_clients":0}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("modbus.max_clients", e.field.c_str());
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"modbus":{"max_clients":9}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("modbus.max_clients", e.field.c_str());
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"modbus":{"max_clients":8}})", c, e));
+    TEST_ASSERT_EQUAL_UINT8(8, c.modbus.maxClients);
+}
+
+// 0 is a value here, not an omission: eModbus skips the idle check entirely at 0, so it means
+// "never drop an idle client". A bounds check written as a plain range would have refused it.
+static void test_idle_timeout_of_zero_means_never_and_is_allowed() {
+    Configuration c;
+    ConfigError   e;
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"modbus":{"idle_timeout_seconds":0}})", c, e));
+    TEST_ASSERT_EQUAL_UINT32(0, c.modbus.idleTimeoutSeconds);
+    // Non-zero still has to be sane: below 5 s a client is dropped between its own polls.
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"modbus":{"idle_timeout_seconds":4}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("modbus.idle_timeout_seconds", e.field.c_str());
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"modbus":{"idle_timeout_seconds":3601}})", c, e));
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"modbus":{"idle_timeout_seconds":3600}})", c, e));
+    TEST_ASSERT_EQUAL_UINT32(3600, c.modbus.idleTimeoutSeconds);
+}
+
+// Both need a reboot: they are read once by begin() and handed to eModbus's start(), and there
+// is no path that reapplies either to a running server. Claiming otherwise would leave the page
+// saying a new limit is in force while the old one is still refusing connections.
+static void test_client_limits_require_a_restart() {
+    Configuration a;
+    Configuration b = a;
+    b.modbus.maxClients = 8;
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(a, b));
+
+    Configuration d = a;
+    d.modbus.idleTimeoutSeconds = 120;
+    TEST_ASSERT_TRUE(configChangeRequiresReboot(a, d));
+}
+
 // A value too large for the field used to be cast first and validated afterwards, so it wrapped
 // into something validate() was perfectly happy with and the stored config was not the one that
 // was asked for -- with no error anywhere. Whether a bad value got caught depended on where the
@@ -1343,6 +1384,39 @@ static void test_modbus_config_is_actually_applied() {
     TEST_ASSERT_EQUAL_UINT16(5020, server.config().port);
     TEST_ASSERT_EQUAL_UINT8(7, server.config().inverterUnitId);
     TEST_ASSERT_EQUAL_UINT8(200, server.config().diagnosticsUnitId);
+}
+
+// The settings have to REACH the server, which is a different claim from "the field exists".
+// The two client limits were struct defaults that nothing ever assigned, so editing them meant
+// editing a header and reflashing (#71) -- and before that, port and unit_id had the same
+// problem for a different reason. Neither showed up as a failure anywhere.
+static void test_stored_settings_reach_the_server_config() {
+    ModbusSettings settings;
+    settings.port               = 5020;
+    settings.unitId             = 7;
+    settings.diagnosticsUnitId  = 200;
+    settings.maxClients         = 8;
+    settings.idleTimeoutSeconds = 120;
+
+    const auto cfg = modbus::serverConfigFrom(settings, 3);
+    TEST_ASSERT_EQUAL_UINT16(5020, cfg.port);
+    TEST_ASSERT_EQUAL_UINT8(7, cfg.inverterUnitId);
+    TEST_ASSERT_EQUAL_UINT8(200, cfg.diagnosticsUnitId);
+    TEST_ASSERT_EQUAL_UINT8(8, cfg.maxClients);
+    // Seconds in, milliseconds out. eModbus takes milliseconds; an operator types seconds.
+    TEST_ASSERT_EQUAL_UINT32(120000, cfg.idleTimeoutMs);
+    TEST_ASSERT_EQUAL_UINT8(3, cfg.deviceCount);
+    // Not from settings, whatever they say: no driver in this build can write.
+    TEST_ASSERT_FALSE(cfg.writeEnabled);
+}
+
+// 0 has to survive the seconds-to-milliseconds conversion as 0, because that is the value
+// eModbus reads as "never drop an idle client". Any other handling silently turns the one
+// deliberate special case into an immediate disconnect.
+static void test_an_idle_timeout_of_zero_stays_zero_at_the_server() {
+    ModbusSettings settings;
+    settings.idleTimeoutSeconds = 0;
+    TEST_ASSERT_EQUAL_UINT32(0, modbus::serverConfigFrom(settings, 1).idleTimeoutMs);
 }
 
 static void test_modbus_write_stays_off_whatever_the_config_says() {
@@ -2361,6 +2435,11 @@ int main(int, char**) {
     RUN_TEST(test_a_label_may_not_carry_control_characters);
     RUN_TEST(test_renaming_a_device_needs_a_restart);
     RUN_TEST(test_diagnostics_unit_id_must_differ_from_the_inverter);
+    RUN_TEST(test_max_clients_is_bounded_at_both_ends);
+    RUN_TEST(test_idle_timeout_of_zero_means_never_and_is_allowed);
+    RUN_TEST(test_client_limits_require_a_restart);
+    RUN_TEST(test_stored_settings_reach_the_server_config);
+    RUN_TEST(test_an_idle_timeout_of_zero_stays_zero_at_the_server);
     RUN_TEST(test_a_value_too_large_for_the_field_is_refused_not_wrapped);
     RUN_TEST(test_driver_options_are_opaque_to_the_config_model);
     RUN_TEST(test_an_option_orphaned_by_a_driver_change_is_dropped);

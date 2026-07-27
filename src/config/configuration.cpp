@@ -337,6 +337,26 @@ bool validate(const Configuration& config, ConfigError& error) {
         error = {"modbus.diagnostics_unit_id", "must differ from modbus.unit_id"};
         return false;
     }
+    // 0 would leave a server running that accepts nothing and says nothing about why; someone
+    // who wants no Modbus has modbus.enabled for that. The ceiling of 8 is a deliberate choice
+    // rather than a measured heap limit: it is double eModbus's own default and comfortably
+    // above the worst case the issue names (Home Assistant, a scraper, a SCADA poller and a
+    // laptop). Every slot costs a socket and a per-connection buffer, and the boards without
+    // PSRAM have no room to discover the real ceiling the hard way -- a refused connection is
+    // a far better failure than a heap exhausted mid-poll.
+    if (config.modbus.maxClients == 0 || config.modbus.maxClients > 8) {
+        error = {"modbus.max_clients", "must be between 1 and 8"};
+        return false;
+    }
+    // 0 is meaningful, not absent: eModbus skips the check entirely, so idle clients are never
+    // dropped. Anything else is bounded below because a timeout shorter than a client's poll
+    // interval disconnects it between polls -- it reconnects, so nothing breaks, but the slot
+    // churns and the connection counter fills with noise.
+    if (config.modbus.idleTimeoutSeconds != 0 &&
+        (config.modbus.idleTimeoutSeconds < 5 || config.modbus.idleTimeoutSeconds > 3600)) {
+        error = {"modbus.idle_timeout_seconds", "must be 0 (never) or between 5 and 3600"};
+        return false;
+    }
     // The MVP has no writable driver; allowing this would advertise something untrue.
     if (config.modbus.writeEnabled) {
         error = {"modbus.write_enabled", "no writable driver exists in this build"};
@@ -481,6 +501,8 @@ void writeCommon(JsonDocument& doc, const Configuration& config) {
     modbus["port"]                = config.modbus.port;
     modbus["unit_id"]             = config.modbus.unitId;
     modbus["diagnostics_unit_id"] = config.modbus.diagnosticsUnitId;
+    modbus["max_clients"]         = config.modbus.maxClients;
+    modbus["idle_timeout_seconds"] = config.modbus.idleTimeoutSeconds;
     modbus["write_enabled"]       = config.modbus.writeEnabled;
 
     doc["polling"]["interval_seconds"] = config.polling.intervalSeconds;
@@ -601,6 +623,10 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
            a.modbus.enabled != b.modbus.enabled || a.modbus.port != b.modbus.port ||
            a.modbus.unitId != b.modbus.unitId ||
            a.modbus.diagnosticsUnitId != b.modbus.diagnosticsUnitId ||
+           // Read once by ModbusTcpServer::begin() and handed to eModbus's start(); there is
+           // no path that reapplies either to a running server, so both wait for a restart.
+           a.modbus.maxClients != b.modbus.maxClients ||
+           a.modbus.idleTimeoutSeconds != b.modbus.idleTimeoutSeconds ||
            a.polling.intervalSeconds != b.polling.intervalSeconds ||
            a.driver.id != b.driver.id || a.driver.options != b.driver.options ||
            // Field by field here, NOT via DriverSettings::operator==, so a new field on that
@@ -674,6 +700,8 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
         if (!patchNumber(modbus["port"], merged.modbus.port, "modbus.port", error)) return false;
         if (!patchNumber(modbus["unit_id"], merged.modbus.unitId, "modbus.unit_id", error)) return false;
         if (!patchNumber(modbus["diagnostics_unit_id"], merged.modbus.diagnosticsUnitId, "modbus.diagnostics_unit_id", error)) return false;
+        if (!patchNumber(modbus["max_clients"], merged.modbus.maxClients, "modbus.max_clients", error)) return false;
+        if (!patchNumber(modbus["idle_timeout_seconds"], merged.modbus.idleTimeoutSeconds, "modbus.idle_timeout_seconds", error)) return false;
         if (!patchBool(modbus["write_enabled"], merged.modbus.writeEnabled, "modbus.write_enabled", error)) return false;
     }
 

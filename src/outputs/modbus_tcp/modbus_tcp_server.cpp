@@ -96,6 +96,28 @@ uint8_t ModbusTcpServer::unitIdFor(size_t index) const {
     return static_cast<uint8_t>(config_.inverterUnitId + index);
 }
 
+ModbusServerConfig serverConfigFrom(const ModbusSettings& settings, uint8_t deviceCount) {
+    ModbusServerConfig cfg;
+    cfg.enabled           = settings.enabled;
+    cfg.port              = settings.port;
+    cfg.inverterUnitId    = settings.unitId;
+    cfg.diagnosticsUnitId = settings.diagnosticsUnitId;
+    cfg.maxClients        = settings.maxClients;
+    // Seconds in the configuration, milliseconds at the server: the unit an operator types is
+    // not the unit eModbus takes. validate() bounds the setting at 3600, so the multiplication
+    // cannot overflow, and 0 survives it as 0 -- which is exactly what disables the timeout.
+    cfg.idleTimeoutMs = settings.idleTimeoutSeconds * 1000UL;
+    // Never from configuration: no driver in this build can write, so offering the switch would
+    // advertise something untrue. validate() rejects it too.
+    cfg.writeEnabled = false;
+    // One unit id per CONFIGURED device, consecutively from modbus.unit_id. Configured, not
+    // started: the unit id has to be a function of the settings page, or a device that fails to
+    // start renumbers every inverter after it. A slot with no device answers offline with no
+    // readings, which is the truth and matches what the Devices tab shows.
+    cfg.deviceCount = deviceCount;
+    return cfg;
+}
+
 }  // namespace heliograph::modbus
 
 #if defined(ESP32)

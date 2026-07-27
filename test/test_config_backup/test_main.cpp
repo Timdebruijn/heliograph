@@ -39,6 +39,8 @@ static Configuration populated() {
     c.modbus.port            = 1502;
     c.modbus.unitId          = 7;
     c.modbus.diagnosticsUnitId = 240;
+    c.modbus.maxClients      = 8;
+    c.modbus.idleTimeoutSeconds = 0;
     c.polling.intervalSeconds = 30;
     c.driver.id              = "mock";
     c.driver.label           = "Schuur";
@@ -97,6 +99,11 @@ static void test_round_trip_with_secrets_is_lossless() {
     TEST_ASSERT_EQUAL_UINT16(1502, restored.modbus.port);
     TEST_ASSERT_EQUAL_UINT8(7, restored.modbus.unitId);
     TEST_ASSERT_EQUAL_UINT8(240, restored.modbus.diagnosticsUnitId);
+    TEST_ASSERT_EQUAL_UINT8(8, restored.modbus.maxClients);
+    // 0 round-trips as 0 rather than falling back to the default: it is the "never" setting,
+    // and a restore that quietly reinstated a 20 s timeout would drop long-lived clients on a
+    // bridge that was deliberately configured not to.
+    TEST_ASSERT_EQUAL_UINT32(0, restored.modbus.idleTimeoutSeconds);
     TEST_ASSERT_EQUAL_UINT32(30, restored.polling.intervalSeconds);
     TEST_ASSERT_TRUE(original.driver == restored.driver);
     // Named explicitly rather than left to operator==: a label that failed to round-trip would

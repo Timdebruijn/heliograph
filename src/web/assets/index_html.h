@@ -1208,6 +1208,7 @@ const RESTART_NEEDED={
   'mqtt.username':'MQTT username','mqtt.password':'MQTT password',
   'mqtt.base_topic':'MQTT base topic','mqtt.discovery_enabled':'Home Assistant discovery',
   'modbus.enabled':'Modbus on/off','modbus.port':'Modbus port','modbus.unit_id':'Modbus unit ID',
+  'modbus.max_clients':'Modbus max clients','modbus.idle_timeout_seconds':'Modbus idle timeout',
   'polling.interval_seconds':'Polling interval',
   'driver.id':'Active driver','driver.label':'Device 1 name','driver.options':'Driver options',
   'ntp.enabled':'NTP on/off','ntp.use_dhcp':'NTP via DHCP','ntp.server':'NTP server',
@@ -1639,6 +1640,11 @@ async function renderConfig(){
   <section class="cfgsec"><h3>Modbus TCP</h3>
   <div class="card"><b>Modbus TCP</b> <span class="tag" style="font-weight:400">needs restart</span>${chk('c_mbe','Enabled',c.modbus.enabled)}
     ${num('c_mbp','Port',c.modbus.port)}${num('c_mbu','Unit ID',c.modbus.unit_id)}
+    ${num('c_mbc','Max clients',c.modbus.max_clients)}${num('c_mbi','Idle timeout (s)',c.modbus.idle_timeout_seconds)}
+    <div class="dim" style="font-size:12px;margin-top:8px">Up to 8 clients at once. Past the
+    limit a client still connects but is never answered, so raise this if Home Assistant, a
+    scraper and a poller share the bridge. Idle timeout drops a silent client to free its slot;
+    0 never drops one.</div>
     <div class="dim" style="font-size:12px;margin-top:8px">Writing is permanently disabled:
     no driver in this build can write to an inverter.</div></div>
   </section>
@@ -1795,7 +1801,8 @@ async function saveConfig(){
               :{ip:'',gateway:'',subnet:'',dns1:'',dns2:''})},
     mqtt:{enabled:b('c_mqe'),host:v('c_mqh'),port:n('c_mqp'),
           base_topic:v('c_mqt'),discovery_enabled:b('c_mqd')},
-    modbus:{enabled:b('c_mbe'),port:n('c_mbp'),unit_id:n('c_mbu')},
+    modbus:{enabled:b('c_mbe'),port:n('c_mbp'),unit_id:n('c_mbu'),
+            max_clients:n('c_mbc'),idle_timeout_seconds:n('c_mbi')},
     polling:{interval_seconds:n('c_pi')},
     ntp:{enabled:b('c_ntpe'),use_dhcp:b('c_ntpd'),server:v('c_ntps'),
          // Dropdown value is an IANA name; the firmware only understands the POSIX string, so
