@@ -10,7 +10,7 @@
 # that file for the reasoning.
 #
 # Checks only. The ESP32 toolchain cache is warmed by cache-warm.yml, which runs on main for
-# the cache-scoping reason documented there -- it lived here until 0.16.1 and made this run take
+# the cache-scoping reason documented there -- it lived here until PR #67 and made this run take
 # twice as long as the checks it reports on, which mattered because tagging a release waits for
 # that conclusion.
 
