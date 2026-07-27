@@ -356,12 +356,17 @@ function fleetStrip(fleet){
     if(Number(w)===0) return 'idle';
     return (v>0?'charging ':'discharging ')+w+' W';
   };
-  const all=[{k:'ac_power_w',t:'AC power',d:0,u:'W'},
-             {k:'energy_today_kwh',t:'Today',d:2,u:'kWh'},
-             {k:'ac_voltage_v',t:'AC voltage',d:1,u:'V'},
-             {k:'temperature_c',t:'Temp',d:1,u:'°C'},
-             {k:'battery_soc_pct',t:'SOC',d:0,u:'%'},
-             {k:'battery_power_w',t:'Battery',d:0,u:'W',fn:batt}];
+  // Each column declares what it actually needs. A flat allowance per column was fine while
+  // the widest cell was a number; it stopped being fine the moment a hybrid appeared, because
+  // the battery cell holds a SENTENCE ("discharging 400 W") and the header "AC voltage" is two
+  // words. At 100px each they wrapped mid-column and the rows lost their alignment -- seen on
+  // a four-device bench the moment the mock started publishing battery power (0.18.0).
+  const all=[{k:'ac_power_w',t:'AC power',d:0,u:'W',w:110},
+             {k:'energy_today_kwh',t:'Today',d:2,u:'kWh',w:110},
+             {k:'ac_voltage_v',t:'AC voltage',d:1,u:'V',w:115},
+             {k:'temperature_c',t:'Temp',d:1,u:'°C',w:90},
+             {k:'battery_soc_pct',t:'SOC',d:0,u:'%',w:80},
+             {k:'battery_power_w',t:'Battery',d:0,u:'W',fn:batt,w:170}];
   const cols=all.filter(c=>fleet.some(f=>f[c.k]!==null&&f[c.k]!==undefined));
   const rows=fleet.map(f=>{
     const answering=f.online&&f.data_valid&&!f.data_stale;
@@ -384,8 +389,12 @@ function fleetStrip(fleet){
   }).join('');
   // Scrolls rather than squeezes: even four columns do not fit a phone, and hiding them below
   // a breakpoint means the reading you went looking for is the one that is not there.
-  const width=260+cols.length*100;
-  return `<div class="card" style="margin-top:14px;overflow-x:auto"><table style="min-width:${width}px">
+  //
+  // Summed from what the columns declare, plus the name and the "Last reply" tag at either end.
+  // nowrap is the other half: without it the table honours min-width and then wraps the text
+  // inside the cells anyway, which is the worst of both -- a scrollbar AND broken rows.
+  const width=260+cols.reduce((a,c)=>a+c.w,0)+150;
+  return `<div class="card" style="margin-top:14px;overflow-x:auto"><table style="min-width:${width}px;white-space:nowrap">
     <tr><th>Inverter</th>${cols.map(c=>`<th style="text-align:right">${c.t}</th>`).join('')}
     <th style="text-align:right">Last reply</th></tr>${rows}</table></div>`;
 }
