@@ -98,13 +98,25 @@ bool validateDriverOptions(const DriverDescriptor& descriptor, const DriverOptio
     return true;
 }
 
+DriverRegistry::Entry* DriverRegistry::findEntry(const std::string& driverId) {
+    const auto it = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& e) {
+        return e.descriptor.id == driverId;
+    });
+    return it == entries_.end() ? nullptr : &*it;
+}
+
+const DriverRegistry::Entry* DriverRegistry::findEntry(const std::string& driverId) const {
+    const auto it = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& e) {
+        return e.descriptor.id == driverId;
+    });
+    return it == entries_.end() ? nullptr : &*it;
+}
+
 void DriverRegistry::registerDriver(const DriverDescriptor& descriptor, DriverFactory factory) {
-    for (auto& e : entries_) {
-        if (e.descriptor.id == descriptor.id) {
-            e.descriptor = descriptor;
-            e.factory    = std::move(factory);
-            return;
-        }
+    if (Entry* existing = findEntry(descriptor.id); existing != nullptr) {
+        existing->descriptor = descriptor;
+        existing->factory    = std::move(factory);
+        return;
     }
     entries_.push_back(Entry{descriptor, std::move(factory)});
 }
@@ -125,12 +137,8 @@ std::vector<DriverDescriptor> DriverRegistry::availableDrivers() const {
 }
 
 const DriverDescriptor* DriverRegistry::find(const std::string& driverId) const {
-    for (const auto& e : entries_) {
-        if (e.descriptor.id == driverId) {
-            return &e.descriptor;
-        }
-    }
-    return nullptr;
+    const Entry* entry = findEntry(driverId);
+    return entry == nullptr ? nullptr : &entry->descriptor;
 }
 
 bool DriverRegistry::contains(const std::string& driverId) const {
