@@ -128,9 +128,16 @@ namespace {
 // one field that exists to hold a name in somebody's own language. The fix was written during
 // the 0.18.0 review and pushed to a branch whose pull request had already been merged, where it
 // sat, invisible, through two tags.
+// 0.19.0 changes nothing a bridge does. It is the cleanup pass: the diagnostics payload, the
+// Modbus transaction skeleton, the REST body guard and the driver lookup each existed twice and
+// now exist once, so a rule can no longer be fixed in one copy and left wrong in the other. The
+// audit that preceded it found no warnings, no deprecated dependencies and no dead code, which
+// is the more useful finding and is why this release is small. What it does add is a guard:
+// the release workflow now refuses a tag that disagrees with the version below, because three
+// releases in a row that agreed only because someone remembered is not a process.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 18
-#define HELIOGRAPH_VERSION_PATCH 2
+#define HELIOGRAPH_VERSION_MINOR 19
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
