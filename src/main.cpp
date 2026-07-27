@@ -1384,8 +1384,15 @@ void loop() {
                     continue;
                 }
                 if (f.everPolled) {
-                    log::info("state:   %s not answering (last reply %us ago)", f.id.c_str(),
-                              static_cast<unsigned>(f.lastPollSecondsAgo));
+                    // WHY, not just that. The old line carried valid= and stale= for the first
+                    // device, and folding three causes into one phrase would have dropped what
+                    // those flags were for. Offline before stale: a device that drops is marked
+                    // offline AND stale by markAllStale(), and the offline is the cause.
+                    const char* why = !f.online          ? "offline"
+                                      : f.dataStale      ? "stale"
+                                                         : "no valid reading";
+                    log::info("state:   %s not answering (%s, last reply %us ago)", f.id.c_str(),
+                              why, static_cast<unsigned>(f.lastPollSecondsAgo));
                 } else {
                     // Never a byte since boot: a bus or addressing fault, not an inverter that
                     // went quiet, and the two need different things done about them.
