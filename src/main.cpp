@@ -1176,13 +1176,13 @@ void setup() {
     // Device 1 comes from `driver`, the rest from `additional_devices`, in that order. One list
     // so the poll loop has one thing to walk, and so a bring-up log reads in the same order the
     // settings page shows.
-    struct Planned { std::string id; const DriverOptions* options; };
+    struct Planned { std::string id; const DriverOptions* options; std::string label; };
     std::vector<Planned> planned;
     if (!driverId.empty()) {
-        planned.push_back({driverId, &g_config.driver.options});
+        planned.push_back({driverId, &g_config.driver.options, g_config.driver.label});
     }
     for (const auto& d : g_config.additionalDevices) {
-        planned.push_back({d.id, &d.options});
+        planned.push_back({d.id, &d.options, d.label});
     }
     g_devicesConfigured = planned.size();
     // One slot per CONFIGURED device, filled in as each one starts. The Modbus unit ids are
@@ -1198,7 +1198,14 @@ void setup() {
         // settings page numbers them. Naming only the driver id was useless on the very bus
         // this exists for: three inverters share one driver id, so all three failures read
         // identically (review, 2026-07-25).
-        const std::string row = "device " + std::to_string(plannedIndex + 1);
+        // The label goes in the PROBLEM text too. "device 2 could not be started" sends someone
+        // to count rows on the settings page; "device 2 (Schuur) could not be started" sends
+        // them to the shed. The row number stays, because that is what the settings page shows
+        // and an unlabelled bridge still needs to be told which row.
+        const std::string row = p.label.empty()
+                                    ? "device " + std::to_string(plannedIndex + 1)
+                                    : "device " + std::to_string(plannedIndex + 1) + " (" +
+                                          p.label + ")";
 
         // Refused BEFORE create() and begin(), because for a driver that cannot share a bus,
         // begin() IS the damage. The AA55 handshake opens with a bus-wide RE_REGISTER
@@ -1264,7 +1271,7 @@ void setup() {
         PollPolicy policy;
         policy.intervalMs = g_config.polling.intervalSeconds * 1000;
         g_contexts.push_back(std::make_unique<DeviceContext>(*driver, *store, g_diagnostics,
-                                                             nowMs, policy));
+                                                             nowMs, policy, p.label));
         g_deviceIds.push_back(id);
         g_configSlotIds[plannedIndex] = id;
         // `planned` is in configuration order and `p` is the entry being started, so this is
@@ -1432,12 +1439,13 @@ void loop() {
                     const char* why = !f.online          ? "offline"
                                       : f.dataStale      ? "stale"
                                                          : "no valid reading";
-                    log::info("state:   %s not answering (%s, last reply %us ago)", f.id.c_str(),
-                              why, static_cast<unsigned>(f.lastPollSecondsAgo));
+                    log::info("state:   %s not answering (%s, last reply %us ago)",
+                              rest::displayName(f).c_str(), why,
+                              static_cast<unsigned>(f.lastPollSecondsAgo));
                 } else {
                     // Never a byte since boot: a bus or addressing fault, not an inverter that
                     // went quiet, and the two need different things done about them.
-                    log::info("state:   %s has never answered", f.id.c_str());
+                    log::info("state:   %s has never answered", rest::displayName(f).c_str());
                 }
             }
             // A device that never STARTED is not in the fleet at all -- it has no driver, so it

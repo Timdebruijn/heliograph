@@ -5,13 +5,17 @@
 namespace heliograph {
 
 DeviceContext::DeviceContext(InverterDriver& driver, StateStore& store, Diagnostics& diagnostics,
-                             ClockFn clock, const PollPolicy& policy)
+                             ClockFn clock, const PollPolicy& policy, std::string label)
     : driver_(driver),
       store_(store),
       diagnostics_(diagnostics),
       clock_(std::move(clock)),
       policy_(policy) {
     state_.bridgeOnline = true;
+    // Set once and then carried by every published snapshot: pollOnce() works on a copy of
+    // state_ and moves it back, so the label survives each poll without the driver knowing it
+    // exists. A driver has no business naming the thing an operator named.
+    state_.label        = std::move(label);
     state_.identity     = driver_.identity();
     state_.capabilities = driver_.capabilities();
     // Read the driver's tally rather than assuming zero. Today it always IS zero -- main.cpp

@@ -95,7 +95,8 @@ std::string humanise(const std::string& id) {
 }
 
 void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIdentity& identity,
-                    bool isBridgeEntity, const std::string& uniqueBase) {
+                    bool isBridgeEntity, const std::string& uniqueBase,
+                    const std::string& label = {}) {
     JsonObject device = entity["device"].to<JsonObject>();
     if (isBridgeEntity) {
         device["identifiers"].to<JsonArray>().add(bridge.bridgeId);
@@ -119,7 +120,19 @@ void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIde
     const std::string& descriptor = !identity.model.empty()          ? identity.model
                                     : !identity.manufacturer.empty() ? identity.manufacturer
                                                                      : kUnknownInverterName;
-    std::string name = bridge.name.empty() ? descriptor : bridge.name + " - " + descriptor;
+    // A label replaces the derived name outright, bridge prefix and all. Somebody who types
+    // "Schuur" wants to read "Schuur" in Home Assistant, not "Heliograph - TL3000-20 #17", and
+    // prefixing it would only put the bridge's name back in front of the one thing they chose.
+    //
+    // Only the NAME. identifiers, unique_id and the retained config topic are all derived from
+    // uniqueBase and are untouched, which is what makes renaming safe: Home Assistant matches
+    // the device it already has, updates its name, and every entity keeps its history. (An
+    // operator who renamed the device inside HA keeps their own name -- HA treats that as
+    // name_by_user and does not let discovery overrule it.)
+    std::string name = !label.empty() ? label
+                       : bridge.name.empty()
+                           ? descriptor
+                           : bridge.name + " - " + descriptor;
     // Three identical inverters on one bus produce three identical model strings and no serial
     // number, so without this Home Assistant lists three devices called exactly the same thing
     // and twelve entities each called "AC Power". The address is the only thing that tells them
@@ -127,8 +140,12 @@ void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIde
     //
     // Only for devices 2..N: the primary keeps the name it has always had, like its topics and
     // its unique ids. Same reasoning, same test.
+    //
+    // And never when a label is set: the label already tells the devices apart -- that is what
+    // it is for -- so appending "#17" to "Schuur" would put the address back into the one name
+    // the operator chose to be free of it.
     const bool primary = uniqueBase == bridge.bridgeId;
-    if (!primary && !identity.instanceKey.empty()) {
+    if (label.empty() && !primary && !identity.instanceKey.empty()) {
         name += " #" + identity.instanceKey;
     }
     device["name"] = name;
@@ -255,7 +272,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         if (const int precision = displayPrecisionFor(m.type); precision >= 0) {
             e["suggested_display_precision"] = precision;
         }
-        addDeviceBlock(e, bridge, state.identity, /*isBridgeEntity=*/false, uniqueBase);
+        addDeviceBlock(e, bridge, state.identity, /*isBridgeEntity=*/false, uniqueBase, state.label);
 
         DiscoveryEntity entity;
         entity.uniqueId    = e["unique_id"].as<std::string>();
@@ -279,7 +296,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         e["value_template"] = "{{ value_json.status_text }}";
         e["availability_topic"] = availabilityTopic;
         e["icon"]           = "mdi:information-outline";
-        addDeviceBlock(e, bridge, state.identity, false, uniqueBase);
+        addDeviceBlock(e, bridge, state.identity, false, uniqueBase, state.label);
 
         DiscoveryEntity entity;
         entity.uniqueId    = e["unique_id"].as<std::string>();
@@ -301,7 +318,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         e["availability_topic"] = availabilityTopic;
         e["device_class"]   = "connectivity";
         e["entity_category"] = "diagnostic";
-        addDeviceBlock(e, bridge, state.identity, false, uniqueBase);
+        addDeviceBlock(e, bridge, state.identity, false, uniqueBase, state.label);
 
         DiscoveryEntity entity;
         entity.uniqueId = e["unique_id"].as<std::string>();

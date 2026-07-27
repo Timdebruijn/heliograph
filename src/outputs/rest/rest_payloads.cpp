@@ -36,6 +36,10 @@ bool buildProvisionPayload(const std::string& hostname, std::string& out, size_t
     return finish(doc, out, maxBytes);
 }
 
+const std::string& displayName(const DeviceSummary& device) {
+    return device.label.empty() ? device.id : device.label;
+}
+
 FleetTotals totalsFor(const std::vector<DeviceSummary>& fleet) {
     FleetTotals t;
     t.polled = static_cast<unsigned>(fleet.size());
@@ -63,6 +67,7 @@ DeviceSummary summariseDevice(const DeviceState& state, const std::string& devic
                               uint64_t nowMs) {
     DeviceSummary s;
     s.id        = deviceId;
+    s.label     = state.label;
     s.online    = state.inverterOnline;
     s.dataValid = state.dataValid;
     s.dataStale = state.dataStale;
@@ -176,6 +181,7 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
 
     JsonObject d = doc["device"].to<JsonObject>();
     d["id"]      = deviceId;  // the registered id, not identity.deviceId() -- see the header
+    addOptional(d, "label", state.label);
     addOptional(d, "driver_id", state.identity.driverId);
     if (driver != nullptr) {
         d["support_level"] = supportLevelName(driver->supportLevel);
@@ -216,6 +222,7 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
     for (const auto& f : fleet) {
         JsonObject o    = devices.add<JsonObject>();
         o["id"]         = f.id;
+        addOptional(o, "label", f.label);
         o["online"]     = f.online;
         o["data_valid"] = f.dataValid;
         o["data_stale"] = f.dataStale;
@@ -306,7 +313,11 @@ bool buildDevicePayload(const DeviceState& state, const std::string& deviceId,
                         const DriverDescriptor* driver, uint64_t nowMs, std::string& out,
                         size_t maxBytes) {
     JsonDocument doc;
-    doc["id"] = deviceId;
+    JsonObject   root = doc.to<JsonObject>();
+    root["id"]        = deviceId;
+    // Outside `identity`, deliberately: identity is what the DEVICE reported, and a name the
+    // operator typed does not belong in it.
+    addOptional(root, "label", state.label);
 
     JsonObject identity = doc["identity"].to<JsonObject>();
     addOptional(identity, "manufacturer", state.identity.manufacturer);

@@ -373,7 +373,12 @@ function fleetStrip(fleet){
     // Em dash, not 0 and not blank: this driver does not report the channel, which is a
     // different statement from "reports zero" and must not be readable as a measurement.
     const num=(v,c)=>(v===null||v===undefined)?'—':(c.fn?c.fn(v):fmt(v,c.d)+' '+c.u);
-    return `<tr><td><span class="dot ${answering?'ok':'bad'}"></span>${esc(f.id)}</td>
+    // The label when there is one, the id underneath it in small type -- not INSTEAD of it.
+    // The id is what /api/v1/devices/<id>, the MQTT topics and the Modbus unit mapping use, so
+    // someone debugging still needs to read it off the screen they are already looking at.
+    const named=f.label?`${esc(f.label)}<div class="dim" style="font-size:11px">${esc(f.id)}</div>`
+                       :esc(f.id);
+    return `<tr><td><span class="dot ${answering?'ok':'bad'}"></span>${named}</td>
       ${cols.map(c=>`<td class="n">${esc(num(f[c.k],c))}</td>`).join('')}
       <td class="n">${when}</td></tr>`;
   }).join('');
@@ -568,7 +573,8 @@ async function renderDevices(b){
         : (dev.data_stale?`<span class="tag">stale — last reply ${esc(ago)} s ago</span>`
                          :`<span class="tag">replied ${esc(ago)} s ago</span>`);
       cards.push(`<div class="card"><div style="display:flex;justify-content:space-between;
-        align-items:baseline;gap:10px"><b>${esc(id)}</b>${live}</div>
+        align-items:baseline;gap:10px"><b>${esc(dev.label||id)}</b>${
+        dev.label?`<span class="dim" style="font-size:12px">${esc(id)}</span>`:''}${live}</div>
         <table>${deviceTable(ident,devCache[id],m)}</table></div>`);
     }
     if(ids.length&&!problems.length&&configured===ids.length){
@@ -1203,7 +1209,7 @@ const RESTART_NEEDED={
   'mqtt.base_topic':'MQTT base topic','mqtt.discovery_enabled':'Home Assistant discovery',
   'modbus.enabled':'Modbus on/off','modbus.port':'Modbus port','modbus.unit_id':'Modbus unit ID',
   'polling.interval_seconds':'Polling interval',
-  'driver.id':'Active driver','driver.options':'Driver options',
+  'driver.id':'Active driver','driver.label':'Device 1 name','driver.options':'Driver options',
   'ntp.enabled':'NTP on/off','ntp.use_dhcp':'NTP via DHCP','ntp.server':'NTP server',
   'ntp.timezone':'Timezone',
   'serial.override':'RS485 line override','serial.baud_rate':'RS485 baud rate',
@@ -1442,7 +1448,7 @@ async function renderConfig(){
   // Deliberately NOT pre-filled with anything when a row is added: an extra device that names
   // no driver is refused by the firmware, and an address silently defaulting to the same one
   // the primary uses would collide and be skipped at boot with only a log line to say so.
-  let xdevs = ((c.additional_devices)||[]).map(d=>({id:d.driver_id||'',options:{...(d.options||{})}}));
+  let xdevs = ((c.additional_devices)||[]).map(d=>({id:d.driver_id||'',label:d.label||'',options:{...(d.options||{})}}));
 
   // Fills a row's model with the driver's declared defaults. Called when a row is added or its
   // driver changes, so the model always holds what the fields SHOW.
@@ -1500,6 +1506,12 @@ async function renderConfig(){
         <div style="display:flex;justify-content:space-between;align-items:baseline">
           <b>Device ${i+2}</b>
           <a href="#" onclick="removeExtraDevice(${i});return false">Remove</a></div>
+        <label for="xdname${i}">Name</label>
+        <input id="xdname${i}" value="${esc(row.label||'')}" placeholder="Schuur"
+          oninput="setExtraLabel(${i},this.value)">
+        <div class="dim" style="font-size:12px">Optional. Shown on the dashboard and in Home
+        Assistant instead of the technical id. Renaming is safe: it never changes the id, so
+        history is kept.</div>
         <label for="xd${i}_drv">Driver</label>
         <select id="xd${i}_drv" onchange="setExtraDriver(${i},this.value)">
           <option value="" ${row.id?'':'selected'}>— choose —</option>${
@@ -1514,17 +1526,21 @@ async function renderConfig(){
     const add=$('#xdevadd');
     if(add)add.disabled=xdevs.length+1>=(window.g_maxDevices||8);
   };
-  window.addExtraDevice=()=>{xdevs.push({id:'',options:{}});renderExtraDevices()};
+  window.addExtraDevice=()=>{xdevs.push({id:'',label:'',options:{}});renderExtraDevices()};
   window.removeExtraDevice=i=>{xdevs.splice(i,1);renderExtraDevices()};
   window.setExtraDriver=(i,id)=>{
     // Options belong to a driver, so switching driver drops the old one's values rather than
     // carrying keys the new driver never declared -- which the firmware would refuse anyway.
-    xdevs[i]={id,options:{}};
+    // The name is the operator's, not the driver's: switching driver keeps it. Clearing it
+    // here would silently discard something they typed for a device that is still the same
+    // physical inverter in the same shed.
+    xdevs[i]={id,label:xdevs[i].label,options:{}};
     seedRowOptions(xdevs[i]);
     renderExtraDevices();
   };
   window.setExtraOption=(i,key,value)=>{xdevs[i].options[key]=value};
-  window.extraDevicesBody=()=>xdevs.map(d=>({driver_id:d.id,options:{...d.options}}));
+  window.setExtraLabel=(i,value)=>{xdevs[i].label=value};
+  window.extraDevicesBody=()=>xdevs.map(d=>({driver_id:d.id,label:d.label||'',options:{...d.options}}));
 
   // What the firmware would refuse, or accept and then quietly skip at boot -- said here, next
   // to the row, instead of as `additional_devices[2].driver_id: ...` under the Save button,
@@ -1662,6 +1678,11 @@ async function renderConfig(){
     <label for="c_sersb">Stop bits</label>
     <input id="c_sersb" type="number" value="${c.serial.stop_bits}"></div>
   <div class="card"><b>Driver</b> <span class="tag" style="font-weight:400">needs restart</span>
+    <label for="c_drvname">Name</label>
+    <input id="c_drvname" value="${esc(c.driver.label||'')}" placeholder="Schuur">
+    <div class="dim" style="font-size:12px">Optional name for device 1, shown on the dashboard
+    and in Home Assistant instead of the technical id. Renaming is safe: the id never changes,
+    so history is kept.</div>
     <label for="c_drv">Active driver</label>
     <select id="c_drv" onchange="reloadDriverOpts()">${
       // A stored id that matches no option selects nothing, so the browser silently shows the
@@ -1782,7 +1803,7 @@ async function saveConfig(){
          ...(v('c_ntptz')==='__custom'
              ?{timezone:v('c_ntptzc'),timezone_name:''}
              :{timezone:TZBYNAME[v('c_ntptz')],timezone_name:v('c_ntptz')})},
-    driver:{id:v('c_drv'),options:{}},
+    driver:{id:v('c_drv'),label:v('c_drvname'),options:{}},
     // read_only_mode is rendered from the stored value, so the generic per-key diff below is
     // enough: no rendered default to mistake for a change (unlike driver options / relay roles).
     // admin_username is added below only when typed, like the other credential fields.

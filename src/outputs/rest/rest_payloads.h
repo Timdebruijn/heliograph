@@ -51,6 +51,11 @@ bool buildProvisionPayload(const std::string& hostname, std::string& out,
 /// report energy must not contribute a zero to a total.
 struct DeviceSummary {
     std::string id;
+    /// The operator's name for this device, or empty. Reported BESIDE the id, never in place
+    /// of it: `id` keys /api/v1/devices/<id>, the MQTT topic tree and the Modbus unit mapping,
+    /// and a client that followed a label would 404 the moment somebody renamed an inverter.
+    /// A client chooses which to show; the firmware refuses to choose for it.
+    std::string label;
     /// The Modbus TCP unit id this device is served at, or 0 when Modbus is off or this device
     /// is past the end of the served run. Reported because otherwise the only way to learn it
     /// is to read modbus.unit_id, fetch the device list and count positions -- and on a bus of
@@ -105,6 +110,14 @@ struct FleetTotals {
 /// rather than by two people remembering the same rule -- the heartbeat used to describe the
 /// first device only, and there was no shared definition of "answering" for it to use (#74).
 FleetTotals totalsFor(const std::vector<DeviceSummary>& fleet);
+
+/// What to CALL this device in a line meant for a human: the label when there is one, the
+/// registered id otherwise.
+///
+/// One function so every human-facing surface makes the same choice. Never use it where an
+/// identifier is wanted -- it deliberately returns something that is not stable across a
+/// rename, which is the whole point on one side and a bug on the other.
+const std::string& displayName(const DeviceSummary& device);
 
 /// Reduces one device's state to the row above.
 ///

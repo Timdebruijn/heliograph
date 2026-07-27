@@ -953,6 +953,64 @@ static void test_devices_beyond_the_first_carry_their_address_in_the_name() {
     TEST_ASSERT_TRUE(nameA.find('#') == std::string::npos);
 }
 
+// A label becomes the Home Assistant device NAME and nothing else. This is the assertion the
+// whole feature rests on: unique_id and the retained config topic stay derived from the id, so
+// renaming an inverter updates the name of the device Home Assistant already has instead of
+// creating a second one and stranding every entity's history behind the first (#76).
+static void test_a_label_renames_the_ha_device_without_touching_its_unique_id() {
+    Rig              r;
+    DeviceState      state  = r.poll();
+    const BridgeInfo bridge = makeBridge();
+    const MqttTopics t(kDefaultBaseTopic, bridge.bridgeId);
+
+    const auto unlabelled = buildDiscoveryEntities(state, bridge, t, t.availability(),
+                                                   kDefaultDiscoveryPrefix, bridge.bridgeId);
+    state.label           = "Schuur";
+    const auto labelled   = buildDiscoveryEntities(state, bridge, t, t.availability(),
+                                                   kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    TEST_ASSERT_EQUAL_size_t(unlabelled.size(), labelled.size());
+    for (size_t i = 0; i < labelled.size(); ++i) {
+        // The two things a rename must never move.
+        TEST_ASSERT_EQUAL_STRING(unlabelled[i].uniqueId.c_str(), labelled[i].uniqueId.c_str());
+        TEST_ASSERT_EQUAL_STRING(unlabelled[i].configTopic.c_str(),
+                                 labelled[i].configTopic.c_str());
+    }
+
+    JsonDocument doc;
+    deserializeJson(doc, labelled.front().payload);
+    // Bare, with no bridge prefix: somebody who types "Schuur" wants to read "Schuur".
+    TEST_ASSERT_EQUAL_STRING("Schuur", doc["device"]["name"]);
+    // Identifiers are keys too, and they are what Home Assistant matches an existing device on.
+    JsonDocument before;
+    deserializeJson(before, unlabelled.front().payload);
+    TEST_ASSERT_EQUAL_STRING(before["device"]["identifiers"][0].as<const char*>(),
+                             doc["device"]["identifiers"][0].as<const char*>());
+    // State topics follow the id, not the name.
+    if (!doc["state_topic"].isNull()) {
+        TEST_ASSERT_EQUAL_STRING(before["state_topic"].as<const char*>(),
+                                 doc["state_topic"].as<const char*>());
+    }
+}
+
+// The address suffix exists to tell identical inverters apart. A label already does that, so
+// appending "#2" to it would put the address back into the one name chosen to be free of it.
+static void test_a_label_replaces_the_address_suffix_rather_than_carrying_it() {
+    Rig         r;
+    DeviceState state          = r.poll();
+    state.identity.instanceKey = "2";
+    state.label                = "Balkon";
+    const BridgeInfo bridge    = makeBridge();
+    const MqttTopics t(kDefaultBaseTopic, bridge.bridgeId, "growatt_modbus-2");
+
+    const auto entities = buildDiscoveryEntities(state, bridge, t, t.availability(),
+                                                 kDefaultDiscoveryPrefix,
+                                                 bridge.bridgeId + "_growatt_modbus-2");
+    JsonDocument doc;
+    deserializeJson(doc, entities.front().payload);
+    TEST_ASSERT_EQUAL_STRING("Balkon", doc["device"]["name"]);
+}
+
 static void test_two_devices_produce_distinct_unique_ids_and_ha_devices() {
     Rig               r;
     const DeviceState state  = r.poll();
@@ -1087,6 +1145,8 @@ int main(int, char**) {
     RUN_TEST(test_every_device_tracks_the_bridge_availability_topic);
     RUN_TEST(test_devices_beyond_the_first_carry_their_address_in_the_name);
     RUN_TEST(test_further_devices_get_their_own_subtree);
+    RUN_TEST(test_a_label_renames_the_ha_device_without_touching_its_unique_id);
+    RUN_TEST(test_a_label_replaces_the_address_suffix_rather_than_carrying_it);
     RUN_TEST(test_two_devices_produce_distinct_unique_ids_and_ha_devices);
     RUN_TEST(test_topics_are_built_consistently);
     RUN_TEST(test_state_payload_is_valid_json_with_the_expected_values);
