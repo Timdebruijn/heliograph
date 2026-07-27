@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include <algorithm>
+#include <utility>
 
 #if ENABLE_DRIVER_EVERSOLAR
 #include "eversolar_legacy/eversolar_driver.h"
@@ -98,18 +99,21 @@ bool validateDriverOptions(const DriverDescriptor& descriptor, const DriverOptio
     return true;
 }
 
-DriverRegistry::Entry* DriverRegistry::findEntry(const std::string& driverId) {
+const DriverRegistry::Entry* DriverRegistry::findEntry(const std::string& driverId) const {
     const auto it = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& e) {
         return e.descriptor.id == driverId;
     });
     return it == entries_.end() ? nullptr : &*it;
 }
 
-const DriverRegistry::Entry* DriverRegistry::findEntry(const std::string& driverId) const {
-    const auto it = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& e) {
-        return e.descriptor.id == driverId;
-    });
-    return it == entries_.end() ? nullptr : &*it;
+// The non-const overload in terms of the const one, rather than a second copy of the search.
+// Writing the loop twice would have put a fresh duplicate in the change whose whole point is
+// removing one -- and the two could then disagree, which is exactly the failure being fixed.
+//
+// The const_cast is the safe direction of the standard idiom: *this is genuinely non-const
+// here, so casting away a constness this function itself added removes nothing real.
+DriverRegistry::Entry* DriverRegistry::findEntry(const std::string& driverId) {
+    return const_cast<Entry*>(std::as_const(*this).findEntry(driverId));
 }
 
 void DriverRegistry::registerDriver(const DriverDescriptor& descriptor, DriverFactory factory) {
