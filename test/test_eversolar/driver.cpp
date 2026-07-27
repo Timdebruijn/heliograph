@@ -62,33 +62,42 @@ static void test_begin_broadcasts_re_register() {
     }
 }
 
-/// Why the descriptor says one device per bridge (#63).
+/// The property that makes a second inverter possible at all (#63, #82).
 ///
-/// Not an assertion that a flag is false -- that would pass just as well if the flag were
-/// meaningless. This is the harm itself: a second instance's begin() broadcasts RE_REGISTER,
-/// every inverter on the line forgets its address, and the first one -- registered, polling,
-/// working -- has to start over. On a real bus both then answer the next broadcast offline
-/// query at once, on half duplex, and whether that converges is not knowable without two
-/// inverters on a bench.
-///
-/// Nobody here has two, which is exactly why the honest answer is to refuse the second device
-/// rather than ship the enumeration this driver would need.
-static void test_a_second_instance_would_deregister_the_first() {
+/// RE_REGISTER tells EVERY inverter on the line to forget its address. It is a bus operation,
+/// not a device one, so only the instance holding the first address may send it -- otherwise
+/// starting device 2 knocks out device 1, which is what this driver used to do.
+static void test_a_second_instance_leaves_the_first_inverter_registered() {
     Rig r;
     r.begin();
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
     TEST_ASSERT_TRUE(r.driver.registered());
     TEST_ASSERT_TRUE(r.device.registered);
+    const uint32_t broadcastsBefore = r.device.reRegisterCount;
 
-    // A second instance of the same driver on the same bus, as `additional_devices` would build.
-    EversolarDriver second{r.transport};
+    // A second instance, as `additional_devices` would build it: same bus, its own address.
+    EversolarOptions opts;
+    opts.assignedAddress = static_cast<uint8_t>(kFirstInverterAddress + 1);
+    EversolarDriver second{r.transport, opts};
     second.begin(r.transport);
 
-    // The inverter that was working is no longer registered -- and it was not asked anything.
-    TEST_ASSERT_FALSE_MESSAGE(r.device.registered,
-                              "begin() no longer de-registers; #63 may be fixable properly now");
-    TEST_ASSERT_FALSE(descriptor().supportsMultipleDevices);
+    // Not one extra broadcast, and the working inverter still holds its address.
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(broadcastsBefore, r.device.reRegisterCount,
+                                     "a second instance broadcast RE_REGISTER");
+    TEST_ASSERT_TRUE_MESSAGE(r.device.registered,
+                             "starting a second device de-registered the first inverter");
+}
+
+/// The other half: a single-inverter bridge must be byte-identical to what it was. Its address
+/// is the default, so it still broadcasts -- and that broadcast is what recovers an inverter
+/// holding a stale address from an earlier session.
+static void test_the_first_address_still_broadcasts_re_register() {
+    Rig r;
+    r.begin();
+    TEST_ASSERT_EQUAL_UINT32(3, r.device.reRegisterCount);
+    TEST_ASSERT_EQUAL_UINT8(kFirstInverterAddress, EversolarOptions{}.assignedAddress);
+    TEST_ASSERT_TRUE(descriptor().supportsMultipleDevices);
 }
 
 static void test_begin_fails_when_the_line_cannot_be_configured() {
@@ -763,7 +772,8 @@ static void test_snapshots_are_immutable_and_independent() {
 void run_eversolar_driver() {
     RUN_TEST(test_begin_configures_the_only_known_profile);
     RUN_TEST(test_begin_broadcasts_re_register);
-    RUN_TEST(test_a_second_instance_would_deregister_the_first);
+    RUN_TEST(test_a_second_instance_leaves_the_first_inverter_registered);
+    RUN_TEST(test_the_first_address_still_broadcasts_re_register);
     RUN_TEST(test_begin_fails_when_the_line_cannot_be_configured);
     RUN_TEST(test_begin_declares_no_capabilities_it_cannot_deliver);
     RUN_TEST(test_poll_registers_before_reading);

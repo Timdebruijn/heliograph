@@ -30,6 +30,16 @@ EversolarOptions optionsFrom(const heliograph::DriverOptions& values) {
     } else {
         out.layout = LayoutSelection::Auto;
     }
+    long addr = 0;
+    if (eversolar::descriptor().numericOption(values, "address", addr)) {
+        out.assignedAddress = static_cast<uint8_t>(addr);
+    } else {
+        // Not an error: the option is absent on every install that predates it, and its
+        // default IS kFirstInverterAddress -- so a single-inverter bridge keeps handing out
+        // 0x10 exactly as before, and keeps sending the RE_REGISTER that only the holder of
+        // that address sends.
+        out.assignedAddress = kFirstInverterAddress;
+    }
     return out;
 }
 
@@ -74,7 +84,20 @@ bool EversolarDriver::begin(Transport& transport) {
     identity_.driverId      = eversolar::descriptor().id;
     identity_.instanceKey   = std::to_string(options_.assignedAddress);
 
-    reRegisterAll();
+    // Only the holder of the first address broadcasts it.
+    //
+    // RE_REGISTER tells EVERY inverter on the line to forget its address, so an unconditional
+    // broadcast here made a second instance's startup de-register the first, already-polling
+    // one (#63). It is a BUS operation, not a device one -- the reference implementation calls
+    // it once from inverter_connect() and never again (eversolar.pl:822).
+    //
+    // Derived from the address rather than configured, so there is no extra knob to get wrong
+    // and no ordering contract between instances to honour. It also keeps a single-inverter
+    // bridge byte-identical: its address is the default 0x10, so it still broadcasts exactly as
+    // it always has.
+    if (options_.assignedAddress == kFirstInverterAddress) {
+        reRegisterAll();
+    }
     return true;
 }
 
