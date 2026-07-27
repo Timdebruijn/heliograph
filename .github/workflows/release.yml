@@ -1,12 +1,23 @@
 # SPDX-License-Identifier: MIT
 #
-# Push a tag `v*` and this builds the firmware, attaches both images to a
+# Push a tag `v*` and this builds the firmware, attaches every image to a
 # GitHub Release, and redeploys the browser flasher on GitHub Pages so
 # "flash the latest release" needs nothing but a USB cable and Chrome/Edge.
 #
 # The flasher bin is served from Pages, not from the release asset: release
 # downloads redirect to a host that sends no CORS headers, and ESP Web Tools
 # fetches the image with fetch(), which that would break.
+#
+# THREE JOBS, NOT ONE, since 0.16.1. The boards used to be built one after another inside a
+# single job: 161 s of the ~296 s a release took, more than half of it spent waiting for one
+# compile to finish so an identical compile could start. They now run as a matrix, and the
+# checks moved into their own job because they need no ESP32 toolchain and so have no business
+# holding up a build that does.
+#
+# The ordering guarantee is unchanged, and it is the part worth being careful about: nothing is
+# published until every board has built AND every check has passed. `needs` enforces that
+# exactly as running them in sequence did. A release that shipped three good images and one bad
+# one would be far worse than a slow release.
 
 name: Release
 
@@ -19,9 +30,17 @@ permissions:
   pages: write
   id-token: write
 
+env:
+  # One list, read by the staging loop, the flasher site and the update feed. The matrix below
+  # cannot use it -- `strategy` is evaluated before `env` exists -- so that one place repeats
+  # the boards, and it is the only one.
+  BOARDS: rs485-can relay-1ch relay-6ch
+
 jobs:
-  release:
-    name: Build + publish release
+  # The checks, on their own. Everything here is host-side, so this job is finished long before
+  # the builds are and never delays them.
+  verify:
+    name: Verify before shipping
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -30,10 +49,52 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Restore-only. A tag ref cannot read a cache written by a PR or by another tag, so the
-      # save this step used to do produced a ~1.7 GB entry that nothing would ever restore --
-      # including the next release. The writer is now the warm-toolchain-cache job in ci.yml,
-      # running on main, whose scope every ref can read.
+      # The native cache, not the firmware one: a different key and a fraction of the size.
+      # Restore-only, because a tag ref cannot write a cache anything else would ever read.
+      - name: Restore PlatformIO (native)
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Validate device profiles
+        run: python3 tools/gen_profiles.py --check
+
+      - name: Layering invariants
+        run: bash tools/check_layering.sh
+
+      - name: Embedded JS syntax
+        run: python3 tools/check_web_js.py
+
+      - name: Native test suite
+        run: pio test -e native
+
+  build:
+    name: Build ${{ matrix.board }}
+    runs-on: ubuntu-latest
+    strategy:
+      # STOP on the first failure, unlike firmware.yml which lets every board report. There the
+      # point is telling a contributor which boards broke; here nothing ships unless all of them
+      # work, so the remaining jobs would only burn minutes.
+      fail-fast: true
+      matrix:
+        board: [rs485-can, relay-1ch, relay-6ch]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Restore-only. A tag ref cannot read a cache written by a PR or by another tag, so a save
+      # here would produce a ~1.7 GB entry that nothing would ever restore -- including the next
+      # release. The writer is the warm-toolchain-cache job in cache-warm.yml, running on main,
+      # whose scope every ref can read.
       - name: Restore PlatformIO toolchain
         uses: actions/cache/restore@v6
         with:
@@ -53,8 +114,7 @@ jobs:
       - name: Install board packages
         run: |
           for attempt in 1 2 3 4 5; do
-            if pio pkg install \
-                 -e waveshare-rs485-can -e waveshare-relay-1ch -e waveshare-relay-6ch; then
+            if pio pkg install -e "waveshare-${{ matrix.board }}"; then
               exit 0
             fi
             echo "package install failed (attempt ${attempt}); retrying in $((attempt * 20))s"
@@ -63,29 +123,61 @@ jobs:
           echo "package install still failing after 5 attempts" >&2
           exit 1
 
-      - name: Verify before shipping
-        run: |
-          python3 tools/gen_profiles.py --check
-          bash tools/check_layering.sh
-          python3 tools/check_web_js.py
-          pio test -e native
+      - name: Build firmware
+        run: pio run -e "waveshare-${{ matrix.board }}"
 
-      - name: Build firmware (all boards)
-        run: |
-          pio run -e waveshare-rs485-can
-          pio run -e waveshare-relay-1ch
-          pio run -e waveshare-relay-6ch
+      # Both images: the OTA one the dashboard installs, and the factory one the browser flasher
+      # writes over USB. Named per board so publish can tell them apart after download.
+      #
+      # if-no-files-found: error rather than the default warning. A silently empty artifact would
+      # surface three steps later as a cp that cannot find its source, in the job that publishes.
+      - name: Upload images
+        uses: actions/upload-artifact@v7
+        with:
+          name: fw-${{ matrix.board }}
+          path: |
+            .pio/build/waveshare-${{ matrix.board }}/firmware.bin
+            .pio/build/waveshare-${{ matrix.board }}/firmware.factory.bin
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish release
+    runs-on: ubuntu-latest
+    # BOTH. This is the ordering guarantee the single job used to give for free: no image is
+    # attached and no feed is deployed unless every board built and every check passed.
+    needs: [verify, build]
+    steps:
+      - uses: actions/checkout@v7
+
+      # No PlatformIO and no toolchain here: this job only moves finished binaries around.
+      # Each artifact lands in fw/<artifact-name>/, so the images are at fw/fw-<board>/.
+      - name: Download images
+        uses: actions/download-artifact@v7
+        with:
+          path: fw
 
       - name: Stage release assets
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          # The matrix and $BOARDS are two lists of the same fact -- `strategy` is evaluated
+          # before `env` exists, so they cannot be derived from one another. If they ever
+          # disagree, an extra board would be built and silently not published, or a missing one
+          # would fail three lines down with a confusing cp error. Say it here instead.
+          built=$(ls -1 fw | wc -l)
+          want=$(printf '%s\n' $BOARDS | wc -l)
+          if [ "$built" -ne "$want" ]; then
+            echo "built $built board(s) but BOARDS lists $want: $(ls -1 fw | tr '\n' ' ')" >&2
+            echo "the matrix in this workflow and the BOARDS env have drifted apart" >&2
+            exit 1
+          fi
           mkdir -p dist
-          for board in rs485-can relay-1ch relay-6ch; do
-            cp ".pio/build/waveshare-${board}/firmware.bin" \
-               "dist/heliograph-${VERSION}-${board}.bin"
-            cp ".pio/build/waveshare-${board}/firmware.factory.bin" \
+          for board in $BOARDS; do
+            cp "fw/fw-${board}/firmware.bin" "dist/heliograph-${VERSION}-${board}.bin"
+            cp "fw/fw-${board}/firmware.factory.bin" \
                "dist/heliograph-${VERSION}-${board}-factory.bin"
           done
+          ls -l dist
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -99,15 +191,13 @@ jobs:
           mkdir -p site
           sed "s|__REPO_URL__|${{ github.server_url }}/${{ github.repository }}|" \
             flasher/index.html > site/index.html
-          for board in rs485-can relay-1ch relay-6ch; do
-            cp ".pio/build/waveshare-${board}/firmware.factory.bin" \
-               "site/heliograph-${board}-factory.bin"
+          for board in $BOARDS; do
+            cp "fw/fw-${board}/firmware.factory.bin" "site/heliograph-${board}-factory.bin"
             # The OTA image too, not just the factory one. The dashboard's update button
             # fetches this with fetch(), and Pages is the only host in the chain that sends
             # CORS headers -- the release asset redirects to one that does not, which is the
             # same reason the flasher bin is served from here.
-            cp ".pio/build/waveshare-${board}/firmware.bin" \
-               "site/heliograph-${board}.bin"
+            cp "fw/fw-${board}/firmware.bin" "site/heliograph-${board}.bin"
             sed -e "s/__VERSION__/${VERSION}/" -e "s/__BOARD__/${board}/" \
               flasher/manifest.json > "site/manifest-${board}.json"
           done
@@ -131,7 +221,7 @@ jobs:
               "${{ github.server_url }}" "${{ github.repository }}" "${GITHUB_REF_NAME}"
             printf '  "boards": {\n'
             first=1
-            for board in rs485-can relay-1ch relay-6ch; do
+            for board in $BOARDS; do
               file="heliograph-${board}.bin"
               sha=$(sha256sum "site/${file}" | cut -d' ' -f1)
               size=$(stat -c%s "site/${file}")
