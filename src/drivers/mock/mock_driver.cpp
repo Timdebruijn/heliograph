@@ -383,8 +383,11 @@ PollResult MockDriver::poll(DeviceState& state) {
     // no register for the combined value, so that output is unchanged by this.
     m.declare(measurement_id::kBatteryPower, MeasurementType::Power, Unit::Watt, "Battery Power");
     const double soc = 40.0 + 40.0 * fraction;
-    // `<= 0.0` rather than `== 0.0`: night is the only case meant here, and an exact float
-    // compare also catches sunrise, where the sine is a true zero in broad daylight.
+    // `<= 0.0` rather than `== 0.0` only to avoid resting on an exact float compare; it does
+    // NOT change which samples count as night, since both forms are true at exactly zero.
+    // Sunrise, where the sine is a genuine zero in daylight, therefore still reads as night for
+    // the one sample that lands on it -- harmless in a simulation, and cheaper to say than to
+    // carry a phase check down here for.
     const double chargeW    = fraction > 0.3 ? 1000.0 : 0.0;
     const double dischargeW = fraction <= 0.0 ? 400.0 : 0.0;
     m.set(measurement_id::kBatterySoc, soc, ts);
