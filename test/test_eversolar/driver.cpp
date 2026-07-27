@@ -62,6 +62,35 @@ static void test_begin_broadcasts_re_register() {
     }
 }
 
+/// Why the descriptor says one device per bridge (#63).
+///
+/// Not an assertion that a flag is false -- that would pass just as well if the flag were
+/// meaningless. This is the harm itself: a second instance's begin() broadcasts RE_REGISTER,
+/// every inverter on the line forgets its address, and the first one -- registered, polling,
+/// working -- has to start over. On a real bus both then answer the next broadcast offline
+/// query at once, on half duplex, and whether that converges is not knowable without two
+/// inverters on a bench.
+///
+/// Nobody here has two, which is exactly why the honest answer is to refuse the second device
+/// rather than ship the enumeration this driver would need.
+static void test_a_second_instance_would_deregister_the_first() {
+    Rig r;
+    r.begin();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+    TEST_ASSERT_TRUE(r.driver.registered());
+    TEST_ASSERT_TRUE(r.device.registered);
+
+    // A second instance of the same driver on the same bus, as `additional_devices` would build.
+    EversolarDriver second{r.transport};
+    second.begin(r.transport);
+
+    // The inverter that was working is no longer registered -- and it was not asked anything.
+    TEST_ASSERT_FALSE_MESSAGE(r.device.registered,
+                              "begin() no longer de-registers; #63 may be fixable properly now");
+    TEST_ASSERT_FALSE(descriptor().supportsMultipleDevices);
+}
+
 static void test_begin_fails_when_the_line_cannot_be_configured() {
     Rig r;
     r.transport.configureSucceeds = false;
@@ -734,6 +763,7 @@ static void test_snapshots_are_immutable_and_independent() {
 void run_eversolar_driver() {
     RUN_TEST(test_begin_configures_the_only_known_profile);
     RUN_TEST(test_begin_broadcasts_re_register);
+    RUN_TEST(test_a_second_instance_would_deregister_the_first);
     RUN_TEST(test_begin_fails_when_the_line_cannot_be_configured);
     RUN_TEST(test_begin_declares_no_capabilities_it_cannot_deliver);
     RUN_TEST(test_poll_registers_before_reading);

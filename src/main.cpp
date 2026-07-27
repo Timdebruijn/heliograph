@@ -1199,6 +1199,35 @@ void setup() {
         // this exists for: three inverters share one driver id, so all three failures read
         // identically (review, 2026-07-25).
         const std::string row = "device " + std::to_string(plannedIndex + 1);
+
+        // Refused BEFORE create() and begin(), because for a driver that cannot share a bus,
+        // begin() IS the damage. The AA55 handshake opens with a bus-wide RE_REGISTER
+        // broadcast, so a second instance starting up tells the first, already-polling inverter
+        // to forget its address -- and a check that ran afterwards would report the refusal
+        // from the far side of the harm (#63).
+        //
+        // Enforced here rather than in config validation because this is where the registry is:
+        // the answer is a property of the driver, not of the configuration file, and the config
+        // layer deliberately knows nothing about drivers.
+        const auto* descriptor = g_registry.find(p.id);
+        if (descriptor != nullptr && !descriptor->supportsMultipleDevices) {
+            bool alreadyPlanned = false;
+            for (size_t earlier = 0; earlier < plannedIndex; ++earlier) {
+                if (planned[earlier].id == p.id) {
+                    alreadyPlanned = true;
+                    break;
+                }
+            }
+            if (alreadyPlanned) {
+                log::warn("device '%s' skipped: this driver supports only one device per bridge",
+                          p.id.c_str());
+                g_deviceProblems.push_back(row + " ('" + p.id +
+                                           "') was not started: this driver supports only one "
+                                           "device per bridge");
+                continue;
+            }
+        }
+
         auto driver = g_registry.create(p.id, g_transport, *p.options);
         if (!driver || !driver->begin(g_transport)) {
             // Named, and the loop continues: one unconfigurable device must not cost the others
