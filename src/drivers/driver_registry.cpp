@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include <algorithm>
+#include <utility>
 
 #if ENABLE_DRIVER_EVERSOLAR
 #include "eversolar_legacy/eversolar_driver.h"
@@ -98,13 +99,28 @@ bool validateDriverOptions(const DriverDescriptor& descriptor, const DriverOptio
     return true;
 }
 
+const DriverRegistry::Entry* DriverRegistry::findEntry(const std::string& driverId) const {
+    const auto it = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& e) {
+        return e.descriptor.id == driverId;
+    });
+    return it == entries_.end() ? nullptr : &*it;
+}
+
+// The non-const overload in terms of the const one, rather than a second copy of the search.
+// Writing the loop twice would have put a fresh duplicate in the change whose whole point is
+// removing one -- and the two could then disagree, which is exactly the failure being fixed.
+//
+// The const_cast is the safe direction of the standard idiom: *this is genuinely non-const
+// here, so casting away a constness this function itself added removes nothing real.
+DriverRegistry::Entry* DriverRegistry::findEntry(const std::string& driverId) {
+    return const_cast<Entry*>(std::as_const(*this).findEntry(driverId));
+}
+
 void DriverRegistry::registerDriver(const DriverDescriptor& descriptor, DriverFactory factory) {
-    for (auto& e : entries_) {
-        if (e.descriptor.id == descriptor.id) {
-            e.descriptor = descriptor;
-            e.factory    = std::move(factory);
-            return;
-        }
+    if (Entry* existing = findEntry(descriptor.id); existing != nullptr) {
+        existing->descriptor = descriptor;
+        existing->factory    = std::move(factory);
+        return;
     }
     entries_.push_back(Entry{descriptor, std::move(factory)});
 }
@@ -125,12 +141,8 @@ std::vector<DriverDescriptor> DriverRegistry::availableDrivers() const {
 }
 
 const DriverDescriptor* DriverRegistry::find(const std::string& driverId) const {
-    for (const auto& e : entries_) {
-        if (e.descriptor.id == driverId) {
-            return &e.descriptor;
-        }
-    }
-    return nullptr;
+    const Entry* entry = findEntry(driverId);
+    return entry == nullptr ? nullptr : &entry->descriptor;
 }
 
 bool DriverRegistry::contains(const std::string& driverId) const {

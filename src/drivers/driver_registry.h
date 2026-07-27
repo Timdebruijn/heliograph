@@ -47,6 +47,16 @@ private:
         DriverDescriptor descriptor;
         DriverFactory    factory;
     };
+
+    /// The one place that knows how a driver id is matched, or nullptr.
+    ///
+    /// registerDriver() and find() each walked entries_ themselves, which meant two answers to
+    /// "is this the same driver?" that happened to agree. They must agree: registerDriver()
+    /// REPLACES on a match, so a lookup that disagreed with it would quietly register a second
+    /// entry the finder could never reach.
+    Entry*       findEntry(const std::string& driverId);
+    const Entry* findEntry(const std::string& driverId) const;
+
     std::vector<Entry> entries_;
 };
 
