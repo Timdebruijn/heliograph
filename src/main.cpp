@@ -123,9 +123,14 @@ namespace {
 // showing it -- a down arrow in red for charging, an up arrow in green for discharging, with a
 // legend under the table, and the word kept in the cell's title for anyone reading by anything
 // other than eye.
+// 0.18.2 makes the 32-character limit on a device name mean characters. It counted bytes, so
+// an accented name was refused at roughly half the length the error message promised -- in the
+// one field that exists to hold a name in somebody's own language. The fix was written during
+// the 0.18.0 review and pushed to a branch whose pull request had already been merged, where it
+// sat, invisible, through two tags.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 18
-#define HELIOGRAPH_VERSION_PATCH 1
+#define HELIOGRAPH_VERSION_PATCH 2
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
