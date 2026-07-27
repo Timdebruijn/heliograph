@@ -55,12 +55,12 @@ Shared by all three: **RS485 TX 17, RS485 RX 18** (UART1), **BOOT GPIO0**.
 
 | Function | RS485-CAN | Relay-1CH | Relay-6CH | Status |
 |---|---|---|---|---|
-| RS485 EN (direction) | **21** | **21** | — | verified; the 6CH has no direction GPIO |
+| RS485 EN (direction) | **21** | **21** | — | RS485-CAN: documentation + months of runtime. 1CH: Waveshare's `WS_GPIO.h` + schematic, no RS485 traffic driven on one yet. 6CH has no direction GPIO |
 | Relay(s) | — | **47** | **1, 2, 41, 42, 45, 46** | 6CH order verified on hardware 2026-07-23 |
 | RTC SCL / SDA (PCF85063) | **38 / 39** | **38 / 39** | — | official schematic GPIO matrix |
 | RTC INT | **40** | not checked | — | RS485-CAN schematic only; unused by this firmware, so nobody has needed the 1CH's |
-| Status LED | — | — | **38** | verified on hardware 2026-07-23 |
-| Buzzer | — | — | **21** | verified on hardware 2026-07-23 |
+| Status LED | — | — | **38** | verified lit on hardware 2026-07-23 |
+| Buzzer | — | — | **21** | documentation + official demo; not sounded on hardware |
 | CAN TX / RX | **15 / 16** | — | — | documented; unused by this firmware |
 
 ## The RTC, and the battery that backs it
