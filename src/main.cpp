@@ -791,21 +791,48 @@ void reconcileAnnouncedDevices(const BridgeInfo& bridge) {
         return;
     }
 
-    std::vector<mqtt::AnnouncedDevice> record;
-    record.reserve(g_deviceIds.size());
+    const auto previous = g_store.announcement();
+    // Say it, once, if the tree moved. Nothing is cleared automatically: the retained payloads
+    // under an old base topic are litter, but the discovery configs under an old prefix are the
+    // live Home Assistant entities if only the base topic changed -- deviceUniqueBase() does not
+    // include it, so those configs are OVERWRITTEN in place rather than orphaned. An automatic
+    // sweep that gets that distinction wrong deletes a working device from someone's dashboard
+    // while nobody is watching, which is why no comparable project does this in firmware either
+    // (ESPHome ships `esphome clean-mqtt`, Tasmota points at its Device Manager -- both host-side
+    // tools a human runs). What the bridge CAN do that an external script cannot is know where
+    // its own topics used to be, so it names them. See docs/mqtt.md and issue #41.
+    if (previous.prefixesKnown()) {
+        if (previous.baseTopic != g_config.mqtt.baseTopic) {
+            log::warn("MQTT: base topic changed %s -> %s; retained payloads under "
+                      "%s/%s/... are no longer updated (docs/mqtt.md explains how to clear them)",
+                      previous.baseTopic.c_str(), g_config.mqtt.baseTopic.c_str(),
+                      previous.baseTopic.c_str(), bridge.bridgeId.c_str());
+        }
+        if (previous.discoveryPrefix != g_config.mqtt.discoveryPrefix) {
+            log::warn("MQTT: discovery prefix changed %s -> %s; Home Assistant will keep the old "
+                      "entities until the retained configs under %s/ are cleared",
+                      previous.discoveryPrefix.c_str(), g_config.mqtt.discoveryPrefix.c_str(),
+                      previous.discoveryPrefix.c_str());
+        }
+    }
+
+    mqtt::AnnouncementRecord record;
+    record.baseTopic       = g_config.mqtt.baseTopic;
+    record.discoveryPrefix = g_config.mqtt.discoveryPrefix;
+    record.devices.reserve(g_deviceIds.size());
     for (const auto& id : g_deviceIds) {
-        record.push_back({id, id == g_primaryDeviceId});
+        record.devices.push_back({id, id == g_primaryDeviceId});
     }
 
     bool allCleared = true;
     for (const auto& id :
-         mqtt::devicesToForget(g_store.announcedDevices(), g_deviceIds, g_primaryDeviceId)) {
+         mqtt::devicesToForget(previous.devices, g_deviceIds, g_primaryDeviceId)) {
         if (!g_mqtt->forgetDevice(id, bridge)) {
             allCleared = false;
             // Kept in the record even though it is gone from the configuration: dropping it
             // here would be the last time anything knew it existed, and its entities would then
             // be orphaned for good.
-            record.push_back({id, false});
+            record.devices.push_back({id, false});
         }
     }
     if (!allCleared && ++g_announcedAttempts < 5) {
@@ -814,7 +841,7 @@ void reconcileAnnouncedDevices(const BridgeInfo& bridge) {
     if (!allCleared) {
         log::warn("MQTT: could not clear every removed device's topics; will retry next boot");
     }
-    if (!g_store.setAnnouncedDevices(record)) {
+    if (!g_store.setAnnouncement(record)) {
         log::warn("MQTT: could not record which devices were announced; removing one later will "
                   "leave its Home Assistant entities behind");
     }

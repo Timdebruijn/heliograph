@@ -329,38 +329,74 @@ bool ConfigurationStore::save(const Configuration& config) {
     return backend_.write(kStorageKeyConfig, blob);
 }
 
-std::vector<mqtt::AnnouncedDevice> ConfigurationStore::announcedDevices() {
-    std::lock_guard<std::mutex>        lock(mutex_);
-    std::vector<mqtt::AnnouncedDevice> out;
-    std::string                        raw;
-    if (!backend_.read(kStorageKeyAnnounced, raw) || raw.empty()) {
-        return out;
-    }
-    JsonDocument doc;
-    if (deserializeJson(doc, raw) != DeserializationError::Ok || !doc.is<JsonArray>()) {
-        return out;  // unreadable bookkeeping is simply forgotten, never fatal
-    }
-    for (JsonVariantConst v : doc.as<JsonArrayConst>()) {
-        // A bare string is the shape this key had before it carried the topic tree. Read as
-        // non-primary, which is what it always meant: the flag was added when the primary's
-        // tree turned out to need different handling, not to reinterpret old entries.
+namespace {
+
+/// Reads the device list out of whichever shape this key is in.
+///
+/// Two legacy shapes, both still readable. A bare string is the oldest: it predates the primary
+/// flag and always meant non-primary, which is how it is read. An object with `id`/`primary` is
+/// the second. Neither carries the topic tree it was announced under, which is what the
+/// enclosing object adds.
+void readDeviceArray(JsonArrayConst arr, std::vector<mqtt::AnnouncedDevice>& out) {
+    for (JsonVariantConst v : arr) {
         if (v.is<const char*>()) {
             out.push_back({v.as<const char*>(), false});
         } else if (v.is<JsonObjectConst>() && v["id"].is<const char*>()) {
             out.push_back({v["id"].as<const char*>(), v["primary"].as<bool>()});
         }
     }
+}
+
+}  // namespace
+
+mqtt::AnnouncementRecord ConfigurationStore::announcement() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    mqtt::AnnouncementRecord    out;
+    std::string                 raw;
+    if (!backend_.read(kStorageKeyAnnounced, raw) || raw.empty()) {
+        return out;
+    }
+    JsonDocument doc;
+    if (deserializeJson(doc, raw) != DeserializationError::Ok) {
+        return out;  // unreadable bookkeeping is simply forgotten, never fatal
+    }
+    // A bare array is the pre-0.16 shape: the ids were recorded, the tree they went to was not.
+    // Left with empty prefixes, which means UNKNOWN rather than "the default" -- nothing may
+    // conclude from such a record that the topics did or did not move.
+    if (doc.is<JsonArray>()) {
+        readDeviceArray(doc.as<JsonArrayConst>(), out.devices);
+        return out;
+    }
+    if (!doc.is<JsonObject>()) {
+        return out;
+    }
+    if (doc["base"].is<const char*>())   out.baseTopic       = doc["base"].as<const char*>();
+    if (doc["prefix"].is<const char*>()) out.discoveryPrefix = doc["prefix"].as<const char*>();
+    if (doc["devices"].is<JsonArrayConst>()) {
+        readDeviceArray(doc["devices"].as<JsonArrayConst>(), out.devices);
+    }
     return out;
 }
 
-bool ConfigurationStore::setAnnouncedDevices(const std::vector<mqtt::AnnouncedDevice>& devices) {
+std::vector<mqtt::AnnouncedDevice> ConfigurationStore::announcedDevices() {
+    return announcement().devices;
+}
+
+bool ConfigurationStore::setAnnouncement(const mqtt::AnnouncementRecord& record) {
     std::lock_guard<std::mutex> lock(mutex_);
     JsonDocument doc;
-    JsonArray    arr = doc.to<JsonArray>();
-    for (const auto& d : devices) {
-        JsonObject o  = arr.add<JsonObject>();
-        o["id"]       = d.id;
-        o["primary"]  = d.primary;
+    JsonObject   root = doc.to<JsonObject>();
+    // The tree these ids were announced under. Recorded because every topic MqttOutput builds
+    // comes from the CURRENT configuration: once base_topic or discovery_prefix changes, nothing
+    // is left that knows where the previous tree was, and its retained payloads are stranded
+    // with no way to name them. Written here so that a later boot can at least SAY so.
+    root["base"]      = record.baseTopic;
+    root["prefix"]    = record.discoveryPrefix;
+    JsonArray devices = root["devices"].to<JsonArray>();
+    for (const auto& d : record.devices) {
+        JsonObject o = devices.add<JsonObject>();
+        o["id"]      = d.id;
+        o["primary"] = d.primary;
     }
     std::string raw;
     serializeJson(doc, raw);
