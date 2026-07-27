@@ -17,9 +17,10 @@ const DriverDescriptor& descriptor() {
         x.description =
             "Any inverter implementing the SunSpec Modbus standard (models 101/102/103). The "
             "device describes its own register layout at runtime, so no per-vendor map is "
-            "needed. Read-only. Not yet confirmed against physical hardware -- see "
-            "docs/sunspec.md for which devices are expected to work and which have actually "
-            "been tested.";
+            "needed. A device that also publishes model 123 gains an active power limit, "
+            "bounded by the scale factor it publishes for it. Not yet confirmed against "
+            "physical hardware -- see docs/sunspec.md for which devices are expected to work "
+            "and which have actually been tested.";
         x.supportedTransports = {TransportType::Rs485, TransportType::Mock};
         // SunSpec does not mandate a line speed; 9600 and 19200 are both common, so both are
         // offered and discovery tries them in order.
@@ -32,7 +33,11 @@ const DriverDescriptor& descriptor() {
         x.supportsAutoDetection   = true;
         x.supportsMultipleDevices = false;
         x.supportsRead            = true;
-        x.supportsWrite           = false;
+        // The driver has a write path; whether a given DEVICE has one is a separate question,
+        // answered by capabilities() after model 123 has been read. This flag is the static
+        // claim about the driver, so it says yes -- a UI that hid the control surface here
+        // would hide it for the devices that do publish 123 as well.
+        x.supportsWrite           = true;
         x.addressOptionKey        = "unit_id";
         x.options                 = {
             DriverOption{"unit_id", "Modbus unit id",

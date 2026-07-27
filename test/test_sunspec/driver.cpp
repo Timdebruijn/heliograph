@@ -55,6 +55,30 @@ void buildTypical(FakeSunspecDevice& dev, double watts = 1500.0) {
     dev.terminate(at);
 }
 
+/// The same healthy device, plus a model 123 it actually implements.
+///
+/// `sf` is the exponent the device publishes for the limit, which is what decides both the
+/// resolution offered and how a percentage is encoded on the wire.
+uint16_t buildWithControls(FakeSunspecDevice& dev, int sf = -1, uint16_t limitRaw = 1000,
+                           uint16_t enabled = sunspec::controls::kDisabled) {
+    uint16_t at = dev.placeMarker();
+    at = dev.addModel(at, sunspec::kModelCommon,
+                      FakeSunspecDevice::commonPayload("Acme Solar", "AS-5000", "SN12345"));
+    at = dev.addModel(at, sunspec::kModelInverterThreePhase,
+                      FakeSunspecDevice::asPayload(FakeSunspecDevice::blankInverterPayload()));
+
+    const uint16_t controlsAt = at;
+    auto block = FakeSunspecDevice::blankControlsPayload();
+    block[sunspec::controls::kWMaxLimPct]    = limitRaw;
+    block[sunspec::controls::kWMaxLim_Ena]   = enabled;
+    block[sunspec::controls::kConn]          = sunspec::controls::kConnect;
+    block[sunspec::controls::kWMaxLimPct_SF] = static_cast<uint16_t>(static_cast<int16_t>(sf));
+    at = dev.addModel(at, sunspec::kModelControls, FakeSunspecDevice::asPayload(block));
+
+    dev.terminate(at);
+    return controlsAt;  ///< so a test can assert the ADDRESS a control write landed on
+}
+
 }  // namespace
 
 static void test_probe_identifies_the_device_from_the_common_model() {
@@ -377,15 +401,201 @@ static void test_a_silent_device_does_not_poll() {
     TEST_ASSERT_NOT_EQUAL(PollResult::Ok, d.poll(state));
 }
 
-static void test_the_driver_is_read_only() {
+/// A device that publishes no model 123 must not merely refuse a write -- the capability has to
+/// be ABSENT, so nothing upstream ever offers a control that cannot exist.
+static void test_a_device_without_model_123_offers_no_controls() {
     Rig r;
     buildTypical(r.device);
     r.arm();
     auto d = r.makeDriver();
 
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(state));
+
+    TEST_ASSERT_TRUE(d.capabilities().isReadOnly());
+    TEST_ASSERT_FALSE(d.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 50.0;
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, d.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(0, r.device.writes);
+}
+
+/// The capability is not a property of the driver but of the device in front of it, and its
+/// bounds come from the scale factor that device published -- not from a constant here.
+static void test_model_123_grants_a_power_limit_bounded_by_the_devices_scale_factor() {
+    Rig r;
+    buildWithControls(r.device, /*sf=*/-1);
+    r.arm();
+    auto d = r.makeDriver();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(state));
+
+    const auto caps = d.capabilities();
+    TEST_ASSERT_FALSE(caps.isReadOnly());
+    TEST_ASSERT_TRUE(caps.canWrite(InverterCapability::SetActivePowerLimit));
+
+    const auto& n =
+        caps.numeric[static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent)];
+    TEST_ASSERT_TRUE(n.supported);
+    TEST_ASSERT_TRUE(n.writable);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, n.minimum);
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, n.maximum);
+    // sf = -1 buys one decimal. A control surface told otherwise would accept 12.34% and the
+    // device would round it, silently.
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.1, n.step);
+    TEST_ASSERT_EQUAL(Unit::Percent, n.unit);
+}
+
+/// Before the block has been read there is no scale factor, and therefore no honest bounds to
+/// advertise. A capability offered at that point is a control with invented limits.
+static void test_the_capability_is_absent_until_the_controls_block_has_been_read() {
+    Rig r;
+    buildWithControls(r.device);
+    r.arm();
+    auto d = r.makeDriver();
+
     TEST_ASSERT_TRUE(d.capabilities().isReadOnly());
     InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 50.0;
     TEST_ASSERT_EQUAL(CommandResult::Unsupported, d.execute(cmd));
+}
+
+/// The whole write path, on the wire: the right registers, the right values, in the right order.
+static void test_setting_a_limit_writes_the_value_before_it_arms_the_limit() {
+    Rig            r;
+    const uint16_t controlsAt = buildWithControls(r.device, /*sf=*/-1);
+    r.arm();
+    auto d = r.makeDriver();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(state));
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 62.5;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, d.execute(cmd));
+
+    // Two writes, not one span: the registers between the value and the enable are ramp and
+    // revert times nobody asked to change.
+    TEST_ASSERT_EQUAL_UINT32(2, r.device.writes);
+    // 62.5% at sf = -1 is 625 raw.
+    TEST_ASSERT_EQUAL_UINT16(
+        625, r.device.registers[static_cast<uint16_t>(controlsAt + sunspec::controls::kWMaxLimPct)]);
+    // And the enable is the LAST thing written -- arming first would apply whatever limit the
+    // register happened to hold until the second write landed.
+    TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(controlsAt + sunspec::controls::kWMaxLim_Ena),
+                             r.device.lastWriteAddress);
+    TEST_ASSERT_EQUAL_UINT16(sunspec::controls::kEnabled, r.device.lastWriteValue);
+}
+
+/// Out of range is refused, not clamped, and nothing goes onto the bus. A caller that asked for
+/// 150% has made a mistake; running at 100% instead hides it behind a successful command.
+static void test_a_limit_outside_the_devices_range_never_reaches_the_bus() {
+    Rig r;
+    buildWithControls(r.device);
+    r.arm();
+    auto d = r.makeDriver();
+
+    DeviceState state;
+    d.poll(state);
+    const uint32_t before = r.device.writes;
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 150.0;
+    TEST_ASSERT_EQUAL(CommandResult::OutOfRange, d.execute(cmd));
+    cmd.numericValue = -1.0;
+    TEST_ASSERT_EQUAL(CommandResult::OutOfRange, d.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(before, r.device.writes);
+}
+
+/// A device that answers with an exception has refused. Distinct from a bus failure: the write
+/// arrived, so the same value will be refused again.
+static void test_a_refused_write_is_reported_as_a_refusal() {
+    Rig r;
+    buildWithControls(r.device);
+    r.arm();
+    auto d = r.makeDriver();
+
+    DeviceState state;
+    d.poll(state);
+    r.device.refuseWrites = true;
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 40.0;
+    TEST_ASSERT_EQUAL(CommandResult::Rejected, d.execute(cmd));
+}
+
+/// The echo IS the confirmation. A device that answers with a well-formed frame carrying a
+/// different value has not done what it was asked, and reporting Ok would leave everybody
+/// believing in a limit that was never set.
+static void test_a_write_whose_echo_disagrees_is_not_success() {
+    Rig r;
+    buildWithControls(r.device);
+    r.arm();
+    auto d = r.makeDriver();
+
+    DeviceState state;
+    d.poll(state);
+    r.device.echoWrongValue = true;
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 40.0;
+    TEST_ASSERT_EQUAL(CommandResult::DriverError, d.execute(cmd));
+}
+
+/// What is published is what the DEVICE holds, not what was last written -- the two differ
+/// whenever someone else changed it or the inverter's own revert timer fired.
+static void test_the_published_limit_comes_from_the_device_not_from_the_last_write() {
+    Rig r;
+    // 45.0% stored, and switched OFF: an inverter holding a limit it is not applying.
+    buildWithControls(r.device, /*sf=*/-1, /*limitRaw=*/450, sunspec::controls::kDisabled);
+    r.arm();
+    auto d = r.makeDriver();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(state));
+
+    const auto* limit = state.measurements.find(measurement_id::kActivePowerLimitPct);
+    TEST_ASSERT_NOT_NULL(limit);
+    TEST_ASSERT_TRUE(limit->valid);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, 45.0, limit->value);
+
+    // And the flag that stops that 45% being read as "the inverter is limited to 45%".
+    const auto* on = state.measurements.find(measurement_id::kActivePowerLimitEnabled);
+    TEST_ASSERT_NOT_NULL(on);
+    TEST_ASSERT_TRUE(on->valid);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, on->value);
+}
+
+/// A device carrying model 123 with no usable scale factor can be read but not written: the
+/// percentage cannot be encoded, so offering the control would be offering a guess.
+static void test_a_controls_block_without_a_scale_factor_grants_no_limit() {
+    Rig      r;
+    uint16_t at = r.device.placeMarker();
+    at = r.device.addModel(at, sunspec::kModelInverterThreePhase,
+                           FakeSunspecDevice::asPayload(FakeSunspecDevice::blankInverterPayload()));
+    // Every point at its sentinel, including WMaxLimPct_SF.
+    at = r.device.addModel(at, sunspec::kModelControls,
+                           FakeSunspecDevice::asPayload(FakeSunspecDevice::blankControlsPayload()));
+    r.device.terminate(at);
+    r.arm();
+
+    auto        d = r.makeDriver();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(state));
+
+    TEST_ASSERT_FALSE(d.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
+    const auto* limit = state.measurements.find(measurement_id::kActivePowerLimitPct);
+    // Declared, because the model is there -- but carrying no reading, which is the honest
+    // combination for a point the device does not implement.
+    TEST_ASSERT_NOT_NULL(limit);
+    TEST_ASSERT_FALSE(limit->valid);
 }
 
 void run_sunspec_driver() {
@@ -407,5 +617,13 @@ void run_sunspec_driver() {
     RUN_TEST(test_a_marker_with_no_readable_models_is_not_reported_as_a_timeout);
     RUN_TEST(test_an_undecodable_model_counts_an_invalid_frame);
     RUN_TEST(test_a_silent_device_does_not_poll);
-    RUN_TEST(test_the_driver_is_read_only);
+    RUN_TEST(test_a_device_without_model_123_offers_no_controls);
+    RUN_TEST(test_model_123_grants_a_power_limit_bounded_by_the_devices_scale_factor);
+    RUN_TEST(test_the_capability_is_absent_until_the_controls_block_has_been_read);
+    RUN_TEST(test_setting_a_limit_writes_the_value_before_it_arms_the_limit);
+    RUN_TEST(test_a_limit_outside_the_devices_range_never_reaches_the_bus);
+    RUN_TEST(test_a_refused_write_is_reported_as_a_refusal);
+    RUN_TEST(test_a_write_whose_echo_disagrees_is_not_success);
+    RUN_TEST(test_the_published_limit_comes_from_the_device_not_from_the_last_write);
+    RUN_TEST(test_a_controls_block_without_a_scale_factor_grants_no_limit);
 }

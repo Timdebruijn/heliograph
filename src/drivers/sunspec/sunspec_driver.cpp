@@ -69,6 +69,12 @@ bool SunspecDriver::walkChain(PollResult& outFailure) {
     chain_.clear();
     inverterEntry_ = nullptr;
     commonEntry_   = nullptr;
+    controlsEntry_ = nullptr;
+    // Dropped with the chain, not kept across it: a re-walk happens because the device stopped
+    // answering mid-chain, and one that came back with a different layout must not be written
+    // into using bounds read from the layout it had before.
+    controlsRead_  = false;
+    controls_      = ControlsReadings{};
     walked_        = false;
 
     uint16_t   marker[2] = {};
@@ -136,6 +142,19 @@ bool SunspecDriver::walkChain(PollResult& outFailure) {
         if (inverterEntry_ == nullptr && isInverterModel(e.modelId)) {
             inverterEntry_ = &e;
         }
+        if (controlsEntry_ == nullptr && e.modelId == kModelControls) {
+            // Only accept a block long enough to hold the points that will be written. A device
+            // advertising a truncated 123 is not one to write into on the assumption that the
+            // missing tail is where we think it is: the enable point sits at offset 9 and the
+            // scale factor at 23, so a short block puts a control write into whatever follows.
+            if (static_cast<size_t>(kHeaderRegisters + e.length) >= controls::kMinRegisters) {
+                controlsEntry_ = &e;
+            } else {
+                log::warn("SUNSPEC model 123 at %u is %u registers, needs %u -- controls ignored",
+                          e.address, static_cast<unsigned>(kHeaderRegisters + e.length),
+                          static_cast<unsigned>(controls::kMinRegisters));
+            }
+        }
     }
 
     // Identity is read here rather than only in probe(): a driver selected by hand never gets
@@ -193,6 +212,9 @@ bool SunspecDriver::begin(Transport& transport) {
     transport_ = &transport;
     chain_.clear();
     walked_                = false;
+    controlsEntry_         = nullptr;
+    controlsRead_          = false;
+    controls_              = ControlsReadings{};
     identity_              = DeviceIdentity{};
     identity_.driverId     = descriptor().id;
     identity_.instanceKey  = std::to_string(options_.unitId);
@@ -326,7 +348,49 @@ PollResult SunspecDriver::poll(DeviceState& state) {
         state.statusCode          = r.state;
         state.statusCodeSupported = true;
     }
+
+    // Read on every poll, not once: the limit is a control somebody else can also change --
+    // another controller on the bus, the installer's app, or the inverter's own revert timer,
+    // which model 123 defines and several devices implement. Reporting what we last WROTE
+    // rather than what the device currently holds would make those changes invisible.
+    if (controlsEntry_ != nullptr && refreshControls()) {
+        m.declare(measurement_id::kActivePowerLimitPct, MeasurementType::Ratio, Unit::Percent,
+                  "Active Power Limit");
+        // Both channels, because either alone misleads: a stored limit of 50% that is switched
+        // off means the inverter is not limited at all, and "enabled" without the value does
+        // not say limited to what.
+        m.declare(measurement_id::kActivePowerLimitEnabled, MeasurementType::Generic, Unit::None,
+                  "Active Power Limit Enabled");
+        if (controls_.hasPowerLimit) {
+            m.set(measurement_id::kActivePowerLimitPct, controls_.powerLimitPct, ts);
+        }
+        if (controls_.hasLimitEnabled) {
+            m.set(measurement_id::kActivePowerLimitEnabled, controls_.limitEnabled ? 1.0 : 0.0,
+                  ts);
+        }
+    }
     return PollResult::Ok;
+}
+
+bool SunspecDriver::refreshControls() {
+    if (controlsEntry_ == nullptr) {
+        return false;
+    }
+    std::vector<uint16_t> regs;
+    PollResult            ignored = PollResult::Timeout;
+    // Best-effort, like the identity read: a controls block that does not answer must not fail
+    // a poll whose inverter readings arrived intact. It costs the control surface for this
+    // round, which the absent measurement already says.
+    if (!readModel(*controlsEntry_, regs, ignored)) {
+        return false;
+    }
+    ControlsReadings fresh;
+    if (!decodeControls(regs.data(), regs.size(), fresh)) {
+        return false;
+    }
+    controls_     = fresh;
+    controlsRead_ = true;
+    return true;
 }
 
 InverterCapabilities SunspecDriver::capabilities() const {
@@ -341,14 +405,104 @@ InverterCapabilities SunspecDriver::capabilities() const {
     c.addRead(InverterCapability::ReadDcPower);
     c.addRead(InverterCapability::ReadEnergyTotal);
     c.addRead(InverterCapability::ReadTemperature);
+
+    // Write capabilities are the device's, not this driver's. They appear only once model 123
+    // has actually been READ -- not merely advertised on the chain -- because the bounds come
+    // from the scale factor inside it. A capability offered before that would be a control
+    // surface with invented limits, and the first thing anybody does with a power limit is
+    // drag it to a number.
+    if (!controlsRead_) {
+        return c;
+    }
+    const LimitBounds bounds = limitBounds(controls_.limitScale);
+    if (bounds.usable) {
+        c.addRead(InverterCapability::SetActivePowerLimit);
+        c.addWrite(InverterCapability::SetActivePowerLimit);
+        auto& n    = c.numeric[static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent)];
+        n.supported = true;
+        n.writable  = true;
+        n.minimum   = bounds.minimum;
+        n.maximum   = bounds.maximum;
+        n.step      = bounds.step;
+        n.unit      = Unit::Percent;
+    }
+    // Conn is a separate point with its own sentinel: a device may implement the limit and not
+    // the disconnect, or the other way round, so they are advertised independently rather than
+    // as one "controls" capability.
+    if (controls_.hasConnection) {
+        c.addRead(InverterCapability::StartStop);
+        c.addWrite(InverterCapability::StartStop);
+    }
     return c;
 }
 
+CommandResult SunspecDriver::writeControl(size_t pointOffset, uint16_t value) {
+    if (transport_ == nullptr || controlsEntry_ == nullptr) {
+        return CommandResult::Unsupported;
+    }
+    const uint16_t address = static_cast<uint16_t>(controlsEntry_->address + pointOffset);
+    const auto     outcome =
+        modbus::writeSingleRegister(*transport_, options_.unitId, address, value);
+    switch (outcome.status) {
+        case modbus::TransactionStatus::Ok:
+            return CommandResult::Ok;
+        case modbus::TransactionStatus::Exception:
+            // The device answered and refused. Distinct from a bus failure: the write reached
+            // it, so retrying the same value will be refused again.
+            log::warn("SUNSPEC write %u = %u refused, exception %u", address, value,
+                      static_cast<unsigned>(outcome.exceptionCode));
+            return CommandResult::Rejected;
+        case modbus::TransactionStatus::Crc:
+            ++busErrors_.checksumErrors;
+            return CommandResult::DriverError;
+        case modbus::TransactionStatus::Timeout:
+            ++busErrors_.timeouts;
+            return CommandResult::Timeout;
+        default:
+            // Protocol / TransportError. Includes the echo not matching what was sent, which is
+            // the one failure a write has and a read does not.
+            ++busErrors_.invalidFrames;
+            log::warn("SUNSPEC write %u = %u was not confirmed", address, value);
+            return CommandResult::DriverError;
+    }
+}
+
 CommandResult SunspecDriver::execute(const InverterCommand& command) {
-    (void)command;
-    // Read-only, like every driver here. SunSpec does define writable models, but enabling one
-    // needs a hardware-verified map and a deliberate write path -- neither exists yet.
-    return CommandResult::Unsupported;
+    // Every gate is a real one: the capability set above is what the dispatcher checks, and it
+    // is absent unless this device published a model 123 that could be read. The checks here
+    // are the driver's own, for a caller that reached execute() another way.
+    if (controlsEntry_ == nullptr || !controlsRead_) {
+        return CommandResult::Unsupported;
+    }
+
+    switch (command.type) {
+        case InverterCommandType::SetActivePowerLimitPercent: {
+            if (!command.numericValue.has_value()) {
+                return CommandResult::Rejected;
+            }
+            uint16_t raw = 0;
+            if (!encodePowerLimitPct(*command.numericValue, controls_.limitScale, raw)) {
+                // Refused rather than clamped: see encodePowerLimitPct. A caller that asked for
+                // 150% has made a mistake, and running the inverter at 100% instead would hide
+                // it behind an apparently successful command.
+                return CommandResult::OutOfRange;
+            }
+            // Value first, enable second. The other order arms whatever limit the register
+            // happened to be holding -- possibly one set by somebody else, possibly the 0% that
+            // a device ships with -- for however long the two writes are apart.
+            const CommandResult set = writeControl(controls::kWMaxLimPct, raw);
+            if (set != CommandResult::Ok) {
+                return set;
+            }
+            return writeControl(controls::kWMaxLim_Ena, controls::kEnabled);
+        }
+        case InverterCommandType::Start:
+            return writeControl(controls::kConn, controls::kConnect);
+        case InverterCommandType::Stop:
+            return writeControl(controls::kConn, controls::kDisconnect);
+        default:
+            return CommandResult::Unsupported;
+    }
 }
 
 }  // namespace heliograph::sunspec

@@ -69,4 +69,29 @@ ReadOutcome readRegisters(Transport& transport, uint8_t unitId, uint8_t function
                           uint16_t start, uint16_t count, uint16_t* out, uint16_t outCapacity,
                           const ReadTiming& timing = {});
 
+/// The outcomes of a Modbus transaction, whichever direction it went.
+///
+/// Aliases rather than a parallel enum for writes: a write fails in exactly the same ways a read
+/// does -- silence, a mangled CRC, an exception, a frame that is not the answer to our question
+/// -- and two lists would be two things to keep in step. The names below are the ones to use in
+/// new code; the Read* spellings stay because they are what every existing driver says.
+using TransactionStatus  = ReadStatus;
+using TransactionOutcome = ReadOutcome;
+
+/// Writes one holding register (0x06) and confirms the device's echo.
+///
+/// Success means the device echoed BOTH the address and the value we sent. That check is the
+/// whole reason this returns something other than "the bytes went out": a write whose echo is
+/// not verified is a request, not a setting, and on a control register the difference is
+/// between an inverter that is limited and one that everybody believes is limited.
+///
+/// A mismatched echo reports Protocol -- the documented meaning of "the frame was intact but
+/// not what we asked for" -- rather than Ok.
+///
+/// Deliberately single-register only. Write-multiple exists in the codec, but a control model
+/// interleaves the points somebody wants to set with timing and ramp registers they do not, and
+/// a span write cannot express that difference.
+TransactionOutcome writeSingleRegister(Transport& transport, uint8_t unitId, uint16_t address,
+                                       uint16_t value, const ReadTiming& timing = {});
+
 }  // namespace heliograph::modbus
