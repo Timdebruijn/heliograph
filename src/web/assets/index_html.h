@@ -1506,8 +1506,8 @@ async function renderConfig(){
         <div style="display:flex;justify-content:space-between;align-items:baseline">
           <b>Device ${i+2}</b>
           <a href="#" onclick="removeExtraDevice(${i});return false">Remove</a></div>
-        <label for="xd${i}_name">Name</label>
-        <input id="xd${i}_name" value="${esc(row.label||'')}" placeholder="Schuur"
+        <label for="xdname${i}">Name</label>
+        <input id="xdname${i}" value="${esc(row.label||'')}" placeholder="Schuur"
           oninput="setExtraLabel(${i},this.value)">
         <div class="dim" style="font-size:12px">Optional. Shown on the dashboard and in Home
         Assistant instead of the technical id. Renaming is safe: it never changes the id, so
