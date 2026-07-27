@@ -26,9 +26,20 @@ const DriverDescriptor& descriptor() {
         x.supportLevel            = DriverSupportLevel::Beta;
         x.probePriority           = 10;
         x.supportsAutoDetection   = true;
-        // The protocol assigns addresses to multiple inverters; the MVP allows only one
-        // active device, but that is an application limit, not a driver limit.
-        x.supportsMultipleDevices = true;
+        // False, and not as a limitation of the application: this DRIVER cannot share a bus
+        // with a second instance of itself, in three separate ways (#63).
+        //
+        // begin() broadcasts RE_REGISTER, which tells every inverter on the line to forget its
+        // address -- so a second instance starting up de-registers the first, already-polling
+        // one. registerDevice() runs the enumeration loop exactly once, so a second inverter is
+        // never discovered anyway. And `assignedAddress` has no option wired to it, so both
+        // instances would claim the same bus address regardless.
+        //
+        // The protocol itself does support several inverters; implementing that means repeating
+        // the offline-query/assign loop until silence and giving each discovered serial its own
+        // device. That is real work and needs two inverters on a bench to verify, which is
+        // exactly why this says false today rather than promising it.
+        x.supportsMultipleDevices = false;
         x.supportsRead            = true;
         x.supportsWrite           = false;
         // Declared here, not in Configuration: the payload-length hypothesis is this
