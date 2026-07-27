@@ -7,6 +7,8 @@
 
 #include "device/device_context.h"
 #include "diagnostics/diagnostics.h"
+#include "diagnostics/log_buffer.h"
+#include "diagnostics/logger.h"
 #include "drivers/eversolar_legacy/eversolar_driver.h"
 #include "fixtures/eversolar_frames.h"
 #include "state/state_store.h"
@@ -649,6 +651,37 @@ static void test_backoff_is_bounded() {
     TEST_ASSERT_EQUAL_UINT32(policy.maxBackoffMs, ctx.nextDelayMs());
 }
 
+// The trace label is BUILT now, not passed: pmu::transact does snprintf("%s RX", logPrefix)
+// because the shared loop takes one bus name and both drivers used to hardcode two strings.
+// That snprintf is reached only at Trace level during a real transaction, so nothing exercised
+// it -- it was verified once by reading a log off a bridge, which is not a test. A wrong label
+// costs no function, but it is the one piece of output the refactor could quietly change.
+static void test_the_trace_label_names_the_bus_and_the_direction() {
+    // Fully qualified: `log` alone resolves to ::log from <cmath> under the using-directives
+    // at the top of this file.
+    const auto previous = heliograph::log::level();
+    heliograph::log::setLevel(heliograph::LogLevel::Trace);
+    heliograph::log::clearLines();
+
+    Rig r;
+    r.begin();
+    DeviceState state;
+    r.poll(state);
+
+    const auto lines = heliograph::log::recentLines(200);
+    bool       sawRx = false, sawOutcome = false;
+    for (const auto& l : lines) {
+        // Not "contains RS485": the label has to be the prefix of the dump, immediately
+        // followed by hex, which is exactly what a mis-built label would break.
+        if (l.rfind("[T] RS485 RX ", 0) == 0) sawRx = true;
+        if (l.find("RS485 ok: ") != std::string::npos) sawOutcome = true;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(sawRx, "no '[T] RS485 RX <hex>' line from the shared transaction");
+    TEST_ASSERT_TRUE_MESSAGE(sawOutcome, "no 'RS485 ok: ...' outcome line");
+
+    heliograph::log::setLevel(previous);
+}
+
 static void test_diagnostics_track_the_cycle_without_leaking_payload() {
     Rig r;
     r.begin();
@@ -738,6 +771,7 @@ void run_eversolar_driver() {
     RUN_TEST(test_sunrise_recovers_without_intervention);
     RUN_TEST(test_a_single_dropped_frame_does_not_disturb_anything);
     RUN_TEST(test_backoff_is_bounded);
+    RUN_TEST(test_the_trace_label_names_the_bus_and_the_direction);
     RUN_TEST(test_diagnostics_track_the_cycle_without_leaking_payload);
     RUN_TEST(test_snapshots_are_immutable_and_independent);
 }
