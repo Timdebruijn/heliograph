@@ -999,6 +999,30 @@ static void test_a_label_may_not_carry_control_characters() {
     TEST_ASSERT_EQUAL_STRING("Schuur achter", c.driver.label.c_str());
 }
 
+// The limit is in characters, which is what the error message promises and what the person
+// typing sees. Counting bytes -- correct for an SSID, which is ASCII by specification --
+// refused a 20-character name once accents pushed it past 32 bytes (release review).
+static void test_the_label_limit_counts_characters_not_bytes() {
+    Configuration c;
+    ConfigError   e;
+    // 24 characters, 48 bytes: every one of these is two bytes in UTF-8.
+    const std::string accented(24, 'x');
+    std::string       twoByteEach;
+    for (int i = 0; i < 24; ++i) {
+        twoByteEach += "\xC3\xA9";  // e-acute
+    }
+    TEST_ASSERT_EQUAL_size_t(48, twoByteEach.size());
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"driver":{"label":")" + twoByteEach + R"("}})", c, e));
+
+    // And the limit still bites at 33 characters.
+    std::string tooMany;
+    for (int i = 0; i < 33; ++i) {
+        tooMany += "\xC3\xA9";
+    }
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"driver":{"label":")" + tooMany + R"("}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("driver.label", e.field.c_str());
+}
+
 static void test_renaming_a_device_needs_a_restart() {
     // The label is applied when the device is created in setup() and announced to Home Assistant
     // at connect. A page that said "applied immediately" would show the old name until reboot.
@@ -2359,6 +2383,7 @@ int main(int, char**) {
     RUN_TEST(test_no_label_means_no_key_at_all);
     RUN_TEST(test_the_fleet_entry_carries_the_label);
     RUN_TEST(test_a_label_may_not_carry_control_characters);
+    RUN_TEST(test_the_label_limit_counts_characters_not_bytes);
     RUN_TEST(test_renaming_a_device_needs_a_restart);
     RUN_TEST(test_diagnostics_unit_id_must_differ_from_the_inverter);
     RUN_TEST(test_a_value_too_large_for_the_field_is_refused_not_wrapped);

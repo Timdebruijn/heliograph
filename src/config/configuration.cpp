@@ -149,15 +149,30 @@ bool checkLength(const std::string& value, size_t max, const char* field, Config
 /// or truncates the name at a point nobody chose. Everything printable is allowed, accents and
 /// emoji included -- "Schuur" and "Balkon achter" are the point of the feature.
 bool checkLabel(const std::string& value, const char* field, ConfigError& error) {
-    if (!checkLength(value, 32, field, error)) return false;
+    // Counted in CHARACTERS, not bytes, because that is what the message promises and what the
+    // person typing sees. checkLength counts bytes, which is right for an SSID or a hostname --
+    // those are ASCII by specification -- and wrong here: this field exists to hold names like
+    // "Schuur" and "Zonnepaneel achter", and a review found "at most 32 characters" refusing a
+    // name of 20 once accents brought it past 32 bytes.
+    //
+    // A UTF-8 continuation byte is 0b10xxxxxx; every other byte starts a character. Counting
+    // the non-continuation bytes is the whole rule, and needs no decoder.
+    size_t characters = 0;
     for (const unsigned char c : value) {
-        // < 0x20 and 0x7F are the C0 controls and DEL. Bytes above 0x7F are left alone: they are
-        // UTF-8 continuation bytes, not characters, and judging them one byte at a time would
-        // reject every accented name.
+        // < 0x20 and 0x7F are the C0 controls and DEL. Everything printable is allowed,
+        // including multi-byte UTF-8 -- a newline would split a log line in two and truncate a
+        // Home Assistant device name at a point nobody chose, an accent would not.
         if (c < 0x20 || c == 0x7F) {
             error = {field, "must not contain control characters"};
             return false;
         }
+        if ((c & 0xC0) != 0x80) {
+            ++characters;
+        }
+    }
+    if (characters > 32) {
+        error = {field, "must be at most 32 characters"};
+        return false;
     }
     return true;
 }
