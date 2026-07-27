@@ -100,6 +100,28 @@ static void test_the_first_address_still_broadcasts_re_register() {
     TEST_ASSERT_TRUE(descriptor().supportsMultipleDevices);
 }
 
+/// The address option must never become a discovery sweep target.
+///
+/// It is the address the bridge HANDS the inverter at registration, not one the inverter
+/// already answers at. Sweeping it discovers nothing: it assigns a string of addresses in a row
+/// and leaves the device on the last one while the report names the first. Worse for this
+/// driver specifically -- each swept candidate is a fresh registration attempt, and a failed one
+/// can broadcast RE_REGISTER at a bus with a working inverter on it.
+///
+/// Asserted on the property, not on the sweep range. The field was briefly set here and did no
+/// damage purely by accident: extended discovery sweeps 1-8 and this option starts at 16, so
+/// every candidate fell outside the bounds. Pinning "no overlap with today's sweep" would be
+/// pinning the coincidence; this pins the rule.
+static void test_the_assigned_address_is_never_swept_by_discovery() {
+    TEST_ASSERT_FALSE_MESSAGE(descriptor().hasSweepableAddress(),
+                              "the assigned address must not be a discovery sweep target");
+    TEST_ASSERT_TRUE_MESSAGE(descriptor().addressOptionKey.empty(),
+                             "addressOptionKey is read by extended discovery and nothing else");
+    // The option itself stays, because a second inverter needs it -- it is only discovery that
+    // must not touch it.
+    TEST_ASSERT_NOT_NULL(descriptor().findOption("address"));
+}
+
 static void test_begin_fails_when_the_line_cannot_be_configured() {
     Rig r;
     r.transport.configureSucceeds = false;
@@ -774,6 +796,7 @@ void run_eversolar_driver() {
     RUN_TEST(test_begin_broadcasts_re_register);
     RUN_TEST(test_a_second_instance_leaves_the_first_inverter_registered);
     RUN_TEST(test_the_first_address_still_broadcasts_re_register);
+    RUN_TEST(test_the_assigned_address_is_never_swept_by_discovery);
     RUN_TEST(test_begin_fails_when_the_line_cannot_be_configured);
     RUN_TEST(test_begin_declares_no_capabilities_it_cannot_deliver);
     RUN_TEST(test_poll_registers_before_reading);
