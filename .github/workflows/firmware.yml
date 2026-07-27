@@ -10,9 +10,18 @@
 #
 # The board list is computed, not static. `changes` emits the full list only when the PR touches
 # something the image is built from, and an empty list otherwise; fromJSON turns it into the
-# build matrix. An empty array expands to zero matrix jobs, so a docs-only PR compiles nothing
-# and shows no build check -- without a job-level `if`, which is precisely the skip that would
-# render `${{ matrix.env }}` as a check name.
+# build matrix.
+#
+# An empty array does NOT quietly expand to zero jobs, which this comment claimed until a
+# docs-only PR was checked against reality: GitHub Actions FAILS a job whose matrix vector has
+# no values. So every documentation PR ended with a red Firmware check for having nothing to
+# build -- #77 and #68 both did -- and the workflow's own comment said the opposite.
+#
+# Hence the job-level `if` below, which the original note went out of its way to avoid because
+# a skipped matrix job reports its check name un-interpolated. That cosmetic cost is real, and
+# it is worth paying: a neutral "skipped" check on a docs PR beats a red one that means nothing.
+# It also only ever shows up on exactly the PRs that build nothing, because this workflow does
+# not trigger on push at all.
 
 name: Firmware
 
@@ -66,6 +75,9 @@ jobs:
   build:
     name: Build (${{ matrix.env }})
     needs: changes
+    # Nothing to build is not a failure. Without this the empty matrix errors out; see the note
+    # at the top of this file.
+    if: needs.changes.outputs.envs != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
