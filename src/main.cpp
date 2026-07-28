@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "app/capture_runner.h"
+#include "app/device_plan.h"
 #include "app/discovery_runner.h"
 #include "boards/board.h"
 #include "config/configuration.h"
@@ -1233,14 +1234,12 @@ void setup() {
     // Device 1 comes from `driver`, the rest from `additional_devices`, in that order. One list
     // so the poll loop has one thing to walk, and so a bring-up log reads in the same order the
     // settings page shows.
-    struct Planned { std::string id; const DriverOptions* options; std::string label; };
-    std::vector<Planned> planned;
-    if (!driverId.empty()) {
-        planned.push_back({driverId, &g_config.driver.options, g_config.driver.label});
-    }
-    for (const auto& d : g_config.additionalDevices) {
-        planned.push_back({d.id, &d.options, d.label});
-    }
+    // The plan -- which devices to start and which to refuse -- is decided in app/device_plan,
+    // where the host build can reach it. It used to be decided here, in the one file no test
+    // compiles, and the rule it enforces is the one that keeps a second instance of a
+    // single-device driver from wiping the first one's address off the bus.
+    const std::vector<app::PlannedDevice> planned =
+        app::planDevices(g_config, driverId, g_registry);
     g_devicesConfigured = planned.size();
     // One slot per CONFIGURED device, filled in as each one starts. The Modbus unit ids are
     // keyed on this, not on the compacted g_deviceIds -- see the declaration.
@@ -1259,37 +1258,18 @@ void setup() {
         // to count rows on the settings page; "device 2 (Schuur) could not be started" sends
         // them to the shed. The row number stays, because that is what the settings page shows
         // and an unlabelled bridge still needs to be told which row.
-        const std::string row = p.label.empty()
-                                    ? "device " + std::to_string(plannedIndex + 1)
-                                    : "device " + std::to_string(plannedIndex + 1) + " (" +
-                                          p.label + ")";
+        const std::string row = app::describeRow(p.row, p.label);
 
-        // Refused BEFORE create() and begin(), because for a driver that cannot share a bus,
-        // begin() IS the damage. The AA55 handshake opens with a bus-wide RE_REGISTER
-        // broadcast, so a second instance starting up tells the first, already-polling inverter
-        // to forget its address -- and a check that ran afterwards would report the refusal
-        // from the far side of the harm (#63).
-        //
-        // Enforced here rather than in config validation because this is where the registry is:
-        // the answer is a property of the driver, not of the configuration file, and the config
-        // layer deliberately knows nothing about drivers.
-        const auto* descriptor = g_registry.find(p.id);
-        if (descriptor != nullptr && !descriptor->supportsMultipleDevices) {
-            bool alreadyPlanned = false;
-            for (size_t earlier = 0; earlier < plannedIndex; ++earlier) {
-                if (planned[earlier].id == p.id) {
-                    alreadyPlanned = true;
-                    break;
-                }
-            }
-            if (alreadyPlanned) {
-                log::warn("device '%s' skipped: this driver supports only one device per bridge",
-                          p.id.c_str());
-                g_deviceProblems.push_back(row + " ('" + p.id +
-                                           "') was not started: this driver supports only one "
-                                           "device per bridge");
-                continue;
-            }
+        // The refusal was decided in planDevices(), before anything was created, because for a
+        // driver that cannot share a bus begin() IS the damage: the AA55 handshake opens with a
+        // bus-wide RE_REGISTER, so a second instance tells the first, already-polling inverter
+        // to forget its address (#63). What is left here is REPORTING it -- the half that needs
+        // a serial port and a problems list, and the half that was never the interesting one.
+        if (!p.shouldStart()) {
+            log::warn("device '%s' skipped: this driver supports only one device per bridge",
+                      p.id.c_str());
+            g_deviceProblems.push_back(p.problem);
+            continue;
         }
 
         auto driver = g_registry.create(p.id, g_transport, *p.options);
