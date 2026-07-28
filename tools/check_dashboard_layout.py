@@ -9,9 +9,10 @@
 # for the ground it currently covers -- and the CI step is named for the strip, so a passing
 # check does not quietly claim the page is fine.
 #
-# The invariant it asserts is per CELL, not per row: a numeric cell or a column header must
-# occupy one line. Rows are deliberately NOT compared, because the device-name cell is two
-# lines by design when a device has a label, with the id underneath in small type.
+# Two invariants. Per CELL, not per row: a numeric cell or a column header must occupy one
+# line -- rows are deliberately NOT compared, because the device-name cell is two lines by
+# design when a device has a label. And per WIDTH: the strip must be a table where one fits and
+# a stack of labelled blocks where it does not, with nothing hidden either way.
 #
 # 0.18.0 shipped a table that scrolled sideways and broke every cell onto a second line, and
 # nothing caught it: the tests assert what the page SAYS, never how it comes out. It was found
@@ -65,7 +66,7 @@ FLEET = """[
 ]"""
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>%(style)s</style></head>
-<body><div id="host" style="width:%(width)spx"></div>
+<body><div id="host" class="strip" style="width:%(width)spx"></div>
 <script>
 const fmt=(v,d)=>Number(v).toFixed(d);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -120,24 +121,59 @@ else {
     fail.push('the document scrolls horizontally: '
       +document.documentElement.scrollWidth+' > '+document.documentElement.clientWidth);
   }
-  // The legend must not slide out of view with the table. Asserted as BEHAVIOUR, not as
-  // structure: an earlier form required the table's immediate parent to be the scroller, which
-  // one extra wrapper div would have broken while the page stayed perfectly correct. What
-  // matters is not which element scrolls, it is what ends up inside it.
-  let scroller=strip.parentElement;
-  while(scroller && scroller.id!=='host' && getComputedStyle(scroller).overflowX!=='auto'){
-    scroller=scroller.parentElement;
+  // TWO SHAPES, and which one is correct depends on the width. Below the fold-over the strip
+  // must stack into one block per inverter and NOT scroll sideways -- that shape exists because
+  // at 390px the table showed the device names and nothing else, every reading behind a
+  // scrollbar. Above it the table must stay a table, because comparing four inverters by
+  // scanning one column is the thing the stack cannot do.
+  const stacked=getComputedStyle(strip).display==='block';
+  // Measured on the HOST, not the window: the container query keys off the strip's own
+  // width, so anything else would be asserting against a different number than the CSS
+  // reads. The window is deliberately wider than the host so a scrollbar never counts
+  // as the page overflowing.
+  const wide=document.getElementById('host').clientWidth>800;
+  if(wide && stacked){
+    fail.push('folded into blocks at a width where the table fits and reads better');
   }
-  if(!scroller || scroller.id==='host'){
-    fail.push('the table has no horizontally scrollable ancestor: it cannot scroll, so it will'
-      +' squeeze instead');
+  if(!wide && !stacked){
+    fail.push('still a table at a width where it cannot fit: the readings end up off-screen');
+  }
+
+  if(stacked){
+    // Nothing may scroll sideways here. The fold exists precisely to remove that scroll, so a
+    // stacked strip that still overflows has not actually solved anything.
+    for(const el of [strip, strip.parentElement]){
+      if(el.scrollWidth > el.clientWidth + 1){
+        fail.push('the stacked strip still scrolls sideways: '
+          +el.scrollWidth+' > '+el.clientWidth);
+        break;
+      }
+    }
+    // Every value must carry its own label once the header row is gone, or a block is a column
+    // of unlabelled numbers. This is what separates folding from hiding.
+    const unlabelled=[...strip.querySelectorAll('td.n')].filter(c=>!c.dataset.label);
+    if(unlabelled.length){
+      fail.push(unlabelled.length+' stacked cells have no label: "'
+        +unlabelled[0].textContent.trim().slice(0,30)+'"');
+    }
   } else {
-    const legend=[...strip.closest('.card').querySelectorAll('div')]
-      .find(d=>d.textContent.includes('power going into the battery'));
-    if(!legend){
-      fail.push('the battery column renders without the legend that explains its arrows');
-    } else if(scroller.contains(legend)){
-      fail.push('the legend sits inside the scrolling area and slides away with the table');
+    // The legend must not slide out of view with the table. Asserted as BEHAVIOUR, not as
+    // structure: an earlier form required the table's immediate parent to be the scroller,
+    // which one extra wrapper div would have broken while the page stayed correct.
+    let scroller=strip.parentElement;
+    while(scroller && scroller.id!=='host' && getComputedStyle(scroller).overflowX!=='auto'){
+      scroller=scroller.parentElement;
+    }
+    if(!scroller || scroller.id==='host'){
+      fail.push('the table has no horizontally scrollable ancestor: it will squeeze instead');
+    } else {
+      const legend=[...strip.closest('.card').querySelectorAll('div')]
+        .find(d=>d.textContent.includes('power going into the battery'));
+      if(!legend){
+        fail.push('the battery column renders without the legend that explains its arrows');
+      } else if(scroller.contains(legend)){
+        fail.push('the legend sits inside the scrolling area and slides away with the table');
+      }
     }
   }
 }
@@ -203,7 +239,7 @@ def main() -> int:
                     "--headless",
                     "--disable-gpu",
                     "--no-sandbox",
-                    f"--window-size={width},700",
+                    f"--window-size={width + 60},760",
                     "--virtual-time-budget=2000",
                     "--dump-dom",
                     page.as_uri(),
