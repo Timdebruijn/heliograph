@@ -12,6 +12,20 @@
 // The single relay is the DRM0 actuator for inverters that cannot be curtailed over
 // RS485: a potential-free contact on the inverter's DRM port. Failsafe by wiring: the
 // relay de-energised means DRM not asserted -- a dead bridge never blocks production.
+//
+// ACTUATION VERIFIED ON HARDWARE 2026-07-28, on a bench board with nothing wired to the
+// contacts. GPIO47 active-high drives the coil: the relay was heard to switch and the indicator
+// LED followed it in both directions.
+//
+// Two reporting paths were read at both moments and agreed with the hardware each time -- REST
+// bridge.relays and heliograph_relay_energised{relay="0"}, [true]/1 while asserted and
+// [false]/0 after release. Two sources at two moments, not four independent confirmations:
+// worth stating exactly, since the point of writing this down is what was actually shown.
+//
+// drm_mode was correctly ABSENT throughout, the role being "none".
+//
+// The wiring half of the failsafe is still untested: it cannot be, without an inverter on the
+// other end. What is proven is that the firmware can energise and release this coil on demand.
 
 #pragma once
 
@@ -57,9 +71,19 @@ inline constexpr uint8_t kRtcI2cAddress = 0x51;
 
 // --- BOOT button / status LED / buzzer -----------------------------------------------------
 // BOOT on GPIO0 (Waveshare documentation, confirmed by Tim 2026-07-23) -- the SoC download
-// strapping pin, so the hold-to-factory-reset recovery works here too. There is NO status LED
-// or buzzer: GPIO38/39 are the RTC I2C, GPIO21 is unassigned here, so a factory reset on this
-// board is silent -- the reboot is its only signal. Runtime read still awaits a 1CH in hand.
+// strapping pin, so the hold-to-factory-reset recovery works here too.
+//
+// There is no SOFTWARE-DRIVEN status LED or buzzer: GPIO38/39 are the RTC I2C and GPIO21 is
+// unassigned here, so a factory reset on this board is silent and the reboot is its only signal.
+//
+// The board DOES carry a relay indicator LED. It is not driven by any GPIO this firmware knows
+// about, which is why kHasStatusLed stays false and is not a contradiction.
+//
+// OBSERVED, 2026-07-28: it tracked the relay in both directions, on and off. Where it is wired
+// was NOT checked against the schematic -- the usual arrangement is across the coil, and if it
+// is, the LED witnesses the coil itself rather than the GPIO, which would make it the better
+// bring-up signal of the two. That last part is inference. What was shown is that it follows
+// the relay.
 inline constexpr bool kHasBootButton = true;
 inline constexpr int  kBootPin       = 0;
 inline constexpr bool kHasStatusLed  = false;
