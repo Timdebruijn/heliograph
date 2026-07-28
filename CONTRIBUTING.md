@@ -28,7 +28,12 @@ pio test -e native                    # host test suite
 bash tools/check_layering.sh          # architecture invariants
 python3 tools/gen_profiles.py --check # profile schema (when touching profiles/)
 python3 tools/check_web_js.py         # embedded JS (when touching src/web/)
+python3 tools/build_web.py            # strip + gzip the pages (when touching src/web/)
 ```
+
+`src/web/assets/*.h` is what you edit; it is not what the device serves. Every build strips
+the comments out of it and gzips it into `src/web/assets/generated/`, which is not committed.
+Run `build_web.py` yourself to see the page rejected early if a `<script>` tag went missing.
 
 CI runs the same checks, plus both firmware builds.
 

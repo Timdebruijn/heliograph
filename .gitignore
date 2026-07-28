@@ -8,6 +8,10 @@ compile_commands.json
 # in the tree is exactly the drift the codegen exists to prevent.
 profiles_generated.cpp
 
+# Generated at build time by tools/build_web.py from src/web/assets/*.h: the same page with
+# the comments removed and gzipped. Same rule -- the authored header is the source of truth.
+src/web/assets/generated/
+
 # --- Local configuration --------------------------------------------------------
 # PlatformIO's conventional per-user override file (upload ports, local flags).
 # Anything in it is machine-specific by definition.
