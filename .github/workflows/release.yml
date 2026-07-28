@@ -78,6 +78,16 @@ jobs:
       - name: Embedded JS syntax
         run: python3 tools/check_web_js.py
 
+      # Renders the dashboard in the Chrome that ships with the runner image and asserts its
+      # LAYOUT. 0.18.0 shipped a table that broke every row onto a second line and nothing
+      # caught it -- the suite asserts what the page says, never how it comes out.
+      #
+      # No browser is installed here on purpose: the check fails loudly when it cannot find one,
+      # so a runner image that stops shipping Chrome shows up as a red check rather than as a
+      # layout check that quietly stopped rendering anything.
+      - name: Dashboard layout
+        run: python3 tools/check_dashboard_layout.py
+
       - name: Native test suite
         run: pio test -e native
 
