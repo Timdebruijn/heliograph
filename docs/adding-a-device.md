@@ -99,6 +99,62 @@ registers against the **inverter's own display or app**:
 - **Record confidence per register** (high/medium/low + source) — it goes into the
   profile comments verbatim.
 
+### 2d. Does your device report something nothing else does?
+
+Almost always the answer is no, and that is the good case: the value you found is AC power or
+battery state of charge or an MPPT string voltage, it already has a **canonical id** in
+`src/device/measurement.h`, you name that id in your profile, and you are done. Every output —
+MQTT, REST, Home Assistant discovery, Prometheus and the dashboard — picks it up on its own,
+because all five read whatever the device reports rather than a list somebody typed.
+
+Occasionally a device genuinely reports a quantity nothing else does: a fan speed, a battery
+cycle count, an isolation resistance. Then it needs a new canonical id, and **three places have
+to agree about it**. CI will refuse the build until they do, naming each one — so this is a
+checklist for recognising the failure, not a trap to fall into.
+
+1. **Declare the constant** in `src/device/measurement.h` and **list it in `kAll`.**
+
+   ```
+   FAIL: not listed in measurement_id::kAll: kFanSpeed
+   ```
+
+   `kAll` is how the firmware enumerates the Home Assistant topics a *removed* device could have
+   published, so it can clear the retained discovery configs it left behind. A constant missing
+   here leaves an entity in Home Assistant reporting online forever.
+
+2. **Add a dashboard row** to the `MEAS` table in `src/web/assets/index_html.h`: the label a
+   person reads, which group it belongs to (`AC`, `DC / MPPT`, `Battery`, `Grid`, `Device`, or
+   `H` for a headline tile), and how many decimals it is worth.
+
+   ```
+   FAIL: no dashboard row for: inverter.fan_speed
+   ```
+
+3. **Add a Prometheus gauge** to `kInverterGauges` in
+   `src/outputs/prometheus/prometheus_metrics.cpp`, with a metric name and a HELP line.
+
+   ```
+   FAIL: no Prometheus gauge for: kFanSpeed
+   ```
+
+   Follow the naming already there: `heliograph_<subsystem>_<thing>_<unit>`, unit spelled out
+   (`_watts`, `_volts`, `_amperes`, `_celsius`). If the quantity has a dimension — a phase, an
+   MPPT string — make that a **label**, not part of the name. `sum by (device)` works over a
+   label and cannot work over three metric names.
+
+   A metric name is an external contract. Once it is in somebody's dashboard and alert rules it
+   is not a name any more, it is an interface, which is why these are written by hand rather
+   than generated from the id.
+
+**MQTT, REST and Home Assistant discovery need nothing.** They iterate every supported
+measurement, so a new channel arrives on all three the moment a driver reports it.
+
+That asymmetry is why the checks exist. Prometheus quietly exported 8 of 33 channels for
+several releases — both MPPT strings, the whole battery, two phases and the operating hours
+reached MQTT and REST and stopped at a hand-written table nobody re-read. Nothing failed,
+because a missing gauge is a metric that never appears, and a metric that never appears looks
+exactly like an inverter that does not report it.
+
 ## 3. Writing the profile
 
 1. Copy [`profiles/_template.toml`](../profiles/_template.toml) to
