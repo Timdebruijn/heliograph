@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 #
-# Renders the dashboard in a real browser and asserts its LAYOUT, not its pixels.
+# Renders part of the dashboard in a real browser and asserts its LAYOUT, not its pixels.
+#
+# SCOPE, stated plainly because a green tick here is easy to over-read: this covers the
+# per-inverter fleet strip and nothing else. The status cards, the settings tab, the logs tab
+# and the setup portal are NOT rendered by it. It is named for the file it may grow into, not
+# for the ground it currently covers -- and the CI step is named for the strip, so a passing
+# check does not quietly claim the page is fine.
+#
+# The invariant it asserts is per CELL, not per row: a numeric cell or a column header must
+# occupy one line. Rows are deliberately NOT compared, because the device-name cell is two
+# lines by design when a device has a label, with the id underneath in small type.
 #
 # 0.18.0 shipped a table that scrolled sideways and broke every cell onto a second line, and
 # nothing caught it: the tests assert what the page SAYS, never how it comes out. It was found
@@ -10,7 +20,7 @@
 # Deliberately not a screenshot comparison. A committed baseline image would have to survive a
 # different font stack on a CI runner than on the machine that generated it, and a check that
 # cries wolf gets switched off -- which is worse than not having it. What broke in 0.18.0 was a
-# layout INVARIANT ("a row is one line tall"), and an invariant can be asserted directly:
+# layout INVARIANT ("a cell is one line tall"), and an invariant can be asserted directly:
 # relative geometry, no reference image, no font dependency.
 #
 # The page asserts itself. A script appended to the document runs the checks against real
@@ -29,12 +39,15 @@ import tempfile
 SOURCE = "src/web/assets/index_html.h"
 
 # Phone, small tablet, laptop. The first two are where a six-column strip cannot fit and the
-# layout has to hold up by scrolling rather than by folding.
+# layout has to hold up by scrolling rather than by folding -- and they are the ones that catch
+# the 0.18.0 regression. 1200 does NOT catch it and is not expected to: at that width the
+# broken table fitted and never wrapped. It is here to guard the opposite failure, something
+# that only misbehaves when there is room to spare.
 WIDTHS = (390, 700, 1200)
 
 # The payload that broke it: a hybrid reporting a battery, which is what makes the widest
-# column appear at all. Two devices so a mismatch in row height is visible as a difference and
-# not only as an absolute.
+# column appear at all. Two devices, one of them with a deliberately long label, so the widest
+# realistic name is exercised rather than the neatest one.
 #
 # WIDTHS matter more than anything else here, and this is the thing the first version of this
 # file got wrong. Rendered at 900px the broken 0.18.0 table PASSED -- its min-width was 860, so
@@ -107,11 +120,25 @@ else {
     fail.push('the document scrolls horizontally: '
       +document.documentElement.scrollWidth+' > '+document.documentElement.clientWidth);
   }
-  // The scroll must live on the wrapper, not on the card, or the legend below it slides out of
-  // view with the table.
-  const scroller=strip.parentElement;
-  if(getComputedStyle(scroller).overflowX!=='auto'){
-    fail.push('the table is not inside a horizontally scrollable wrapper');
+  // The legend must not slide out of view with the table. Asserted as BEHAVIOUR, not as
+  // structure: an earlier form required the table's immediate parent to be the scroller, which
+  // one extra wrapper div would have broken while the page stayed perfectly correct. What
+  // matters is not which element scrolls, it is what ends up inside it.
+  let scroller=strip.parentElement;
+  while(scroller && scroller.id!=='host' && getComputedStyle(scroller).overflowX!=='auto'){
+    scroller=scroller.parentElement;
+  }
+  if(!scroller || scroller.id==='host'){
+    fail.push('the table has no horizontally scrollable ancestor: it cannot scroll, so it will'
+      +' squeeze instead');
+  } else {
+    const legend=[...strip.closest('.card').querySelectorAll('div')]
+      .find(d=>d.textContent.includes('power going into the battery'));
+    if(!legend){
+      fail.push('the battery column renders without the legend that explains its arrows');
+    } else if(scroller.contains(legend)){
+      fail.push('the legend sits inside the scrolling area and slides away with the table');
+    }
   }
 }
 document.title = fail.length ? 'LAYOUT-FAIL ' + fail.join(' || ') : 'LAYOUT-OK';
