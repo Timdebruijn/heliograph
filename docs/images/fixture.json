@@ -1,0 +1,516 @@
+{
+  "status": {
+    "bridge": {
+      "id": "heliograph-a1b2c3",
+      "name": "Heliograph",
+      "firmware_version": "0.22.1 (Jul 28 2026 16:05:01)",
+      "board_id": "rs485-can",
+      "ip_address": "192.168.1.50",
+      "ip_mode": "dhcp",
+      "max_devices": 8,
+      "devices_configured": 1,
+      "devices_started": 1,
+      "device_problems": [],
+      "uptime_seconds": 10899,
+      "wifi_connected": true,
+      "wifi_rssi_dbm": -58,
+      "mqtt_connected": true,
+      "modbus_listening": true,
+      "modbus_clients": 0,
+      "time_synced": true,
+      "time": "2026-07-28 21:51:04",
+      "ntp_last_sync": "2026-07-28 21:49:30",
+      "ntp_server": "pool.ntp.org",
+      "ntp_server_source": "dhcp",
+      "free_heap_bytes": 149760,
+      "boot_button_pressed": false
+    },
+    "device": {
+      "id": "eversolar_legacy-16",
+      "label": "Dak huis",
+      "driver_id": "eversolar_legacy",
+      "support_level": "beta",
+      "manufacturer": "Ever-Solar",
+      "model": "TL3000-20",
+      "serial_number": "SN0000000000",
+      "online": true,
+      "data_valid": true,
+      "data_stale": false,
+      "consecutive_poll_failures": 0,
+      "last_successful_poll_seconds_ago": 9
+    },
+    "measurements": {
+      "ac.power.total": {
+        "value": 0,
+        "unit": "W",
+        "valid": true,
+        "stale": false
+      },
+      "ac.phase_l1.voltage": {
+        "value": 230.6,
+        "unit": "V",
+        "valid": true,
+        "stale": false
+      },
+      "ac.phase_l1.current": {
+        "value": 0.3,
+        "unit": "A",
+        "valid": true,
+        "stale": false
+      },
+      "ac.frequency": {
+        "value": 50,
+        "unit": "Hz",
+        "valid": true,
+        "stale": false
+      },
+      "dc.mppt_1.voltage": {
+        "value": 219,
+        "unit": "V",
+        "valid": true,
+        "stale": false
+      },
+      "dc.mppt_1.current": {
+        "value": 0,
+        "unit": "A",
+        "valid": true,
+        "stale": false
+      },
+      "dc.mppt_1.power": {
+        "value": 0,
+        "unit": "W",
+        "valid": true,
+        "stale": false,
+        "derived": true
+      },
+      "dc.power.total": {
+        "value": 0,
+        "unit": "W",
+        "valid": true,
+        "stale": false,
+        "derived": true
+      },
+      "energy.today": {
+        "value": 16.13,
+        "unit": "kWh",
+        "valid": true,
+        "stale": false
+      },
+      "energy.total": {
+        "value": 35579.1,
+        "unit": "kWh",
+        "valid": true,
+        "stale": false
+      },
+      "inverter.temperature": {
+        "value": 31.5,
+        "unit": "\u00b0C",
+        "valid": true,
+        "stale": false
+      },
+      "inverter.operating_hours": {
+        "value": 47556,
+        "unit": "h",
+        "valid": true,
+        "stale": false
+      }
+    },
+    "status_code": 1,
+    "status_text": "Grid-connected (normal)",
+    "error_code": null,
+    "devices": [
+      {
+        "id": "eversolar_legacy-16",
+        "label": "Dak huis",
+        "online": true,
+        "data_valid": true,
+        "data_stale": false,
+        "modbus_unit_id": 1,
+        "last_successful_poll_seconds_ago": 9,
+        "energy_today_kwh": 16.13,
+        "ac_voltage_v": 230.6,
+        "temperature_c": 31.5,
+        "battery_soc_pct": null,
+        "battery_power_w": null,
+        "ac_power_w": 0
+      }
+    ],
+    "totals": {
+      "devices_answering": 1,
+      "devices_polled": 1,
+      "ac_power_w": 0,
+      "ac_power_devices": 1,
+      "energy_today_kwh": 16.13,
+      "energy_today_devices": 1,
+      "energy_total_kwh": 35579.1,
+      "energy_total_devices": 1
+    },
+    "poll_success_total": 1069,
+    "poll_failure_total": 1
+  },
+  "config": {
+    "version": 1,
+    "bridge_name": "Heliograph",
+    "wifi": {
+      "ssid": "HomeNetwork",
+      "hostname": "heliograph-a1b2c3",
+      "ip": "",
+      "gateway": "",
+      "subnet": "",
+      "dns1": "",
+      "dns2": "",
+      "password_set": true
+    },
+    "mqtt": {
+      "enabled": true,
+      "host": "192.168.1.50",
+      "port": 1883,
+      "base_topic": "solarbridge",
+      "discovery_prefix": "homeassistant",
+      "discovery_enabled": true,
+      "qos": 0,
+      "username_set": true,
+      "password_set": true
+    },
+    "modbus": {
+      "enabled": true,
+      "port": 502,
+      "unit_id": 1,
+      "diagnostics_unit_id": 250,
+      "max_clients": 4,
+      "idle_timeout_seconds": 20,
+      "write_enabled": false
+    },
+    "polling": {
+      "interval_seconds": 10
+    },
+    "relays": {
+      "enabled": false,
+      "roles": []
+    },
+    "driver": {
+      "id": "eversolar_legacy",
+      "auto_detect": false,
+      "label": "Dak huis",
+      "options": {}
+    },
+    "additional_devices": [],
+    "ntp": {
+      "enabled": true,
+      "use_dhcp": true,
+      "server": "pool.ntp.org",
+      "timezone": "CET-1CEST,M3.5.0,M10.5.0/3",
+      "timezone_name": "Europe/Amsterdam"
+    },
+    "serial": {
+      "override": false,
+      "baud_rate": 9600,
+      "parity": "none",
+      "data_bits": 8,
+      "stop_bits": 1
+    },
+    "updates": {
+      "check_enabled": true
+    },
+    "logging": {
+      "level": "info"
+    },
+    "security": {
+      "password_set": true,
+      "read_only_mode": true
+    }
+  },
+  "diagnostics": {
+    "uptime_seconds": 10899,
+    "firmware_version": "0.22.1 (Jul 28 2026 16:05:01)",
+    "board": "Waveshare ESP32-S3-RS485-CAN",
+    "free_heap_bytes": 149504,
+    "minimum_free_heap_bytes": 107196,
+    "max_alloc_heap_bytes": 98292,
+    "psram_size_bytes": 8388608,
+    "psram_free_bytes": 8378140,
+    "reset_reason": 3,
+    "ota_image_state": "valid",
+    "coredump_present": false,
+    "coredump_task": null,
+    "coredump_pc": null,
+    "coredump_cause": null,
+    "coredump_cause_name": null,
+    "coredump_fault_address": null,
+    "wifi_connected": true,
+    "wifi_rssi_dbm": -58,
+    "mqtt_connected": true,
+    "time_synced": true,
+    "time": "2026-07-28 21:51:04",
+    "ntp_last_sync": "2026-07-28 21:49:30",
+    "ntp_server": "pool.ntp.org",
+    "ntp_server_source": "dhcp",
+    "poll_success_total": 1069,
+    "poll_failure_total": 1,
+    "consecutive_poll_failures": 0,
+    "checksum_error_total": 0,
+    "rs485_timeout_total": 1,
+    "invalid_frame_total": 0,
+    "wifi_reconnect_total": 0,
+    "mqtt_reconnect_total": 0,
+    "modbus_client_connections_total": 0,
+    "rest_requests_total": 57,
+    "mqtt_publish_failure_total": 0,
+    "last_successful_poll_ms": 10889626,
+    "rs485_stack_free_bytes": 3532,
+    "loop_stack_free_bytes": 3784,
+    "last_error": "poll failed: timeout",
+    "coredump_backtrace": null,
+    "coredump_backtrace_corrupted": null
+  },
+  "drivers": {
+    "drivers": [
+      {
+        "id": "sunspec",
+        "display_name": "SunSpec Modbus (generic)",
+        "manufacturer": "SunSpec",
+        "protocol": "SunSpec Modbus RTU",
+        "support_level": "experimental",
+        "supports_read": true,
+        "supports_write": true,
+        "auto_detection": true,
+        "serial_profiles": [
+          {
+            "baud_rate": 9600,
+            "parity": "none",
+            "data_bits": 8,
+            "stop_bits": 1
+          },
+          {
+            "baud_rate": 19200,
+            "parity": "none",
+            "data_bits": 8,
+            "stop_bits": 1
+          }
+        ],
+        "options": [
+          {
+            "key": "unit_id",
+            "display_name": "Modbus unit id",
+            "description": "Slave address of the inverter on the RS485 bus. Range 1-247.",
+            "default_value": "1",
+            "min_value": 1,
+            "max_value": 247,
+            "allowed_values": []
+          },
+          {
+            "key": "base_address",
+            "display_name": "SunSpec base register",
+            "description": "Where the 'SunS' marker lives. 40000 covers most devices; 50000 is the other common choice, and some vendors sit elsewhere. Each extra guess would cost a discovery round trip, so this is set rather than searched.",
+            "default_value": "40000",
+            "min_value": 0,
+            "max_value": 65534,
+            "allowed_values": []
+          }
+        ]
+      },
+      {
+        "id": "eversolar_legacy",
+        "display_name": "Ever-Solar / Zeversolar (legacy PMU)",
+        "manufacturer": "Ever-Solar",
+        "protocol": "EverSolar PMU RS485",
+        "support_level": "beta",
+        "supports_read": true,
+        "supports_write": false,
+        "auto_detection": true,
+        "serial_profiles": [
+          {
+            "baud_rate": 9600,
+            "parity": "none",
+            "data_bits": 8,
+            "stop_bits": 1
+          }
+        ],
+        "options": [
+          {
+            "key": "layout",
+            "display_name": "Payload layout",
+            "description": "How to interpret the measurement payload. 'auto' derives it from the frame length (28 bytes = 1 string, 32 = 2). Force one only if a device contradicts that.",
+            "default_value": "auto",
+            "allowed_values": [
+              "auto",
+              "single",
+              "dual"
+            ]
+          },
+          {
+            "key": "address",
+            "display_name": "Assigned bus address",
+            "description": "Address this bridge hands to its inverter at registration. Leave at 16 unless you have more than one inverter on the same RS485 loop; then give each its own, counting up (16, 17, 18...). The inverter does not store it -- it is handed out at registration and forgotten on power loss. Range 16-254.",
+            "default_value": "16",
+            "min_value": 16,
+            "max_value": 254,
+            "allowed_values": []
+          }
+        ]
+      },
+      {
+        "id": "solax_x1",
+        "display_name": "SolaX X1 series (RS485)",
+        "manufacturer": "SolaX",
+        "protocol": "SolaX X1 RS485 (PMU)",
+        "support_level": "experimental",
+        "supports_read": true,
+        "supports_write": false,
+        "auto_detection": true,
+        "serial_profiles": [
+          {
+            "baud_rate": 9600,
+            "parity": "none",
+            "data_bits": 8,
+            "stop_bits": 1
+          }
+        ],
+        "options": [
+          {
+            "key": "address",
+            "display_name": "Assigned bus address",
+            "description": "Address handed to the inverter at registration (reference default 10 = 0x0A). Range 1-254.",
+            "default_value": "10",
+            "min_value": 1,
+            "max_value": 254,
+            "allowed_values": []
+          }
+        ]
+      },
+      {
+        "id": "growatt_modbus",
+        "display_name": "Growatt (Modbus RTU)",
+        "manufacturer": "Growatt",
+        "protocol": "Modbus RTU",
+        "support_level": "experimental",
+        "supports_read": true,
+        "supports_write": false,
+        "auto_detection": true,
+        "serial_profiles": [
+          {
+            "baud_rate": 9600,
+            "parity": "none",
+            "data_bits": 8,
+            "stop_bits": 1
+          },
+          {
+            "baud_rate": 115200,
+            "parity": "none",
+            "data_bits": 8,
+            "stop_bits": 1
+          }
+        ],
+        "options": [
+          {
+            "key": "unit_id",
+            "display_name": "Modbus unit id",
+            "description": "The inverter's Modbus slave address (Growatt default is 1). Range 1-247.",
+            "default_value": "1",
+            "min_value": 1,
+            "max_value": 247,
+            "allowed_values": []
+          },
+          {
+            "key": "profile",
+            "display_name": "Register-map profile",
+            "description": "Which Growatt register map to use (profiles/growatt/). Empty = the default profile.",
+            "default_value": "",
+            "allowed_values": [
+              "",
+              "mic_tl_x",
+              "sph"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "mock_0000000001",
+        "display_name": "Mock Inverter",
+        "manufacturer": "Heliograph open-source project",
+        "protocol": "none (simulated)",
+        "support_level": "stable",
+        "supports_read": true,
+        "supports_write": false,
+        "auto_detection": false,
+        "serial_profiles": [],
+        "options": [
+          {
+            "key": "day_length_minutes",
+            "display_name": "Simulated day length",
+            "description": "How long one simulated sunrise-to-sunset cycle takes. Short by default so a full curve is visible within minutes of booting.",
+            "default_value": "10",
+            "min_value": 1,
+            "max_value": 1440,
+            "allowed_values": []
+          },
+          {
+            "key": "unit_id",
+            "display_name": "Simulated unit",
+            "description": "Which simulated inverter this is. Give each mock under Extra devices its own number: it is what keeps them apart, and it staggers their solar curves so they do not all report the same value at the same moment.",
+            "default_value": "1",
+            "min_value": 1,
+            "max_value": 8,
+            "allowed_values": []
+          }
+        ]
+      },
+      {
+        "id": "mock_inverter_0000000001",
+        "display_name": "Mock Inverter (writable)",
+        "manufacturer": "Heliograph open-source project",
+        "protocol": "none (simulated)",
+        "support_level": "stable",
+        "supports_read": true,
+        "supports_write": true,
+        "auto_detection": false,
+        "serial_profiles": [],
+        "options": [
+          {
+            "key": "day_length_minutes",
+            "display_name": "Simulated day length",
+            "description": "How long one simulated sunrise-to-sunset cycle takes. Short by default so a full curve is visible within minutes of booting.",
+            "default_value": "10",
+            "min_value": 1,
+            "max_value": 1440,
+            "allowed_values": []
+          },
+          {
+            "key": "unit_id",
+            "display_name": "Simulated unit",
+            "description": "Which simulated inverter this is. Give each mock under Extra devices its own number: it is what keeps them apart, and it staggers their solar curves so they do not all report the same value at the same moment.",
+            "default_value": "1",
+            "min_value": 1,
+            "max_value": 8,
+            "allowed_values": []
+          }
+        ]
+      }
+    ]
+  },
+  "discovery": {
+    "status": "idle",
+    "mode": "quick",
+    "busy": false
+  },
+  "capture": {
+    "status": "idle",
+    "line": {
+      "baud_rate": 9600,
+      "parity": "none",
+      "data_bits": 8,
+      "stop_bits": 1,
+      "idle_gap_ms": 0
+    },
+    "requested_seconds": 30,
+    "max_frames": 64,
+    "summary": {
+      "frames": 0,
+      "bytes": 0,
+      "modbus_crc_ok": 0,
+      "aa55_frames_ok": 0,
+      "truncated": false
+    },
+    "frames": []
+  }
+}
