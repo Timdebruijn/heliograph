@@ -12,6 +12,15 @@
 // The single relay is the DRM0 actuator for inverters that cannot be curtailed over
 // RS485: a potential-free contact on the inverter's DRM port. Failsafe by wiring: the
 // relay de-energised means DRM not asserted -- a dead bridge never blocks production.
+//
+// ACTUATION VERIFIED ON HARDWARE 2026-07-28, on a bench board with nothing wired to the
+// contacts. GPIO47 active-high drives the coil: the relay was heard to switch, the indicator
+// LED followed it in both directions, and three independent readings agreed with the hardware
+// -- REST bridge.relays [true], heliograph_relay_energised{relay="0"} 1, and back to false/0 on
+// release. drm_mode was correctly ABSENT throughout, the role being "none".
+//
+// The wiring half of the failsafe is still untested: it cannot be, without an inverter on the
+// other end. What is proven is that the firmware can energise and release this coil on demand.
 
 #pragma once
 
@@ -57,9 +66,16 @@ inline constexpr uint8_t kRtcI2cAddress = 0x51;
 
 // --- BOOT button / status LED / buzzer -----------------------------------------------------
 // BOOT on GPIO0 (Waveshare documentation, confirmed by Tim 2026-07-23) -- the SoC download
-// strapping pin, so the hold-to-factory-reset recovery works here too. There is NO status LED
-// or buzzer: GPIO38/39 are the RTC I2C, GPIO21 is unassigned here, so a factory reset on this
-// board is silent -- the reboot is its only signal. Runtime read still awaits a 1CH in hand.
+// strapping pin, so the hold-to-factory-reset recovery works here too.
+//
+// There is no SOFTWARE-DRIVEN status LED or buzzer: GPIO38/39 are the RTC I2C and GPIO21 is
+// unassigned here, so a factory reset on this board is silent and the reboot is its only signal.
+//
+// The board DOES carry a relay indicator LED, wired across the coil in hardware rather than to
+// a GPIO -- which is why kHasStatusLed stays false and is not a contradiction. For bring-up it
+// is the better witness of the two: it sits after the driver transistor, so it lights when the
+// coil is genuinely energised, where a software LED would only prove the firmware believed it
+// had switched.
 inline constexpr bool kHasBootButton = true;
 inline constexpr int  kBootPin       = 0;
 inline constexpr bool kHasStatusLed  = false;
