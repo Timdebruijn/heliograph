@@ -57,8 +57,8 @@ Configuration configWith(const std::string& first, const std::vector<std::string
 
 static void test_a_driver_that_shares_the_bus_may_appear_many_times() {
     const auto registry = makeRegistry();
-    const auto plan     = app::planDevices(
-        configWith("growatt_modbus", {"growatt_modbus", "growatt_modbus"}), "growatt_modbus",
+    const auto config   = configWith("growatt_modbus", {"growatt_modbus", "growatt_modbus"});
+    const auto plan     = app::planDevices(config, "growatt_modbus",
         registry);
 
     // Three MIC TL-X on one bus is the case this bridge was extended for. Refusing any of them
@@ -72,7 +72,8 @@ static void test_a_driver_that_shares_the_bus_may_appear_many_times() {
 
 static void test_a_second_exclusive_device_is_refused_before_it_can_speak() {
     const auto registry = makeRegistry();
-    const auto plan     = app::planDevices(configWith("eversolar_legacy", {"eversolar_legacy"}),
+    const auto config   = configWith("eversolar_legacy", {"eversolar_legacy"});
+    const auto plan     = app::planDevices(config,
                                            "eversolar_legacy", registry);
 
     TEST_ASSERT_EQUAL_UINT32(2, plan.size());
@@ -85,8 +86,8 @@ static void test_a_second_exclusive_device_is_refused_before_it_can_speak() {
 
 static void test_a_third_copy_is_refused_too_and_names_its_own_row() {
     const auto registry = makeRegistry();
-    const auto plan     = app::planDevices(
-        configWith("eversolar_legacy", {"eversolar_legacy", "eversolar_legacy"}),
+    const auto config   = configWith("eversolar_legacy", {"eversolar_legacy", "eversolar_legacy"});
+    const auto plan     = app::planDevices(config,
         "eversolar_legacy", registry);
 
     TEST_ASSERT_TRUE(plan[0].shouldStart());
@@ -101,8 +102,8 @@ static void test_a_third_copy_is_refused_too_and_names_its_own_row() {
 
 static void test_the_label_goes_in_the_refusal() {
     const auto registry = makeRegistry();
-    const auto plan     = app::planDevices(
-        configWith("eversolar_legacy", {"eversolar_legacy"}, {"Schuur"}), "eversolar_legacy",
+    const auto config   = configWith("eversolar_legacy", {"eversolar_legacy"}, {"Schuur"});
+    const auto plan     = app::planDevices(config, "eversolar_legacy",
         registry);
 
     // "device 2 could not be started" sends someone to count rows on a settings page.
@@ -112,7 +113,8 @@ static void test_the_label_goes_in_the_refusal() {
 
 static void test_an_unknown_driver_is_planned_and_left_to_fail_later() {
     const auto registry = makeRegistry();
-    const auto plan     = app::planDevices(configWith("not_a_driver", {"not_a_driver"}),
+    const auto config   = configWith("not_a_driver", {"not_a_driver"});
+    const auto plan     = app::planDevices(config,
                                            "not_a_driver", registry);
 
     // The registry has no opinion, so this rule has none either: both are planned, and both
@@ -125,7 +127,8 @@ static void test_an_unknown_driver_is_planned_and_left_to_fail_later() {
 
 static void test_two_different_exclusive_drivers_do_not_collide() {
     const auto registry = makeRegistry();
-    const auto plan     = app::planDevices(configWith("eversolar_legacy", {"growatt_modbus"}),
+    const auto config   = configWith("eversolar_legacy", {"growatt_modbus"});
+    const auto plan     = app::planDevices(config,
                                            "eversolar_legacy", registry);
 
     // The rule is per DRIVER, not per bus. Two different drivers each get their one instance.
@@ -135,7 +138,8 @@ static void test_two_different_exclusive_drivers_do_not_collide() {
 
 static void test_an_empty_driver_id_leaves_it_out_of_the_plan() {
     const auto registry = makeRegistry();
-    const auto plan     = app::planDevices(configWith("", {"growatt_modbus"}), "", registry);
+    const auto config   = configWith("", {"growatt_modbus"});
+    const auto plan     = app::planDevices(config, "", registry);
 
     // Nothing configured and nothing compiled in: the additional device is device 1, not
     // device 2 with a hole where the first should be.
@@ -146,13 +150,39 @@ static void test_an_empty_driver_id_leaves_it_out_of_the_plan() {
 
 static void test_rows_are_numbered_as_the_settings_page_shows_them() {
     const auto registry = makeRegistry();
-    const auto plan     = app::planDevices(
-        configWith("growatt_modbus", {"growatt_modbus", "growatt_modbus"}), "growatt_modbus",
+    const auto config   = configWith("growatt_modbus", {"growatt_modbus", "growatt_modbus"});
+    const auto plan     = app::planDevices(config, "growatt_modbus",
         registry);
 
     TEST_ASSERT_EQUAL_UINT32(1, plan[0].row);
     TEST_ASSERT_EQUAL_UINT32(2, plan[1].row);
     TEST_ASSERT_EQUAL_UINT32(3, plan[2].row);
+}
+
+// The plan points INTO the configuration rather than copying it, so the configuration has to
+// outlive the plan. This reads the options through that pointer, which is the only way the
+// contract gets exercised rather than merely written down -- the first version of these tests
+// passed a temporary configuration and held pointers into it, and passed because nothing ever
+// looked.
+static void test_the_options_pointer_reaches_the_configured_options() {
+    const auto registry = makeRegistry();
+    Configuration config;
+    config.driver.id                       = "growatt_modbus";
+    config.driver.options["unit_id"] = "7";
+    DriverSettings second;
+    second.id                       = "growatt_modbus";
+    second.options["unit_id"] = "9";
+    config.additionalDevices.push_back(second);
+
+    const auto plan = app::planDevices(config, "growatt_modbus", registry);
+
+    TEST_ASSERT_EQUAL_UINT32(2, plan.size());
+    TEST_ASSERT_NOT_NULL(plan[0].options);
+    TEST_ASSERT_NOT_NULL(plan[1].options);
+    // Each device's OWN options, not the first one's twice: a unit_id shared between two
+    // Modbus devices is a bus where both answer to the same address.
+    TEST_ASSERT_EQUAL_STRING("7", plan[0].options->at("unit_id").c_str());
+    TEST_ASSERT_EQUAL_STRING("9", plan[1].options->at("unit_id").c_str());
 }
 
 static void test_describe_row_names_the_label_when_there_is_one() {
@@ -170,6 +200,7 @@ int main() {
     RUN_TEST(test_two_different_exclusive_drivers_do_not_collide);
     RUN_TEST(test_an_empty_driver_id_leaves_it_out_of_the_plan);
     RUN_TEST(test_rows_are_numbered_as_the_settings_page_shows_them);
+    RUN_TEST(test_the_options_pointer_reaches_the_configured_options);
     RUN_TEST(test_describe_row_names_the_label_when_there_is_one);
     return UNITY_END();
 }

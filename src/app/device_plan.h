@@ -26,6 +26,10 @@ namespace heliograph::app {
 struct PlannedDevice {
     std::string          id;
     std::string          label;
+    /// Points INTO the configuration that was planned. The plan does not own it, so the
+    /// configuration must outlive the plan -- which it does in setup(), where g_config is a
+    /// global. Worth stating: the first version of the tests passed a temporary and held
+    /// pointers into it, and passed only because nothing read them.
     const DriverOptions* options = nullptr;
     /// As the settings page numbers them: 1 is the `driver` section, 2..N are the additional
     /// devices. Carried because a bring-up failure has to say which ROW to go and look at.

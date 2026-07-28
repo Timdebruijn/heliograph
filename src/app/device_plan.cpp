@@ -43,9 +43,14 @@ std::vector<PlannedDevice> planDevices(const Configuration& config, const std::s
             continue;
         }
         for (size_t earlier = 0; earlier < i; ++earlier) {
-            // Only an earlier device that is itself starting can claim the bus. A refused one
-            // never calls begin(), so it cannot be the reason a third is refused -- without
-            // this, three copies would report two different refusals for the same conflict.
+            // Only an earlier device that is itself STARTING can claim the bus: a refused one
+            // never calls begin(), so it can never be the reason a later one is refused.
+            //
+            // Today this changes nothing -- the loop stops at the first match, which is always
+            // the one that started -- so it is a guard against a future second reason for
+            // refusing a device, not a fix for a bug that exists. Said plainly because a
+            // condition whose comment claims a failure it does not prevent is worse than no
+            // comment (review).
             if (planned[earlier].id == planned[i].id && planned[earlier].shouldStart()) {
                 planned[i].problem = describeRow(planned[i].row, planned[i].label) + " ('" +
                                      planned[i].id +
