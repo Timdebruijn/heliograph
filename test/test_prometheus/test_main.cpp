@@ -119,14 +119,25 @@ static void test_one_help_and_one_type_however_many_phases() {
 }
 
 static void test_a_battery_is_its_own_metric_prefix() {
-    const std::string text = metricsOf(hybrid());
+    DeviceState s = hybrid();
+    // BOTH temperatures, on purpose. The first version of this test asserted that the inverter
+    // one was absent -- which it was, because the fixture never reported it. It passed without
+    // saying anything about the prefixes, which is the failure mode a test like this exists to
+    // avoid rather than demonstrate.
+    report(s, measurement_id::kTemperature, MeasurementType::Temperature, Unit::Celsius,
+           "Inverter °C", 47.1);
+    const std::string text = metricsOf(s);
+
     TEST_ASSERT_TRUE(text.find("heliograph_battery_state_of_charge_percent{device=\"inv-1\"} "
                                "64.000") != std::string::npos);
     TEST_ASSERT_TRUE(text.find("heliograph_battery_power_watts{device=\"inv-1\"} -1180.000")
                      != std::string::npos);
-    // A query for the inverter's temperature must not have to exclude the battery's.
-    TEST_ASSERT_TRUE(text.find("heliograph_battery_temperature_celsius") != std::string::npos);
-    TEST_ASSERT_TRUE(text.find("heliograph_inverter_temperature_celsius") == std::string::npos);
+    // Two temperatures, two families, two different numbers: a query for the inverter's must
+    // not have to exclude the battery's, and must not accidentally return it.
+    TEST_ASSERT_TRUE(text.find("heliograph_battery_temperature_celsius{device=\"inv-1\"} 28.400")
+                     != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_temperature_celsius{device=\"inv-1\"} 47.100")
+                     != std::string::npos);
 }
 
 static void test_a_channel_the_inverter_lacks_produces_nothing_at_all() {

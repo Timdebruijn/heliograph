@@ -71,11 +71,12 @@ void appendDeviceValue(std::string& out, const char* name, const std::string& de
     out += name;
     out += "{device=\"" + escapeLabel(deviceId) + "\"";
     if (labelName != nullptr) {
+        // Escaped like the device id beside it. Every value in the table today is a literal
+        // that needs no escaping, which is exactly why the asymmetry would have survived: the
+        // day a label carries anything derived, it would be the one field that does not.
         out += ",";
         out += labelName;
-        out += "=\"";
-        out += labelValue;
-        out += "\"";
+        out += "=\"" + escapeLabel(labelValue) + "\"";
     }
     out += "}";
     out += buf;
@@ -195,7 +196,11 @@ constexpr GaugeSpec kInverterGauges[] = {
 std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const BridgeInfo& bridge,
                          const DiagnosticsSnapshot& d) {
     std::string out;
-    out.reserve(2048 + devices.size() * 512);
+    // Sized against the gauge table rather than a number typed once and left behind. 512 bytes
+    // per device was written when eight gauges existed; at thirty-odd a device emits closer to
+    // 2.5 KB, so an eight-device bus reserved 6 KB for 20 KB of output and grew the string
+    // repeatedly -- on a heap this page is served from, and which fragments.
+    out.reserve(2048 + devices.size() * (std::size(kInverterGauges) * 80));
 
     // One build_info series per device: the firmware and board are the bridge's, the driver is
     // the device's, and on a mixed bus those differ.
@@ -249,7 +254,12 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
             continue;  // already emitted with the first row carrying this name
         }
 
-        bool headerWritten = false;
+        // From the family's FIRST row, never from whichever row happened to have a reading.
+        // Every row of a family carries the same help text today, but nothing enforces that, and
+        // taking it from the data would make the documentation a scraper sees depend on which
+        // inverter answered first.
+        const char* help         = kInverterGauges[i].help;
+        bool        headerWritten = false;
         for (const auto& gauge : kInverterGauges) {
             if (std::strcmp(gauge.name, name) != 0) {
                 continue;
@@ -260,7 +270,7 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
                     continue;  // omit, do not zero
                 }
                 if (!headerWritten) {
-                    appendHelp(out, name, gauge.help, "gauge");
+                    appendHelp(out, name, help, "gauge");
                     headerWritten = true;
                 }
                 appendDeviceValue(out, name, dev.id, m->value, gauge.labelName,
