@@ -119,7 +119,12 @@ document.title = fail.length ? 'LAYOUT-FAIL ' + fail.join(' || ') : 'LAYOUT-OK';
 
 
 def find_chrome() -> str | None:
-    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+    for name in (
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+    ):
         found = shutil.which(name)
         if found:
             return found
@@ -142,7 +147,7 @@ def main() -> int:
         print("dashboard layout: FAIL (fleetStrip not found)")
         return 1
     end = joined.find("\nfunction ", start + 10)
-    fleet_strip = joined[start:end if end > 0 else len(joined)]
+    fleet_strip = joined[start : end if end > 0 else len(joined)]
 
     chrome = find_chrome()
     if chrome is None:
@@ -156,21 +161,35 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="heliograph-layout-") as scratch:
         for width in WIDTHS:
             page = pathlib.Path(scratch) / f"dashboard-{width}.html"
-            page.write_text(PAGE % {
-                "style": style.group(1), "script": fleet_strip,
-                "fleet": FLEET, "width": width,
-            })
+            page.write_text(
+                PAGE
+                % {
+                    "style": style.group(1),
+                    "script": fleet_strip,
+                    "fleet": FLEET,
+                    "width": width,
+                }
+            )
             result = subprocess.run(
                 [
-                    chrome, "--headless", "--disable-gpu", "--no-sandbox",
-                    f"--window-size={width},700", "--virtual-time-budget=2000",
-                    "--dump-dom", page.as_uri(),
+                    chrome,
+                    "--headless",
+                    "--disable-gpu",
+                    "--no-sandbox",
+                    f"--window-size={width},700",
+                    "--virtual-time-budget=2000",
+                    "--dump-dom",
+                    page.as_uri(),
                 ],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             verdict = re.search(r"<title>(LAYOUT-[^<]*)</title>", result.stdout)
             if verdict is None:
-                print(f"dashboard layout @{width}px: FAIL (no verdict; the page did not run)")
+                print(
+                    f"dashboard layout @{width}px: FAIL (no verdict; the page did not run)"
+                )
                 print(result.stderr[-600:])
                 status = 1
                 continue
