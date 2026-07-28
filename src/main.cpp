@@ -150,8 +150,16 @@ namespace {
 // ac_current_amperes. The names did not change, but a series with a new label is a new series,
 // so an existing Grafana panel keeps its history and stops receiving points. See
 // docs/prometheus.md.
+// 0.21.0 makes a crash dump say WHY. The firmware read the IDF summary and kept three fields
+// out of it, discarding the exception cause, the faulting address and a sixteen-deep backtrace.
+// The one PC it did report is where the panic HANDLER was running, so it was the one field that
+// could not answer the question. The cause and the address need no ELF and no cable:
+// "LoadProhibited at 0x00000000" is a null dereference, said in full.
+//
+// The dump survives reboots in its own flash partition, so this reads crashes already stored,
+// not only the next one.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 20
+#define HELIOGRAPH_VERSION_MINOR 21
 #define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
