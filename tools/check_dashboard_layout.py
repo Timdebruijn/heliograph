@@ -43,8 +43,9 @@ SOURCE = "src/web/assets/index_html.h"
 # layout has to hold up by scrolling rather than by folding -- and they are the ones that catch
 # the 0.18.0 regression. 1200 does NOT catch it and is not expected to: at that width the
 # broken table fitted and never wrapped. It is here to guard the opposite failure, something
-# that only misbehaves when there is room to spare.
-WIDTHS = (390, 700, 1200)
+# that only misbehaves when there is room to spare. 780 sits just above the fold-over, which is
+# exactly where an off-by-one between the CSS and this file would show up -- and did.
+WIDTHS = (390, 700, 780, 1200)
 
 # The payload that broke it: a hybrid reporting a battery, which is what makes the widest
 # column appear at all. Two devices, one of them with a deliberately long label, so the widest
@@ -66,7 +67,7 @@ FLEET = """[
 ]"""
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>%(style)s</style></head>
-<body><div id="host" class="strip" style="width:%(width)spx"></div>
+<body><div id="host" style="width:%(width)spx"></div>
 <script>
 const fmt=(v,d)=>Number(v).toFixed(d);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -127,16 +128,54 @@ else {
   // scrollbar. Above it the table must stay a table, because comparing four inverters by
   // scanning one column is the thing the stack cannot do.
   const stacked=getComputedStyle(strip).display==='block';
-  // Measured on the HOST, not the window: the container query keys off the strip's own
-  // width, so anything else would be asserting against a different number than the CSS
-  // reads. The window is deliberately wider than the host so a scrollbar never counts
-  // as the page overflowing.
-  const wide=document.getElementById('host').clientWidth>800;
-  if(wide && stacked){
-    fail.push('folded into blocks at a width where the table fits and reads better');
-  }
-  if(!wide && !stacked){
-    fail.push('still a table at a width where it cannot fit: the readings end up off-screen');
+  // Measured on the HOST, not the window: the container query keys off the strip's own width,
+  // so anything else would be asserting against a different number than the CSS reads. The
+  // window is deliberately wider than the host so a scrollbar never counts as the page
+  // overflowing.
+  //
+  // The threshold is READ OUT OF THE STYLESHEET, never written here. It was hard-coded as 800
+  // while the CSS folded at 760, which left a 40px band where this check demanded blocks and
+  // the CSS produced a table -- a spurious failure that only stayed hidden because the three
+  // tested widths happened to miss it. Two numbers that have to mean the same thing are one
+  // number too many.
+  // Measured on the element that IS the container -- the card fleetStrip emits with class
+  // "strip" -- and not on the host around it. The container query reads that box's INNER width,
+  // so the card's own padding is part of the sum. An earlier form measured the host and put
+  // class="strip" on it as well, which made the harness disagree with the product in two ways
+  // at once: a second nested container, and a width the CSS was never looking at. It showed up
+  // as a fold at 780px that the stylesheet did not ask for.
+  const container=strip.closest('.strip');
+  if(container===null){ fail.push('the strip is not inside a query container'); }
+  // The CONTENT box, which is the box a container query evaluates against -- not clientWidth,
+  // which includes the card's padding. Off by exactly that padding, this expected a table at
+  // 780px while the stylesheet had already folded, because the card's inner width was 752.
+  const cs=container?getComputedStyle(container):null;
+  const inner=container
+    ? container.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+    : 0;
+  //
+  // WHICH SHAPE IS REQUIRED is this file's own judgement at the extremes, and only a reading of
+  // the stylesheet in between. Deriving it entirely from the CSS made the check validate the
+  // stylesheet against itself: set the fold-over to 1px and it read that same 1, expected a
+  // table everywhere, got one, and passed a build where the fold never happened -- the very
+  // regression it exists to catch. Found by mutation-testing it, not by reading it.
+  //
+  // So: a phone must stack whatever the CSS says, a laptop must not, and between those two the
+  // stylesheet's own threshold decides.
+  const REQUIRE_STACKED_AT=440;   // no phone may be shown the table
+  const REQUIRE_TABLE_AT=1000;    // no laptop may be shown fragments
+  const wide=inner > %(fold)s;
+  if(inner<=REQUIRE_STACKED_AT && !stacked){
+    fail.push('still a table at '+Math.round(inner)+'px: a phone cannot show it, and every'
+      +' reading ends up behind a scrollbar');
+  } else if(inner>=REQUIRE_TABLE_AT && stacked){
+    fail.push('folded into blocks at '+Math.round(inner)+'px, where the table fits and lets'
+      +' four inverters be compared down one column');
+  } else if(inner>REQUIRE_STACKED_AT && inner<REQUIRE_TABLE_AT){
+    // In between, either shape is defensible and the stylesheet decides -- but it must decide
+    // CONSISTENTLY with the threshold it declares.
+    if(wide && stacked){ fail.push('folded above its own declared fold-over width'); }
+    if(!wide && !stacked){ fail.push('still a table below its own declared fold-over width'); }
   }
 
   if(stacked){
@@ -199,6 +238,13 @@ def main() -> int:
     root = pathlib.Path(__file__).resolve().parent.parent
     source = (root / SOURCE).read_text()
 
+    fold = re.search(r"@container \(max-width:\s*(\d+)px\)", source)
+    if fold is None:
+        print(
+            "fleet strip layout: FAIL (no @container fold-over threshold found in the CSS)"
+        )
+        return 1
+
     style = re.search(r"<style>(.*?)</style>", source, re.S)
     scripts = re.findall(r"<script>(.*?)</script>", source, re.S)
     if not style or not scripts:
@@ -231,6 +277,7 @@ def main() -> int:
                     "script": fleet_strip,
                     "fleet": FLEET,
                     "width": width,
+                    "fold": fold.group(1),
                 }
             )
             result = subprocess.run(
