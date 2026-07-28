@@ -58,6 +58,19 @@ bool shouldConfirmHealthyBoot(bool wifiConnected, uint64_t uptimeMs, bool alread
     return pollingHealthy && uptimeMs >= kOfflineConfirmThresholdMs;
 }
 
+/// Shared by both builds on purpose -- see the declaration for why an #if between two copies of
+/// this is the dangerous kind of duplication.
+void OtaManager::startTracking(size_t expectedSize, const std::string& expectedSha256) {
+    running_      = true;
+    magicChecked_ = false;
+    written_      = 0;
+    expected_     = expectedSize;
+    expectedSha_  = expectedSha256;
+    writtenSha256_.clear();
+    hasher_.reset();
+    lastError_.clear();
+}
+
 #if defined(ESP32)
 
 // Overrides the WEAK hook in the Arduino core (esp32-hal-misc.c). Without this override,
@@ -100,14 +113,7 @@ OtaResult OtaManager::begin(size_t expectedSize, const std::string& expectedSha2
         return Update.getError() == UPDATE_ERROR_SPACE ? OtaResult::TooLarge
                                                        : OtaResult::NoPartition;
     }
-    running_      = true;
-    magicChecked_ = false;
-    written_      = 0;
-    expected_     = expectedSize;
-    expectedSha_  = expectedSha256;
-    writtenSha256_.clear();
-    hasher_.reset();
-    lastError_.clear();
+    startTracking(expectedSize, expectedSha256);
     return OtaResult::Ok;
 }
 
@@ -192,14 +198,7 @@ OtaResult OtaManager::begin(size_t expectedSize, const std::string& expectedSha2
     if (running_) {
         return OtaResult::AlreadyRunning;
     }
-    running_      = true;
-    magicChecked_ = false;
-    written_      = 0;
-    expected_     = expectedSize;
-    expectedSha_  = expectedSha256;
-    writtenSha256_.clear();
-    hasher_.reset();
-    lastError_.clear();
+    startTracking(expectedSize, expectedSha256);
     return OtaResult::Ok;
 }
 
