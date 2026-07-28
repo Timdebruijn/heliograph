@@ -45,7 +45,7 @@ SOURCE = "src/web/assets/index_html.h"
 # broken table fitted and never wrapped. It is here to guard the opposite failure, something
 # that only misbehaves when there is room to spare. 780 sits just above the fold-over, which is
 # exactly where an off-by-one between the CSS and this file would show up -- and did.
-WIDTHS = (390, 700, 780, 1200)
+WIDTHS = (390, 700, 780, 1000, 1200)
 
 # The payload that broke it: a hybrid reporting a battery, which is what makes the widest
 # column appear at all. Two devices, one of them with a deliberately long label, so the widest
@@ -196,6 +196,20 @@ else {
         +unlabelled[0].textContent.trim().slice(0,30)+'"');
     }
   } else {
+    // A table at a laptop width must FIT. It may scroll -- that is the deliberate fallback for
+    // a bus wide enough to need it -- but a four-device strip on a 1200px screen scrolling is
+    // the regression Tim reported after 0.19.1: a min-width held it at 1025px when the content
+    // needed 870, so every width between those two scrolled for no reason.
+    // Runs whenever the SHAPE is a table and there is real room -- not only above
+    // REQUIRE_TABLE_AT, which the card's own padding puts out of reach at a 1000px screen and
+    // which is why the first version of this assertion never ran where the bug lived. Just
+    // above the fold-over a table may still scroll: that is the honest fallback for a width
+    // where the content genuinely does not fit. A comfortable margin above it may not.
+    const box=strip.parentElement;
+    if(inner>%(fold)s+150 && box.scrollWidth>box.clientWidth+1){
+      fail.push('the table scrolls sideways at '+Math.round(inner)+'px, where it should fit: '
+        +box.scrollWidth+' > '+box.clientWidth);
+    }
     // The legend must not slide out of view with the table. Asserted as BEHAVIOUR, not as
     // structure: an earlier form required the table's immediate parent to be the scroller,
     // which one extra wrapper div would have broken while the page stayed correct.
