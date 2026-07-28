@@ -668,6 +668,188 @@ static void test_the_mic_profile_converts_half_seconds_to_hours() {
     TEST_ASSERT_DOUBLE_WITHIN(0.01, 12345.0, hours->value);
 }
 
+// --- write path -------------------------------------------------------------------------
+//
+// The chain runs profile row -> capabilities() -> execute() -> FC06. Every case below turns on
+// one link of it, because a driver that ADVERTISES a setpoint and then refuses it is worse than
+// one that never offered.
+
+namespace {
+
+/// A profile carrying one VERIFIED write row, which no shipped profile has.
+///
+/// Built here rather than by flipping a real profile's flag: `verified = true` means somebody
+/// wrote the register on hardware and confirmed the effect, and a test must not be able to
+/// claim that on a device's behalf.
+const WriteMapping kTestWrites[] = {
+    {InverterCommandType::SetActivePowerLimitPercent, "Active Power Limit", RegSpace::Holding, 3,
+     1, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, true},
+};
+
+/// The same row, needing FC16 -- which the Modbus client cannot send.
+const WriteMapping kMultiWordWrites[] = {
+    {InverterCommandType::SetActivePowerLimitPercent, "Active Power Limit", RegSpace::Holding, 3,
+     2, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, true},
+};
+
+GrowattProfile profileWith(const WriteMapping* writes, size_t count) {
+    GrowattProfile p = *findProfile("mic_tl_x");
+    p.writes         = writes;
+    p.writeCount     = count;
+    return p;
+}
+
+/// Echoes a well-formed FC06 confirmation, which is what a device that accepted the write sends.
+void echoWrites(MockTransport& t) {
+    t.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 6 || req[1] != 0x06) {
+            return false;
+        }
+        reply.assign(req.begin(), req.begin() + 6);
+        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
+        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
+        reply.push_back(static_cast<uint8_t>(crc >> 8));
+        return true;
+    });
+}
+
+/// The same row with verified = false, which is how every shipped profile carries it.
+const WriteMapping kUnverifiedWrites[] = {
+    {InverterCommandType::SetActivePowerLimitPercent, "Active Power Limit", RegSpace::Holding, 3,
+     1, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, false},
+};
+
+}  // namespace
+
+// THE GATE THAT MATTERS MOST, and the one nothing was checking.
+//
+// A test existed asserting that the shipped row carries verified = false -- but that is a fact
+// about the DATA. Nothing asserted the driver acts on it, so deleting the check in writeFor()
+// left every test green while unverified research became a live control surface on somebody's
+// inverter. Found by mutation-testing this change, not by reading it.
+static void test_an_unverified_row_is_neither_advertised_nor_executed() {
+    MockTransport transport;
+    echoWrites(transport);
+    GrowattProfile profile = profileWith(kUnverifiedWrites, 1);
+    GrowattOptions options;
+    options.profile = &profile;
+    GrowattDriver driver(transport, options);
+
+    TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
+    const auto& n = driver.capabilities().numeric[static_cast<size_t>(
+        InverterCommandType::SetActivePowerLimitPercent)];
+    TEST_ASSERT_FALSE(n.writable);
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 60.0;
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, driver.execute(cmd));
+    // Nothing on the bus. `verified` means a person confirmed the register on hardware, and
+    // until then the row is documentation.
+    TEST_ASSERT_EQUAL_UINT32(0, transport.writes.size());
+}
+
+static void test_a_verified_row_becomes_an_advertised_setpoint() {
+    MockTransport  transport;
+    GrowattProfile profile = profileWith(kTestWrites, 1);
+    GrowattOptions options;
+    options.profile = &profile;
+    GrowattDriver driver(transport, options);
+
+    const auto caps = driver.capabilities();
+    TEST_ASSERT_TRUE(caps.canWrite(InverterCapability::SetActivePowerLimit));
+    const auto& n = caps.numeric[static_cast<size_t>(
+        InverterCommandType::SetActivePowerLimitPercent)];
+    TEST_ASSERT_TRUE(n.writable);
+    // The bounds come from the row, so the dispatcher enforces what the register accepts rather
+    // than a number typed twice.
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, n.minimum);
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, n.maximum);
+}
+
+static void test_a_verified_row_writes_the_register_it_names() {
+    MockTransport transport;
+    echoWrites(transport);
+    GrowattProfile profile = profileWith(kTestWrites, 1);
+    GrowattOptions options;
+    options.unitId  = 2;
+    options.profile = &profile;
+    GrowattDriver driver(transport, options);
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 60.0;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, driver.execute(cmd));
+
+    // unit 2, FC06, register 3, value 60 -- the frame the profile row describes, not a frame
+    // that happens to be accepted.
+    TEST_ASSERT_EQUAL_UINT32(1, transport.writes.size());
+    const auto& f = transport.writes.back();
+    TEST_ASSERT_EQUAL_UINT8(0x02, f[0]);
+    TEST_ASSERT_EQUAL_UINT8(0x06, f[1]);
+    TEST_ASSERT_EQUAL_UINT16(3, (f[2] << 8) | f[3]);
+    TEST_ASSERT_EQUAL_UINT16(60, (f[4] << 8) | f[5]);
+}
+
+static void test_a_value_outside_the_row_bounds_never_reaches_the_bus() {
+    MockTransport transport;
+    echoWrites(transport);
+    GrowattProfile profile = profileWith(kTestWrites, 1);
+    GrowattOptions options;
+    options.profile = &profile;
+    GrowattDriver driver(transport, options);
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 150.0;
+    TEST_ASSERT_EQUAL(CommandResult::OutOfRange, driver.execute(cmd));
+    // Refused before the frame is built. An inverter asked for 150% is an inverter asked
+    // something meaningless, and finding out from its exception reply is finding out too late.
+    TEST_ASSERT_EQUAL_UINT32(0, transport.writes.size());
+}
+
+static void test_a_row_needing_write_multiple_is_refused_not_faked() {
+    MockTransport  transport;
+    GrowattProfile profile = profileWith(kMultiWordWrites, 1);
+    GrowattOptions options;
+    options.profile = &profile;
+    GrowattDriver driver(transport, options);
+
+    // The client speaks FC06 only. Sending a single-register write for a two-register row would
+    // put half a value in the device, which is worse than declining.
+    TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 60.0;
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, driver.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(0, transport.writes.size());
+}
+
+static void test_a_device_that_refuses_is_rejected_not_reported_as_a_fault() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 2) {
+            return false;
+        }
+        reply = {req[0], static_cast<uint8_t>(req[1] | 0x80), 0x02};  // illegal data address
+        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
+        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
+        reply.push_back(static_cast<uint8_t>(crc >> 8));
+        return true;
+    });
+    GrowattProfile profile = profileWith(kTestWrites, 1);
+    GrowattOptions options;
+    options.profile = &profile;
+    GrowattDriver driver(transport, options);
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 60.0;
+    // The bus worked perfectly and the device said no. Reporting that as a driver fault sends
+    // somebody to look at wiring.
+    TEST_ASSERT_EQUAL(CommandResult::Rejected, driver.execute(cmd));
+}
+
 // The active-power-limit row is research, not a control surface: it stays dormant until a
 // bench session sets verified = true AND the driver grows a write path (execute() still
 // returns Unsupported). Both gates are asserted here so neither can be dropped unnoticed.
@@ -720,6 +902,12 @@ int main(int, char**) {
     RUN_TEST(test_the_mic_profile_probes_3000_but_publishes_nothing_from_it);
     RUN_TEST(test_the_mic_profile_decodes_a_realistic_frame);
     RUN_TEST(test_the_mic_profile_converts_half_seconds_to_hours);
+    RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
+    RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
+    RUN_TEST(test_a_verified_row_writes_the_register_it_names);
+    RUN_TEST(test_a_value_outside_the_row_bounds_never_reaches_the_bus);
+    RUN_TEST(test_a_row_needing_write_multiple_is_refused_not_faked);
+    RUN_TEST(test_a_device_that_refuses_is_rejected_not_reported_as_a_fault);
     RUN_TEST(test_the_mic_power_limit_write_row_is_declared_but_dormant);
     return UNITY_END();
 }
