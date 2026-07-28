@@ -23,6 +23,38 @@ bool crcOk(const uint8_t* buf, size_t len) {
     return crc16(buf, len - 2) == bytes::le16(buf, len - 2);
 }
 
+/// The exception reply, which is the same frame whatever was asked.
+///
+/// unit + (function | 0x80) + code + CRC, five bytes, and every check on it is identical for a
+/// read and for a write. It was written out twice, and the two copies had NOT drifted -- but
+/// this is the path a device uses to say "I refuse", and a fix applied to one of two copies
+/// leaves the other quietly wrong. The function-code check below is exactly such a fix (#67).
+///
+/// A template because ReadResponse and WriteResponse are separate types that happen to carry
+/// the same three fields; giving them a shared base to avoid one template would be the larger
+/// change. The caller tests the exception flag first -- it has to, to know to come here at all
+/// -- and has already established len >= 5.
+template <typename Response>
+ParseResult parseExceptionFrame(const uint8_t* buf, uint8_t expectedUnit,
+                                uint8_t expectedFunction, Response& out) {
+    if (!crcOk(buf, 5)) {
+        return ParseResult::BadCrc;
+    }
+    if (buf[0] != expectedUnit) {
+        return ParseResult::WrongUnit;
+    }
+    // The echoed function (exception flag stripped) must match what we asked. Without this a
+    // stale or misrouted exception frame -- right unit, valid CRC, but for a different request
+    // -- would be accepted as the answer to this one on a shared multidrop bus.
+    if ((buf[1] & ~kExceptionFlag) != expectedFunction) {
+        return ParseResult::WrongFunction;
+    }
+    out.unitId        = buf[0];
+    out.functionCode  = buf[1];
+    out.exceptionCode = buf[2];
+    return ParseResult::Exception;
+}
+
 }  // namespace
 
 uint16_t crc16(const uint8_t* data, size_t len) {
@@ -99,6 +131,7 @@ size_t expectedReadResponseLength(uint16_t quantity) {
     return 5 + static_cast<size_t>(quantity) * 2;  // unit + fn + bytecount + data + crc
 }
 
+
 ParseResult parseReadResponse(const uint8_t* buf, size_t len, uint8_t expectedUnit,
                               uint8_t expectedFunction, uint16_t* regsOut, size_t regsCapacity,
                               ReadResponse& out) {
@@ -109,22 +142,7 @@ ParseResult parseReadResponse(const uint8_t* buf, size_t len, uint8_t expectedUn
     // Exception first: it is 5 bytes, so demanding the full data-frame length would stall on a
     // device that is trying to tell us the request was illegal.
     if ((buf[1] & kExceptionFlag) != 0) {
-        if (!crcOk(buf, 5)) {
-            return ParseResult::BadCrc;
-        }
-        if (buf[0] != expectedUnit) {
-            return ParseResult::WrongUnit;
-        }
-        // The echoed function (exception flag stripped) must match what we asked. Without this
-        // a stale or misrouted exception frame -- right unit, valid CRC, but for a different
-        // request -- would be accepted as the answer to this one on a shared multidrop bus.
-        if ((buf[1] & ~kExceptionFlag) != expectedFunction) {
-            return ParseResult::WrongFunction;
-        }
-        out.unitId        = buf[0];
-        out.functionCode  = buf[1];
-        out.exceptionCode = buf[2];
-        return ParseResult::Exception;
+        return parseExceptionFrame(buf, expectedUnit, expectedFunction, out);
     }
 
     const uint8_t byteCount = buf[2];
@@ -169,22 +187,7 @@ ParseResult parseWriteResponse(const uint8_t* buf, size_t len, uint8_t expectedU
         return ParseResult::Incomplete;
     }
     if ((buf[1] & kExceptionFlag) != 0) {
-        if (!crcOk(buf, 5)) {
-            return ParseResult::BadCrc;
-        }
-        if (buf[0] != expectedUnit) {
-            return ParseResult::WrongUnit;
-        }
-        // The echoed function (exception flag stripped) must match what we asked. Without this
-        // a stale or misrouted exception frame -- right unit, valid CRC, but for a different
-        // request -- would be accepted as the answer to this one on a shared multidrop bus.
-        if ((buf[1] & ~kExceptionFlag) != expectedFunction) {
-            return ParseResult::WrongFunction;
-        }
-        out.unitId        = buf[0];
-        out.functionCode  = buf[1];
-        out.exceptionCode = buf[2];
-        return ParseResult::Exception;
+        return parseExceptionFrame(buf, expectedUnit, expectedFunction, out);
     }
     if (len < 8) {
         return ParseResult::Incomplete;
