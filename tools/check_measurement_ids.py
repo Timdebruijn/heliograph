@@ -74,7 +74,9 @@ def check_dashboard_labels(root: pathlib.Path, body: str) -> int:
     if missing:
         print("FAIL: no dashboard row for: " + ", ".join(missing))
     if unknown:
-        print("FAIL: dashboard row for an id that does not exist: " + ", ".join(unknown))
+        print(
+            "FAIL: dashboard row for an id that does not exist: " + ", ".join(unknown)
+        )
     if missing or unknown:
         return 1
     print(f"dashboard measurement rows: OK ({len(labelled)} ids)")
