@@ -93,6 +93,13 @@ jobs:
       - name: Embedded JS syntax
         run: python3 tools/check_web_js.py
 
+      # The firmware build runs this too, but that job does not run on every push. Here it is
+      # the only thing standing between a page and its stripped, gzipped copy: the script
+      # refuses to emit if a <script>/<style> tag went missing or the page lost more than 70%
+      # of its bytes, and those are the ways a line-based filter breaks a page quietly.
+      - name: Web assets strip + gzip
+        run: python3 tools/build_web.py
+
       # Renders the dashboard in the Chrome that ships with the runner image and asserts its
       # LAYOUT. 0.18.0 shipped a table that broke every row onto a second line and nothing
       # caught it -- the suite asserts what the page says, never how it comes out.
