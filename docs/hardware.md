@@ -170,6 +170,12 @@ carries:
 **Start with the cause and the address.** `LoadProhibited` at `0x00000000` is a null dereference
 and needs no ELF, no cable and no symbol lookup to read. Most crashes are answered right there.
 
+**A null `coredump_cause` does not mean the dump is useless.** It means the panic was not a CPU
+exception — an abort, a failed assert, a watchdog — and those leave the IDF's exception fields
+zeroed. The backtrace is still there and is still the answer. Cause `0` is reported as *no*
+cause deliberately: `0` is `IllegalInstruction` on the ISA, but an abort looks identical in this
+struct, and naming one after the other would invent a fault that did not happen.
+
 **`coredump_pc` is not the fault.** It is where the panic handler was running, so decoding it
 tends to land somewhere in the IDF's own cache or panic code and explain nothing. It is reported
 because it is what the summary provides, not because it is the useful field — that is
@@ -180,7 +186,27 @@ backtrace: sixteen addresses that never change, republished every interval, are 
 for something nobody reads in Home Assistant. Prometheus exports `heliograph_coredump_present`
 as a 0/1 to alert on, and Modbus register 828 carries the same flag.
 
-To resolve the backtrace to file and line, or to pull the dump itself:
+### Resolving the backtrace
+
+The addresses are offsets into the image that was **running**, so you need that image's ELF.
+Every release publishes one per board:
+
+```bash
+gh release download v0.21.1 --pattern 'heliograph-*-rs485-can.elf.gz'
+gunzip heliograph-0.21.1-rs485-can.elf.gz
+xtensa-esp32s3-elf-addr2line -pfiaC -e heliograph-0.21.1-rs485-can.elf 0x420529B7 0x420506CD
+```
+
+The toolchain lives at
+`~/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-addr2line`.
+
+**Rebuilding the tag is not a substitute.** It produces a different layout, and the addresses
+then land in unrelated functions that decode perfectly and mean nothing — tried on a real dump
+from this bridge, against two candidate tags, and both gave call chains that could not exist.
+If the release predates ELF publishing (before 0.21.1), the dump cannot be resolved. Clear it
+and wait for one that can.
+
+To pull the dump itself, with a cable:
 
 ```bash
 python -m esp_coredump --chip esp32s3 --port /dev/tty.usbmodem* info_corefile .pio/build/waveshare-rs485-can/firmware.elf

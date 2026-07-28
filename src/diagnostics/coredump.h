@@ -47,7 +47,14 @@ struct CoredumpSummary {
     /// in the summary the firmware already read and were thrown away.
     uint32_t exceptionCause = 0;
     uint32_t faultAddress   = 0;
-    bool     causeKnown     = false;  ///< false when the dump carries no extra info at all
+    /// False when the dump records no usable cause. A cause of 0 counts as none: 0 is
+    /// EXCCAUSE_ILLEGAL on the ISA, but an abort, a failed assert or a watchdog leaves the
+    /// whole field zeroed, and naming that "IllegalInstruction" invents a fault.
+    bool causeKnown = false;
+    /// False when the cause is not one that HAS a faulting address. exc_vaddr is what a load or
+    /// a store reached for; on any other cause it is leftover, and a 0 there reads exactly like
+    /// a null-pointer dereference without being one.
+    bool faultAddressKnown = false;
 
     /// The call stack at the moment of the fault, innermost first.
     ///

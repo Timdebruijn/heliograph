@@ -173,20 +173,26 @@ inline void writeDiagnostics(JsonObject doc, const DiagnosticsSnapshot& d,
     //
     // Null, not 0, when the dump carries no extra info: 0 is a real cause (IllegalInstruction)
     // and a real address, so neither can double as "unknown".
+    // Two separate questions, and conflating them is what put "IllegalInstruction at 0x00000000"
+    // on a dump that was an abort. Whether a CAUSE was recorded, and whether that cause is one
+    // that HAS a faulting address, are not the same thing.
     if (bridge.coredumpPresent && bridge.coredumpCauseKnown) {
-        const char* name       = diag::exceptionCauseName(bridge.coredumpCause);
-        doc["coredump_cause"]  = bridge.coredumpCause;
+        doc["coredump_cause"] = bridge.coredumpCause;
         // The number stays alongside the name: a cause this table does not know is still worth
         // reporting, and a reader with the Xtensa manual can look it up.
+        const char* name = diag::exceptionCauseName(bridge.coredumpCause);
         if (name != nullptr) {
             doc["coredump_cause_name"] = name;
         } else {
             doc["coredump_cause_name"] = nullptr;
         }
+    } else {
+        doc["coredump_cause"]      = nullptr;
+        doc["coredump_cause_name"] = nullptr;
+    }
+    if (bridge.coredumpPresent && bridge.coredumpFaultAddressKnown) {
         doc["coredump_fault_address"] = bridge.coredumpFaultAddress;
     } else {
-        doc["coredump_cause"]         = nullptr;
-        doc["coredump_cause_name"]    = nullptr;
         doc["coredump_fault_address"] = nullptr;
     }
     doc["wifi_connected"] = bridge.wifiConnected;

@@ -63,7 +63,36 @@ CoredumpSummary readCoredumpSummary() {
     // into "a null dereference on a load" before anything is decoded.
     out.exceptionCause = summary.ex_info.exc_cause;
     out.faultAddress   = summary.ex_info.exc_vaddr;
-    out.causeKnown     = true;
+
+    // A CAUSE OF 0 IS TREATED AS NO CAUSE, and that is a deliberate trade.
+    //
+    // 0 is EXCCAUSE_ILLEGAL on the ISA, so this gives up the ability to name a genuine illegal
+    // instruction. It is still right: a panic that is not a CPU exception at all -- an abort, a
+    // failed assert, a watchdog -- leaves the whole ex_info zeroed, and that is far and away
+    // the common case. Reporting a zeroed field as "IllegalInstruction at 0x00000000" invents
+    // a fault, which is the one thing this project does not do with a reading.
+    //
+    // Found on a real dump from a production bridge: cause 0, vaddr 0, and a fault PC inside
+    // the chip's own ROM. An illegal instruction in Espressif's ROM is not a thing that
+    // happens; an abort walking out through the panic handler is (2026-07-28).
+    out.causeKnown = summary.ex_info.exc_cause != 0;
+
+    // The faulting address only means something for a fault that HAS one. exc_vaddr is the
+    // address a load or a store reached for; on a divide-by-zero or an illegal instruction it
+    // is whatever happened to be in the field, and 0 there is noise wearing the shape of a
+    // null-pointer dereference.
+    switch (summary.ex_info.exc_cause) {
+        case 3:   // LoadStoreError
+        case 9:   // UnalignedLoadStore
+        case 26:  // LoadStoreRing
+        case 28:  // LoadProhibited
+        case 29:  // StoreProhibited
+            out.faultAddressKnown = true;
+            break;
+        default:
+            out.faultAddressKnown = false;
+            break;
+    }
 
     // The call stack, innermost first. Bounded by BOTH the reported depth and the array size:
     // depth comes out of a dump that has already survived a crash, and trusting it alone would

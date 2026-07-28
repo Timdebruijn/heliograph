@@ -1928,24 +1928,65 @@ static void test_a_crash_reports_why_and_where_without_an_elf() {
     TEST_ASSERT_EQUAL_UINT32(0x42011AF0, doc["coredump_backtrace"][0].as<uint32_t>());
 }
 
-static void test_cause_zero_is_a_cause_not_an_absence() {
+// This test used to assert the OPPOSITE, and was right on the ISA and wrong in practice.
+//
+// 0 is EXCCAUSE_ILLEGAL, so yesterday it was reported as "IllegalInstruction". Then a real dump
+// arrived: the EverSolar bridge had cause 0, vaddr 0, and a fault PC of 0x4037DAA9 -- inside
+// the chip's ROM. An illegal instruction in Espressif's own ROM does not happen; an abort, a
+// failed assert or a watchdog walking out through the panic handler does, and every one of
+// those leaves the whole ex_info zeroed.
+//
+// So a zero cause is reported as no cause. The trade is real and worth stating: a genuine
+// illegal instruction now goes unnamed. Naming an abort after a fault it did not have is worse,
+// and inventing a reading is the one thing this project does not do.
+static void test_a_zero_cause_is_reported_as_no_cause() {
     Rig  r;
     auto bridge                 = makeBridge();
     bridge.coredumpPresent      = true;
-    bridge.coredumpCause        = 0;  // EXCCAUSE_ILLEGAL, a real fault
+    bridge.coredumpTask         = "loopTask";
+    bridge.coredumpCause        = 0;
     bridge.coredumpFaultAddress = 0;
-    bridge.coredumpCauseKnown   = true;
+    bridge.coredumpCauseKnown   = false;  // what the reader now decides for a zero cause
 
-    // 0 is a legitimate cause AND a legitimate faulting address, so neither may double as
-    // "unknown". causeKnown is what carries that, and this is the test that stops someone
-    // simplifying it away later.
     std::string json;
     TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
     auto doc = parse(json);
-    TEST_ASSERT_FALSE(doc["coredump_cause"].isNull());
-    TEST_ASSERT_EQUAL_UINT32(0, doc["coredump_cause"].as<uint32_t>());
-    TEST_ASSERT_EQUAL_STRING("IllegalInstruction", doc["coredump_cause_name"].as<const char*>());
-    TEST_ASSERT_FALSE(doc["coredump_fault_address"].isNull());
+    TEST_ASSERT_TRUE(doc["coredump_present"].as<bool>());
+    TEST_ASSERT_TRUE(doc["coredump_cause"].isNull());
+    TEST_ASSERT_TRUE(doc["coredump_cause_name"].isNull());
+    TEST_ASSERT_TRUE(doc["coredump_fault_address"].isNull());
+}
+
+// A faulting address belongs to a fault that HAS one. exc_vaddr is what a load or a store
+// reached for; on a divide-by-zero it is leftover, and a 0 there reads exactly like a null
+// dereference without being one.
+static void test_a_fault_address_is_only_reported_where_it_means_something() {
+    Rig  r;
+    auto withAddress                 = makeBridge();
+    withAddress.coredumpPresent      = true;
+    withAddress.coredumpCause        = 28;  // LoadProhibited: vaddr is the address it read
+    withAddress.coredumpFaultAddress = 0x0000002C;
+    withAddress.coredumpCauseKnown   = true;
+    withAddress.coredumpFaultAddressKnown = true;
+
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), withAddress, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(0x2C, doc["coredump_fault_address"].as<uint32_t>());
+
+    auto without                 = makeBridge();
+    without.coredumpPresent      = true;
+    without.coredumpCause        = 6;  // DivideByZero: no address is involved
+    without.coredumpFaultAddress = 0;
+    without.coredumpCauseKnown   = true;
+    without.coredumpFaultAddressKnown = false;
+
+    std::string json2;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), without, json2));
+    auto doc2 = parse(json2);
+    // The cause survives; only the address that does not apply is withheld.
+    TEST_ASSERT_EQUAL_STRING("DivideByZero", doc2["coredump_cause_name"].as<const char*>());
+    TEST_ASSERT_TRUE(doc2["coredump_fault_address"].isNull());
 }
 
 static void test_a_dump_without_extra_info_reports_null_not_zero() {
@@ -2581,7 +2622,8 @@ int main(int, char**) {
     RUN_TEST(test_coredump_is_reported_when_one_is_stored);
     RUN_TEST(test_coredump_details_are_null_when_none_is_stored);
     RUN_TEST(test_a_crash_reports_why_and_where_without_an_elf);
-    RUN_TEST(test_cause_zero_is_a_cause_not_an_absence);
+    RUN_TEST(test_a_zero_cause_is_reported_as_no_cause);
+    RUN_TEST(test_a_fault_address_is_only_reported_where_it_means_something);
     RUN_TEST(test_a_dump_without_extra_info_reports_null_not_zero);
     RUN_TEST(test_an_unknown_cause_keeps_its_number);
     RUN_TEST(test_a_nameless_coredump_still_reports_present);

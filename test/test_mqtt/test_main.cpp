@@ -344,8 +344,9 @@ static void test_the_backtrace_stays_off_the_mqtt_payload() {
     bridge.coredumpPresent      = true;
     bridge.coredumpCause        = 29;  // EXCCAUSE_STORE_PROHIBITED
     bridge.coredumpFaultAddress = 0x0000000C;
-    bridge.coredumpCauseKnown   = true;
-    bridge.coredumpBacktrace    = {0x42011AF0, 0x42010C34};
+    bridge.coredumpCauseKnown        = true;
+    bridge.coredumpFaultAddressKnown = true;  // StoreProhibited genuinely has one
+    bridge.coredumpBacktrace         = {0x42011AF0, 0x42010C34};
 
     std::string json;
     TEST_ASSERT_TRUE(buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));

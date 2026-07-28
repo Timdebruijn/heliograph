@@ -148,6 +148,19 @@ jobs:
       #
       # if-no-files-found: error rather than the default warning. A silently empty artifact would
       # surface three steps later as a cp that cannot find its source, in the job that publishes.
+      # The ELF is what turns a crash dump's backtrace into file and line, and it is thrown away
+      # everywhere else. A dump names addresses in the image that was RUNNING, so the ELF has to
+      # be the one that shipped -- rebuilding the tag afterwards does not reproduce the layout
+      # closely enough, which is exactly how a real dump on the EverSolar bridge became
+      # undecodable (2026-07-28).
+      #
+      # Compressed because it is ~33 MB of mostly debug information and gzips to a fraction of
+      # that. Three boards uncompressed would be 100 MB of release storage per tag, for a file
+      # most releases never need.
+      - name: Compress the ELF for the release
+        run: gzip -9 -c .pio/build/waveshare-${{ matrix.board }}/firmware.elf
+             > .pio/build/waveshare-${{ matrix.board }}/firmware.elf.gz
+
       - name: Upload images
         uses: actions/upload-artifact@v7
         with:
@@ -155,6 +168,7 @@ jobs:
           path: |
             .pio/build/waveshare-${{ matrix.board }}/firmware.bin
             .pio/build/waveshare-${{ matrix.board }}/firmware.factory.bin
+            .pio/build/waveshare-${{ matrix.board }}/firmware.elf.gz
           if-no-files-found: error
           retention-days: 1
 
@@ -200,6 +214,9 @@ jobs:
             cp "fw/fw-${board}/firmware.bin" "dist/heliograph-${VERSION}-${board}.bin"
             cp "fw/fw-${board}/firmware.factory.bin" \
                "dist/heliograph-${VERSION}-${board}-factory.bin"
+            # Debug symbols for this exact image. Only useful with a crash dump, which is why it
+            # is not on the flasher site -- it is a release asset you fetch when you need it.
+            cp "fw/fw-${board}/firmware.elf.gz" "dist/heliograph-${VERSION}-${board}.elf.gz"
           done
           ls -l dist
 
