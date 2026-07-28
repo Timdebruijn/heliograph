@@ -171,6 +171,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             name = path[len("/api/v1/") :].strip("/")
             payload = self.data.get(name)
             if payload is None:
+                # 404 covers two cases and wants to for both: an endpoint that was not captured
+                # (a bridge with no stored capture answers the same), and /api/v1/events, which
+                # the page opens as an EventSource. Failing that one FAST matters -- left
+                # hanging, the browser stays busy past the virtual-time budget and the
+                # screenshot catches a half-drawn page.
                 self.send_error(404)
                 return
             body = json.dumps(payload).encode()
@@ -180,13 +185,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if path == "/api/v1/events":
-            # The page opens an EventSource. Answering 404 lets it fail fast and render from the
-            # REST payloads; leaving the request hanging would keep the browser busy past the
-            # virtual-time budget and the screenshot would catch a half-drawn page.
-            self.send_error(404)
-            return
-
         tab = ""
         if "?" in self.path:
             tab = dict(
@@ -233,6 +231,11 @@ def main() -> int:
         "--bridge", help="host to capture fresh data from, e.g. 192.168.20.254"
     )
     parser.add_argument("--out", default="docs/images", help="where the PNGs go")
+    parser.add_argument(
+        "--fixture",
+        default=str(FIXTURE),
+        help="captured data to render from; --bridge OVERWRITES this file",
+    )
     parser.add_argument("--width", type=int, default=1100)
     parser.add_argument("--height", type=int, default=900)
     args = parser.parse_args()
@@ -240,6 +243,11 @@ def main() -> int:
     out_dir = ROOT / args.out
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Explicit rather than derived from --out. Capturing writes the fixture, and the first
+    # version wrote the COMMITTED one whatever --out said -- so a run aimed at a scratch
+    # directory quietly rewrote a repository file. Noticed only because a mid-test restore from
+    # a backup was needed and the reason was not obvious.
+    fixture = pathlib.Path(args.fixture)
     if args.bridge:
         print(f"capturing from {args.bridge}")
         data = capture(args.bridge)
@@ -255,12 +263,13 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        FIXTURE.write_text(json.dumps(data, indent=2) + "\n")
-        print(f"  sanitised fixture written to {FIXTURE.relative_to(ROOT)}")
+        fixture.parent.mkdir(parents=True, exist_ok=True)
+        fixture.write_text(json.dumps(data, indent=2) + "\n")
+        print(f"  sanitised fixture written to {fixture}")
     else:
-        if not FIXTURE.exists():
-            raise SystemExit(f"no fixture at {FIXTURE}; run once with --bridge <host>")
-        data = json.loads(FIXTURE.read_text())
+        if not fixture.exists():
+            raise SystemExit(f"no fixture at {fixture}; run once with --bridge <host>")
+        data = json.loads(fixture.read_text())
 
     Handler.page = extract_page()
     Handler.data = data
