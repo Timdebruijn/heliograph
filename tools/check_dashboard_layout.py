@@ -1,34 +1,28 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 #
-# Renders part of the dashboard in a real browser and asserts its LAYOUT, not its pixels.
+# Renders the Live tab in headless Chrome and asserts its LAYOUT and its battery semantics.
 #
-# SCOPE, stated plainly because a green tick here is easy to over-read: this covers the
-# per-inverter fleet strip and nothing else. The status cards, the settings tab, the logs tab
-# and the setup portal are NOT rendered by it. It is named for the file it may grow into, not
-# for the ground it currently covers -- and the CI step is named for the strip, so a passing
-# check does not quietly claim the page is fine.
+# WHY A BROWSER
 #
-# Two invariants. Per CELL, not per row: a numeric cell or a column header must occupy one
-# line -- rows are deliberately NOT compared, because the device-name cell is two lines by
-# design when a device has a label. And per WIDTH: the strip must be a table where one fits and
-# a stack of labelled blocks where it does not, with nothing hidden either way.
+# The rest of the suite asserts what the page SAYS. 0.18.0 shipped a fleet strip that said all
+# the right things and broke every row onto a second line, and nothing caught it; 0.19.1 shipped
+# one that fitted and scrolled sideways anyway. Both are questions only a layout engine can
+# answer, so this one boots a real one.
 #
-# 0.18.0 shipped a table that scrolled sideways and broke every cell onto a second line, and
-# nothing caught it: the tests assert what the page SAYS, never how it comes out. It was found
-# by eye, on hardware, minutes after the tag.
+# WHAT IT RENDERS
 #
-# Deliberately not a screenshot comparison. A committed baseline image would have to survive a
-# different font stack on a CI runner than on the machine that generated it, and a check that
-# cries wolf gets switched off -- which is worse than not having it. What broke in 0.18.0 was a
-# layout INVARIANT ("a cell is one line tall"), and an invariant can be asserted directly:
-# relative geometry, no reference image, no font dependency.
+# The page as the DEVICE SERVES IT: pulled out of the raw string literal and put through
+# tools/build_web.py's stripper, which is what gzips into flash. Rendering the authored source
+# instead would leave the one transformation between source and screen untested -- and that
+# stripper deletes lines for a living.
 #
-# The page asserts itself. A script appended to the document runs the checks against real
-# computed geometry and writes the verdict into the DOM; Chrome is asked for the rendered DOM
-# and this reads the verdict out. That avoids a DevTools-protocol client or a headless-browser
-# library -- a dependency this project does not otherwise need, for a job that one <script>
-# already does.
+# The fleet comes from tools/demo_fleet.js: three inverters, one of which never replied. No
+# bridge on this desk has that fleet, which is the point.
+#
+# No browser is installed by this script on purpose. It fails loudly when it cannot find one, so
+# a runner image that stops shipping Chrome shows up as a red check rather than as a layout
+# check that quietly stopped rendering anything.
 
 import pathlib
 import re
@@ -37,201 +31,110 @@ import subprocess
 import sys
 import tempfile
 
-SOURCE = "src/web/assets/index_html.h"
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import build_web  # noqa: E402
 
-# Phone, small tablet, laptop. The first two are where a six-column strip cannot fit and the
-# layout has to hold up by scrolling rather than by folding -- and they are the ones that catch
-# the 0.18.0 regression. 1200 does NOT catch it and is not expected to: at that width the
-# broken table fitted and never wrapped. It is here to guard the opposite failure, something
-# that only misbehaves when there is room to spare. 780 sits just above the fold-over, which is
-# exactly where an off-by-one between the CSS and this file would show up -- and did.
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+# Phone, small tablet, laptop, desktop. The narrow ones are where a row cannot fit and the
+# layout has to hold up by wrapping rather than by overflowing -- they are what catches the
+# 0.18.0 class of bug. 1000 and 1200 guard the opposite failure, the one Tim reported after
+# 0.19.1: something that only misbehaves when there is room to spare.
 WIDTHS = (390, 700, 780, 1000, 1200)
 
-# The payload that broke it: a hybrid reporting a battery, which is what makes the widest
-# column appear at all. Two devices, one of them with a deliberately long label, so the widest
-# realistic name is exercised rather than the neatest one.
+# Battery states, and what each must be able to say for itself. Rendered from the same page at
+# one width, because these are semantics and not layout.
 #
-# WIDTHS matter more than anything else here, and this is the thing the first version of this
-# file got wrong. Rendered at 900px the broken 0.18.0 table PASSED -- its min-width was 860, so
-# it fitted and never had to wrap. The bug only bites where the table is asked to fit into less
-# room than its content needs, which is the phone and tablet case it was reported on. Checking
-# one comfortable width proves nothing; the narrow ones are the whole point.
-FLEET = """[
-  {"id":"inverter-A","label":"Dak huis","online":true,"data_valid":true,"data_stale":false,
-   "last_successful_poll_seconds_ago":2,"ac_power_w":2310,"energy_today_kwh":12.5,
-   "ac_voltage_v":230.4,"temperature_c":41.2,"battery_soc_pct":64,"battery_power_w":2450},
-  {"id":"inverter-B","label":"Schuur achter met een lange naam","online":true,
-   "data_valid":true,"data_stale":false,"last_successful_poll_seconds_ago":12,
-   "ac_power_w":880,"energy_today_kwh":4.25,"ac_voltage_v":229.1,"temperature_c":38.0,
-   "battery_soc_pct":40,"battery_power_w":-1180}
-]"""
+# Direction is carried by an ARROW as well as a colour, so it survives a reader who cannot tell
+# the red from the green, and the sign of the number never has to be decoded. Asserting only the
+# colour would let a future change drop the arrow and leave the meaning in a hue.
+BATTERY_CASES = [
+    # (label, soc, power, must contain, must NOT contain)
+    ("discharging", 68, -1240, ["↑", "var(--ok)", 'title="discharging"'], ["-1240"]),
+    ("charging", 41, 1500, ["↓", "var(--bad)", 'title="charging"'], []),
+    # A trickle that rounds away must not claim a direction next to a zero.
+    ("idle", 55, 0.4, ["idle"], ["charging at 0 W", "discharging at 0 W"]),
+]
 
-PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>%(style)s</style></head>
-<body><div id="host" style="width:%(width)spx"></div>
-<script>
-const fmt=(v,d)=>Number(v).toFixed(d);
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-%(script)s
-document.getElementById('host').innerHTML=fleetStrip(%(fleet)s);
+# Runs after the page has painted. Verdict goes in document.title, which --dump-dom gives back.
+#
+# Scoped in an IIFE, and not for tidiness: the page has its own top-level say(), and a bare
+# `const say` here is a SyntaxError that kills the whole script -- which reports as "the page
+# did not run" and points at everything except the collision.
+ASSERT_JS = r"""
+(function(){
+const fail = [];
+const say = m => fail.push(m);
 
-const fail=[];
-const strip=document.querySelector('#host table');
-if(!strip){ fail.push('no table rendered'); }
-else {
-  // How many LINES does each cell's text occupy? A Range over the cell's contents returns one
-  // client rect per line box, so this counts wrapping directly -- no height ratio, no pixel
-  // tolerance, nothing that depends on the runner's font metrics.
-  //
-  // The first version of this file compared cell HEIGHTS against the shortest cell and allowed
-  // 1.6x. That silently passed the real 0.18.0 regression: padding does not double when the
-  // text does, so a wrapped cell measured 74px against 57px -- 1.3x, comfortably inside the
-  // tolerance. A check that lets the bug it was written for through is worse than no check,
-  // which is why this one is mutation-tested against the broken revision.
-  //
-  // Rects are MERGED BY VERTICAL OVERLAP, not bucketed by position. A cell holding the
-  // "Last reply" pill yields two rects on one line -- the span's padded box at top 79 height
-  // 19, and its text at top 82 height 13 -- which overlap and are plainly the same line. An
-  // earlier version rounded tops into buckets and split those two into "2 lines", failing a
-  // page that was correct. Overlap is what "same line" means; rounding is a guess at it.
-  const lineCount=el=>{
-    const r=document.createRange();
-    r.selectNodeContents(el);
-    const rects=[...r.getClientRects()]
-      .filter(x=>x.width>0 && x.height>0)
-      .sort((a,b)=>a.top-b.top);
-    let lines=0, bottom=-Infinity;
-    for(const x of rects){
-      if(x.top>=bottom){ lines++; bottom=x.bottom; }
-      else { bottom=Math.max(bottom,x.bottom); }
-    }
-    return Math.max(lines,1);
-  };
-  // Numbers and headers. Not the device-name cell: it is DELIBERATELY two lines when a device
-  // has a label, with the id underneath in small type.
-  const cells=[...strip.querySelectorAll('td.n'), ...strip.querySelectorAll('th')];
-  if(cells.length===0){ fail.push('no cells found to measure'); }
-  for(const c of cells){
-    const lines=lineCount(c);
-    if(lines>1){
-      fail.push('wraps onto '+lines+' lines: "'+c.textContent.trim().slice(0,40)+'"');
-    }
+// How many LINES an element's text occupies. Not getClientRects().length: an element holding
+// several inline children yields one rect per child, so a pill that reads as one line counts as
+// two. Rects that overlap vertically are the same line.
+function lines(el){
+  const rects=[...el.getClientRects()].filter(r=>r.width>0&&r.height>0);
+  const rows=[];
+  for(const r of rects.sort((a,b)=>a.top-b.top)){
+    const row=rows.find(x=>Math.min(x.bottom,r.bottom)-Math.max(x.top,r.top) > r.height*0.5);
+    if(row){ row.top=Math.min(row.top,r.top); row.bottom=Math.max(row.bottom,r.bottom); }
+    else rows.push({top:r.top,bottom:r.bottom});
   }
-  // The strip is allowed to scroll sideways -- that is a deliberate decision. The PAGE is not:
-  // a document that scrolls horizontally means something escaped its container.
-  if(document.documentElement.scrollWidth > document.documentElement.clientWidth){
-    fail.push('the document scrolls horizontally: '
-      +document.documentElement.scrollWidth+' > '+document.documentElement.clientWidth);
-  }
-  // TWO SHAPES, and which one is correct depends on the width. Below the fold-over the strip
-  // must stack into one block per inverter and NOT scroll sideways -- that shape exists because
-  // at 390px the table showed the device names and nothing else, every reading behind a
-  // scrollbar. Above it the table must stay a table, because comparing four inverters by
-  // scanning one column is the thing the stack cannot do.
-  const stacked=getComputedStyle(strip).display==='block';
-  // Measured on the HOST, not the window: the container query keys off the strip's own width,
-  // so anything else would be asserting against a different number than the CSS reads. The
-  // window is deliberately wider than the host so a scrollbar never counts as the page
-  // overflowing.
-  //
-  // The threshold is READ OUT OF THE STYLESHEET, never written here. It was hard-coded as 800
-  // while the CSS folded at 760, which left a 40px band where this check demanded blocks and
-  // the CSS produced a table -- a spurious failure that only stayed hidden because the three
-  // tested widths happened to miss it. Two numbers that have to mean the same thing are one
-  // number too many.
-  // Measured on the element that IS the container -- the card fleetStrip emits with class
-  // "strip" -- and not on the host around it. The container query reads that box's INNER width,
-  // so the card's own padding is part of the sum. An earlier form measured the host and put
-  // class="strip" on it as well, which made the harness disagree with the product in two ways
-  // at once: a second nested container, and a width the CSS was never looking at. It showed up
-  // as a fold at 780px that the stylesheet did not ask for.
-  const container=strip.closest('.strip');
-  if(container===null){ fail.push('the strip is not inside a query container'); }
-  // The CONTENT box, which is the box a container query evaluates against -- not clientWidth,
-  // which includes the card's padding. Off by exactly that padding, this expected a table at
-  // 780px while the stylesheet had already folded, because the card's inner width was 752.
-  const cs=container?getComputedStyle(container):null;
-  const inner=container
-    ? container.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
-    : 0;
-  //
-  // WHICH SHAPE IS REQUIRED is this file's own judgement at the extremes, and only a reading of
-  // the stylesheet in between. Deriving it entirely from the CSS made the check validate the
-  // stylesheet against itself: set the fold-over to 1px and it read that same 1, expected a
-  // table everywhere, got one, and passed a build where the fold never happened -- the very
-  // regression it exists to catch. Found by mutation-testing it, not by reading it.
-  //
-  // So: a phone must stack whatever the CSS says, a laptop must not, and between those two the
-  // stylesheet's own threshold decides.
-  const REQUIRE_STACKED_AT=440;   // no phone may be shown the table
-  const REQUIRE_TABLE_AT=1000;    // no laptop may be shown fragments
-  const wide=inner > %(fold)s;
-  if(inner<=REQUIRE_STACKED_AT && !stacked){
-    fail.push('still a table at '+Math.round(inner)+'px: a phone cannot show it, and every'
-      +' reading ends up behind a scrollbar');
-  } else if(inner>=REQUIRE_TABLE_AT && stacked){
-    fail.push('folded into blocks at '+Math.round(inner)+'px, where the table fits and lets'
-      +' four inverters be compared down one column');
-  } else if(inner>REQUIRE_STACKED_AT && inner<REQUIRE_TABLE_AT){
-    // In between, either shape is defensible and the stylesheet decides -- but it must decide
-    // CONSISTENTLY with the threshold it declares.
-    if(wide && stacked){ fail.push('folded above its own declared fold-over width'); }
-    if(!wide && !stacked){ fail.push('still a table below its own declared fold-over width'); }
-  }
-
-  if(stacked){
-    // Nothing may scroll sideways here. The fold exists precisely to remove that scroll, so a
-    // stacked strip that still overflows has not actually solved anything.
-    for(const el of [strip, strip.parentElement]){
-      if(el.scrollWidth > el.clientWidth + 1){
-        fail.push('the stacked strip still scrolls sideways: '
-          +el.scrollWidth+' > '+el.clientWidth);
-        break;
-      }
-    }
-    // Every value must carry its own label once the header row is gone, or a block is a column
-    // of unlabelled numbers. This is what separates folding from hiding.
-    const unlabelled=[...strip.querySelectorAll('td.n')].filter(c=>!c.dataset.label);
-    if(unlabelled.length){
-      fail.push(unlabelled.length+' stacked cells have no label: "'
-        +unlabelled[0].textContent.trim().slice(0,30)+'"');
-    }
-  } else {
-    // A table at a laptop width must FIT. It may scroll -- that is the deliberate fallback for
-    // a bus wide enough to need it -- but a four-device strip on a 1200px screen scrolling is
-    // the regression Tim reported after 0.19.1: a min-width held it at 1025px when the content
-    // needed 870, so every width between those two scrolled for no reason.
-    // Runs whenever the SHAPE is a table and there is real room -- not only above
-    // REQUIRE_TABLE_AT, which the card's own padding puts out of reach at a 1000px screen and
-    // which is why the first version of this assertion never ran where the bug lived. Just
-    // above the fold-over a table may still scroll: that is the honest fallback for a width
-    // where the content genuinely does not fit. A comfortable margin above it may not.
-    const box=strip.parentElement;
-    if(inner>%(fold)s+150 && box.scrollWidth>box.clientWidth+1){
-      fail.push('the table scrolls sideways at '+Math.round(inner)+'px, where it should fit: '
-        +box.scrollWidth+' > '+box.clientWidth);
-    }
-    // The legend must not slide out of view with the table. Asserted as BEHAVIOUR, not as
-    // structure: an earlier form required the table's immediate parent to be the scroller,
-    // which one extra wrapper div would have broken while the page stayed correct.
-    let scroller=strip.parentElement;
-    while(scroller && scroller.id!=='host' && getComputedStyle(scroller).overflowX!=='auto'){
-      scroller=scroller.parentElement;
-    }
-    if(!scroller || scroller.id==='host'){
-      fail.push('the table has no horizontally scrollable ancestor: it will squeeze instead');
-    } else {
-      const legend=[...strip.closest('.card').querySelectorAll('div')]
-        .find(d=>d.textContent.includes('power going into the battery'));
-      if(!legend){
-        fail.push('the battery column renders without the legend that explains its arrows');
-      } else if(scroller.contains(legend)){
-        fail.push('the legend sits inside the scrolling area and slides away with the table');
-      }
-    }
-  }
+  return rows.length;
 }
-document.title = fail.length ? 'LAYOUT-FAIL ' + fail.join(' || ') : 'LAYOUT-OK';
-</script></body></html>"""
+
+function check(){
+  const rows=[...document.querySelectorAll('.fleetrow')];
+  if(rows.length!==3){ say('expected 3 fleet rows, rendered '+rows.length); return true; }
+
+  // THE original complaint, and the one thing that must hold at every width: the page itself
+  // may not scroll sideways. Asserted on the document rather than on the strip, because "I have
+  // to scroll right to read it" is a property of the page, not of whichever element caused it.
+  const over = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+  if(over > 1) say('the page scrolls sideways by '+over+'px');
+
+  for(const row of rows){
+    // A row may WRAP -- it is a flex container and that is how it survives a phone. What it may
+    // not do is break a single value onto two lines: "1 840" over two lines is the 0.18.0 bug
+    // wearing different markup.
+    for(const v of row.querySelectorAll('.num b, .name b')){
+      if(lines(v)>1) say('a value wraps onto '+lines(v)+' lines: "'+v.textContent.trim()+'"');
+    }
+    if(row.scrollWidth > row.clientWidth + 1){
+      say('a fleet row overflows its own box: '+row.scrollWidth+' > '+row.clientWidth);
+    }
+  }
+
+  // The inverter that never answered has the most to say and the least to show. It must be
+  // marked as such rather than rendered as a row of dashes indistinguishable from a zero.
+  const silent=rows.find(r=>r.textContent.includes('Dak achter'));
+  if(!silent) say('the never-answering inverter is not on screen');
+  else{
+    if(!silent.classList.contains('bad')) say('the never-answering inverter is not marked');
+    if(!silent.textContent.includes('never answered')){
+      say('the never-answering inverter does not say so: "'+silent.textContent.trim().slice(0,60)+'"');
+    }
+  }
+
+  // The legend became load-bearing the moment the word came out of the cell: it is the only
+  // place the arrows are explained. A battery on screen without it is undecodable.
+  const card=[...document.querySelectorAll('.card')].find(c=>c.querySelector('.soc'));
+  if(!card) say('no battery card for a fleet that reports one');
+  else if(!card.textContent.includes('power going into the battery')){
+    say('the battery renders without the legend that explains its arrows');
+  }
+  return true;
+}
+
+// The page fetches before it paints. Poll rather than guess a delay: a fixed timeout that is
+// slightly too short reports "nothing rendered" for a page that was about to.
+let tries=0;
+const tick=setInterval(()=>{
+  if(document.querySelector('.fleetrow') || ++tries>60){
+    clearInterval(tick);
+    try{ check(); }catch(e){ say('the assertions threw: '+e.message); }
+    document.title = fail.length ? 'LAYOUT-FAIL '+fail.join(' || ') : 'LAYOUT-OK';
+  }
+}, 25);
+})();
+"""
 
 
 def find_chrome() -> str | None:
@@ -248,83 +151,98 @@ def find_chrome() -> str | None:
     return mac if pathlib.Path(mac).exists() else None
 
 
+def build_page(stripped: str, stub: str, battery: str, extra_js: str) -> str:
+    """The served page with the stub attached, and the assertions after it.
+
+    The stub goes in BEFORE the page's own <script>: it replaces window.fetch, and a page that
+    has already fired its first request would answer from the network instead.
+    """
+    prelude = (
+        f"<script>window.__demoBattery={battery};</script>\n<script>{stub}</script>\n"
+    )
+    at = stripped.find("<script>")
+    if at < 0:
+        raise SystemExit("no <script> in the page; this check needs updating")
+    page = stripped[:at] + prelude + stripped[at:]
+    return page.replace("</body>", f"<script>{extra_js}</script></body>", 1)
+
+
+def render(
+    chrome: str, page: str, width: int, scratch: str, tag: str
+) -> tuple[str, str]:
+    path = pathlib.Path(scratch) / f"page-{tag}.html"
+    path.write_text(page, encoding="utf-8")
+    result = subprocess.run(
+        [
+            chrome,
+            "--headless",
+            "--disable-gpu",
+            "--no-sandbox",
+            f"--window-size={width},900",
+            "--virtual-time-budget=6000",
+            "--dump-dom",
+            path.as_uri(),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    verdict = re.search(r"<title>(LAYOUT-[^<]*)</title>", result.stdout)
+    return (verdict.group(1) if verdict else "", result.stdout)
+
+
+def report(label: str, verdict: str) -> int:
+    if verdict.startswith("LAYOUT-OK"):
+        print(f"{label}: OK")
+        return 0
+    print(f"{label}: FAIL")
+    if not verdict:
+        print("  no verdict; the page did not run")
+        return 1
+    for problem in verdict.removeprefix("LAYOUT-FAIL ").split(" || "):
+        print("  " + problem)
+    return 1
+
+
 def main() -> int:
-    root = pathlib.Path(__file__).resolve().parent.parent
-    source = (root / SOURCE).read_text()
-
-    fold = re.search(r"@container \(max-width:\s*(\d+)px\)", source)
-    if fold is None:
-        print(
-            "fleet strip layout: FAIL (no @container fold-over threshold found in the CSS)"
-        )
-        return 1
-
-    style = re.search(r"<style>(.*?)</style>", source, re.S)
-    scripts = re.findall(r"<script>(.*?)</script>", source, re.S)
-    if not style or not scripts:
-        print("dashboard layout: FAIL (no <style> or <script> found)")
-        return 1
-    joined = "\n".join(scripts)
-    start = joined.find("function fleetStrip(fleet){")
-    if start < 0:
-        print("dashboard layout: FAIL (fleetStrip not found)")
-        return 1
-    end = joined.find("\nfunction ", start + 10)
-    fleet_strip = joined[start : end if end > 0 else len(joined)]
+    stripped = build_web.strip_comments(
+        build_web.extract(build_web.assets() / "index_html.h")
+    )
+    stub = (ROOT / "tools" / "demo_fleet.js").read_text(encoding="utf-8")
 
     chrome = find_chrome()
     if chrome is None:
-        # Loud, not skipped. A layout check that quietly does nothing when the browser is
-        # missing reports a clean tree it never rendered -- which is the failure this whole
-        # file exists to stop happening again.
         print("dashboard layout: FAIL (no Chrome/Chromium on PATH to render with)")
         return 1
 
     status = 0
     with tempfile.TemporaryDirectory(prefix="heliograph-layout-") as scratch:
+        page = build_page(stripped, stub, "{soc:68,power:-1240}", ASSERT_JS)
         for width in WIDTHS:
-            page = pathlib.Path(scratch) / f"dashboard-{width}.html"
-            page.write_text(
-                PAGE
-                % {
-                    "style": style.group(1),
-                    "script": fleet_strip,
-                    "fleet": FLEET,
-                    "width": width,
-                    "fold": fold.group(1),
-                }
+            verdict, _ = render(chrome, page, width, scratch, str(width))
+            status |= report(f"dashboard layout @{width}px", verdict)
+
+        for label, soc, power, wanted, unwanted in BATTERY_CASES:
+            # The DOM itself is the subject here, so the assertions read it as text rather than
+            # measuring it. Rendered at one comfortable width: these are semantics, and running
+            # them at five widths would only make a failure five times as loud.
+            js = (
+                "(function(){\n"
+                "const fail=[];const say=m=>fail.push(m);\n"
+                "let tries=0;const tick=setInterval(()=>{\n"
+                "  if(document.querySelector('.soc')||++tries>60){clearInterval(tick);\n"
+                "    const c=[...document.querySelectorAll('.card')].find(x=>x.querySelector('.soc'));\n"
+                "    const h=c?c.innerHTML:'';\n"
+                "    if(!c)say('no battery card rendered');\n"
+                f"    for(const w of {wanted!r}) if(!h.includes(w)) say('missing: '+w);\n"
+                f"    for(const w of {unwanted!r}) if(h.includes(w)) say('present but must not be: '+w);\n"
+                "    document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';}\n"
+                "},25);})();"
             )
-            result = subprocess.run(
-                [
-                    chrome,
-                    "--headless",
-                    "--disable-gpu",
-                    "--no-sandbox",
-                    f"--window-size={width + 60},760",
-                    "--virtual-time-budget=2000",
-                    "--dump-dom",
-                    page.as_uri(),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            verdict = re.search(r"<title>(LAYOUT-[^<]*)</title>", result.stdout)
-            if verdict is None:
-                print(
-                    f"dashboard layout @{width}px: FAIL (no verdict; the page did not run)"
-                )
-                print(result.stderr[-600:])
-                status = 1
-                continue
-            text = verdict.group(1)
-            if text.startswith("LAYOUT-OK"):
-                print(f"dashboard layout @{width}px: OK")
-                continue
-            status = 1
-            print(f"dashboard layout @{width}px: FAIL")
-            for problem in text.removeprefix("LAYOUT-FAIL ").split(" || "):
-                print("  " + problem)
+            page = build_page(stripped, stub, f"{{soc:{soc},power:{power}}}", js)
+            verdict, _ = render(chrome, page, 1000, scratch, label)
+            status |= report(f"battery {label}", verdict)
+
     return status
 
 

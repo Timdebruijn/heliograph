@@ -36,6 +36,9 @@ import threading
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import build_web  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSET = ROOT / "src/web/assets/index_html.h"
 FIXTURE = ROOT / "docs/images/fixture.json"
@@ -46,12 +49,17 @@ ENDPOINTS = ["status", "config", "diagnostics", "drivers", "discovery", "capture
 
 # data-t value -> output file. Tabs are switched by CLICK, not by URL, so each shot navigates to
 # the same page and clicks its way there.
+#
+# Five tabs, not the eight these filenames were named for. `live.png` replaces dashboard+device,
+# `health.png` replaces diagnostics+logs. The old names are gone rather than kept as aliases:
+# a README pointing at `device.png` should break loudly, not quietly show a screen that no
+# longer exists.
 TABS = {
-    "dash": "dashboard.png",
-    "dev": "device.png",
-    "diag": "diagnostics.png",
-    "cfg": "settings.png",
-    "logs": "logs.png",
+    "live": "live.png",
+    "inv": "inverters.png",
+    "int": "integrations.png",
+    "health": "health.png",
+    "bridge": "bridge.png",
 }
 
 
@@ -147,15 +155,13 @@ def capture(host: str) -> dict:
 
 
 def extract_page() -> str:
-    """The HTML out of the PROGMEM literal, with the C++ escaping undone."""
-    source = ASSET.read_text()
-    # Any raw-string delimiter, not a hard-coded one: the asset uses R"HTML( today and the
-    # delimiter is the author's free choice, so pinning it would break on a rename that changes
-    # nothing about the page.
-    match = re.search(r'R"([A-Za-z_]*)\((.*)\)\1"', source, re.S)
-    if not match:
-        raise SystemExit("could not find a raw string literal in " + str(ASSET))
-    return match.group(2)
+    """The page as the DEVICE SERVES IT, not as it is authored.
+
+    Comments stripped, through the same tools/build_web.py that gzips it into flash. A
+    screenshot of the authored source would be a picture of something no browser ever receives,
+    and the one transformation between the two deletes lines for a living.
+    """
+    return build_web.strip_comments(build_web.extract(ASSET))
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):

@@ -58,7 +58,8 @@ def main() -> int:
                 status |= check_version_compare(script, scratch)
                 status |= check_auth_prompt_reentrancy(script, scratch)
                 status |= check_auth_fetch_race(script, scratch)
-                status |= check_fleet_columns(script, scratch)
+                status |= check_fleet_mode(script, scratch)
+                status |= check_address_collision(script, scratch)
     return status
 
 
@@ -166,86 +167,179 @@ process.exit(bad === 0 ? 0 : 1);
     return 0
 
 
-def check_fleet_columns(script, scratch):
-    """A fleet column appears only when some inverter can fill it.
+def check_fleet_mode(script, scratch):
+    """One answer to "is this a fleet?", for the headline and for the chart under it.
 
-    A string inverter has no battery, and a column of em dashes reads as "broken" rather than
-    "not applicable". The inverse matters just as much: one device reporting a channel must keep
-    the column for all of them, with the em dash marking the device that does not -- absent and
-    zero are different answers and must not look alike.
+    It used to be answered three times in three places, and one of them differed: the sparkline
+    picked its source by `devices.length > 1` while the header and the hero used
+    devices_configured. A bridge with two inverters configured and one not yet answering then
+    charted a single inverter's output under a heading reading "all inverters stacked" -- and
+    when the second one started replying, the series switched source mid-curve and drew a step
+    that never happened.
 
-    Battery direction is checked as words. The payload carries the project's sign convention
-    (positive charging, negative discharging); a reader should not need to know it, and a bare
-    negative in a cell invites exactly the wrong guess.
+    Silent while it lasts, because with one answering device the fleet total and that device's
+    own reading are the same number. That is what makes it worth a test rather than a comment.
     """
-    body = extract_function(script, "fleetStrip")
+    body = extract_function(script, "isFleet")
     if body is None:
-        print("FAIL: fleetStrip() not found in index_html.h; this check needs updating")
+        print("FAIL: isFleet() not found in index_html.h; this check needs updating")
+        return 1
+    cases = json.dumps(
+        [
+            # (label, status payload, expected)
+            [
+                "one inverter, answering",
+                {
+                    "bridge": {"devices_configured": 1},
+                    "devices": [{}],
+                    "totals": {"devices_polled": 1},
+                },
+                False,
+            ],
+            [
+                "two configured, both polled",
+                {
+                    "bridge": {"devices_configured": 2},
+                    "devices": [{}, {}],
+                    "totals": {"devices_polled": 2},
+                },
+                True,
+            ],
+            # THE case. Configured for two, only one in the array: still a fleet, because the
+            # screen says so.
+            [
+                "two configured, one started",
+                {
+                    "bridge": {"devices_configured": 2},
+                    "devices": [{}],
+                    "totals": {"devices_polled": 1},
+                },
+                True,
+            ],
+            [
+                "two configured, none answering yet",
+                {"bridge": {"devices_configured": 2}, "devices": [], "totals": {}},
+                True,
+            ],
+            # Older or partial payloads must not flip the layout by omission.
+            [
+                "no configured count, two devices",
+                {"bridge": {}, "devices": [{}, {}], "totals": {"devices_polled": 2}},
+                True,
+            ],
+            [
+                "no totals, one device",
+                {"bridge": {}, "devices": [{}], "totals": {}},
+                False,
+            ],
+            ["empty payload", {}, False],
+        ]
+    )
+    harness = (
+        body
+        + f"""
+let bad = 0;
+for (const [label, payload, want] of {cases}) {{
+  const got = isFleet(payload);
+  if (got !== want) {{ console.error(`${{label}}: isFleet = ${{got}}, want ${{want}}`); bad++; }}
+}}
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    path = pathlib.Path(scratch) / "fleet_mode.js"
+    path.write_text(harness)
+    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    print(f"fleet mode: {'OK' if result.returncode == 0 else 'FAIL'}")
+    if result.returncode != 0:
+        print(result.stdout + result.stderr)
+        return 1
+    return 0
+
+
+def check_address_collision(script, scratch):
+    """Two inverters answering to the same address are caught, whichever drivers they use.
+
+    There is ONE RS485 bus. The check keyed on driver+address, so it only ever noticed a
+    collision between two units of the same make -- while this firmware ships two Modbus
+    drivers (growatt_modbus and sunspec) whose units share the numbering. The most likely real
+    collision walked straight past the card built to report it.
+
+    Both directions matter. A protocol that does not address this way -- AA55 finds a device by
+    serial number and declares no unit_id -- must not be dragged into a collision it cannot
+    have, or the card cries wolf on a perfectly good bus.
+    """
+    body = extract_function(script, "addressProblem")
+    if body is None:
+        print(
+            "FAIL: addressProblem() not found in index_html.h; this check needs updating"
+        )
         return 1
     harness = (
-        "const esc=s=>String(s);\nconst fmt=(v,d)=>Number(v).toFixed(d);\n"
+        """
+// Only what addressProblem reads. `sunspec` and `growatt_modbus` both declare unit_id;
+// `eversolar_legacy` declares none, which is what makes it the false-positive case.
+const drivers = {drivers:[
+  {id:'growatt_modbus', options:[{key:'unit_id', display_name:'Modbus unit id'}]},
+  {id:'sunspec',        options:[{key:'unit_id', display_name:'Modbus unit id'}]},
+  {id:'eversolar_legacy', options:[]},
+]};
+const cfg = {driver:{}, additional_devices:[]};
+"""
         + body
         + r"""
-const cols = h => (h.match(/<th[^>]*>([^<]*)<\/th>/g)||[]).map(x=>x.replace(/<[^>]*>/g,''));
-const base = {online:true,data_valid:true,data_stale:false,last_successful_poll_seconds_ago:2};
 let bad = 0;
-const check = (cond, msg) => { if (!cond) { console.error(msg); bad++; } };
+const check = (label, body, wantCollision) => {
+  const got = addressProblem(body);
+  const isCollision = !!got && got.includes('same address');
+  if (isCollision !== wantCollision) {
+    console.error(`${label}: got ${JSON.stringify(got)}, wanted ${wantCollision ? 'a collision' : 'no collision'}`);
+    bad++;
+  }
+};
 
-let h = fleetStrip([{...base,id:'a',ac_power_w:771,energy_today_kwh:9.3,ac_voltage_v:238,
-  temperature_c:48.6,battery_soc_pct:null,battery_power_w:null}]);
-let c = cols(h);
-check(!c.includes('SOC') && !c.includes('Battery'), 'battery columns shown for a device with no battery');
-check(c.includes('Temp') && c.includes('Today'), 'a channel the device reports has no column');
+// THE case: two different Modbus drivers, one bus, one address.
+check('growatt@2 + sunspec@2', {
+  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'sunspec', options:{unit_id:'2'}}]}, true);
 
-// The direction is carried by an ARROW now, not by the word it used to spell out. What the
-// rule protects has not changed: a reader must be able to answer "is it charging?" without
-// knowing this project's sign convention, and a bare -800 does not let them.
-//
-// Two carriers, deliberately, and both are checked. The arrow is a SHAPE, so it survives being
-// read by someone who cannot distinguish the red from the green; the colour is the second cue,
-// not the only one. Asserting only the colour would let a future change drop the arrow and
-// leave the meaning in a hue.
-h = fleetStrip([{...base,id:'b',ac_power_w:1200,battery_soc_pct:64,battery_power_w:1500}]);
-check(cols(h).includes('SOC'), 'SOC column missing for a hybrid');
-check(h.includes('\u2193 1500 W'), 'charging is not marked with a down arrow');
-check(h.includes('var(--bad)'), 'charging is not coloured');
-// The word left the cell but not the document. A screen reader announcing "down arrow 2450
-// watts" cannot answer "is it charging?", and the legend that answers it is elsewhere.
-check(h.includes('title="charging"'), 'the cell does not carry the word for assistive tech');
-check(h.includes('64 %'), 'state of charge not rendered');
+// Same make, same address -- caught before this change too.
+check('growatt@2 + growatt@2', {
+  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'2'}}]}, true);
 
-h = fleetStrip([{...base,id:'c',battery_soc_pct:20,battery_power_w:-800}]);
-check(h.includes('\u2191 800 W'), 'discharging is not marked with an up arrow');
-check(h.includes('var(--ok)'), 'discharging is not coloured');
-check(h.includes('title="discharging"'), 'the cell does not carry the word for assistive tech');
-check(!h.includes('-800'), 'a raw negative leaked into the cell');
+// Distinct addresses are fine, across drivers and within one.
+check('growatt@2 + sunspec@3', {
+  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'sunspec', options:{unit_id:'3'}}]}, false);
 
-// The legend became load-bearing the moment the word came out of the cell: it is the only
-// place the arrows are explained. A strip that renders the column without it is undecodable.
-check(h.includes('power going into the battery') && h.includes('the house is running on it'),
-      'the battery column renders without the legend that explains its arrows');
-h = fleetStrip([{...base,id:'h',ac_power_w:500,battery_power_w:null,battery_soc_pct:null}]);
-check(!h.includes('power going into the battery'),
-      'a legend for a battery column that is not on screen');
+// A driver with no address option cannot collide with one that has an address.
+check('eversolar + growatt@2', {
+  driver:{id:'eversolar_legacy', options:{}},
+  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'2'}}]}, false);
 
-h = fleetStrip([{...base,id:'d',battery_soc_pct:50,battery_power_w:0}]);
-check(h.includes('idle'), 'a resting battery is not reported as idle');
+// Two of them: neither has an address, so there is nothing to compare.
+check('eversolar + eversolar', {
+  driver:{id:'eversolar_legacy', options:{}},
+  additional_devices:[{driver_id:'eversolar_legacy', options:{}}]}, false);
 
-h = fleetStrip([{...base,id:'g',battery_soc_pct:50,battery_power_w:0.4}]);
-check(h.includes('idle'), 'a trickle that rounds to 0 W still claims a direction');
-check(!h.includes('charging 0 W'), 'the cell argues with itself: a direction next to zero watts');
+// An empty address field is unanswered, not address "". Two blanks are not a collision --
+// the firmware has not been told a number yet.
+check('two blank addresses', {
+  driver:{id:'growatt_modbus', options:{unit_id:''}},
+  additional_devices:[{driver_id:'sunspec', options:{unit_id:''}}]}, false);
 
-h = fleetStrip([{...base,id:'e',temperature_c:40},{...base,id:'f',temperature_c:null}]);
-check(cols(h).includes('Temp'), 'column dropped although one device reports it');
-check(h.includes('\u2014'), 'the device without the channel is not an em dash');
+// Whitespace is not a different address.
+check('growatt@2 + sunspec@" 2 "', {
+  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'sunspec', options:{unit_id:' 2 '}}]}, true);
 
 process.exit(bad === 0 ? 0 : 1);
 """
     )
-    path = pathlib.Path(scratch) / "fleet_columns.js"
+    path = pathlib.Path(scratch) / "address_collision.js"
     path.write_text(harness)
     result = subprocess.run(["node", str(path)], capture_output=True, text=True)
-    print(f"fleet columns: {'OK' if result.returncode == 0 else 'FAIL'}")
+    print(f"address collision: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
         return 1
@@ -272,7 +366,15 @@ const els = {{
   '#authdlg': {{returnValue:'', onclose:null, open:false,
                 showModal(){{ if(this.open) throw new Error('InvalidStateError'); this.open=true }},
                 close(v){{ this.open=false; this.returnValue=v; this.onclose && this.onclose() }}}},
-  '#authpw': {{value:''}}, '#authu': {{value:''}}, '#autherr': {{style:{{display:'none'}}}},
+  '#authpw': {{value:''}}, '#authu': {{value:''}},
+  // The error line is hidden by a class, not by an inline style. It needs a real enough
+  // classList that a missing method is a failure here rather than a TypeError thrown inside
+  // the promise executor -- which is how this check first reported the rename: three
+  // assertions failed at once and none of them named the cause.
+  '#autherr': {{hidden:true,
+                classList:{{add(c){{ els['#autherr'].hidden = c==='hide' }},
+                           remove(c){{ if(c==='hide') els['#autherr'].hidden=false }},
+                           toggle(c,on){{ if(c==='hide') els['#autherr'].hidden=!!on }}}}}},
 }};
 const $ = s => els[s];
 const store = {{}};
@@ -304,12 +406,13 @@ const fail = m => {{ console.error(m); bad++; }};
   askAuth(true);
   await null;
   if ($('#authpw').value !== 'halfway-typed') fail('retry=true wiped the password field');
+  if ($('#autherr').hidden) fail('a refusal arriving while the dialog is open said nothing');
 
   // Finishing the dialog must resolve EVERY waiter, not only the last one.
   $('#authdlg').close('ok');
   const results = await Promise.all([first, second]);
   if (!results.every(r => r === true)) fail('not every caller received the answer: ' + JSON.stringify(results));
-  if (store['sb_auth'] !== btoa('beheerder:halfway-typed')) fail('wrong credentials stored: ' + store['sb_auth']);
+  if (store['hg_auth'] !== btoa('beheerder:halfway-typed')) fail('wrong credentials stored: ' + store['hg_auth']);
 
   // And the guard must release, so a later 401 can prompt again.
   const later = askAuth(false);
@@ -351,8 +454,8 @@ def check_auth_fetch_race(script, scratch):
 const store = {};
 const sessionStorage = {getItem:k=>k in store?store[k]:null, setItem:(k,v)=>{store[k]=v},
                         removeItem:k=>{delete store[k]}};
-const authHeader = () => store['sb_auth'] ? {'Authorization':'Basic '+store['sb_auth']} : {};
-const clearAuth = () => { delete store['sb_auth'] };
+const authHeader = () => store['hg_auth'] ? {'Authorization':'Basic '+store['hg_auth']} : {};
+const clearAuth = () => { delete store['hg_auth'] };
 const rememberUser = () => {};
 const authCancelled = () => ({ok:false,status:0,cancelled:true});
 const btoa = s => Buffer.from(s, 'binary').toString('base64');
@@ -364,7 +467,7 @@ const realAskAuth = null;
 """
         + parts[0]
         + """
-async function askAuth(retry){ prompts++; store['sb_auth'] = 'GOOD'; return true; }
+async function askAuth(retry){ prompts++; store['hg_auth'] = 'GOOD'; return true; }
 
 // 401 for anything that is not the good token; 200 once it is.
 let served = [];
@@ -379,11 +482,11 @@ const fail = m => { console.error(m); bad++; };
 
 (async () => {
   // Both callers start with the same stale credentials, exactly as two tabs on one refresh do.
-  store['sb_auth'] = 'STALE';
+  store['hg_auth'] = 'STALE';
   const [a, b] = await Promise.all([authFetch('/api/v1/logs'), authFetch('/api/v1/diagnostics')]);
 
   if (!a.ok || !b.ok) fail(`both callers should end up authorised, got ${a.status} and ${b.status}`);
-  if (store['sb_auth'] !== 'GOOD') fail('the accepted credentials were cleared again: ' + store['sb_auth']);
+  if (store['hg_auth'] !== 'GOOD') fail('the accepted credentials were cleared again: ' + store['hg_auth']);
   if (prompts !== 1) fail(`the user was asked ${prompts} times; once is enough`);
 
   process.exit(bad === 0 ? 0 : 1);

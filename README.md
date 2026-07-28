@@ -23,7 +23,7 @@ It runs entirely on your own network. No account, no cloud, no subscription.
 </p>
 
 <p align="center">
-  <img src="docs/images/dashboard.png" width="480" alt="Heliograph's built-in web dashboard showing live production from a long-unsupported EverSolar inverter">
+  <img src="docs/images/live.png" width="480" alt="Heliograph's built-in web dashboard showing live production from a long-unsupported EverSolar inverter">
   <br>
   <em>The built-in dashboard — a long-unsupported EverSolar read live over RS485, with no cloud and no app in between.</em>
 </p>
@@ -67,7 +67,7 @@ common set of measurements, and republishes that:
 | **Web dashboard** | Built into the device; works with no internet at all |
 
 <p align="center">
-  <img src="docs/images/device.png" width="420" alt="The Device tab listing an inverter's identity, capabilities and every live measurement">
+  <img src="docs/images/inverters.png" width="420" alt="The Inverters tab listing each inverter's identity, capabilities and every live measurement">
   <br>
   <em>Everything the inverter reports collapses into one canonical model — which is why the same values reach Home Assistant, MQTT, Modbus, REST and Prometheus without any per-output glue.</em>
 </p>
