@@ -66,6 +66,21 @@ heliograph_inverter_ac_power_watts{device="growatt_modbus-3"} 1105.000
 counters, the relay and DRM series. They are not per device: the counters live in one place for
 the whole bus, so labelling them would invent a distinction the firmware does not make.
 
+### Upgrading from 0.19.x or earlier
+
+`heliograph_inverter_ac_voltage_volts` and `heliograph_inverter_ac_current_amperes` **gained a
+`phase` label**. The metric names did not change, but a series with a new label is a new series:
+an existing panel keeps its history and stops receiving points, and the new series starts empty
+beside it.
+
+Selectors keep working — `heliograph_inverter_ac_voltage_volts{device="x"}` still matches, now
+returning one series per phase. What needs a look is anything that assumed a single series, such
+as a panel with no legend format or an alert on the bare metric. `max by (device)` or
+`{phase="l1"}` restores the old meaning.
+
+Nothing else was renamed. Everything else in this release is new metrics that were simply not
+exported before.
+
 ### If you already have a dashboard
 
 **The first device is labelled too.** That is a breaking change and it was chosen deliberately:
@@ -117,16 +132,64 @@ All gauges, all carrying `device`, and all **omitted entirely when the value is 
 inverter reports temperature and another does not gives one series, not two with a fabricated
 one. A metric no inverter reports is absent entirely, header included.
 
+Two of these carry a second label besides `device`. A phase and an MPPT string are dimensions of
+the same quantity, not different quantities, so they are labels rather than three metric names —
+`sum by (device) (heliograph_inverter_ac_power_watts)` works, and would not if L1, L2 and L3 were
+`..._l1_volts` and friends.
+
+**Whole inverter**
+
 | Metric | Unit |
 |---|---|
 | `heliograph_inverter_ac_power_watts` | W |
-| `heliograph_inverter_dc_power_watts` | W (derived) |
-| `heliograph_inverter_ac_voltage_volts` | V (L1) |
-| `heliograph_inverter_ac_current_amperes` | A (L1) |
+| `heliograph_inverter_dc_power_watts` | W (whole array, derived) |
 | `heliograph_inverter_grid_frequency_hertz` | Hz |
 | `heliograph_inverter_energy_today_kwh` | kWh |
 | `heliograph_inverter_energy_total_kwh` | kWh, lifetime |
+| `heliograph_inverter_operating_hours` | h, lifetime |
 | `heliograph_inverter_temperature_celsius` | °C |
+
+**Per phase** — extra label `phase="l1"`, `"l2"`, `"l3"`
+
+| Metric | Unit |
+|---|---|
+| `heliograph_inverter_ac_voltage_volts` | V |
+| `heliograph_inverter_ac_current_amperes` | A |
+| `heliograph_inverter_ac_phase_power_watts` | W |
+
+`ac_phase_power_watts` is a separate family from `ac_power_watts` on purpose. Parts and their
+sum in one family is how a `sum()` silently double-counts.
+
+**Per MPPT string** — extra label `string="1"`, `"2"`
+
+| Metric | Unit |
+|---|---|
+| `heliograph_inverter_mppt_voltage_volts` | V |
+| `heliograph_inverter_mppt_current_amperes` | A |
+| `heliograph_inverter_mppt_power_watts` | W |
+
+**Battery** — a separate prefix, because a battery is its own thing that happens to be reported
+through the inverter. A query for the inverter's temperature should not have to exclude the
+battery's.
+
+| Metric | Unit |
+|---|---|
+| `heliograph_battery_state_of_charge_percent` | % |
+| `heliograph_battery_power_watts` | W, positive charging |
+| `heliograph_battery_charge_power_watts` | W |
+| `heliograph_battery_discharge_power_watts` | W |
+| `heliograph_battery_voltage_volts` | V |
+| `heliograph_battery_current_amperes` | A |
+| `heliograph_battery_temperature_celsius` | °C |
+| `heliograph_battery_energy_charged_kwh` | kWh, lifetime |
+| `heliograph_battery_energy_discharged_kwh` | kWh, lifetime |
+
+**Grid meter**
+
+| Metric | Unit |
+|---|---|
+| `heliograph_grid_import_power_watts` | W |
+| `heliograph_grid_export_power_watts` | W |
 
 Which of these appear depends on the inverter: a driver only reports what its device actually
 provides, so a single-phase inverter has no three-phase series and an inverter without a

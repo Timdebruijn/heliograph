@@ -3,6 +3,8 @@
 #include "prometheus_metrics.h"
 
 #include <cstdio>
+#include <cstring>   // std::strcmp, grouping the gauge table by name
+#include <iterator>  // std::size
 #include <vector>
 
 #include "relays/drm.h"
@@ -55,12 +57,28 @@ std::string escapeLabel(const std::string& value) {
 }
 
 /// `<name>{device="<id>"} <value>`.
+/// One sample, labelled by device and optionally by one more dimension.
+///
+/// The extra label is how a phase or an MPPT string is expressed, rather than by baking the
+/// number into the metric NAME. Three names for the same quantity cannot be summed, averaged or
+/// graphed together without listing all three, and adding a fourth phase would mean a fourth
+/// name; a label costs one series and answers all of that with sum() and by().
 void appendDeviceValue(std::string& out, const char* name, const std::string& deviceId,
-                       double value) {
+                       double value, const char* labelName = nullptr,
+                       const char* labelValue = nullptr) {
     char buf[64];
     std::snprintf(buf, sizeof(buf), " %.3f\n", value);
     out += name;
-    out += "{device=\"" + escapeLabel(deviceId) + "\"}";
+    out += "{device=\"" + escapeLabel(deviceId) + "\"";
+    if (labelName != nullptr) {
+        // Escaped like the device id beside it. Every value in the table today is a literal
+        // that needs no escaping, which is exactly why the asymmetry would have survived: the
+        // day a label carries anything derived, it would be the one field that does not.
+        out += ",";
+        out += labelName;
+        out += "=\"" + escapeLabel(labelValue) + "\"";
+    }
+    out += "}";
     out += buf;
 }
 
@@ -70,27 +88,107 @@ void appendDeviceFlag(std::string& out, const char* name, const std::string& dev
     out += set ? "1\n" : "0\n";
 }
 
-/// One measurement, as one metric family across every device.
+/// One measurement, as one series within a metric family.
+///
+/// Several rows may share a `name`: that is how per-phase and per-string channels become one
+/// family distinguished by a label. HELP and TYPE are written once per NAME, not once per row --
+/// a repeated HELP line is a parse error in strict parsers, and grouping is why the emit loop
+/// below walks names on the outside and rows on the inside.
 struct GaugeSpec {
     const char* measurementId;
     const char* name;
     const char* help;
+    const char* labelName  = nullptr;
+    const char* labelValue = nullptr;
 };
 
 constexpr GaugeSpec kInverterGauges[] = {
+    // --- AC, whole inverter -------------------------------------------------------------
     {measurement_id::kAcPowerTotal, "heliograph_inverter_ac_power_watts",
-     "Current AC output power"},
-    {measurement_id::kDcPowerTotal, "heliograph_inverter_dc_power_watts",
-     "Current DC input power (derived)"},
-    {measurement_id::kAcL1Voltage, "heliograph_inverter_ac_voltage_volts", "AC voltage on L1"},
-    {measurement_id::kAcL1Current, "heliograph_inverter_ac_current_amperes", "AC current on L1"},
+     "Current AC output power, whole inverter"},
     {measurement_id::kAcFrequency, "heliograph_inverter_grid_frequency_hertz", "Grid frequency"},
+
+    // --- AC, per phase ------------------------------------------------------------------
+    // The phase is a LABEL, not part of the name. Three names for one quantity cannot be
+    // summed or graphed together without naming all three.
+    //
+    // Per-phase power is a separate family from the total above, deliberately. Putting parts
+    // and their sum in one family is how a sum() silently double-counts.
+    {measurement_id::kAcL1Voltage, "heliograph_inverter_ac_voltage_volts", "AC voltage",
+     "phase", "l1"},
+    {measurement_id::kAcL2Voltage, "heliograph_inverter_ac_voltage_volts", "AC voltage",
+     "phase", "l2"},
+    {measurement_id::kAcL3Voltage, "heliograph_inverter_ac_voltage_volts", "AC voltage",
+     "phase", "l3"},
+    {measurement_id::kAcL1Current, "heliograph_inverter_ac_current_amperes", "AC current",
+     "phase", "l1"},
+    {measurement_id::kAcL2Current, "heliograph_inverter_ac_current_amperes", "AC current",
+     "phase", "l2"},
+    {measurement_id::kAcL3Current, "heliograph_inverter_ac_current_amperes", "AC current",
+     "phase", "l3"},
+    {measurement_id::kAcL1Power, "heliograph_inverter_ac_phase_power_watts",
+     "AC output power of one phase", "phase", "l1"},
+    {measurement_id::kAcL2Power, "heliograph_inverter_ac_phase_power_watts",
+     "AC output power of one phase", "phase", "l2"},
+    {measurement_id::kAcL3Power, "heliograph_inverter_ac_phase_power_watts",
+     "AC output power of one phase", "phase", "l3"},
+
+    // --- DC ------------------------------------------------------------------------------
+    // Same split as AC: the array total is its own family, the strings carry a label.
+    {measurement_id::kDcPowerTotal, "heliograph_inverter_dc_power_watts",
+     "Current DC input power, whole array"},
+    {measurement_id::kDcMppt1Voltage, "heliograph_inverter_mppt_voltage_volts",
+     "DC voltage of one MPPT string", "string", "1"},
+    {measurement_id::kDcMppt2Voltage, "heliograph_inverter_mppt_voltage_volts",
+     "DC voltage of one MPPT string", "string", "2"},
+    {measurement_id::kDcMppt1Current, "heliograph_inverter_mppt_current_amperes",
+     "DC current of one MPPT string", "string", "1"},
+    {measurement_id::kDcMppt2Current, "heliograph_inverter_mppt_current_amperes",
+     "DC current of one MPPT string", "string", "2"},
+    {measurement_id::kDcMppt1Power, "heliograph_inverter_mppt_power_watts",
+     "DC input power of one MPPT string", "string", "1"},
+    {measurement_id::kDcMppt2Power, "heliograph_inverter_mppt_power_watts",
+     "DC input power of one MPPT string", "string", "2"},
+
+    // --- Energy and runtime ---------------------------------------------------------------
+    // kWh rather than the joules Prometheus would prefer: these two names shipped in 0.5.0 and
+    // renaming them would break every dashboard and alert rule already pointed at them, for a
+    // unit nobody reads solar production in.
     {measurement_id::kEnergyToday, "heliograph_inverter_energy_today_kwh",
      "Energy produced today"},
     {measurement_id::kEnergyTotal, "heliograph_inverter_energy_total_kwh",
      "Lifetime energy produced"},
+    {measurement_id::kOperatingHours, "heliograph_inverter_operating_hours",
+     "Lifetime hours the inverter reports having run"},
     {measurement_id::kTemperature, "heliograph_inverter_temperature_celsius",
      "Inverter temperature"},
+
+    // --- Battery ---------------------------------------------------------------------------
+    // Its own metric prefix, not heliograph_inverter_: a battery is a separate thing that
+    // happens to be reported through the inverter, and a query for inverter temperature should
+    // not have to exclude the battery's.
+    {measurement_id::kBatterySoc, "heliograph_battery_state_of_charge_percent",
+     "Battery state of charge"},
+    {measurement_id::kBatteryPower, "heliograph_battery_power_watts",
+     "Battery power, positive charging and negative discharging"},
+    {measurement_id::kBatteryChargePower, "heliograph_battery_charge_power_watts",
+     "Power flowing into the battery"},
+    {measurement_id::kBatteryDischargePower, "heliograph_battery_discharge_power_watts",
+     "Power flowing out of the battery"},
+    {measurement_id::kBatteryVoltage, "heliograph_battery_voltage_volts", "Battery voltage"},
+    {measurement_id::kBatteryCurrent, "heliograph_battery_current_amperes", "Battery current"},
+    {measurement_id::kBatteryTemperature, "heliograph_battery_temperature_celsius",
+     "Battery temperature"},
+    {measurement_id::kBatteryEnergyCharged, "heliograph_battery_energy_charged_kwh",
+     "Lifetime energy stored in the battery"},
+    {measurement_id::kBatteryEnergyDischarged, "heliograph_battery_energy_discharged_kwh",
+     "Lifetime energy taken from the battery"},
+
+    // --- Grid meter --------------------------------------------------------------------------
+    {measurement_id::kGridImportPower, "heliograph_grid_import_power_watts",
+     "Power drawn from the grid"},
+    {measurement_id::kGridExportPower, "heliograph_grid_export_power_watts",
+     "Power delivered to the grid"},
 };
 
 }  // namespace
@@ -98,7 +196,11 @@ constexpr GaugeSpec kInverterGauges[] = {
 std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const BridgeInfo& bridge,
                          const DiagnosticsSnapshot& d) {
     std::string out;
-    out.reserve(2048 + devices.size() * 512);
+    // Sized against the gauge table rather than a number typed once and left behind. 512 bytes
+    // per device was written when eight gauges existed; at thirty-odd a device emits closer to
+    // 2.5 KB, so an eight-device bus reserved 6 KB for 20 KB of output and grew the string
+    // repeatedly -- on a heap this page is served from, and which fragments.
+    out.reserve(2048 + devices.size() * (std::size(kInverterGauges) * 80));
 
     // One build_info series per device: the firmware and board are the bridge's, the driver is
     // the device's, and on a mixed bus those differ.
@@ -131,18 +233,49 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
     // header is written lazily so a family no device reports is absent entirely rather than
     // present as a bare header -- which is a parse error in strict parsers, and is why the
     // whole family loops here instead of each device rendering its own block.
-    for (const auto& gauge : kInverterGauges) {
-        bool headerWritten = false;
-        for (const auto& dev : devices) {
-            const auto* m = dev.state->measurements.find(gauge.measurementId);
-            if (m == nullptr || !m->supported || !m->valid || m->stale) {
-                continue;  // omit, do not zero
+    // Names on the outside, rows within a name on the inside, devices innermost. Rows sharing a
+    // name are one family -- the three phases of a voltage, the strings of an array -- and a
+    // family gets exactly one HELP and one TYPE however many series it holds. Emitting them per
+    // row would repeat those lines, which strict parsers reject outright.
+    //
+    // The pass that finds a name's first row is what makes this O(rows^2) in the table size.
+    // With thirty-odd rows that is nothing, and it keeps the table a plain list that reads in
+    // declaration order rather than something pre-grouped that has to be maintained as groups.
+    for (size_t i = 0; i < std::size(kInverterGauges); ++i) {
+        const char* name = kInverterGauges[i].name;
+        bool        first = true;
+        for (size_t j = 0; j < i; ++j) {
+            if (std::strcmp(kInverterGauges[j].name, name) == 0) {
+                first = false;
+                break;
             }
-            if (!headerWritten) {
-                appendHelp(out, gauge.name, gauge.help, "gauge");
-                headerWritten = true;
+        }
+        if (!first) {
+            continue;  // already emitted with the first row carrying this name
+        }
+
+        // From the family's FIRST row, never from whichever row happened to have a reading.
+        // Every row of a family carries the same help text today, but nothing enforces that, and
+        // taking it from the data would make the documentation a scraper sees depend on which
+        // inverter answered first.
+        const char* help         = kInverterGauges[i].help;
+        bool        headerWritten = false;
+        for (const auto& gauge : kInverterGauges) {
+            if (std::strcmp(gauge.name, name) != 0) {
+                continue;
             }
-            appendDeviceValue(out, gauge.name, dev.id, m->value);
+            for (const auto& dev : devices) {
+                const auto* m = dev.state->measurements.find(gauge.measurementId);
+                if (m == nullptr || !m->supported || !m->valid || m->stale) {
+                    continue;  // omit, do not zero
+                }
+                if (!headerWritten) {
+                    appendHelp(out, name, help, "gauge");
+                    headerWritten = true;
+                }
+                appendDeviceValue(out, name, dev.id, m->value, gauge.labelName,
+                                  gauge.labelValue);
+            }
         }
     }
 
