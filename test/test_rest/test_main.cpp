@@ -1904,6 +1904,83 @@ static void test_coredump_details_are_null_when_none_is_stored() {
 
 // A dump whose summary could not be parsed still says present -- the ELF is retrievable with
 // the host tool even when the on-device summariser cannot read it.
+static void test_a_crash_reports_why_and_where_without_an_elf() {
+    Rig  r;
+    auto bridge               = makeBridge();
+    bridge.coredumpPresent    = true;
+    bridge.coredumpTask       = "loopTask";
+    bridge.coredumpPc         = 0x4037DAA9;
+    bridge.coredumpCause      = 28;  // EXCCAUSE_LOAD_PROHIBITED
+    bridge.coredumpFaultAddress = 0x00000000;
+    bridge.coredumpCauseKnown = true;
+    bridge.coredumpBacktrace  = {0x42011AF0, 0x42010C34, 0x4200FE18};
+
+    // These two are the whole point of the change: a null dereference on a load, said without
+    // decoding a single symbol. The single PC this dump also carries is where the PANIC HANDLER
+    // was running -- decoding it landed in the IDF's cache code and explained nothing.
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(28, doc["coredump_cause"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("LoadProhibited", doc["coredump_cause_name"].as<const char*>());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["coredump_fault_address"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(3, doc["coredump_backtrace"].size());
+    TEST_ASSERT_EQUAL_UINT32(0x42011AF0, doc["coredump_backtrace"][0].as<uint32_t>());
+}
+
+static void test_cause_zero_is_a_cause_not_an_absence() {
+    Rig  r;
+    auto bridge                 = makeBridge();
+    bridge.coredumpPresent      = true;
+    bridge.coredumpCause        = 0;  // EXCCAUSE_ILLEGAL, a real fault
+    bridge.coredumpFaultAddress = 0;
+    bridge.coredumpCauseKnown   = true;
+
+    // 0 is a legitimate cause AND a legitimate faulting address, so neither may double as
+    // "unknown". causeKnown is what carries that, and this is the test that stops someone
+    // simplifying it away later.
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_FALSE(doc["coredump_cause"].isNull());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["coredump_cause"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("IllegalInstruction", doc["coredump_cause_name"].as<const char*>());
+    TEST_ASSERT_FALSE(doc["coredump_fault_address"].isNull());
+}
+
+static void test_a_dump_without_extra_info_reports_null_not_zero() {
+    Rig  r;
+    auto bridge               = makeBridge();
+    bridge.coredumpPresent    = true;
+    bridge.coredumpTask       = "loopTask";
+    bridge.coredumpCauseKnown = false;  // the dump could not be summarised that far
+
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["coredump_present"].as<bool>());
+    TEST_ASSERT_TRUE(doc["coredump_cause"].isNull());
+    TEST_ASSERT_TRUE(doc["coredump_cause_name"].isNull());
+    TEST_ASSERT_TRUE(doc["coredump_fault_address"].isNull());
+    TEST_ASSERT_TRUE(doc["coredump_backtrace"].isNull());
+}
+
+static void test_an_unknown_cause_keeps_its_number() {
+    Rig  r;
+    auto bridge               = makeBridge();
+    bridge.coredumpPresent    = true;
+    bridge.coredumpCause      = 61;  // not in the table, and not going to be
+    bridge.coredumpCauseKnown = true;
+
+    // The name is null and the number survives: a cause this table does not know is still worth
+    // reporting to someone holding the Xtensa manual.
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(61, doc["coredump_cause"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["coredump_cause_name"].isNull());
+}
+
 static void test_a_nameless_coredump_still_reports_present() {
     Rig  r;
     auto bridge            = makeBridge();
@@ -2503,6 +2580,10 @@ int main(int, char**) {
     RUN_TEST(test_prometheus_exports_the_publish_failure_counter);
     RUN_TEST(test_coredump_is_reported_when_one_is_stored);
     RUN_TEST(test_coredump_details_are_null_when_none_is_stored);
+    RUN_TEST(test_a_crash_reports_why_and_where_without_an_elf);
+    RUN_TEST(test_cause_zero_is_a_cause_not_an_absence);
+    RUN_TEST(test_a_dump_without_extra_info_reports_null_not_zero);
+    RUN_TEST(test_an_unknown_cause_keeps_its_number);
     RUN_TEST(test_a_nameless_coredump_still_reports_present);
     RUN_TEST(test_prometheus_always_reports_the_coredump_flag);
     RUN_TEST(test_stack_marks_are_null_before_the_first_sample);

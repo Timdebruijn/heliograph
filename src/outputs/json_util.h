@@ -16,6 +16,7 @@
 #include "device/capability.h"
 #include "device/command.h"
 #include "device/device_state.h"
+#include "diagnostics/coredump.h"
 #include "diagnostics/diagnostics.h"
 #include "diagnostics/log_timestamp.h"
 
@@ -163,6 +164,30 @@ inline void writeDiagnostics(JsonObject doc, const DiagnosticsSnapshot& d,
         doc["coredump_pc"] = bridge.coredumpPc;
     } else {
         doc["coredump_pc"] = nullptr;
+    }
+    // Why it faulted, and what it was reaching for. Shared with MQTT on purpose: two short
+    // fields are enough for a Home Assistant notification to say "the bridge crashed on a null
+    // dereference" rather than "the bridge crashed". The BACKTRACE is deliberately not here --
+    // sixteen addresses republished every diagnostics interval, never changing, for something
+    // nobody reads in Home Assistant. It lives on the REST payload, which is fetched on purpose.
+    //
+    // Null, not 0, when the dump carries no extra info: 0 is a real cause (IllegalInstruction)
+    // and a real address, so neither can double as "unknown".
+    if (bridge.coredumpPresent && bridge.coredumpCauseKnown) {
+        const char* name       = diag::exceptionCauseName(bridge.coredumpCause);
+        doc["coredump_cause"]  = bridge.coredumpCause;
+        // The number stays alongside the name: a cause this table does not know is still worth
+        // reporting, and a reader with the Xtensa manual can look it up.
+        if (name != nullptr) {
+            doc["coredump_cause_name"] = name;
+        } else {
+            doc["coredump_cause_name"] = nullptr;
+        }
+        doc["coredump_fault_address"] = bridge.coredumpFaultAddress;
+    } else {
+        doc["coredump_cause"]         = nullptr;
+        doc["coredump_cause_name"]    = nullptr;
+        doc["coredump_fault_address"] = nullptr;
     }
     doc["wifi_connected"] = bridge.wifiConnected;
     // Only meaningful while associated; 0 dBm would look like an excellent signal.

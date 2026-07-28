@@ -154,14 +154,33 @@ A panic writes a full ELF core dump to the `coredump` partition (64 KB, present 
 partition tables; `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` is set in the prebuilt IDF config). It
 survives the reboot.
 
-The bridge now tells you it is there without a cable. The boot log carries a `coredump:` warn
-line naming the faulting task and PC, `GET /api/v1/diagnostics` reports
-`coredump_present` / `coredump_task` / `coredump_pc`, Prometheus exports
-`heliograph_coredump_present`, and Modbus register 828 carries the same flag. That is enough to
-know a crash happened, which task died, and roughly where — usually enough to decide whether it
-is worth going further.
+The bridge reads that dump at boot and reports it **without a cable**. `GET /api/v1/diagnostics`
+carries:
 
-To go further, pull the dump itself:
+| Field | What it says |
+|---|---|
+| `coredump_present` | a valid dump is stored |
+| `coredump_task` | the task that faulted |
+| `coredump_cause` / `coredump_cause_name` | the Xtensa EXCCAUSE, e.g. `28` / `LoadProhibited` |
+| `coredump_fault_address` | the address the faulting access reached for |
+| `coredump_backtrace` | up to 16 PCs, innermost first |
+| `coredump_backtrace_corrupted` | the IDF's own verdict on whether the stack walk stayed sane |
+| `coredump_pc` | one PC — see the warning below |
+
+**Start with the cause and the address.** `LoadProhibited` at `0x00000000` is a null dereference
+and needs no ELF, no cable and no symbol lookup to read. Most crashes are answered right there.
+
+**`coredump_pc` is not the fault.** It is where the panic handler was running, so decoding it
+tends to land somewhere in the IDF's own cache or panic code and explain nothing. It is reported
+because it is what the summary provides, not because it is the useful field — that is
+`coredump_backtrace[0]`.
+
+MQTT carries the cause and the faulting address on the diagnostics topic, but **not** the
+backtrace: sixteen addresses that never change, republished every interval, are payload weight
+for something nobody reads in Home Assistant. Prometheus exports `heliograph_coredump_present`
+as a 0/1 to alert on, and Modbus register 828 carries the same flag.
+
+To resolve the backtrace to file and line, or to pull the dump itself:
 
 ```bash
 python -m esp_coredump --chip esp32s3 --port /dev/tty.usbmodem* info_corefile .pio/build/waveshare-rs485-can/firmware.elf

@@ -88,6 +88,18 @@ struct BridgeInfo {
     bool        coredumpPresent = false;
     std::string coredumpTask;
     uint32_t    coredumpPc      = 0;
+    /// Why it faulted and what address it reached for. These answer the question without an
+    /// ELF: a LoadProhibited at 0 is a null dereference, and no symbol lookup says it better.
+    /// `coredumpCauseKnown` false means the dump carries no extra info, not that the cause was
+    /// zero -- and 0 is a real cause (IllegalInstruction).
+    uint32_t coredumpCause        = 0;
+    uint32_t coredumpFaultAddress = 0;
+    bool     coredumpCauseKnown   = false;
+    /// The call stack, innermost first, and whether the IDF thinks the walk stayed sane. Carried
+    /// as a vector rather than the fixed array it comes from: everything downstream iterates it,
+    /// and a size that cannot disagree with its contents is one fewer thing to get wrong.
+    std::vector<uint32_t> coredumpBacktrace;
+    bool                  coredumpBacktraceCorrupted = false;
 
     /// The board this firmware is running on. Reported to Home Assistant as the bridge
     /// device's model.
