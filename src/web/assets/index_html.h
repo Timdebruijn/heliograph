@@ -46,6 +46,28 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
 th{color:var(--dim);font-weight:500;font-size:12px;text-transform:uppercase}
 td.n{text-align:right;font-variant-numeric:tabular-nums}
+/* The fleet strip has two shapes. Above 760px it stays a table, on its own merits: four
+   inverters are compared by scanning one column, which a stack of blocks cannot do. Below it,
+   the same table folds into one block per inverter.
+   Reported from hardware: at 390px the table showed the device NAMES and nothing else -- every
+   reading sat behind a horizontal scrollbar, which is not a reading.
+   NOTHING is hidden by the fold. Every value keeps its own label, which is the whole difference
+   between reshaping and the column-hiding this file has always refused: a column dropped below
+   a breakpoint is the reading you went looking for, gone.
+   A CONTAINER query, not a media query -- the strip answers to its own width, so it stays right
+   if it is ever placed in a narrow column on a wide screen. */
+.strip{container-type:inline-size}
+@container (max-width:760px){
+  .strip table,.strip tbody,.strip tr,.strip td{display:block;width:auto}
+  .strip tr:first-child{display:none}
+  .strip table{min-width:0 !important}
+  .strip tr{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+  .strip td{text-align:left !important;padding:3px 0;display:flex;justify-content:space-between;
+            gap:16px;border:0}
+  .strip td:first-child{display:block;font-weight:600;margin-bottom:7px}
+  .strip td[data-label]::before{content:attr(data-label);color:var(--dim);font-size:12px;
+                                font-weight:400}
+}
 .dim{color:var(--dim)}.hide{display:none}
 .tag{font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
 a.tag{text-decoration:none;border-color:#2f81f7;color:#2f81f7}
@@ -422,14 +444,16 @@ function fleetStrip(fleet){
     const cell=c=>{
       const v=f[c.k];
       const has=v!==null&&v!==undefined;
-      if(!c.state||!has) return `<td class="n">${esc(num(v,c))}</td>`;
+      // data-label carries the column heading INTO the cell. Stacked, the header row is gone,
+      // so without this a block would be a column of unlabelled numbers.
+      if(!c.state||!has) return `<td class="n" data-label="${esc(c.t)}">${esc(num(v,c))}</td>`;
       const state=c.state(v);
-      return `<td class="n" title="${esc(state)}" style="color:${battColour[state]}">${
-        esc(num(v,c))}</td>`;
+      return `<td class="n" data-label="${esc(c.t)}" title="${esc(state)}" style="color:${
+        battColour[state]}">${esc(num(v,c))}</td>`;
     };
     return `<tr><td><span class="dot ${answering?'ok':'bad'}"></span>${named}</td>
       ${cols.map(cell).join('')}
-      <td class="n">${when}</td></tr>`;
+      <td class="n" data-label="Last reply">${when}</td></tr>`;
   }).join('');
   // Scrolls rather than squeezes: even four columns do not fit a phone, and hiding them below
   // a breakpoint means the reading you went looking for is the one that is not there.
@@ -450,7 +474,7 @@ function fleetStrip(fleet){
        ${key('discharging','the house is running on it')}
        ${key('idle','')}</div>`
     : '';
-  return `<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table style="min-width:${width}px;white-space:nowrap">
+  return `<div class="card strip" style="margin-top:14px"><div style="overflow-x:auto"><table style="min-width:${width}px;white-space:nowrap">
     <tr><th>Inverter</th>${cols.map(c=>`<th style="text-align:right">${c.t}</th>`).join('')}
     <th style="text-align:right">Last reply</th></tr>${rows}</table></div>${legend}</div>`;
 }
