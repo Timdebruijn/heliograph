@@ -168,9 +168,14 @@ namespace {
 // It also ships the ELF as a release asset. A backtrace names addresses in the image that was
 // RUNNING, and rebuilding a tag afterwards does not reproduce the layout -- which is how the
 // dump on the production bridge became undecodable.
+// 0.22.0 closes the last structural test gap. The rule that refuses a second instance of a
+// driver which cannot share a bus lived inside setup(), the one file the host build does not
+// compile -- so a safety property, on the exact bus this bridge exists for, had no test. It is
+// app::planDevices() now: a configuration and a registry in, a plan out, and setup() reads the
+// verdict instead of computing it.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 21
-#define HELIOGRAPH_VERSION_PATCH 1
+#define HELIOGRAPH_VERSION_MINOR 22
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
