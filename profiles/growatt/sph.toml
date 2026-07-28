@@ -118,7 +118,15 @@ unit = "W"
 #     labels 40-41 as VA explicitly
 #   - nygma2004/growatt2mqtt, a working implementation reading 35<<16|36 as output power
 # ------------------------------------------------------------------------------------------
-[[register]]                    # high confidence — corrected 2026-07-28, see below
+# The TYPE is still s32 and that part is NOT confirmed. What was verified on 2026-07-28 is the
+# address and the quantity -- Pac in watts, not Pac1 in VA. Whether an SPH reports negative Pac
+# while charging the battery from the grid was not established, and the entry this replaces
+# admitted the same ("sign unclear").
+#
+# s32 is kept because it is the safe way round on a hybrid: reading unsigned data as signed is
+# harmless here (AC power in 0.1 W units never approaches 2^31), while reading a genuinely
+# negative value as unsigned would show a house charging its battery as a 400 MW producer.
+[[register]]                    # address and quantity: high confidence. Sign: unverified.
 measurement = "ac.power.total"
 display_name = "AC Power"
 space = "input"
