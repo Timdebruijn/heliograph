@@ -2,6 +2,31 @@
 
 #include "coredump.h"
 
+namespace heliograph::diag {
+
+/// Xtensa EXCCAUSE values, from xtensa/corebits.h. Only the ones a firmware fault plausibly
+/// produces: the TLB and PIF causes exist on the architecture but not on this part in any way
+/// a driver bug reaches, and listing them would suggest a precision this table does not have.
+const char* exceptionCauseName(uint32_t cause) {
+    switch (cause) {
+        case 0:  return "IllegalInstruction";
+        case 1:  return "Syscall";
+        case 2:  return "InstructionFetchError";
+        case 3:  return "LoadStoreError";
+        case 5:  return "Alloca";
+        case 6:  return "DivideByZero";
+        case 7:  return "IllegalPC";
+        case 8:  return "PrivilegedInstruction";
+        case 9:  return "UnalignedLoadStore";
+        case 20: return "InstructionProhibited";
+        case 28: return "LoadProhibited";
+        case 29: return "StoreProhibited";
+        default: return nullptr;
+    }
+}
+
+}  // namespace heliograph::diag
+
 #if defined(ESP32)
 
 #include <esp_core_dump.h>
@@ -32,6 +57,25 @@ CoredumpSummary readCoredumpSummary() {
     // name uses all of it. strnlen bounds it; taking strlen would run into whatever follows.
     out.taskName.assign(summary.exc_task,
                         strnlen(summary.exc_task, sizeof(summary.exc_task)));
+
+    // The two fields that answer "why" without an ELF. exc_cause is an Xtensa EXCCAUSE and
+    // exc_vaddr is the address the faulting access reached for -- together they turn a reboot
+    // into "a null dereference on a load" before anything is decoded.
+    out.exceptionCause = summary.ex_info.exc_cause;
+    out.faultAddress   = summary.ex_info.exc_vaddr;
+    out.causeKnown     = true;
+
+    // The call stack, innermost first. Bounded by BOTH the reported depth and the array size:
+    // depth comes out of a dump that has already survived a crash, and trusting it alone would
+    // read past the end of a fixed 16-entry array if it were wrong.
+    const size_t depth = summary.exc_bt_info.depth < kMaxBacktrace
+                             ? summary.exc_bt_info.depth
+                             : kMaxBacktrace;
+    for (size_t i = 0; i < depth; ++i) {
+        out.backtrace[i] = summary.exc_bt_info.bt[i];
+    }
+    out.backtraceDepth      = depth;
+    out.backtraceCorrupted  = summary.exc_bt_info.corrupted;
     return out;
 }
 

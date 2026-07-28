@@ -332,6 +332,30 @@ static void test_the_mock_hybrid_payload_also_fits() {
 
 // --- diagnostics / identity / capabilities -----------------------------------------------
 
+/// The crash cause travels over MQTT; the backtrace deliberately does not.
+///
+/// Two short fields are what a Home Assistant notification needs to say "the bridge crashed on
+/// a null dereference" rather than "the bridge crashed". Sixteen addresses that never change,
+/// republished on every diagnostics interval, are payload weight for something nobody reads
+/// there -- so the backtrace lives on the REST payload, which is fetched on purpose.
+static void test_the_backtrace_stays_off_the_mqtt_payload() {
+    Rig  r;
+    auto bridge                 = makeBridge();
+    bridge.coredumpPresent      = true;
+    bridge.coredumpCause        = 29;  // EXCCAUSE_STORE_PROHIBITED
+    bridge.coredumpFaultAddress = 0x0000000C;
+    bridge.coredumpCauseKnown   = true;
+    bridge.coredumpBacktrace    = {0x42011AF0, 0x42010C34};
+
+    std::string json;
+    TEST_ASSERT_TRUE(buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+
+    TEST_ASSERT_EQUAL_STRING("StoreProhibited", doc["coredump_cause_name"].as<const char*>());
+    TEST_ASSERT_EQUAL_UINT32(0x0000000C, doc["coredump_fault_address"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["coredump_backtrace"].isNull());
+}
+
 static void test_diagnostics_payload() {
     Rig r;
     r.poll();
@@ -1165,6 +1189,7 @@ int main(int, char**) {
     RUN_TEST(test_oversized_payload_is_refused_rather_than_truncated);
     RUN_TEST(test_state_payload_stays_well_within_the_bound);
     RUN_TEST(test_the_mock_hybrid_payload_also_fits);
+    RUN_TEST(test_the_backtrace_stays_off_the_mqtt_payload);
     RUN_TEST(test_diagnostics_payload);
     RUN_TEST(test_rssi_is_null_when_wifi_is_down);
     RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);

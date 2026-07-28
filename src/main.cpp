@@ -369,6 +369,12 @@ BridgeInfo bridgeInfo() {
     info.coredumpPresent  = g_coredump.present;
     info.coredumpTask     = g_coredump.taskName;
     info.coredumpPc       = g_coredump.programCounter;
+    info.coredumpCause        = g_coredump.exceptionCause;
+    info.coredumpFaultAddress = g_coredump.faultAddress;
+    info.coredumpCauseKnown   = g_coredump.causeKnown;
+    info.coredumpBacktrace.assign(g_coredump.backtrace,
+                                  g_coredump.backtrace + g_coredump.backtraceDepth);
+    info.coredumpBacktraceCorrupted = g_coredump.backtraceCorrupted;
     if (g_relays.count() > 0) {
         {
             std::lock_guard<std::mutex> lock(g_relayMutex);

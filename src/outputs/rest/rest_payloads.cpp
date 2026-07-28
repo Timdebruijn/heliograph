@@ -373,6 +373,24 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
     JsonDocument doc;
     json_util::writeDiagnostics(doc.to<JsonObject>(), d, bridge, bridge.boardName,
                                 bridge.mqttConnected);
+    // REST only. The backtrace is the one part of a crash dump worth sixteen numbers, and it is
+    // also the part nobody wants republished over MQTT every interval when it never changes.
+    // Someone fetching /api/v1/diagnostics is asking on purpose.
+    //
+    // Absent, not an empty array, when there is nothing to report: [] would read as "the stack
+    // walk found no frames", which is a different statement from "no dump is stored".
+    if (bridge.coredumpPresent && !bridge.coredumpBacktrace.empty()) {
+        JsonArray bt = doc["coredump_backtrace"].to<JsonArray>();
+        for (const uint32_t pc : bridge.coredumpBacktrace) {
+            bt.add(pc);
+        }
+        // The IDF's own verdict on the stack walk. A corrupted backtrace is still worth showing
+        // -- the innermost frame or two are usually right -- but it must be shown as suspect.
+        doc["coredump_backtrace_corrupted"] = bridge.coredumpBacktraceCorrupted;
+    } else {
+        doc["coredump_backtrace"]           = nullptr;
+        doc["coredump_backtrace_corrupted"] = nullptr;
+    }
     return finish(doc, out, maxBytes);
 }
 
