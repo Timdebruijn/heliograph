@@ -58,6 +58,7 @@ def main() -> int:
                 status |= check_version_compare(script, scratch)
                 status |= check_auth_prompt_reentrancy(script, scratch)
                 status |= check_auth_fetch_race(script, scratch)
+                status |= check_fleet_mode(script, scratch)
     return status
 
 
@@ -159,6 +160,95 @@ process.exit(bad === 0 ? 0 : 1);
     path.write_text(harness)
     result = subprocess.run(["node", str(path)], capture_output=True, text=True)
     print(f"version comparison: {'OK' if result.returncode == 0 else 'FAIL'}")
+    if result.returncode != 0:
+        print(result.stdout + result.stderr)
+        return 1
+    return 0
+
+
+def check_fleet_mode(script, scratch):
+    """One answer to "is this a fleet?", for the headline and for the chart under it.
+
+    It used to be answered three times in three places, and one of them differed: the sparkline
+    picked its source by `devices.length > 1` while the header and the hero used
+    devices_configured. A bridge with two inverters configured and one not yet answering then
+    charted a single inverter's output under a heading reading "all inverters stacked" -- and
+    when the second one started replying, the series switched source mid-curve and drew a step
+    that never happened.
+
+    Silent while it lasts, because with one answering device the fleet total and that device's
+    own reading are the same number. That is what makes it worth a test rather than a comment.
+    """
+    body = extract_function(script, "isFleet")
+    if body is None:
+        print("FAIL: isFleet() not found in index_html.h; this check needs updating")
+        return 1
+    cases = json.dumps(
+        [
+            # (label, status payload, expected)
+            [
+                "one inverter, answering",
+                {
+                    "bridge": {"devices_configured": 1},
+                    "devices": [{}],
+                    "totals": {"devices_polled": 1},
+                },
+                False,
+            ],
+            [
+                "two configured, both polled",
+                {
+                    "bridge": {"devices_configured": 2},
+                    "devices": [{}, {}],
+                    "totals": {"devices_polled": 2},
+                },
+                True,
+            ],
+            # THE case. Configured for two, only one in the array: still a fleet, because the
+            # screen says so.
+            [
+                "two configured, one started",
+                {
+                    "bridge": {"devices_configured": 2},
+                    "devices": [{}],
+                    "totals": {"devices_polled": 1},
+                },
+                True,
+            ],
+            [
+                "two configured, none answering yet",
+                {"bridge": {"devices_configured": 2}, "devices": [], "totals": {}},
+                True,
+            ],
+            # Older or partial payloads must not flip the layout by omission.
+            [
+                "no configured count, two devices",
+                {"bridge": {}, "devices": [{}, {}], "totals": {"devices_polled": 2}},
+                True,
+            ],
+            [
+                "no totals, one device",
+                {"bridge": {}, "devices": [{}], "totals": {}},
+                False,
+            ],
+            ["empty payload", {}, False],
+        ]
+    )
+    harness = (
+        body
+        + f"""
+let bad = 0;
+for (const [label, payload, want] of {cases}) {{
+  const got = isFleet(payload);
+  if (got !== want) {{ console.error(`${{label}}: isFleet = ${{got}}, want ${{want}}`); bad++; }}
+}}
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    path = pathlib.Path(scratch) / "fleet_mode.js"
+    path.write_text(harness)
+    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    print(f"fleet mode: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
         return 1

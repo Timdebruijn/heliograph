@@ -268,21 +268,25 @@ function saveHist(){
   histSaveDue=now+20000;
   try{sessionStorage.setItem('hg_hist',JSON.stringify(hist))}catch(e){}
 }
-/// An SVG polyline of one history series. Returns '' below two points -- a single sample is a
-/// dot pretending to be a trend.
+/// An SVG polyline of one history series. Below two points it says so instead of drawing: a
+/// single sample is a dot pretending to be a trend.
 ///
-/// A LINE, never a filled area. An area implies integrating from zero across a whole span, and
-/// this series starts whenever the page was opened: filling it drew a vertical wall up at the
-/// left edge and a cliff down at the right, neither of which is a reading.
+/// A LINE, never a filled area, and there is no option to make it one. An area implies
+/// integrating from zero across a whole span, and this series starts whenever the page was
+/// opened: filling it drew a vertical wall up at the left edge and a cliff down at the right,
+/// neither of which is a reading. Keeping a `fill` option next to that paragraph would leave
+/// the footgun loaded beside the warning.
+///
+/// The horizontal axis is SAMPLES, not time. Refreshes are event-driven while the bridge's
+/// event stream is up, so the spacing follows the poll, and a gap in the readings shortens the
+/// curve rather than flattening it.
 function spark(key,w,h,opts={}){
   const a=hist[key]||[];
   if(a.length<2)return `<div class="hint" style="height:${h}px">collecting… the curve fills in as this page stays open</div>`;
-  const max=Math.max(...a,1)*1.08, pad=opts.pad??2;
+  const max=Math.max(...a,1)*1.08, pad=2;
   const pts=a.map((y,i)=>((i/(a.length-1))*w).toFixed(1)+','+(h-pad-(y/max)*(h-pad)).toFixed(1));
-  const line=opts.fill?['0,'+(h-pad),...pts,w+','+(h-pad)].join(' '):pts.join(' ');
-  const stroke=opts.stroke||'var(--acc)';
   return `<svg class="spark" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-    <polyline points="${line}" fill="${opts.fill||'none'}" stroke="${stroke}" stroke-width="${opts.weight||2}" stroke-linejoin="round"></polyline>
+    <polyline points="${pts.join(' ')}" fill="none" stroke="${opts.stroke||'var(--acc)'}" stroke-width="${opts.weight||2}" stroke-linejoin="round"></polyline>
     ${opts.base?`<line x1="0" y1="${h-1}" x2="${w}" y2="${h-1}" stroke="var(--line)" stroke-width="1"></line>`:''}
   </svg>`;
 }
@@ -359,9 +363,9 @@ function groupsFor(m,skipHeadline){
 function paintChrome(){
   if(!S)return;
   const b=S.bridge, d=S.device, fleet=S.devices||[], tot=S.totals||{};
-  const polled=tot.devices_polled??fleet.length, answering=tot.devices_answering??0;
-  const expected=b.devices_configured??polled;
-  const multi=expected>1||polled>1;
+  const answering=tot.devices_answering??0;
+  const expected=b.devices_configured??(tot.devices_polled??fleet.length);
+  const multi=isFleet(S);
   // location.hostname when the payload does not carry one: this is a label, and the address the
   // page was reached at is never wrong for it.
   $('#host').textContent=b.hostname?b.hostname+'.local':location.hostname;
@@ -390,12 +394,27 @@ function paintChrome(){
 }
 
 // ---------------- Live ----------------
+/// Whether this bridge is a fleet, decided in ONE place.
+///
+/// It was decided in two, and they disagreed. The sparkline chose its source by
+/// `devices.length > 1` while the headline chose its layout by devices_configured -- so a
+/// bridge with two inverters configured and one of them not yet answering drew a curve of a
+/// single inverter's output under a heading that said "all inverters stacked". Invisible while
+/// it lasts, because one answering device makes the two numbers equal. Then the second one
+/// starts replying, the series switches source mid-curve, and the chart shows a step that never
+/// happened -- in exactly the scenario the diagnosis card exists to get people out of
+/// (review, 2026-07-28).
+function isFleet(s){
+  const tot=s.totals||{}, fleet=s.devices||[];
+  const polled=tot.devices_polled??fleet.length;
+  const expected=(s.bridge||{}).devices_configured??polled;
+  return expected>1||polled>1;
+}
 function paintLive(){
   if(!S)return;
   const b=S.bridge, d=S.device, m=S.measurements||{}, fleet=S.devices||[], tot=S.totals||{};
-  const polled=tot.devices_polled??fleet.length;
-  const expected=b.devices_configured??polled;
-  const multi=expected>1||polled>1;
+  const expected=b.devices_configured??(tot.devices_polled??fleet.length);
+  const multi=isFleet(S);
   let h='';
   if(multi){
     const answering=tot.devices_answering??0;
@@ -1173,9 +1192,14 @@ async function patch(body){
     if(body.security&&body.security.admin_username){
       const cur=atob(sessionStorage.getItem('hg_auth')||'');
       if(cur){
+        // Only the new NAME is encoded here. What atob returns is already the UTF-8 bytes that
+        // were stored, one per character, so running the password half back through
+        // TextEncoder encodes it a second time: 'ë' (c3 ab) became c3 83 c2 ab and the rename
+        // caused exactly the 401 this re-key exists to prevent. Silent on ASCII passwords,
+        // which is why it survived (review, 2026-07-28).
         const pw=cur.slice(cur.indexOf(':')+1);
         sessionStorage.setItem('hg_auth',btoa(String.fromCharCode(
-          ...new TextEncoder().encode(body.security.admin_username+':'+pw))));
+          ...new TextEncoder().encode(body.security.admin_username+':'))+pw));
         sessionStorage.setItem('hg_user',body.security.admin_username);
       }
     }
@@ -1887,7 +1911,8 @@ async function refresh(){
     // One request feeds the whole Live tab: /status already carries devices[] and totals, so
     // the fleet rows need no per-device fetch. The sparkline series come from here too.
     const tot=S.totals||{}, fleet=S.devices||[];
-    if(fleet.length>1)record('all',tot.ac_power_w);
+    // Same question, same answer as the headline above it: see isFleet().
+    if(isFleet(S))record('all',tot.ac_power_w);
     else record('all',(S.measurements&&S.measurements['ac.power.total']||{}).value);
     for(const f of fleet)record('d:'+f.id,f.ac_power_w);
     saveHist();
