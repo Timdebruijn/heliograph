@@ -285,16 +285,103 @@ DeviceIdentity GrowattDriver::identity() const {
     return id;
 }
 
+/// The write row for a command, or nullptr when this profile has none it can actually serve.
+///
+/// Three separate reasons to say no, and they are checked here so that capabilities() and
+/// execute() can never disagree about which commands exist -- a driver that ADVERTISES a
+/// setpoint and then refuses it is worse than one that never offered.
+const WriteMapping* GrowattDriver::writeFor(InverterCommandType type) const {
+    for (size_t i = 0; i < options_.profile->writeCount; ++i) {
+        const WriteMapping& w = options_.profile->writes[i];
+        if (w.command != type) {
+            continue;
+        }
+        // Unverified rows are documented research, not a control surface. A row goes live only
+        // when somebody has written the register on real hardware, read it back, and confirmed
+        // against the inverter's own reported output that it took effect.
+        if (!w.verified) {
+            return nullptr;
+        }
+        // The Modbus client speaks FC06 only. A row needing FC16 -- more than one register, or
+        // a firmware that demands write-multiple for a single one -- cannot be served, and
+        // pretending otherwise would send a frame the device never asked for.
+        if (w.words != 1 || w.useWriteMultiple) {
+            return nullptr;
+        }
+        return &w;
+    }
+    return nullptr;
+}
+
 InverterCapabilities GrowattDriver::capabilities() const {
     InverterCapabilities caps;
     caps.phaseCount = options_.profile->phaseCount;
     caps.mpptCount  = options_.profile->mpptCount;
     caps.hasBattery = options_.profile->hasBattery;
+
+    // Advertised from the same lookup execute() uses, so the two cannot drift apart. A profile
+    // with only unverified rows reports exactly what it did before this existed: read-only.
+    for (size_t i = 0; i < options_.profile->writeCount; ++i) {
+        const WriteMapping* w = writeFor(options_.profile->writes[i].command);
+        if (w == nullptr) {
+            continue;
+        }
+        caps.addWrite(requiredCapability(w->command));
+        NumericCapability& n = caps.numeric[static_cast<size_t>(w->command)];
+        n.supported          = true;
+        n.writable           = true;
+        n.minimum            = w->minimum;
+        n.maximum            = w->maximum;
+        n.step               = w->step;
+        n.unit               = w->unit;
+    }
     return caps;
 }
 
-CommandResult GrowattDriver::execute(const InverterCommand&) {
-    return CommandResult::Unsupported;  // read-only until the map is confirmed on hardware
+CommandResult GrowattDriver::execute(const InverterCommand& command) {
+    if (transport_ == nullptr) {
+        return CommandResult::Unsupported;
+    }
+    const WriteMapping* w = writeFor(command.type);
+    if (w == nullptr) {
+        return CommandResult::Unsupported;
+    }
+    if (!command.numericValue.has_value()) {
+        return CommandResult::Rejected;
+    }
+    // Bounds are checked HERE as well as in the dispatcher. The dispatcher enforces what
+    // capabilities() advertised; this enforces what the register actually accepts, and the two
+    // are the same number today only because both read it from the same row.
+    const double value = *command.numericValue;
+    if (value < w->minimum || value > w->maximum) {
+        return CommandResult::OutOfRange;
+    }
+    const double raw = value / w->scale;
+    if (raw < 0.0 || raw > 65535.0) {
+        return CommandResult::OutOfRange;
+    }
+
+    const modbus::TransactionOutcome outcome = modbus::writeSingleRegister(
+        *transport_, options_.unitId, w->address, static_cast<uint16_t>(raw + 0.5),
+        modbus::ReadTiming{kTransactionDeadlineMs, kResponseTimeoutMs});
+    switch (outcome.status) {
+        case modbus::TransactionStatus::Ok:
+            return CommandResult::Ok;
+        case modbus::TransactionStatus::Exception:
+            // The device understood and refused: a read-only register, a value it will not take,
+            // or a mode that has to be unlocked first. Rejected, not a transport failure -- the
+            // bus worked perfectly.
+            return CommandResult::Rejected;
+        case modbus::TransactionStatus::Timeout:
+            // Its own result, not folded into DriverError: silence on the bus points at wiring
+            // or a unit id, and a driver fault points at this code. Two different call-outs.
+            return CommandResult::Timeout;
+        default:
+            // Crc, Protocol, TransportError. The write may or may not have landed -- a CRC
+            // failure on the ECHO means the device answered and we could not read it. Reported
+            // as an error rather than guessed either way.
+            return CommandResult::DriverError;
+    }
 }
 
 }  // namespace heliograph::growatt

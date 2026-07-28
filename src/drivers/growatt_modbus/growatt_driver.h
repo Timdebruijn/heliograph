@@ -52,6 +52,13 @@ public:
     BusErrorCounts busErrors() const override { return busErrors_; }
 
 private:
+    /// The write row that can actually serve this command, or nullptr.
+    ///
+    /// Used by BOTH capabilities() and execute() so the two can never disagree about which
+    /// setpoints exist. A driver that advertises a command and then refuses it is worse than
+    /// one that never offered it.
+    const WriteMapping* writeFor(InverterCommandType type) const;
+
     /// Crc is separate from Protocol for the same reason it is in the codec: it is the only one
     /// that means the wire is bad, and it is what the checksum-error metric and its alert key on.
     enum class ReadResult { Ok, Timeout, Exception, Crc, Protocol, TransportError };
