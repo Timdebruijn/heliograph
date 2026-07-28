@@ -79,7 +79,6 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
 @container (max-width:760px){
   .strip table,.strip tbody,.strip tr,.strip td{display:block;width:auto}
   .strip tr:first-child{display:none}
-  .strip table{min-width:0 !important}
   .strip tr{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
   .strip td{text-align:left !important;padding:3px 0;display:flex;justify-content:space-between;
             gap:16px;border:0}
