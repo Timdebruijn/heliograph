@@ -9,9 +9,13 @@
 // faulting task sat in flash where only a cable and espcoredump.py could reach it (audit,
 // 2026-07-26).
 //
-// This is the summary, not the dump. Retrieving the ELF itself still wants the host tool -- see
-// docs/hardware.md -- but knowing a dump EXISTS, and which task died, is what turns "something
-// happened" into a question worth taking the cable out for.
+// This is the summary, not the dump. Pulling the ELF still wants the host tool -- see
+// docs/hardware.md -- but the summary now carries the exception cause, the faulting address and
+// a sixteen-deep backtrace, which is usually the whole answer. "LoadProhibited at 0x00000000"
+// is a null dereference, and no cable makes that clearer.
+//
+// The cable is for turning backtrace ADDRESSES into file and line, and only when the cause and
+// the address were not enough.
 
 #pragma once
 

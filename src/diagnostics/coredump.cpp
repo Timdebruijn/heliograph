@@ -68,6 +68,13 @@ CoredumpSummary readCoredumpSummary() {
     // The call stack, innermost first. Bounded by BOTH the reported depth and the array size:
     // depth comes out of a dump that has already survived a crash, and trusting it alone would
     // read past the end of a fixed 16-entry array if it were wrong.
+    // The bound is only a bound if the two sizes agree. kMaxBacktrace is mirrored in the header
+    // so the host build needs no IDF include, and a mirror is exactly the kind of constant that
+    // drifts silently: were the IDF ever to shrink bt[], this loop would read past its end while
+    // still looking careful.
+    static_assert(sizeof(summary.exc_bt_info.bt) / sizeof(summary.exc_bt_info.bt[0]) ==
+                      kMaxBacktrace,
+                  "kMaxBacktrace no longer matches esp_core_dump_bt_info_t::bt");
     const size_t depth = summary.exc_bt_info.depth < kMaxBacktrace
                              ? summary.exc_bt_info.depth
                              : kMaxBacktrace;
