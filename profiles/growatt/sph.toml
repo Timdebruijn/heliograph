@@ -104,11 +104,164 @@ type = "u32"
 scale = 0.1
 unit = "W"
 
-[[register]]                    # low confidence — meaning/sign unclear, first to verify
+# ------------------------------------------------------------------------------------------
+# AC POWER WAS READING THE WRONG REGISTER, and the wrong KIND of quantity.
+#
+# It pointed at 40, which the SPH/SPA register map names `Pac1` and describes as "AC Grid phase
+# 1 power output in VA" -- apparent power, of one phase. The inverter's real output in watts is
+# `Pac` at 35-36. The entry carried "low confidence, meaning unclear, first to verify", and the
+# doubt was justified: a Home Assistant energy dashboard fed apparent power reports a house that
+# consumes more than it does, and nothing about the number looks wrong.
+#
+# Sources (2026-07-28), agreeing on 35-36 = Pac in watts:
+#   - enide-electronics/growatt-sph-spa-esp8266 REGISTERS.md, which is SPH/SPA-specific and
+#     labels 40-41 as VA explicitly
+#   - nygma2004/growatt2mqtt, a working implementation reading 35<<16|36 as output power
+# ------------------------------------------------------------------------------------------
+[[register]]                    # high confidence — corrected 2026-07-28, see below
 measurement = "ac.power.total"
 display_name = "AC Power"
 space = "input"
-address = 40
+address = 35
 type = "s32"
 scale = 0.1
 unit = "W"
+
+# ------------------------------------------------------------------------------------------
+# Channels the bridge already READ and threw away. The 0-124 block is fetched every poll; six
+# of these sat in it unmapped, so an SPH reported no grid voltage, no frequency, no temperature
+# and nothing at all about the second PV string.
+#
+# Every address below is corroborated by BOTH source families: the SPH/SPA-specific register
+# map and a general Protocol II implementation. Where they disagreed, nothing was added -- see
+# the note on energy at the bottom.
+# ------------------------------------------------------------------------------------------
+[[register]]                    # high confidence — both sources
+measurement = "ac.frequency"
+display_name = "Grid Frequency"
+space = "input"
+address = 37
+type = "u16"
+scale = 0.01
+unit = "Hz"
+
+[[register]]                    # high confidence — both sources
+measurement = "ac.phase_l1.voltage"
+display_name = "Grid Voltage"
+space = "input"
+address = 38
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence — both sources
+measurement = "ac.phase_l1.current"
+display_name = "Grid Current"
+space = "input"
+address = 39
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # high confidence — both sources
+measurement = "inverter.temperature"
+display_name = "Inverter Temperature"
+space = "input"
+address = 93
+type = "s16"
+scale = 0.1
+unit = "C"
+
+[[register]]                    # high confidence — both sources
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 Voltage"
+space = "input"
+address = 3
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence — both sources
+measurement = "dc.mppt_1.current"
+display_name = "PV1 Current"
+space = "input"
+address = 4
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # high confidence — both sources
+measurement = "dc.mppt_1.power"
+display_name = "PV1 Power"
+space = "input"
+address = 5
+type = "u32"
+scale = 0.1
+unit = "W"
+
+# The SPH has two strings; the profile declares mppts = 2 and mapped neither of them.
+[[register]]                    # high confidence — both sources
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 Voltage"
+space = "input"
+address = 7
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence — both sources
+measurement = "dc.mppt_2.current"
+display_name = "PV2 Current"
+space = "input"
+address = 8
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # high confidence — both sources
+measurement = "dc.mppt_2.power"
+display_name = "PV2 Power"
+space = "input"
+address = 9
+type = "u32"
+scale = 0.1
+unit = "W"
+
+# battery.power at 1009 is Pdischarge; 1011 is Pcharge. Both are unsigned magnitudes in their
+# own direction, which is why they are separate canonical channels rather than one signed one.
+[[register]]                    # high confidence — SPH/SPA map
+measurement = "battery.charge_power"
+display_name = "Battery Charge Power"
+space = "input"
+address = 1011
+type = "u32"
+scale = 0.1
+unit = "W"
+
+# ==============================================================================================
+# DELIBERATELY NOT MAPPED
+# ==============================================================================================
+#
+# ENERGY TODAY AND TOTAL (registers 53-54 and 55-56). The sources disagree about which is
+# which, and both orderings are plausible:
+#
+#   - enide-electronics/growatt-sph-spa-esp8266, SPH/SPA-specific: 53 = Etotal, 55 = Etoday
+#   - nygma2004/growatt2mqtt, general Protocol II: 53 = Etoday, 55 = Etotal
+#   - Growatt Protocol II text quoted online agrees with the second
+#
+# The MIC TL-X profile in this repo uses today=53, total=55, on the same two-general-sources
+# basis. That may well be right for a plain inverter and still wrong for a storage one.
+#
+# Guessing here is worse than omitting. Getting it backwards feeds a lifetime total into Home
+# Assistant's daily energy statistic, which is not a wrong number on a tile -- it is a corrupted
+# long-term statistic that has to be deleted by hand to fix.
+#
+# ONE READING SETTLES IT, on any SPH that has produced something today: Etoday is small and
+# resets at midnight, Etotal is large and only grows. Read 53-56 as two 32-bit values and the
+# answer is obvious. Add both registers then, with the order that was observed.
+#
+# DC POWER TOTAL (register 116) is left as it stands, at medium confidence. Neither source
+# consulted on 2026-07-28 mentions 116; the general implementation reads total PV power from
+# 1-2 instead, and this profile's own PV1 and PV2 power registers (5-6 and 9-10) should sum to
+# it. Changing it would be substituting one unverified address for another. Worth checking on
+# the same bench visit: if 116 does not track 5-6 plus 9-10, it is not what it claims to be.
