@@ -1317,10 +1317,10 @@ function addressProblem(body){
     const bad=rowOf(drvId,options);
     if(bad)return who+': '+bad;
     // The ADDRESS alone, not the address per driver. There is one RS485 bus, and two units
-    // answering to the same number collide on it whichever driver is polling them -- this
-    // firmware ships two Modbus drivers today (growatt_modbus and sunspec), so keying on
-    // driver+address let the most likely real collision through unreported, in the card built
-    // to report exactly that (review, 2026-07-28).
+    // answering to the same number collide on it whichever driver is polling them. More than
+    // one Modbus driver is compiled in, and they all draw from the same 1-247 numbering, so
+    // keying on driver+address let the likeliest real collision through unreported -- in the
+    // card built to report exactly that (review, 2026-07-28).
     //
     // No false positives from the protocols that do not address this way: an AA55 device is
     // found by serial number and declares no unit_id, so addr is undefined and it is skipped.
