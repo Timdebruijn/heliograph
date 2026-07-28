@@ -240,6 +240,56 @@ static void test_write_exception_is_reported() {
     TEST_ASSERT_EQUAL_HEX8(0x04, resp.exceptionCode);
 }
 
+// The exception frame is now parsed by ONE helper shared by both parsers, so both call sites
+// have to be shown to get its checks. The read path already had these; the write path had only
+// the happy case, which meant the function-code check -- added because a stale exception frame
+// from a different request would otherwise be accepted as the answer to this one -- was never
+// exercised on the write side at all.
+static void test_write_exception_with_a_foreign_function_is_refused() {
+    uint8_t frame[8];
+    frame[0]           = 0x01;
+    frame[1]           = kReadHoldingRegisters | kExceptionFlag;  // 0x83, not our 0x06
+    frame[2]           = 0x02;
+    const uint16_t crc = crc16(frame, 3);
+    frame[3]           = static_cast<uint8_t>(crc & 0xFF);
+    frame[4]           = static_cast<uint8_t>((crc >> 8) & 0xFF);
+
+    // Right unit, valid CRC, genuine exception -- and the answer to a question we did not ask.
+    // On a multidrop bus that is a frame meant for somebody else.
+    WriteResponse resp;
+    TEST_ASSERT_EQUAL(ParseResult::WrongFunction,
+                      parseWriteResponse(frame, 5, 0x01, kWriteSingleRegister, resp));
+}
+
+static void test_write_exception_from_another_unit_is_refused() {
+    uint8_t frame[8];
+    frame[0]           = 0x02;  // not the unit we addressed
+    frame[1]           = kWriteSingleRegister | kExceptionFlag;
+    frame[2]           = 0x02;
+    const uint16_t crc = crc16(frame, 3);
+    frame[3]           = static_cast<uint8_t>(crc & 0xFF);
+    frame[4]           = static_cast<uint8_t>((crc >> 8) & 0xFF);
+
+    WriteResponse resp;
+    TEST_ASSERT_EQUAL(ParseResult::WrongUnit,
+                      parseWriteResponse(frame, 5, 0x01, kWriteSingleRegister, resp));
+}
+
+static void test_write_exception_with_a_bad_crc_indicts_the_cable() {
+    uint8_t frame[8];
+    frame[0] = 0x01;
+    frame[1] = kWriteSingleRegister | kExceptionFlag;
+    frame[2] = 0x02;
+    frame[3] = 0x00;  // deliberately not the CRC
+    frame[4] = 0x00;
+
+    // Crc, not Protocol: this is the one outcome that blames the wiring rather than the
+    // configuration, and a driver that cannot report it can never report a checksum error.
+    WriteResponse resp;
+    TEST_ASSERT_EQUAL(ParseResult::BadCrc,
+                      parseWriteResponse(frame, 5, 0x01, kWriteSingleRegister, resp));
+}
+
 void run_modbus_rtu() {
     RUN_TEST(test_crc_matches_the_canonical_vector);
     RUN_TEST(test_crc_second_vector);
@@ -259,4 +309,7 @@ void run_modbus_rtu() {
     RUN_TEST(test_registers_overflowing_the_caller_buffer_are_refused);
     RUN_TEST(test_write_single_echo_is_validated);
     RUN_TEST(test_write_exception_is_reported);
+    RUN_TEST(test_write_exception_with_a_foreign_function_is_refused);
+    RUN_TEST(test_write_exception_from_another_unit_is_refused);
+    RUN_TEST(test_write_exception_with_a_bad_crc_indicts_the_cable);
 }
