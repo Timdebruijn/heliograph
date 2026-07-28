@@ -135,9 +135,15 @@ namespace {
 // is the more useful finding and is why this release is small. What it does add is a guard:
 // the release workflow now refuses a tag that disagrees with the version below, because three
 // releases in a row that agreed only because someone remembered is not a process.
+// 0.19.1 makes the per-inverter strip readable on a phone. With four inverters on the bus it
+// showed the device names and nothing else -- every reading sat behind a horizontal scrollbar.
+// Below 760px the same table now folds into one block per inverter, every value beside its own
+// label; above it the table stays, because four inverters are compared by scanning one column.
+// Nothing is hidden either way, which is what separates this from the column-hiding the web
+// asset has always refused. CI renders the strip and asserts both shapes.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 19
-#define HELIOGRAPH_VERSION_PATCH 0
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
