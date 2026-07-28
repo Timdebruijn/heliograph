@@ -70,6 +70,12 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
    A CONTAINER query, not a media query -- the strip answers to its own width, so it stays right
    if it is ever placed in a narrow column on a wide screen. */
 .strip{container-type:inline-size}
+/* The device name is the ONE cell where wrapping is harmless: it is already two lines by
+   design, a label with the id beneath it. Everywhere else nowrap is what keeps the rows
+   aligned, but here it forced an id like mock_inverter_writable-MOCK-0000000001 onto a single
+   line and took 329px of a 1070px table -- almost a third, spent on a string nobody reads
+   across. Wrapping it is what lets the whole table fit a laptop instead of scrolling. */
+.strip td:first-child{white-space:normal;overflow-wrap:anywhere}
 @container (max-width:760px){
   .strip table,.strip tbody,.strip tr,.strip td{display:block;width:auto}
   .strip tr:first-child{display:none}
@@ -504,17 +510,14 @@ function fleetStrip(fleet){
     if(state==='idle') return 'idle';
     return battArrow[state]+' '+fmt(Math.abs(v),0)+' W';
   };
-  // Each column declares what it actually needs. A flat allowance per column was fine while
-  // the widest cell was a number; it stopped being fine the moment a hybrid appeared, because
-  // the battery cell holds a SENTENCE ("discharging 400 W") and the header "AC voltage" is two
-  // words. At 100px each they wrapped mid-column and the rows lost their alignment -- seen on
-  // a four-device bench the moment the mock started publishing battery power (0.18.0).
-  const all=[{k:'ac_power_w',t:'AC power',d:0,u:'W',w:110},
-             {k:'energy_today_kwh',t:'Today',d:2,u:'kWh',w:110},
-             {k:'ac_voltage_v',t:'AC voltage',d:1,u:'V',w:115},
-             {k:'temperature_c',t:'Temp',d:1,u:'°C',w:90},
-             {k:'battery_soc_pct',t:'SOC',d:0,u:'%',w:80},
-             {k:'battery_power_w',t:'Battery',d:0,u:'W',fn:batt,w:110,state:battState}];
+  // No declared widths. The columns are sized by their content, which nowrap already pins to
+  // one line -- see the table style below for why that is the whole mechanism now.
+  const all=[{k:'ac_power_w',t:'AC power',d:0,u:'W'},
+             {k:'energy_today_kwh',t:'Today',d:2,u:'kWh'},
+             {k:'ac_voltage_v',t:'AC voltage',d:1,u:'V'},
+             {k:'temperature_c',t:'Temp',d:1,u:'°C'},
+             {k:'battery_soc_pct',t:'SOC',d:0,u:'%'},
+             {k:'battery_power_w',t:'Battery',d:0,u:'W',fn:batt,state:battState}];
   const cols=all.filter(c=>fleet.some(f=>f[c.k]!==null&&f[c.k]!==undefined));
   const rows=fleet.map(f=>{
     const answering=f.online&&f.data_valid&&!f.data_stale;
@@ -553,13 +556,18 @@ function fleetStrip(fleet){
       ${cols.map(cell).join('')}
       <td class="n" data-label="Last reply">${when}</td></tr>`;
   }).join('');
-  // Scrolls rather than squeezes: even four columns do not fit a phone, and hiding them below
-  // a breakpoint means the reading you went looking for is the one that is not there.
+  // NO min-width. There used to be one, summed from a declared width per column, and it was
+  // the reason a laptop still got a horizontal scrollbar: it held the table at 1025px when the
+  // content only needed 870, so anything narrower than 1025 scrolled for no reason at all.
   //
-  // Summed from what the columns declare, plus the name and the "Last reply" tag at either end.
-  // nowrap is the other half: without it the table honours min-width and then wraps the text
-  // inside the cells anyway, which is the worst of both -- a scrollbar AND broken rows.
-  const width=260+cols.reduce((a,c)=>a+c.w,0)+150;
+  // It was a second mechanism for a job nowrap already does. nowrap pins every numeric cell to
+  // one line, so those columns set their own floor and cannot be squeezed into wrapping -- the
+  // failure the min-width was added to prevent in 0.18.1, before nowrap existed. Two mechanisms
+  // for one problem, and the redundant one was the coarser of the two.
+  //
+  // The name column is the only one allowed to wrap (see the style block), so it absorbs the
+  // slack: at a 900px container the table now measures 870 and does not scroll, where before it
+  // measured 1025 and did.
   // Only when there is a battery column to explain. A legend for a column that is not on
   // screen is noise, and this strip already filters columns no inverter can fill.
   // Shows the cell itself, not an abstraction of it: same arrow, same colour, same word. A
@@ -572,7 +580,7 @@ function fleetStrip(fleet){
        ${key('discharging','the house is running on it')}
        ${key('idle','')}</div>`
     : '';
-  return `<div class="card strip" style="margin-top:14px"><div style="overflow-x:auto"><table style="min-width:${width}px;white-space:nowrap">
+  return `<div class="card strip" style="margin-top:14px"><div style="overflow-x:auto"><table style="white-space:nowrap">
     <tr><th>Inverter</th>${cols.map(c=>`<th style="text-align:right">${c.t}</th>`).join('')}
     <th style="text-align:right">Last reply</th></tr>${rows}</table></div>${legend}</div>`;
 }
