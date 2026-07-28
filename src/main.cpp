@@ -173,9 +173,17 @@ namespace {
 // compile -- so a safety property, on the exact bus this bridge exists for, had no test. It is
 // app::planDevices() now: a configuration and a registry in, a plan out, and setup() reads the
 // verdict instead of computing it.
+// 0.22.1 changes nothing a bridge does. Three duplications collapsed to one definition each:
+// the Modbus exception frame, the OTA start-of-upload state, and a hand-written search that is
+// std::find_if. The audit behind it found no warnings, no deprecated dependencies and no dead
+// code, which is the more useful result and why this is a patch.
+//
+// The exception-frame work carried a real gap out with it: the write path had only the happy
+// case, so the check that stops a stale exception from another request being read as the answer
+// to this one had never been exercised on the control path.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 22
-#define HELIOGRAPH_VERSION_PATCH 0
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
