@@ -35,6 +35,11 @@ python3 tools/build_web.py            # strip + gzip the pages (when touching sr
 the comments out of it and gzips it into `src/web/assets/generated/`, which is not committed.
 Run `build_web.py` yourself to see the page rejected early if a `<script>` tag went missing.
 
+To look at the page without a bridge, `python3 tools/preview_web.py` serves it on
+`127.0.0.1:8000` against a fixed three-inverter fleet — one legacy PV unit, one hybrid with a
+battery, one that never replied. That last one is what the diagnosis card is for, and the only
+way to see it on a desk.
+
 CI runs the same checks, plus both firmware builds.
 
 ## Code style
