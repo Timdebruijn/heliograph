@@ -158,9 +158,18 @@ namespace {
 //
 // The dump survives reboots in its own flash partition, so this reads crashes already stored,
 // not only the next one.
+// 0.21.1 stops 0.21.0 naming a fault the dump never recorded. A cause of 0 is EXCCAUSE_ILLEGAL
+// on the ISA, but an abort, a failed assert or a watchdog leaves the whole field zeroed -- and
+// that is the common case, so "IllegalInstruction at 0x00000000" was an invented fault on a
+// dump that was neither. A zero cause is now no cause, and a faulting address is reported only
+// for the causes that have one.
+//
+// It also ships the ELF as a release asset. A backtrace names addresses in the image that was
+// RUNNING, and rebuilding a tag afterwards does not reproduce the layout -- which is how the
+// dump on the production bridge became undecodable.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 21
-#define HELIOGRAPH_VERSION_PATCH 0
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
