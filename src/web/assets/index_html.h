@@ -335,7 +335,6 @@ function bridgeTiles(b){
     // No firmware tile: the version already sits in the header, permanently.
 }
 
-/// The single-inverter dashboard, unchanged. `g` reads the first device's measurements.
 /// Every canonical measurement: its label, which group it belongs to, and how many decimals it
 /// is worth. Order in this list IS the order on screen, so it is arranged the way someone reads
 /// an inverter rather than the way the ids happen to sort.
@@ -352,7 +351,7 @@ const MEAS=[
   ['ac.power.total','AC power','H',0],
   ['energy.today','Today','H',2],
   ['energy.total','Total','H',1],
-  ['battery.soc','Battery','H',0],
+  ['battery.soc','State of charge','H',0],
   ['ac.phase_l1.voltage','Voltage L1','AC',1],
   ['ac.phase_l2.voltage','Voltage L2','AC',1],
   ['ac.phase_l3.voltage','Voltage L3','AC',1],
@@ -397,14 +396,12 @@ const MEAS=[
 /// and never the screen. It also meant a single battery inverter showed no battery at all,
 /// while TWO of them did, because the fleet strip below picks its columns from the payload and
 /// these tiles did not.
-function singleTiles(s,d,g,m){
-  const has=id=>m!==undefined&&m[id]!==undefined;
-  const val=(id,dec)=>{const v=g(id);return v===null||v===undefined?'—':fmt(v,dec)};
-  const unit=id=>(m[id]&&m[id].unit)||'';
-
+function singleTiles(s,d,m){
   let out='';
   for(const [id,label,group,dec] of MEAS){
-    if(group==='H'&&has(id)) out+=tile(label,val(id,dec),unit(id));
+    // fmt() already renders null as an em dash, so there is no second opinion here about what
+    // "no reading" looks like.
+    if(group==='H'&&m[id]!==undefined) out+=tile(label,fmt(m[id].value,dec),m[id].unit||'');
   }
   // Status and error code are not measurements and have their own rule: null means the protocol
   // has no such field, so the tile is not shown at all. It used to read "not reported", which is
@@ -426,7 +423,10 @@ function detailGroups(m){
     seen.add(group);
     const rows=MEAS.filter(([id,,gr])=>gr===group&&m[id]!==undefined).map(([id,label,,dec])=>{
       const v=m[id].value;
-      const shown=v===null||v===undefined?'—':fmt(v,dec)+' '+(m[id].unit||'');
+      // The unit is appended only to a real reading: fmt() gives an em dash for null, and
+      // "— V" claims a missing volt rather than a missing measurement. trim() because a
+      // unitless channel would otherwise carry a trailing space into the DOM.
+      const shown=(v===null||v===undefined?fmt(v,dec):fmt(v,dec)+' '+(m[id].unit||'')).trim();
       return `<div class="row"><span class="dim">${esc(label)}</span><span>${esc(shown)}</span></div>`;
     });
     if(rows.length) html+=`<section><h4>${esc(group)}</h4>${rows.join('')}</section>`;
@@ -618,12 +618,11 @@ function render(s){
   // Boards without relays never send the field; the settings card keys off this.
   window.g_relayCount=(b.relays||[]).length;
   window.g_maxDevices=b.max_devices||window.g_maxDevices;
-  const g=id=>m[id]?m[id].value:null;
   if(tab==='dash'){
     // One inverter: exactly the dashboard this has always been. Several: the tiles that can
     // honestly be added become bridge totals, the ones that only mean something per device
     // move to the strip below, and nothing on this page presents one inverter as the bridge.
-    $('#tiles').innerHTML=(multi?fleetTiles(fleet,tot,expected):singleTiles(s,d,g,m))+bridgeTiles(b);
+    $('#tiles').innerHTML=(multi?fleetTiles(fleet,tot,expected):singleTiles(s,d,m))+bridgeTiles(b);
     // The detail groups belong to ONE inverter. With several on the bus the measurements in
     // s.measurements are the first device's, and presenting those as the bridge's would be the
     // same lie the fleet totals were built to avoid -- so they are shown per device on the
