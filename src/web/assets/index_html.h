@@ -40,6 +40,19 @@ main{padding:20px;max-width:900px}
 .card .k{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
 .card .v{font-size:22px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums}
 .card .u{font-size:13px;color:var(--dim);font-weight:400}
+/* Detail rows under the headline tiles. Everything an inverter reports belongs on this page --
+   half of what a TL3000 sends was reaching the API and never the screen -- but not everything
+   deserves a 22px number. The few figures you read at a glance stay tiles; the rest are rows.
+   Grouped by where the reading comes from, because "MPPT 1 voltage" next to "AC voltage L1" is
+   two different questions sharing a word. */
+.detail{margin-top:14px;display:grid;gap:14px;align-items:start;
+        grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.detail section{background:var(--card);border:1px solid var(--line);border-radius:12px;
+                padding:13px 15px}
+.detail h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+           color:var(--dim);font-weight:500}
+.detail .row{display:flex;justify-content:space-between;gap:14px;padding:3px 0}
+.detail .row span:last-child{font-variant-numeric:tabular-nums}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 .dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}
 table{width:100%;border-collapse:collapse;font-size:14px}
@@ -323,17 +336,102 @@ function bridgeTiles(b){
 }
 
 /// The single-inverter dashboard, unchanged. `g` reads the first device's measurements.
-function singleTiles(s,d,g){
-  return tile('AC Power',fmt(g('ac.power.total'),0),'W')+
-    tile('Today',fmt(g('energy.today'),2),'kWh')+
-    tile('Total',fmt(g('energy.total'),1),'kWh')+
-    tile('Temperature',fmt(g('inverter.temperature')),'°C')+
-    tile('AC Voltage',fmt(g('ac.phase_l1.voltage')),'V')+
-    tile('Frequency',fmt(g('ac.frequency'),2),'Hz')+
-    tile('Status',esc(s.status_text??'—'),'')+
-    // null means this protocol has no error code field at all -- not "no fault".
-    tile('Error code',s.error_code===null?'not reported':esc(s.error_code),'')+
-    tile('Last poll',d.last_successful_poll_seconds_ago??'—','s ago');
+/// Every canonical measurement: its label, which group it belongs to, and how many decimals it
+/// is worth. Order in this list IS the order on screen, so it is arranged the way someone reads
+/// an inverter rather than the way the ids happen to sort.
+///
+/// `H` puts a measurement on a headline tile; the rest name a group. Units are NOT here -- they
+/// arrive with each reading, so there is only one place that decides what a watt is called.
+///
+/// Decimals are per measurement and not per unit, deliberately: energy.today at 5.56 kWh wants
+/// two, energy.total at 35568.6 kWh wants one, and 35568.60 is noise pretending to be precision.
+///
+/// A new id in measurement.h without a row here is caught by tools/check_measurement_ids.py.
+/// Without that, adding a channel in C++ would show up on this page as a raw id.
+const MEAS=[
+  ['ac.power.total','AC power','H',0],
+  ['energy.today','Today','H',2],
+  ['energy.total','Total','H',1],
+  ['battery.soc','Battery','H',0],
+  ['ac.phase_l1.voltage','Voltage L1','AC',1],
+  ['ac.phase_l2.voltage','Voltage L2','AC',1],
+  ['ac.phase_l3.voltage','Voltage L3','AC',1],
+  ['ac.phase_l1.current','Current L1','AC',1],
+  ['ac.phase_l2.current','Current L2','AC',1],
+  ['ac.phase_l3.current','Current L3','AC',1],
+  ['ac.phase_l1.power','Power L1','AC',0],
+  ['ac.phase_l2.power','Power L2','AC',0],
+  ['ac.phase_l3.power','Power L3','AC',0],
+  ['ac.frequency','Frequency','AC',2],
+  ['dc.mppt_1.voltage','MPPT 1 voltage','DC / MPPT',1],
+  ['dc.mppt_1.current','MPPT 1 current','DC / MPPT',1],
+  ['dc.mppt_1.power','MPPT 1 power','DC / MPPT',0],
+  ['dc.mppt_2.voltage','MPPT 2 voltage','DC / MPPT',1],
+  ['dc.mppt_2.current','MPPT 2 current','DC / MPPT',1],
+  ['dc.mppt_2.power','MPPT 2 power','DC / MPPT',0],
+  ['dc.power.total','DC power total','DC / MPPT',0],
+  ['battery.power','Power','Battery',0],
+  ['battery.charge_power','Charging','Battery',0],
+  ['battery.discharge_power','Discharging','Battery',0],
+  ['battery.voltage','Voltage','Battery',1],
+  ['battery.current','Current','Battery',1],
+  ['battery.temperature','Temperature','Battery',1],
+  ['battery.energy_charged','Energy charged','Battery',2],
+  ['battery.energy_discharged','Energy discharged','Battery',2],
+  ['grid.import_power','Importing','Grid',0],
+  ['grid.export_power','Exporting','Grid',0],
+  ['inverter.temperature','Temperature','Device',1],
+  ['inverter.operating_hours','Operating hours','Device',0],
+];
+
+/// The dashboard for a single inverter: everything it reports, and nothing it does not.
+///
+/// A CHANNEL IS SHOWN WHEN THE PAYLOAD CARRIES ITS KEY, not when it carries a value. The API
+/// only emits measurements the driver declares as supported, so a present key means "this
+/// inverter has this"; a null value means "it has it, but not right now". Filtering on the
+/// value instead would make rows appear and vanish as readings go briefly stale, and a layout
+/// that reshuffles while you read it is worse than an em dash.
+///
+/// Before this, nine tiles were hard-coded. A TL3000 reports twelve measurements and six of
+/// them -- both MPPT strings, DC total, phase current, operating hours -- reached the REST API
+/// and never the screen. It also meant a single battery inverter showed no battery at all,
+/// while TWO of them did, because the fleet strip below picks its columns from the payload and
+/// these tiles did not.
+function singleTiles(s,d,g,m){
+  const has=id=>m!==undefined&&m[id]!==undefined;
+  const val=(id,dec)=>{const v=g(id);return v===null||v===undefined?'—':fmt(v,dec)};
+  const unit=id=>(m[id]&&m[id].unit)||'';
+
+  let out='';
+  for(const [id,label,group,dec] of MEAS){
+    if(group==='H'&&has(id)) out+=tile(label,val(id,dec),unit(id));
+  }
+  // Status and error code are not measurements and have their own rule: null means the protocol
+  // has no such field, so the tile is not shown at all. It used to read "not reported", which is
+  // a tile spending space to say nothing -- exactly the empty tile this page should not have.
+  if(s.status_text) out+=tile('Status',esc(s.status_text),'');
+  if(s.error_code!==null&&s.error_code!==undefined) out+=tile('Error code',esc(s.error_code),'');
+  out+=tile('Last poll',d.last_successful_poll_seconds_ago??'—','s ago');
+  return out;
+}
+
+/// The detail groups under the tiles. Empty groups are not rendered -- a heading over nothing
+/// is the same empty tile in a different shape.
+function detailGroups(m){
+  if(!m) return '';
+  const seen=new Set();
+  let html='';
+  for(const [,,group] of MEAS){
+    if(group==='H'||seen.has(group)) continue;
+    seen.add(group);
+    const rows=MEAS.filter(([id,,gr])=>gr===group&&m[id]!==undefined).map(([id,label,,dec])=>{
+      const v=m[id].value;
+      const shown=v===null||v===undefined?'—':fmt(v,dec)+' '+(m[id].unit||'');
+      return `<div class="row"><span class="dim">${esc(label)}</span><span>${esc(shown)}</span></div>`;
+    });
+    if(rows.length) html+=`<section><h4>${esc(group)}</h4>${rows.join('')}</section>`;
+  }
+  return html?`<div class="detail">${html}</div>`:'';
 }
 
 /// Totals across every polled inverter, each carrying how many it actually covers.
@@ -525,8 +623,12 @@ function render(s){
     // One inverter: exactly the dashboard this has always been. Several: the tiles that can
     // honestly be added become bridge totals, the ones that only mean something per device
     // move to the strip below, and nothing on this page presents one inverter as the bridge.
-    $('#tiles').innerHTML=(multi?fleetTiles(fleet,tot,expected):singleTiles(s,d,g))+bridgeTiles(b);
-    $('#fleet').innerHTML=multi?fleetStrip(fleet):'';
+    $('#tiles').innerHTML=(multi?fleetTiles(fleet,tot,expected):singleTiles(s,d,g,m))+bridgeTiles(b);
+    // The detail groups belong to ONE inverter. With several on the bus the measurements in
+    // s.measurements are the first device's, and presenting those as the bridge's would be the
+    // same lie the fleet totals were built to avoid -- so they are shown per device on the
+    // Device tab instead.
+    $('#fleet').innerHTML=multi?fleetStrip(fleet):detailGroups(m);
   }
   if(tab==='dev'){
     // Every configured device, not just the first. The bridge polls up to eight; this tab
