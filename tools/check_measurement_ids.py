@@ -46,6 +46,40 @@ def main() -> int:
     if missing or extra:
         return 1
     print(f"measurement_id::kAll: OK ({len(listed)} ids)")
+    return check_dashboard_labels(root, body)
+
+
+def check_dashboard_labels(root: pathlib.Path, body: str) -> int:
+    """Every canonical id must have a row in the dashboard's MEAS table.
+
+    The dashboard renders one row per measurement the payload carries, looking each id up in
+    that table for its label, its group and how many decimals it is worth. An id declared in
+    C++ and missing there does not fail anywhere -- it simply never appears on the page, which
+    is the bug this whole change was made to fix, arriving again through the back door.
+    """
+    ids = set(re.findall(r'=\s*"([a-z0-9_.]+)"', body))
+    # control.* are SETPOINTS, not readings. They are in kAll so a removed device's retained
+    # Home Assistant configs can be cleared, but no driver reports them as a measurement, so
+    # there is nothing for the dashboard to show and a row here would be a promise of a tile
+    # that can never appear.
+    ids = {i for i in ids if not i.startswith("control.")}
+    page = (root / "src/web/assets/index_html.h").read_text()
+    table = re.search(r"const MEAS=\[(.*?)\n\];", page, re.DOTALL)
+    if not table:
+        print("FAIL: the dashboard's MEAS table was not found")
+        return 1
+    labelled = set(re.findall(r"\['([a-z0-9_.]+)'", table.group(1)))
+    missing = sorted(ids - labelled)
+    unknown = sorted(labelled - ids)
+    if missing:
+        print("FAIL: no dashboard row for: " + ", ".join(missing))
+    if unknown:
+        print(
+            "FAIL: dashboard row for an id that does not exist: " + ", ".join(unknown)
+        )
+    if missing or unknown:
+        return 1
+    print(f"dashboard measurement rows: OK ({len(labelled)} ids)")
     return 0
 
 
