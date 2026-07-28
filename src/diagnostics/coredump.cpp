@@ -7,22 +7,56 @@ namespace heliograph::diag {
 /// Xtensa EXCCAUSE values, from xtensa/corebits.h. Only the ones a firmware fault plausibly
 /// produces: the TLB and PIF causes exist on the architecture but not on this part in any way
 /// a driver bug reaches, and listing them would suggest a precision this table does not have.
-const char* exceptionCauseName(uint32_t cause) {
-    switch (cause) {
-        case 0:  return "IllegalInstruction";
-        case 1:  return "Syscall";
-        case 2:  return "InstructionFetchError";
-        case 3:  return "LoadStoreError";
-        case 5:  return "Alloca";
-        case 6:  return "DivideByZero";
-        case 7:  return "IllegalPC";
-        case 8:  return "PrivilegedInstruction";
-        case 9:  return "UnalignedLoadStore";
-        case 20: return "InstructionProhibited";
-        case 28: return "LoadProhibited";
-        case 29: return "StoreProhibited";
-        default: return nullptr;
+namespace {
+
+/// One row per cause: what it is called, and whether a faulting ADDRESS means anything for it.
+///
+/// Both questions live here because they were two switch statements that had already drifted --
+/// one knew about LoadStoreRing and the other did not, with no stated reason. A cause is one
+/// thing; asking two questions of it should not need two lists that can disagree.
+struct CauseSpec {
+    uint32_t    code;
+    const char* name;
+    /// exc_vaddr is the address a load or a store reached for. On any other cause the field is
+    /// leftover, and a 0 there reads exactly like a null-pointer dereference without being one.
+    bool hasFaultAddress;
+};
+
+constexpr CauseSpec kCauses[] = {
+    {0, "IllegalInstruction", false},
+    {1, "Syscall", false},
+    {2, "InstructionFetchError", false},
+    {3, "LoadStoreError", true},
+    {5, "Alloca", false},
+    {6, "DivideByZero", false},
+    {7, "IllegalPC", false},
+    {8, "PrivilegedInstruction", false},
+    {9, "UnalignedLoadStore", true},
+    {20, "InstructionProhibited", false},
+    {26, "LoadStorePrivilege", true},
+    {28, "LoadProhibited", true},
+    {29, "StoreProhibited", true},
+};
+
+const CauseSpec* findCause(uint32_t cause) {
+    for (const auto& spec : kCauses) {
+        if (spec.code == cause) {
+            return &spec;
+        }
     }
+    return nullptr;
+}
+
+}  // namespace
+
+const char* exceptionCauseName(uint32_t cause) {
+    const CauseSpec* spec = findCause(cause);
+    return spec != nullptr ? spec->name : nullptr;
+}
+
+bool causeHasFaultAddress(uint32_t cause) {
+    const CauseSpec* spec = findCause(cause);
+    return spec != nullptr && spec->hasFaultAddress;
 }
 
 }  // namespace heliograph::diag
@@ -81,18 +115,7 @@ CoredumpSummary readCoredumpSummary() {
     // address a load or a store reached for; on a divide-by-zero or an illegal instruction it
     // is whatever happened to be in the field, and 0 there is noise wearing the shape of a
     // null-pointer dereference.
-    switch (summary.ex_info.exc_cause) {
-        case 3:   // LoadStoreError
-        case 9:   // UnalignedLoadStore
-        case 26:  // LoadStoreRing
-        case 28:  // LoadProhibited
-        case 29:  // StoreProhibited
-            out.faultAddressKnown = true;
-            break;
-        default:
-            out.faultAddressKnown = false;
-            break;
-    }
+    out.faultAddressKnown = causeHasFaultAddress(summary.ex_info.exc_cause);
 
     // The call stack, innermost first. Bounded by BOTH the reported depth and the array size:
     // depth comes out of a dump that has already survived a crash, and trusting it alone would

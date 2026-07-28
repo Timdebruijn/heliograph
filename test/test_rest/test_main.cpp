@@ -11,6 +11,7 @@
 #include <string>
 
 #include "config/configuration.h"
+#include "diagnostics/coredump.h"
 #include "diagnostics/logger.h"
 #include "outputs/modbus_tcp/modbus_tcp_server.h"
 #include "device/device_context.h"
@@ -1939,6 +1940,30 @@ static void test_a_crash_reports_why_and_where_without_an_elf() {
 // So a zero cause is reported as no cause. The trade is real and worth stating: a genuine
 // illegal instruction now goes unnamed. Naming an abort after a fault it did not have is worse,
 // and inventing a reading is the one thing this project does not do.
+// The cause table itself, which nothing reached before: the switch deciding whether a cause has
+// a faulting address lived inside the ESP32-only block, so no host test could see it. Two lists
+// about the same causes had already drifted -- one knew LoadStorePrivilege and the other did
+// not -- and neither was testable.
+static void test_the_cause_table_answers_both_questions_consistently() {
+    // Named and carrying an address: the load and store faults.
+    TEST_ASSERT_EQUAL_STRING("LoadProhibited", diag::exceptionCauseName(28));
+    TEST_ASSERT_TRUE(diag::causeHasFaultAddress(28));
+    TEST_ASSERT_EQUAL_STRING("StoreProhibited", diag::exceptionCauseName(29));
+    TEST_ASSERT_TRUE(diag::causeHasFaultAddress(29));
+    TEST_ASSERT_EQUAL_STRING("UnalignedLoadStore", diag::exceptionCauseName(9));
+    TEST_ASSERT_TRUE(diag::causeHasFaultAddress(9));
+
+    // Named, but no address is involved: nothing was being addressed.
+    TEST_ASSERT_EQUAL_STRING("DivideByZero", diag::exceptionCauseName(6));
+    TEST_ASSERT_FALSE(diag::causeHasFaultAddress(6));
+    TEST_ASSERT_EQUAL_STRING("IllegalInstruction", diag::exceptionCauseName(0));
+    TEST_ASSERT_FALSE(diag::causeHasFaultAddress(0));
+
+    // Unknown to the table: no name, and certainly no address to claim.
+    TEST_ASSERT_NULL(diag::exceptionCauseName(61));
+    TEST_ASSERT_FALSE(diag::causeHasFaultAddress(61));
+}
+
 static void test_a_zero_cause_is_reported_as_no_cause() {
     Rig  r;
     auto bridge                 = makeBridge();
@@ -2622,6 +2647,7 @@ int main(int, char**) {
     RUN_TEST(test_coredump_is_reported_when_one_is_stored);
     RUN_TEST(test_coredump_details_are_null_when_none_is_stored);
     RUN_TEST(test_a_crash_reports_why_and_where_without_an_elf);
+    RUN_TEST(test_the_cause_table_answers_both_questions_consistently);
     RUN_TEST(test_a_zero_cause_is_reported_as_no_cause);
     RUN_TEST(test_a_fault_address_is_only_reported_where_it_means_something);
     RUN_TEST(test_a_dump_without_extra_info_reports_null_not_zero);

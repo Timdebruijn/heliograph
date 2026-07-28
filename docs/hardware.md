@@ -192,9 +192,12 @@ The addresses are offsets into the image that was **running**, so you need that 
 Every release publishes one per board:
 
 ```bash
-gh release download v0.21.1 --pattern 'heliograph-*-rs485-can.elf.gz'
-gunzip heliograph-0.21.1-rs485-can.elf.gz
-xtensa-esp32s3-elf-addr2line -pfiaC -e heliograph-0.21.1-rs485-can.elf 0x420529B7 0x420506CD
+# The release the bridge was RUNNING when it crashed -- not the newest one.
+VERSION=0.21.1
+gh release download "v${VERSION}" --pattern "heliograph-*-rs485-can.elf.gz"
+gunzip "heliograph-${VERSION}-rs485-can.elf.gz"
+xtensa-esp32s3-elf-addr2line -pfiaC \
+  -e "heliograph-${VERSION}-rs485-can.elf" 0x420529B7 0x420506CD
 ```
 
 The toolchain lives at

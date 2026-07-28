@@ -76,6 +76,13 @@ struct CoredumpSummary {
 /// where that file does not exist.
 const char* exceptionCauseName(uint32_t cause);
 
+/// Whether a faulting ADDRESS means anything for this cause.
+///
+/// Only a load or a store has one. Asked separately from the name because they are separate
+/// questions, and answered from the same table because two lists about the same causes had
+/// already drifted apart once.
+bool causeHasFaultAddress(uint32_t cause);
+
 /// Reads the summary from flash. Call ONCE, at boot: it verifies a checksum over the whole
 /// stored image, which is far too much work to repeat per REST request.
 ///
