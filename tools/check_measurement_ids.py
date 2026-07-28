@@ -46,7 +46,8 @@ def main() -> int:
     if missing or extra:
         return 1
     print(f"measurement_id::kAll: OK ({len(listed)} ids)")
-    return check_dashboard_labels(root, body)
+    status = check_dashboard_labels(root, body)
+    return status | check_prometheus_gauges(root, declared)
 
 
 def check_dashboard_labels(root: pathlib.Path, body: str) -> int:
@@ -80,6 +81,33 @@ def check_dashboard_labels(root: pathlib.Path, body: str) -> int:
     if missing or unknown:
         return 1
     print(f"dashboard measurement rows: OK ({len(labelled)} ids)")
+    return 0
+
+
+def check_prometheus_gauges(root: pathlib.Path, declared: set[str]) -> int:
+    """Every canonical measurement must have a gauge in the Prometheus table.
+
+    Prometheus shipped 8 of the 33 channels the model carries for several releases: both MPPT
+    strings, every battery reading, the second and third phase and the operating hours reached
+    REST and MQTT and stopped at a hand-written table nobody re-read. Nothing failed, because a
+    missing gauge is simply a metric that never appears -- and a metric that never appears is
+    indistinguishable from an inverter that does not report it.
+
+    control.* is exempt: those are setpoints, present in kAll so retained Home Assistant configs
+    can be cleared, and no driver reports them as a reading.
+    """
+    wanted = {c for c in declared if not c.startswith("kActivePowerLimit")}
+    metrics = (root / "src/outputs/prometheus/prometheus_metrics.cpp").read_text()
+    table = re.search(r"kInverterGauges\[\] = \{(.*?)\n\};", metrics, re.DOTALL)
+    if not table:
+        print("FAIL: the Prometheus gauge table was not found")
+        return 1
+    exported = set(re.findall(r"measurement_id::(k\w+)", table.group(1)))
+    missing = sorted(wanted - exported)
+    if missing:
+        print("FAIL: no Prometheus gauge for: " + ", ".join(missing))
+        return 1
+    print(f"prometheus gauges: OK ({len(exported)} ids)")
     return 0
 
 
