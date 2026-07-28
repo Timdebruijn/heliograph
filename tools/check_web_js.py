@@ -59,6 +59,7 @@ def main() -> int:
                 status |= check_auth_prompt_reentrancy(script, scratch)
                 status |= check_auth_fetch_race(script, scratch)
                 status |= check_fleet_mode(script, scratch)
+                status |= check_address_collision(script, scratch)
     return status
 
 
@@ -249,6 +250,96 @@ process.exit(bad === 0 ? 0 : 1);
     path.write_text(harness)
     result = subprocess.run(["node", str(path)], capture_output=True, text=True)
     print(f"fleet mode: {'OK' if result.returncode == 0 else 'FAIL'}")
+    if result.returncode != 0:
+        print(result.stdout + result.stderr)
+        return 1
+    return 0
+
+
+def check_address_collision(script, scratch):
+    """Two inverters answering to the same address are caught, whichever drivers they use.
+
+    There is ONE RS485 bus. The check keyed on driver+address, so it only ever noticed a
+    collision between two units of the same make -- while this firmware ships two Modbus
+    drivers (growatt_modbus and sunspec) whose units share the numbering. The most likely real
+    collision walked straight past the card built to report it.
+
+    Both directions matter. A protocol that does not address this way -- AA55 finds a device by
+    serial number and declares no unit_id -- must not be dragged into a collision it cannot
+    have, or the card cries wolf on a perfectly good bus.
+    """
+    body = extract_function(script, "addressProblem")
+    if body is None:
+        print(
+            "FAIL: addressProblem() not found in index_html.h; this check needs updating"
+        )
+        return 1
+    harness = (
+        """
+// Only what addressProblem reads. `sunspec` and `growatt_modbus` both declare unit_id;
+// `eversolar_legacy` declares none, which is what makes it the false-positive case.
+const drivers = {drivers:[
+  {id:'growatt_modbus', options:[{key:'unit_id', display_name:'Modbus unit id'}]},
+  {id:'sunspec',        options:[{key:'unit_id', display_name:'Modbus unit id'}]},
+  {id:'eversolar_legacy', options:[]},
+]};
+const cfg = {driver:{}, additional_devices:[]};
+"""
+        + body
+        + r"""
+let bad = 0;
+const check = (label, body, wantCollision) => {
+  const got = addressProblem(body);
+  const isCollision = !!got && got.includes('same address');
+  if (isCollision !== wantCollision) {
+    console.error(`${label}: got ${JSON.stringify(got)}, wanted ${wantCollision ? 'a collision' : 'no collision'}`);
+    bad++;
+  }
+};
+
+// THE case: two different Modbus drivers, one bus, one address.
+check('growatt@2 + sunspec@2', {
+  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'sunspec', options:{unit_id:'2'}}]}, true);
+
+// Same make, same address -- caught before this change too.
+check('growatt@2 + growatt@2', {
+  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'2'}}]}, true);
+
+// Distinct addresses are fine, across drivers and within one.
+check('growatt@2 + sunspec@3', {
+  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'sunspec', options:{unit_id:'3'}}]}, false);
+
+// A driver with no address option cannot collide with one that has an address.
+check('eversolar + growatt@2', {
+  driver:{id:'eversolar_legacy', options:{}},
+  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'2'}}]}, false);
+
+// Two of them: neither has an address, so there is nothing to compare.
+check('eversolar + eversolar', {
+  driver:{id:'eversolar_legacy', options:{}},
+  additional_devices:[{driver_id:'eversolar_legacy', options:{}}]}, false);
+
+// An empty address field is unanswered, not address "". Two blanks are not a collision --
+// the firmware has not been told a number yet.
+check('two blank addresses', {
+  driver:{id:'growatt_modbus', options:{unit_id:''}},
+  additional_devices:[{driver_id:'sunspec', options:{unit_id:''}}]}, false);
+
+// Whitespace is not a different address.
+check('growatt@2 + sunspec@" 2 "', {
+  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'sunspec', options:{unit_id:' 2 '}}]}, true);
+
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    path = pathlib.Path(scratch) / "address_collision.js"
+    path.write_text(harness)
+    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    print(f"address collision: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
         return 1
