@@ -129,6 +129,15 @@ private:
     // call site lives on the single AsyncTCP task, so this is belt-and-braces -- but that
     // single-task property is an implicit library detail, not something this class enforces,
     // and running() is exactly the kind of flag a future caller polls from another task.
+    /// The state an upload starts from, set in ONE place for both builds.
+    ///
+    /// These eight fields were assigned identically in the ESP32 begin() and the host begin(),
+    /// which is a worse duplication than most: the two live on opposite sides of an #if, so a
+    /// field added to one and forgotten in the other would leave the host tests setting up a
+    /// different starting state than the device. The tests would pass and the bridge would
+    /// carry a stale value into a firmware update.
+    void startTracking(size_t expectedSize, const std::string& expectedSha256);
+
     std::atomic<bool> running_{false};
     bool        magicChecked_ = false;
     size_t      written_    = 0;
