@@ -141,9 +141,18 @@ namespace {
 // label; above it the table stays, because four inverters are compared by scanning one column.
 // Nothing is hidden either way, which is what separates this from the column-hiding the web
 // asset has always refused. CI renders the strip and asserts both shapes.
+// 0.20.0 is the release where every output finally reports everything an inverter does. The
+// dashboard showed 6 of the 33 channels the model carries and Prometheus exported 8; MQTT, REST
+// and Home Assistant discovery were already complete. Both now follow the payload, and a
+// canonical id wired into neither fails the build rather than going quietly missing.
+//
+// MINOR, not patch: Prometheus gained a `phase` label on ac_voltage_volts and
+// ac_current_amperes. The names did not change, but a series with a new label is a new series,
+// so an existing Grafana panel keeps its history and stops receiving points. See
+// docs/prometheus.md.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 19
-#define HELIOGRAPH_VERSION_PATCH 1
+#define HELIOGRAPH_VERSION_MINOR 20
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
