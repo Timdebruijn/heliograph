@@ -2,6 +2,9 @@
 
 #include "coredump.h"
 
+#include <algorithm>
+#include <iterator>
+
 namespace heliograph::diag {
 
 /// Xtensa EXCCAUSE values, from xtensa/corebits.h. Only the ones a firmware fault plausibly
@@ -39,12 +42,9 @@ constexpr CauseSpec kCauses[] = {
 };
 
 const CauseSpec* findCause(uint32_t cause) {
-    for (const auto& spec : kCauses) {
-        if (spec.code == cause) {
-            return &spec;
-        }
-    }
-    return nullptr;
+    const auto* found = std::find_if(std::begin(kCauses), std::end(kCauses),
+                                     [cause](const CauseSpec& spec) { return spec.code == cause; });
+    return found == std::end(kCauses) ? nullptr : found;
 }
 
 }  // namespace
