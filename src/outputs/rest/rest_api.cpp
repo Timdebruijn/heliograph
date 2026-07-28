@@ -200,15 +200,17 @@ bool RestApi::begin() {
         // dashboard would show a page full of dashes; serve the one page that can help.
         const bool portal = context_.portalActive && context_.portalActive();
         // Stream straight from flash. The plain beginResponse(code, type, const char*) form
-        // copies the whole literal into a heap String on every load -- ~46 KB for the
-        // dashboard, competing with the MQTT/JSON/RS485 buffers under memory pressure (review,
-        // 2026-07-21). The chunked filler serves it in place, no copy.
+        // copies the whole page into a heap String on every load, competing with the
+        // MQTT/JSON/RS485 buffers under memory pressure -- 46 KB of it when that was found
+        // (review, 2026-07-21). The chunked filler serves it in place, no copy. Gzip has since
+        // cut the page to 31 KB, which is still not a copy worth making on this heap.
         //
         // What ships is the gzipped page built by tools/build_web.py, not the authored header:
-        // 163 KB of dashboard leaves the device as 31 KB, and the same saving lands twice in
-        // flash because there are two OTA slots. No identity copy is kept as a fallback --
-        // every browser that can run this page accepts gzip, and keeping both spends the whole
-        // saving twice over.
+        // 163 KB of dashboard leaves the device as 31 KB, and that saving lands twice in flash
+        // because there are two OTA slots. No identity copy is kept as a fallback -- every
+        // browser that can run this page accepts gzip, and keeping both would spend the whole
+        // saving twice over. Note that this means the response is gzipped whether or not the
+        // client asked: `curl /` needs --compressed, where it did not before.
         const uint8_t* html    = portal ? web::kSetupHtmlGz : web::kIndexHtmlGz;
         const size_t   htmlLen = portal ? web::kSetupHtmlGzLen : web::kIndexHtmlGzLen;
         auto* response = request->beginResponse(
@@ -219,10 +221,10 @@ bool RestApi::begin() {
                 std::memcpy(buffer, html + index, n);
                 return n;
             });
+        response->addHeader("Content-Encoding", "gzip");
         // no-cache, or an OTA that changes the UI keeps showing the old page until the user
         // happens to hard-refresh (seen live: the freshly added update card stayed invisible).
         // The browser may still cache but must revalidate; the page is a few KB on a LAN.
-        response->addHeader("Content-Encoding", "gzip");
         response->addHeader("Cache-Control", "no-cache");
         request->send(response);
     });
