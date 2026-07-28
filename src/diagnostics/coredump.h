@@ -47,7 +47,14 @@ struct CoredumpSummary {
     /// in the summary the firmware already read and were thrown away.
     uint32_t exceptionCause = 0;
     uint32_t faultAddress   = 0;
-    bool     causeKnown     = false;  ///< false when the dump carries no extra info at all
+    /// False when the dump records no usable cause. A cause of 0 counts as none: 0 is
+    /// EXCCAUSE_ILLEGAL on the ISA, but an abort, a failed assert or a watchdog leaves the
+    /// whole field zeroed, and naming that "IllegalInstruction" invents a fault.
+    bool causeKnown = false;
+    /// False when the cause is not one that HAS a faulting address. exc_vaddr is what a load or
+    /// a store reached for; on any other cause it is leftover, and a 0 there reads exactly like
+    /// a null-pointer dereference without being one.
+    bool faultAddressKnown = false;
 
     /// The call stack at the moment of the fault, innermost first.
     ///
@@ -68,6 +75,13 @@ struct CoredumpSummary {
 /// xtensa/corebits.h, transcribed rather than included: this header is compiled on the host too,
 /// where that file does not exist.
 const char* exceptionCauseName(uint32_t cause);
+
+/// Whether a faulting ADDRESS means anything for this cause.
+///
+/// Only a load or a store has one. Asked separately from the name because they are separate
+/// questions, and answered from the same table because two lists about the same causes had
+/// already drifted apart once.
+bool causeHasFaultAddress(uint32_t cause);
 
 /// Reads the summary from flash. Call ONCE, at boot: it verifies a checksum over the whole
 /// stored image, which is far too much work to repeat per REST request.

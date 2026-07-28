@@ -379,7 +379,8 @@ BridgeInfo bridgeInfo() {
     info.coredumpPc       = g_coredump.programCounter;
     info.coredumpCause        = g_coredump.exceptionCause;
     info.coredumpFaultAddress = g_coredump.faultAddress;
-    info.coredumpCauseKnown   = g_coredump.causeKnown;
+    info.coredumpCauseKnown        = g_coredump.causeKnown;
+    info.coredumpFaultAddressKnown = g_coredump.faultAddressKnown;
     info.coredumpBacktrace.assign(g_coredump.backtrace,
                                   g_coredump.backtrace + g_coredump.backtraceDepth);
     info.coredumpBacktraceCorrupted = g_coredump.backtraceCorrupted;

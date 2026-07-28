@@ -95,6 +95,9 @@ struct BridgeInfo {
     uint32_t coredumpCause        = 0;
     uint32_t coredumpFaultAddress = 0;
     bool     coredumpCauseKnown   = false;
+    /// Whether the faulting address means anything for this cause. Only a load or a store has
+    /// one; elsewhere the field is leftover, and 0 there looks exactly like a null dereference.
+    bool coredumpFaultAddressKnown = false;
     /// The call stack, innermost first, and whether the IDF thinks the walk stayed sane. Carried
     /// as a vector rather than the fixed array it comes from: everything downstream iterates it,
     /// and a size that cannot disagree with its contents is one fewer thing to get wrong.
