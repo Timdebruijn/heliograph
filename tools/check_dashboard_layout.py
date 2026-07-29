@@ -303,10 +303,18 @@ const tick=setInterval(async()=>{
       }
       // The other half: the guard must RELEASE. A tab that stops updating once anything was
       // ever touched is a worse bug than the one being fixed.
+      //
+      // Both guards have to come off, and this assertion predates the second one: blurring the
+      // dropdown leaves the WIZARD open, and an open panel is deliberately left alone now. So
+      // close that too, or this asserts a repaint that is correctly refused.
       sel.blur();
+      togglePanel('wiz');
+      await new Promise(r=>setTimeout(r,50));
+      const probe=document.createElement('span'); probe.id='release-probe';
+      document.getElementById('inv').appendChild(probe);
       paint();
       await new Promise(r=>setTimeout(r,50));
-      if(document.querySelector('#wizcard select')===sel){
+      if(document.getElementById('release-probe')){
         say('the tab never repainted again after the control was left alone');
       }
     }
