@@ -1698,7 +1698,7 @@ static void test_status_payload() {
     TEST_ASSERT_EQUAL_STRING("0.1.0", doc["bridge"]["firmware_version"]);
     TEST_ASSERT_EQUAL_INT(-57, doc["bridge"]["wifi_rssi_dbm"].as<int>());
     TEST_ASSERT_EQUAL_STRING("eversolar_legacy", doc["device"]["driver_id"]);
-    TEST_ASSERT_EQUAL_STRING("beta", doc["device"]["support_level"]);
+    TEST_ASSERT_EQUAL_STRING("stable", doc["device"]["support_level"]);
     TEST_ASSERT_TRUE(doc["device"]["online"].as<bool>());
     TEST_ASSERT_DOUBLE_WITHIN(0.01, fx::expected::kAcPowerW,
                               doc["measurements"]["ac.power.total"]["value"].as<double>());
@@ -1806,7 +1806,7 @@ static void test_drivers_payload_drives_the_wizard() {
         if (std::string(d["id"].as<const char*>()) == "eversolar_legacy") {
             foundEversolar = true;
             TEST_ASSERT_TRUE(d["supports_multiple_devices"].as<bool>());
-            TEST_ASSERT_EQUAL_STRING("beta", d["support_level"]);
+            TEST_ASSERT_EQUAL_STRING("stable", d["support_level"]);
             TEST_ASSERT_FALSE(d["supports_write"].as<bool>());
             // The wizard shows which line settings will actually be tried.
             TEST_ASSERT_EQUAL_size_t(1, d["serial_profiles"].as<JsonArray>().size());

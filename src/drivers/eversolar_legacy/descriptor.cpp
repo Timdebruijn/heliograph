@@ -19,21 +19,30 @@ const DriverDescriptor& descriptor() {
         // 9600 8N1 is hardcoded in the reference implementation and is the only profile
         // known to work. Offering more would be guessing on a live bus.
         x.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3}};
-        // Beta since 2026-07-19: Phase 3 exit criteria met against a real TL3000-20 -- stable
+        // Beta from 2026-07-19: Phase 3 exit criteria met against a real TL3000-20 -- stable
         // reads over hours, values matching eversolar-monitor within the documented tolerance
         // (energy.total exactly +HI*0.1 kWh, hours/status/impedance/serial exact), and both
-        // captured frames committed as fixtures. Stable only after the Phase 9 soak test.
-        x.supportLevel            = DriverSupportLevel::Beta;
+        // captured frames committed as fixtures.
+        //
+        // STABLE from 2026-07-29. What Beta was withholding is in the enum above: "not yet run
+        // long enough to trust unattended". The thing that had to be trusted is the sunrise
+        // path, because the bug this driver was carrying only ever appeared at the night->morning
+        // transition -- a flash or a reboot hides it by starting cold, so no test on the bench
+        // could close it. The gate was ~7 clean unassisted sunrises on the production bridge.
+        //
+        // Eight, counted from Home Assistant's recorder (2026-07-22 through 2026-07-29), each an
+        // evening standby followed by an unattended recovery at first light: standby 06:20:33 ->
+        // grid-connected 06:23:57, 06:04:11 -> 06:06:23, 06:09:44 -> 06:12:06 on the last three.
+        // Recovery got FASTER over the run, ~5 min at first and ~2 min by the end, and no morning
+        // showed a stuck timeout. An overnight soak alongside it measured 515 poll failures that
+        // were ALL plain RS485 timeouts -- zero checksum errors, zero invalid frames -- with the
+        // back-off behaving as designed, so first light is always picked up within 60 s.
+        //
+        // Not covered by this level, and deliberately: two inverters on one bus (see below), and
+        // any write path, which this protocol does not define at all.
+        x.supportLevel            = DriverSupportLevel::Stable;
         x.probePriority           = 10;
         x.supportsAutoDetection   = true;
-        // False, and not as a limitation of the application: this DRIVER cannot share a bus
-        // with a second instance of itself, in three separate ways (#63).
-        //
-        // begin() broadcasts RE_REGISTER, which tells every inverter on the line to forget its
-        // address -- so a second instance starting up de-registers the first, already-polling
-        // one. registerDevice() runs the enumeration loop exactly once, so a second inverter is
-        // never discovered anyway. And `assignedAddress` has no option wired to it, so both
-        // instances would claim the same bus address regardless.
         // True, with one device per inverter and each holding its own bus address.
         //
         // The enumeration needs no loop of its own: a registered inverter ignores the broadcast
