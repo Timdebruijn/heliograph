@@ -1486,8 +1486,6 @@ async function saveDevice(slot){
   say('#dv_msg','ok','Saved. Takes effect after a restart.');
   invNextMs=0;loadInverters(true);
 }
-/// What the firmware would refuse, or accept and then quietly skip at boot -- said here, next
-/// to the field, rather than as `additional_devices[2].driver_id` under a Save button.
 /// Whether a second row of this driver can run at all, straight from the driver list. Absent on
 /// a bridge running firmware from before the field existed, and the benefit of the doubt is the
 /// right default there: the firmware still refuses the row at boot and says why, which is worse
@@ -1496,6 +1494,8 @@ function canShare(drvId){
   const d=((drivers&&drivers.drivers)||[]).find(x=>x.id===drvId);
   return !d||d.supports_multiple_devices!==false;
 }
+/// What the firmware would refuse, or accept and then quietly skip at boot -- said here, next
+/// to the field, rather than as `additional_devices[2].driver_id` under a Save button.
 function addressProblem(body){
   const seen={};
   // Drivers that poll one device per bridge, by row. planDevices() refuses the SECOND one and
@@ -1525,17 +1525,18 @@ function addressProblem(body){
     // function had the same hole and kept it a day longer, so the collision stayed reachable by
     // typing the number in by hand and pressing Save.
     //
-    // No false positives from the protocols that do not address this way: an AA55 device is
-    // found by serial number and declares no address option at all, so addressOf() returns ''
-    // and it never enters the comparison.
     // Said here rather than discovered at boot. A row of an exclusive driver is accepted by the
     // API, persisted, and then skipped by planDevices() -- after the restart the owner performed
-    // to apply it. The refusal was reachable only by doing all of that first.
+    // to apply it. The refusal was reachable only by doing all of that first. Checked before the
+    // address, because for such a row the address is beside the point: it cannot start at any.
     if(!canShare(drvId)){
       if(exclusive[drvId])return who+' cannot run beside '+exclusive[drvId].toLowerCase()+
         ': this driver polls one device per bridge. The second row is skipped at boot.';
       exclusive[drvId]=who;
     }
+    // No false positives from the protocols that do not address this way: an AA55 device is
+    // found by serial number and declares no address option at all, so addressOf() returns ''
+    // and it never enters the comparison.
     const addr=addressOf(drvId,options);
     if(addr==='')return null;
     const key=addr;
