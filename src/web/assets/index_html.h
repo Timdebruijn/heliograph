@@ -736,6 +736,38 @@ function paintInverters(){
       ${panel==='s:'+id?deviceForm(id,dev):''}
     </div>`;
   }
+
+  // Rows that are in the configuration but did not start: added since the last restart. They
+  // have no device id, so they get no card above and nothing else on this page mentions them
+  // except the "N configured" count -- which is how a freshly added row became impossible to
+  // edit OR remove without a reboot.
+  //
+  // Sliced by position: extras start in configuration order, so anything past the ones that
+  // started is still waiting. Each carries the one thing it needs, which is a way back out.
+  if(!neverConfigured()){
+    const extras=(cfg&&cfg.additional_devices)||[];
+    // Matched by DRIVER, not by position. Position holds only while every row starts in order,
+    // and planDevices refuses a row whose driver cannot share a bus while letting later ones
+    // through -- so [X, X, Y] starts X and Y, and counting would have called Y the pending one.
+    // Y is running; the Remove button on that card would have taken out the wrong inverter.
+    const running=invIds.slice(1).map(id=>((devCache[id]||{}).driver||{}).id
+                                       ||((devCache[id]||{}).identity||{}).driver_id||'');
+    const unmatched=[...running];
+    for(let i=0;i<extras.length;i++){
+      const at=unmatched.indexOf(extras[i].driver_id);
+      if(at>=0){unmatched.splice(at,1);continue}  // this row has a device of its own
+      const e=extras[i], addr=addressOf(e.driver_id,e.options);
+      const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===e.driver_id);
+      h+=`<div class="card" style="border-color:var(--warn)">
+        <div class="between"><div><b>${esc(e.label||'Inverter '+(i+2))}</b>
+          <span class="tag warn">starts after a restart</span></div>
+          <button class="dangerAlt sm" onclick="removeExtraAt(${i})">Remove</button></div>
+        <div class="hint">${esc((drv&&drv.display_name)||e.driver_id||'no driver chosen')}${
+          addr?' · address '+esc(addr):''} — added to the configuration, not polled yet. Restart
+          the bridge to start it, or remove it here.</div>
+      </div>`;
+    }
+  }
   h+='</div>';
 
   // Bus and polling. One card, because the interval and the line are the same subject: both
@@ -1440,11 +1472,20 @@ function addressProblem(body){
   }
   return null;
 }
-async function removeDevice(id){
+async function removeDevice(id){ return removeExtraAt(invIds.indexOf(id)-1) }
+/// Removes an extra device by its position in the CONFIGURATION, which is the only handle a row
+/// that has not started yet has.
+///
+/// removeDevice() went through invIds -- the devices that actually started at boot -- so a row
+/// added since the last restart was not in it, had no card, and therefore had no button either.
+/// The alert offering to "open Name, driver and address on the new inverter" pointed at
+/// something that did not exist, and the configuration could not be undone from the UI at all
+/// (hardware, 2026-07-29).
+async function removeExtraAt(idx){
+  const arr=(cfg.additional_devices)||[];
+  if(idx<0||idx>=arr.length){alert('That row is no longer in the configuration.');return}
   if(!confirm('Remove this inverter from the configuration? Its entities stay in Home Assistant showing their last value.'))return;
-  const idx=invIds.indexOf(id)-1;
-  const arr=((cfg.additional_devices)||[]).filter((_,i)=>i!==idx);
-  const r=await patch({additional_devices:arr});
+  const r=await patch({additional_devices:arr.filter((_,i)=>i!==idx)});
   if(!r.ok){say('#dv_msg','err',esc(r.why));return}
   panel=null;invNextMs=0;loadInverters(true);
 }
@@ -1453,6 +1494,20 @@ async function removeDevice(id){
 function addressOptionOf(drvId){
   const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===drvId);
   return ((drv&&drv.options)||[]).find(o=>o.key==='unit_id'||o.key==='address')||null;
+}
+/// The address a device actually answers at, resolved the way the FIRMWARE resolves it: the
+/// stored option when there is one, and otherwise the option's declared default. See
+/// DriverDescriptor::optionOr -- an absent key is not an absent address.
+///
+/// Reading only the stored options is what put a second inverter straight on top of the first.
+/// A primary configured through the wizard carries options:{} and answers at its driver's
+/// default of 16, so a search over stored values alone saw nothing taken and handed out 16
+/// (found on hardware, 2026-07-29, by adding a row and watching it collide).
+function addressOf(driverId,options){
+  const opt=addressOptionOf(driverId);
+  if(!opt)return '';
+  const stored=String((options||{})[opt.key]??'').trim();
+  return stored!==''?stored:String(opt.default_value??'').trim();
 }
 async function addExtra(){
   const arr=((cfg.additional_devices)||[]).map(d=>({driver_id:d.driver_id,label:d.label||'',options:{...(d.options||{})}}));
@@ -1477,8 +1532,9 @@ async function addExtra(){
   const opt=addressOptionOf(primary);
   const options={};
   if(opt){
-    const taken=new Set([cfg.driver,...arr]
-      .map(d=>String((d.options||{})[opt.key]??'').trim()).filter(v=>v!==''));
+    const taken=new Set([[primary,(cfg.driver||{}).options],
+                         ...arr.map(d=>[d.driver_id,d.options])]
+      .map(([id,o])=>addressOf(id,o)).filter(v=>v!==''));
     let next=Number(opt.default_value||1);
     const ceiling=Number(opt.max_value||247);
     while(taken.has(String(next))&&next<=ceiling)next++;

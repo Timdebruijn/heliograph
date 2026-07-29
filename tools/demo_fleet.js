@@ -113,7 +113,12 @@
     modbus:{enabled:true,port:502,unit_id:1,max_clients:8,idle_timeout_seconds:120},
     polling:{interval_seconds:10},
     serial:{override:false,baud_rate:9600,parity:'none',data_bits:8,stop_bits:1},
-    driver:{id:'eversolar_legacy',label:'Schuur',options:{layout:'auto',address:'16'}},
+    // options:{} ON PURPOSE, and it is what a real bridge carries. A primary configured through
+    // the wizard stores nothing here and answers at its driver's declared default -- exactly how
+    // 192.168.20.254 is set up. Giving it an explicit address made this stub "realistic" in the
+    // one way that hid a collision: the free-address search read stored options only, saw
+    // nothing taken, and handed the new row the address the primary was already using.
+    driver:{id:'eversolar_legacy',label:'Schuur',options:{}},
     additional_devices:[
       {driver_id:'growatt_modbus',label:'Garage',options:{profile:'sph_3_6kw',unit_id:'2'}},
       {driver_id:'growatt_modbus',label:'Dak achter',options:{profile:'mic_tl_x',unit_id:'3'}}],
