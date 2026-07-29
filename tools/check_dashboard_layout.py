@@ -262,6 +262,50 @@ const tick=setInterval(async()=>{
 """
 
 
+# A bridge that has just been provisioned: on the network, admin password set, and nothing ever
+# said about the RS485 side. The firmware still starts its highest-priority driver, which never
+# answers -- so from the poll results alone this is indistinguishable from a miswired bus.
+#
+# It used to be shown as one: three named wiring causes, A/B swapped at the top, on the very
+# first screen after setup. Everything here exists so that the page reads the CONFIG instead and
+# invites rather than accuses.
+FRESH_BRIDGE_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+let tries=0;
+const tick=setInterval(async()=>{
+  if(!cfg && ++tries<=80) return;
+  clearInterval(tick);
+  try{
+    if(!neverConfigured()) say('the fresh-bridge stub was not recognised as unconfigured');
+    for(const tab of ['live','inv']){
+      goTab(tab);
+      await new Promise(r=>setTimeout(r,250));
+      const body=document.getElementById(tab).textContent;
+      if(!body.includes('No inverter set up yet')){
+        say(tab+' does not say an inverter still has to be set up');
+      }
+      // The wiring diagnosis is for a bus somebody has connected. Naming a fault on one that
+      // was never wired is the accusation this whole branch exists to stop.
+      for(const accusation of ['A and B swapped','Termination in the wrong place','never replied']){
+        if(body.includes(accusation)) say(tab+' blames the wiring: "'+accusation+'"');
+      }
+    }
+    // Live must offer a way in rather than a dead headline.
+    goTab('live');
+    await new Promise(r=>setTimeout(r,250));
+    if(!document.querySelector('#live button')) say('Live offers nothing to do next');
+    // And the header must not raise an alarm about a bus nobody has connected.
+    const chips=document.getElementById('chips');
+    if(chips.querySelector('.dot.bad')) say('the header shows a fault on an unconfigured bridge');
+  }catch(e){ say('the fresh-bridge assertions threw: '+e.message); }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
+
+
 def find_chrome() -> str | None:
     for name in (
         "google-chrome",
@@ -367,6 +411,14 @@ def main() -> int:
         page = build_page(stripped, stub, "{soc:68,power:-1240}", INVERTERS_JS)
         verdict, _ = render(chrome, page, 1000, scratch, "inverters")
         status |= report("inverters tab interaction", verdict)
+
+        # And the state every owner passes through exactly once, on a different stub: a bridge
+        # that has just been provisioned and has never been told what it is wired to.
+        fresh = (ROOT / "tools" / "fresh_bridge.js").read_text(encoding="utf-8")
+        page = build_web.inject_before_script(stripped, fresh)
+        page = page.replace("</body>", f"<script>{FRESH_BRIDGE_JS}</script></body>", 1)
+        verdict, _ = render(chrome, page, 1000, scratch, "fresh")
+        status |= report("first run, nothing configured", verdict)
 
     return status
 

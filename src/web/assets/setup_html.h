@@ -108,6 +108,13 @@ button.alt{background:none;border:1px solid var(--line);color:var(--fg)}
 <div class="card">
   <p class="sub" style="margin:0">After saving, the bridge restarts and joins your network.
   This setup network disappears. Find it again by its hostname, or via your router.</p>
+  <!-- This page asks for a network and a password and nothing about the inverter, so it used to
+       end reading like the end of the job. It is not: the bridge arrives on the LAN knowing
+       nothing about what is on the RS485 pair, and the owner who thinks they are finished meets
+       a dashboard with no production on it. One sentence, here, where the expectation is set. -->
+  <p class="sub" style="margin:8px 0 0">One thing is left after that: telling it which inverter
+  it is wired to. Open <b>Inverters</b> on the dashboard and let it search — the RS485 pair (A, B
+  and ground) needs to be connected first.</p>
 </div>
 </div>
 <script>

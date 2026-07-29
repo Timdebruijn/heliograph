@@ -398,6 +398,10 @@ function paintChrome(){
   // learn to ignore. With one device this is the header it has always been, stale tag included.
   const inv=multi
     ?chip(answering===expected?'ok':'bad',`Inverters ${esc(answering)}/${esc(expected)} answering`)
+    // Amber, not red, and no stale/no-data tags: a bridge nobody has configured is not failing
+    // at anything. It wants attention, which is what amber says, and the wiring alarm belongs
+    // to a bus somebody has actually connected.
+    :neverConfigured()?chip('warn','No inverter set up yet')
     :chip(d.online?'ok':'bad','Inverter'+(d.data_stale?' <span class="tag">stale</span>':'')+
        (d.data_valid?'':' <span class="tag">no data</span>'));
   $('#chips').innerHTML=inv+
@@ -433,8 +437,44 @@ function isFleet(s){
   const expected=(s.bridge||{}).devices_configured??polled;
   return expected>1||polled>1;
 }
+/// True when nobody has ever told this bridge what it is connected to.
+///
+/// The setup portal saves a network and an admin password and nothing else, so `driver.id`
+/// stays empty on a bridge that has just been provisioned. The firmware then starts its
+/// highest-priority driver anyway -- something has to be polled -- and that device never
+/// answers, because no inverter has been chosen, let alone wired.
+///
+/// Without this the first screen after setup accused the owner of a wiring fault: three named
+/// causes, A/B swapped at the top, for a bus they had not touched yet. The diagnosis is right
+/// for a bridge someone has connected something to and wrong for one still in its box, and the
+/// two look identical from the poll results alone -- the difference is only in the config.
+///
+/// Undefined while cfg is still loading, and that is deliberate: "we have not asked yet" must
+/// not flash a first-run panel at somebody with four working inverters.
+function neverConfigured(){
+  return !!cfg && !((cfg.driver||{}).id||'') && !((cfg.additional_devices||[]).length);
+}
+/// The one thing to do next, said once and shown wherever the reader happens to be.
+/// `here` is true when the Inverters tab is drawing it. That tab already carries the heading
+/// and is already where the second button would send you, so it gets neither -- a card that
+/// repeats the title above it and offers to take you where you are reads like a bug.
+function firstRunCard(here){
+  return `<div class="card" style="margin-top:20px">
+    ${here?'':'<div style="font-size:17px;font-weight:600">No inverter set up yet</div>'}
+    <div class="hint" style="margin-top:6px">The bridge is on your network and reachable — that
+      part is done. What it does not know yet is what is on the other end of the RS485 pair.</div>
+    <div class="hint" style="margin-top:8px">Wire A, B and ground to the inverter first, then let
+      the bridge look for it. Discovery listens at each driver's own line speed and reports what
+      answered; nothing is written to the inverter and nothing is changed until you confirm.</div>
+    <div class="acts"><button onclick="${here?"togglePanel('wiz')":"goTab('inv');togglePanel('wiz')"}">Find my inverter</button>
+      ${here?'':'<button class="alt" onclick="goTab(\'inv\')">Open the Inverters tab</button>'}</div>
+  </div>`;
+}
 function paintLive(){
   if(!S)return;
+  // Before anything else: a bridge nobody has configured has no production to lead with, and a
+  // headline dash over an empty page is not an answer to "what now".
+  if(neverConfigured()){$('#live').innerHTML=firstRunCard(false);return}
   const b=S.bridge, d=S.device, m=S.measurements||{}, fleet=S.devices||[], tot=S.totals||{};
   const expected=b.devices_configured??(tot.devices_polled??fleet.length);
   const multi=isFleet(S);
@@ -601,8 +641,9 @@ function paintInverters(){
   const b=S.bridge, problems=b.device_problems||[];
   const configured=b.devices_configured??invIds.length;
   let h=`<div class="between">
-    <div><div style="font-size:17px;font-weight:600">${esc(invIds.length)} inverter${invIds.length===1?'':'s'} polled${
-      configured!==invIds.length?` of ${esc(configured)} configured`:''}</div>
+    <div><div style="font-size:17px;font-weight:600">${neverConfigured()?'No inverter set up yet'
+      :`${esc(invIds.length)} inverter${invIds.length===1?'':'s'} polled${
+        configured!==invIds.length?` of ${esc(configured)} configured`:''}`}</div>
       <div class="hint">All on the onboard RS485 bus, polled in turn. Up to ${esc(b.max_devices||8)}.</div></div>
     <div class="acts" style="margin:0">
       <button onclick="togglePanel('wiz')">${panel==='wiz'?'Close':'Find inverters'}</button>
@@ -614,7 +655,12 @@ function paintInverters(){
   // is where the wizard's old advice ran out at "check your wiring" -- these are the three
   // causes in the order they actually happen, each with the test that settles it.
   const silent=invIds.filter(id=>(devCache[id]||{}).last_successful_poll_seconds_ago==null);
-  if(problems.length||configured!==invIds.length||silent.length){
+  // A bridge nobody has configured yet is silent for a reason that has nothing to do with its
+  // wiring, so it gets the invitation rather than the diagnosis. Everything below is written
+  // for someone who HAS connected an inverter and is not getting a reply from it.
+  if(neverConfigured()){
+    h+=firstRunCard(true);
+  }else if(problems.length||configured!==invIds.length||silent.length){
     const who=silent.map(id=>esc((devCache[id]||{}).label||id)).join(', ');
     h+=`<div class="card bad" style="margin-top:14px">
       <b>${silent.length?who+(silent.length===1?' has':' have')+' never replied':'Not every configured inverter started'}</b>
@@ -641,8 +687,11 @@ function paintInverters(){
       </div></div>`;
   }
 
+  // Nothing configured means nothing to list. The firmware still started its default driver --
+  // something has to be polled -- but showing that placeholder in red as "never answered"
+  // contradicts the invitation directly above it, and the reader never asked for it.
   h+='<div class="stack" style="margin-top:14px">';
-  for(const id of invIds){
+  for(const id of (neverConfigured()?[]:invIds)){
     const dev=devCache[id]||{}, m=measCache[id]||{}, caps=capsCache[id];
     const ident=dev.identity||{}, drv=dev.driver||{};
     const ago=dev.last_successful_poll_seconds_ago;
@@ -685,7 +734,7 @@ function paintInverters(){
   // decide what happens on the wire, and both need a restart.
   const c=cfg||{};
   h+=`<div class="card" style="margin-top:12px">
-    <div class="between"><div><b>Bus &amp; polling</b> <span class="tag warn">needs restart</span></div>
+    <div class="between"><div><b>Bus &amp; polling</b> <span class="tag warn">changes here need a restart</span></div>
       <button class="alt sm" onclick="togglePanel('bus')">${panel==='bus'?'Close':'Change'}</button></div>
     <div class="hint">${c.serial?`${esc(c.serial.baud_rate)} ${esc(c.serial.data_bits)}${esc(String(c.serial.parity||'n')[0].toUpperCase())}${esc(c.serial.stop_bits)}, ${c.serial.override?'<b>overridden here</b>':'set by the driver'}`:'—'} · polling every ${esc((c.polling||{}).interval_seconds??10)} s. Only override the line when discovery found a device at a profile the driver does not lead with — otherwise the driver decides, and that is right for almost every install.</div>
     ${panel==='bus'?busForm(c):''}
