@@ -127,6 +127,32 @@ void RestApi::releaseBody() {
     bodyBuffer_.shrink_to_fit();
 }
 
+bool RestApi::applyBodyTo(AsyncWebServerRequest* request, Configuration& updated,
+                          const DriverLookupFn& lookupDriver) {
+    ConfigError error;
+    const bool  parsed = applyConfigPatch(bodyBuffer_, updated, error, lookupDriver);
+    // Before the branch, not inside it: the buffer must go back whether the patch was accepted
+    // or refused, and an error path that forgets is a leak that only shows under a client
+    // sending bad JSON in a loop.
+    releaseBody();
+    if (!parsed) {
+        sendError(request, {400, "invalid_config",
+                            error.field.empty() ? error.message
+                                                : error.field + ": " + error.message});
+        return false;
+    }
+    return true;
+}
+
+bool RestApi::saveAndApply(AsyncWebServerRequest* request, const Configuration& updated) {
+    if (!context_.saveConfig(updated)) {
+        sendError(request, {500, "save_failed", "could not persist the configuration"});
+        return false;
+    }
+    context_.applyConfig(updated);  // lock-guarded publish; see RestContext
+    return true;
+}
+
 RestApi::~RestApi() { stop(); }
 
 void RestApi::notifyState(const DeviceState& state, uint64_t nowMs) {
@@ -277,13 +303,7 @@ bool RestApi::begin() {
             }
 
             Configuration updated = *context_.config;
-            ConfigError   error;
-            const bool    parsed = applyConfigPatch(bodyBuffer_, updated, error);
-            releaseBody();
-            if (!parsed) {
-                sendError(request, {400, "invalid_config",
-                                    error.field.empty() ? error.message
-                                                        : error.field + ": " + error.message});
+            if (!applyBodyTo(request, updated)) {
                 return;
             }
             // Refuse to finish setup without an admin password: everything after this
@@ -298,11 +318,9 @@ bool RestApi::begin() {
                 sendError(request, {400, "ssid_required", "a WiFi network is required"});
                 return;
             }
-            if (!context_.saveConfig(updated)) {
-                sendError(request, {500, "save_failed", "could not persist the configuration"});
+            if (!saveAndApply(request, updated)) {
                 return;
             }
-            context_.applyConfig(updated);  // lock-guarded publish; see RestContext
             // Echo the hostname: after the reboot this AP is gone and the user needs a
             // concrete address to go to. The setup page turns this into a clickable link.
             //
@@ -539,18 +557,12 @@ bool RestApi::begin() {
             // this, and applyConfig() below overwrites what context_.config points at.
             const Configuration before  = *context_.config;
             Configuration       updated = before;
-            ConfigError         error;
             // The lookup lets the config layer drop options orphaned by a previous driver
             // without itself knowing what a driver is; see applyConfigPatch's contract.
             const auto lookupDriver = [this](const std::string& id) -> const DriverDescriptor* {
                 return context_.registry != nullptr ? context_.registry->find(id) : nullptr;
             };
-            const bool parsed = applyConfigPatch(bodyBuffer_, updated, error, lookupDriver);
-            releaseBody();
-            if (!parsed) {
-                sendError(request, {400, "invalid_config",
-                                    error.field.empty() ? error.message
-                                                        : error.field + ": " + error.message});
+            if (!applyBodyTo(request, updated, lookupDriver)) {
                 return;
             }
 
@@ -623,11 +635,9 @@ bool RestApi::begin() {
                 }
             }
 
-            if (!context_.saveConfig(updated)) {
-                sendError(request, {500, "save_failed", "could not persist the configuration"});
+            if (!saveAndApply(request, updated)) {
                 return;
             }
-            context_.applyConfig(updated);  // lock-guarded publish; see RestContext
             const bool  rebootRequired = configChangeRequiresReboot(before, updated);
             std::string body;
             serializeConfig(updated, body, 4096, &rebootRequired);
@@ -776,11 +786,9 @@ bool RestApi::begin() {
             const bool rollbackStored =
                 context_.stashRollback != nullptr && context_.stashRollback();
 
-            if (!context_.saveConfig(merged)) {
-                sendError(request, {500, "save_failed", "could not persist the configuration"});
+            if (!saveAndApply(request, merged)) {
                 return;
             }
-            context_.applyConfig(merged);  // lock-guarded publish; see RestContext
 
             std::string body;
             if (!buildRestoreResultPayload(diff.size(), rebootRequired, rollbackStored, body)) {
@@ -1294,6 +1302,12 @@ void RestApi::releaseBody() {
     bodyRejected_ = nullptr;
     bodyBuffer_.clear();
 }
+// No routes on this build, so nothing reaches these. Stubbed for the same reason as their
+// neighbours: the header declares one class for both builds.
+bool RestApi::applyBodyTo(AsyncWebServerRequest*, Configuration&, const DriverLookupFn&) {
+    return false;
+}
+bool RestApi::saveAndApply(AsyncWebServerRequest*, const Configuration&) { return false; }
 
 }  // namespace heliograph::rest
 

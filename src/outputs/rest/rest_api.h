@@ -153,6 +153,28 @@ private:
     bool bodyMissing(AsyncWebServerRequest* request, const char* expected);
     void releaseBody();
 
+    /// Merges the collected body into `updated`, or answers 400 and returns false.
+    ///
+    /// Releases the body either way, which is half of why this is one function: the release
+    /// belongs between the parse and the error, and writing that out three times is three
+    /// chances to leak the buffer down an error path. The other half is the message -- a
+    /// ConfigError carries an optional field name, and "field: message" versus bare "message"
+    /// was spelled out at every site, so a change to how a rejection reads would have had to
+    /// be made in all of them.
+    bool applyBodyTo(AsyncWebServerRequest* request, Configuration& updated,
+                     const DriverLookupFn& lookupDriver = {});
+
+    /// Persists `updated` and publishes it to the running system, or answers 500 and
+    /// returns false.
+    ///
+    /// The ORDER is the invariant: save first, publish second. Publishing a configuration that
+    /// failed to persist leaves the device running something it will not have after a reboot.
+    ///
+    /// Deliberately NOT used by the rollback route. rollbackConfig() has already swapped the
+    /// two stored blobs, so calling saveConfig() there would re-serialise the same
+    /// configuration over the copy just put in place -- it applies without saving, and says so.
+    bool saveAndApply(AsyncWebServerRequest* request, const Configuration& updated);
+
     RestContext context_;
     uint16_t    port_;
     bool        started_        = false;
