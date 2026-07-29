@@ -239,6 +239,22 @@ const tick=setInterval(async()=>{
         say('the tab never repainted again after the control was left alone');
       }
     }
+
+    // 3. And it must not release too little. A BUTTON keeps focus after it is clicked, so
+    // counting one as "busy" would have frozen the Live tab the moment somebody opened it --
+    // a worse and quieter bug than the dropdown it was meant to fix.
+    goTab('live');
+    await new Promise(r=>setTimeout(r,200));
+    const nav=document.querySelector('nav button[data-t="live"]');
+    if(!nav) say('no nav button to test focus against');
+    else{
+      nav.focus();
+      const marker=document.createElement('span');
+      $('#live').appendChild(marker);
+      paint();
+      await new Promise(r=>setTimeout(r,50));
+      if(marker.isConnected) say('a focused nav button stopped the Live tab from updating');
+    }
   }catch(e){ say('the interaction assertions threw: '+e.message); }
   done();
 },25);

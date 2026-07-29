@@ -1413,6 +1413,10 @@ async function addExtra(){
   // picked here, by the same reading of the options that addressProblem() uses to complain.
   const primary=(cfg.driver||{}).id||'';
   if(!primary){alert('Choose a driver for the first inverter before adding a second.');return}
+  // The driver list is what says which option holds an address. Without it this would fall
+  // through to "no address option" and hand the new row the driver's default -- straight onto
+  // the primary. Refusing for a moment beats adding a row that cannot work.
+  if(!drivers){alert('Still reading the driver list. Try again in a moment.');return}
   const opt=addressOptionOf(primary);
   const options={};
   if(opt){
@@ -1420,7 +1424,10 @@ async function addExtra(){
       .map(d=>String((d.options||{})[opt.key]??'').trim()).filter(v=>v!==''));
     let next=Number(opt.default_value||1);
     const ceiling=Number(opt.max_value||247);
-    while(taken.has(String(next))&&next<ceiling)next++;
+    while(taken.has(String(next))&&next<=ceiling)next++;
+    // Running off the end must not fall back to a taken address -- that is the exact failure
+    // this block exists to prevent, and it would be silent.
+    if(next>ceiling){alert('Every bus address in this driver’s range is already in use.');return}
     options[opt.key]=String(next);
   }
   arr.push({driver_id:primary,label:'',options});
@@ -1989,7 +1996,15 @@ function tzOptions(ntp){
 function readerIsBusy(){
   const el=document.activeElement;
   if(!el||el===document.body)return false;
-  return el.tagName==='SELECT'||el.tagName==='INPUT'||el.tagName==='TEXTAREA';
+  const tag=el.tagName;
+  if(tag==='SELECT'||tag==='TEXTAREA')return true;
+  if(tag!=='INPUT')return false;
+  // Only the ones a repaint can actually rob. A checkbox commits the moment it is clicked and
+  // then KEEPS focus, so counting it here would freeze its tab for as long as the reader sits
+  // looking at the box they just ticked -- silently, which is the worse failure of the two.
+  // Buttons are excluded by the same test: a nav button holds focus after a tab switch, and
+  // treating that as "busy" would have stopped the Live tab updating the moment you opened it.
+  return !['checkbox','radio','button','submit','reset'].includes((el.type||'').toLowerCase());
 }
 function paint(){
   paintChrome();
