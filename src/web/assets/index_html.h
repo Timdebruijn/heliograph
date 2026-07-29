@@ -736,7 +736,7 @@ function paintInverters(){
         ${groupsFor(m,false)||'<div class="dim">Nothing published yet.</div>'}
         ${caps&&(caps.write||[]).length===0?'<div class="hint">This driver cannot write to the inverter. Nothing in this build can.</div>':''}
       </div>`:''}
-      ${panel==='s:'+id?deviceForm(id,dev):''}
+      ${panel==='s:'+id?deviceForm(slotOf(id)):''}
     </div>`;
   }
 
@@ -750,20 +750,28 @@ function paintInverters(){
   if(!neverConfigured()){
     const extras=(cfg&&cfg.additional_devices)||[];
     // Claimed slots, straight from the bridge. Guessing this by counting started devices, and
-    // then by matching driver ids, was wrong both times -- see extraIndexOf().
+    // then by matching driver ids, was wrong both times -- see slotOf().
     const claimed=new Set(invIds.map(id=>(devCache[id]||{}).config_slot)
                                 .filter(v=>typeof v==='number'));
     for(let i=0;i<extras.length;i++){
       if(claimed.has(i+1))continue;  // a device of its own is running for this row  // this row has a device of its own
       const e=extras[i], addr=addressOf(e.driver_id,e.options);
       const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===e.driver_id);
+      // The same form a running inverter gets, on the same configuration row. A pending row is
+      // where the settings are most likely to still be WRONG -- it is usually one address or one
+      // register map away from working -- and until now it was the one row that could not be
+      // corrected without a restart first.
       h+=`<div class="card" style="border-color:var(--warn)">
         <div class="between"><div><b>${esc(e.label||'Inverter '+(i+2))}</b>
           <span class="tag warn">starts after a restart</span></div>
-          <button class="dangerAlt sm" onclick="removeExtraAt(${i})">Remove</button></div>
+          ${panel==='x:'+i?'':`<button class="dangerAlt sm" onclick="removeExtraAt(${i})">Remove</button>`}</div>
         <div class="hint">${esc((drv&&drv.display_name)||e.driver_id||'no driver chosen')}${
-          addr?' · address '+esc(addr):''} — added to the configuration, not polled yet. Restart
-          the bridge to start it, or remove it here.</div>
+          addr?' · address '+esc(addr):''} — added to the configuration, not polled yet. Correct it
+          here before the restart if anything is off, or remove it.</div>
+        <div class="acts">
+          <button class="alt sm" onclick="togglePanel('x:${i}')">${panel==='x:'+i?'Close settings':'Name, driver and address'}</button>
+        </div>
+        ${panel==='x:'+i?deviceForm(i+1):''}
       </div>`;
     }
   }
@@ -779,6 +787,9 @@ function paintInverters(){
     ${panel==='bus'?busForm(c):''}
   </div>`;
   $('#inv').innerHTML=h;
+  // The gate ran on change only, so a form just opened with an unset must-pick option offered an
+  // enabled Save. addressProblem() still refused it, but the button said otherwise first.
+  gateForms();
   if(panel==='bus')wireBusForm();
   if(panel==='wiz'&&wizStep===4)wizLoadDrivers();
 }
@@ -788,18 +799,35 @@ function paintInverters(){
 // the new driver's options never appeared -- so a driver could not be changed here at all.
 let devDraft=null;
 
-function deviceForm(id,dev){
-  const primary=isPrimary(id);
-  const storedDrvId=(dev.identity||{}).driver_id||(dev.driver||{}).id||'';
-  if(!devDraft||devDraft.id!==id)devDraft={id,drv:storedDrvId,label:dev.label||''};
+/// What is STORED for a configuration row: slot 0 is `driver`, 1..N are additional_devices[0..].
+///
+/// One lookup for both kinds of card, and that is what makes a row that has not started
+/// editable at all -- it has a slot even though it has no device id, no identity and no entry
+/// in devCache. Everything the form needs comes from the configuration, which is also the only
+/// thing Save writes.
+function storedRow(slot){
+  const d=slot===0?((cfg&&cfg.driver)||{}):((((cfg&&cfg.additional_devices)||[])[slot-1])||{});
+  return {drv:(slot===0?d.id:d.driver_id)||'',label:d.label||'',options:d.options||{}};
+}
+/// The form for one configuration row, started or not.
+///
+/// It reads the CONFIGURATION, not the running device. Reading the running device was both the
+/// reason a pending row could not be edited and a quiet revert: after changing a driver and
+/// saving, `identity.driver_id` still named the old one until the restart, so reopening the
+/// card to fix the label and pressing Save wrote the old driver back over the pending change.
+function deviceForm(slot){
+  const primary=slot===0;
+  const st=storedRow(slot);
+  const storedDrvId=st.drv;
+  if(!devDraft||devDraft.slot!==slot)devDraft={slot,drv:storedDrvId,label:st.label};
   const drvId=devDraft.drv;
   const list=(drivers&&drivers.drivers)||[];
   // Stored option values apply only while the selection IS the configured driver. Otherwise the
   // declared defaults do -- rendering one driver's options under another driver's id is how an
   // option once got saved into the wrong driver's config.
-  const stored=drvId===storedDrvId?(primary?((cfg&&cfg.driver&&cfg.driver.options)||{}):extraOptionsFor(id)):{};
+  const stored=drvId===storedDrvId?st.options:{};
   const drv=list.find(x=>x.id===drvId);
-  let h=`<div class="hair" data-form="dev:${esc(id)}">
+  let h=`<div class="hair" data-form="dev:${esc(slot)}">
     <span class="tag warn">changes here need a restart</span>
     <label for="dv_label">Name</label>
     <input id="dv_label" value="${esc(devDraft.label)}" placeholder="Schuur" autocomplete="off"
@@ -807,14 +835,15 @@ function deviceForm(id,dev){
     <div class="hint">Shown here and in Home Assistant instead of the id. Renaming never changes the id, so history is kept.</div>
     <label for="dv_drv">Driver</label>
     <select id="dv_drv" onchange="devDraft.drv=this.value;paintInverters()">${list.map(x=>
-      `<option value="${esc(x.id)}" ${x.id===drvId?'selected':''}>${esc(x.display_name)} (${esc(x.support_level)})</option>`).join('')}</select>
+      `<option value="${esc(x.id)}" ${x.id===drvId?'selected':''}>${esc(x.display_name)} (${esc(x.support_level)})${
+        primary||canShare(x.id)?'':' — one inverter per bridge'}</option>`).join('')}</select>
     ${drvId!==storedDrvId?'<div class="hint" style="color:var(--warn)">A different driver from the one running. Its options below start at this driver\u2019s own defaults, not the stored ones.</div>':''}`;
   h+=optionFields(drv,stored,'dv_o_');
   h+=`<div class="acts">
-      <button onclick="saveDevice('${esc(id)}',${primary?'true':'false'})">Save</button>
+      <button onclick="saveDevice(${slot})">Save</button>
       <button class="alt" onclick="togglePanel(null)">Cancel</button>
       <span style="flex:1"></span>
-      ${primary?'':`<button class="dangerAlt" onclick="removeDevice('${esc(id)}')">Remove this inverter</button>`}
+      ${primary?'':`<button class="dangerAlt" onclick="removeExtraAt(${slot-1})">Remove this inverter</button>`}
     </div>
     <div class="hint">${primary?'This is the first inverter, which every build has. Point it at a different driver rather than removing it.'
       :'Removing it does not remove what it already published: the old entities stay in Home Assistant, available, showing their last value.'}</div>
@@ -857,10 +886,22 @@ function gateForms(){
 // Which /devices entry is the one configured under `driver`, as opposed to additional_devices.
 // Order is the boot order, and the primary is always first.
 function isPrimary(id){return invIds[0]===id}
-function extraOptionsFor(id){
-  const idx=extraIndexOf(id);
-  const arr=(cfg&&cfg.additional_devices)||[];
-  return (arr[idx]||{}).options||{};
+/// The configuration row a running device came from: 0 is the primary driver, 1..N are
+/// additional_devices[0..N-1], and -1 when it cannot be placed.
+///
+/// The firmware plans the rows, starts them, and refuses some -- a driver that cannot share a
+/// bus, or a row resolving to an id another row already took, which skips the LATER one. So the
+/// running devices are not the configured rows minus a suffix, and every attempt to re-derive
+/// the mapping in here got it wrong: first by counting, then by matching driver ids. Both put a
+/// Remove button on a working inverter.
+///
+/// config_slot is that mapping, handed over by the only code that knows it. The fallback covers
+/// a bridge still on firmware from before that field existed, where only the first device can be
+/// placed with any confidence at all.
+function slotOf(id){
+  const v=(devCache[id]||{}).config_slot;
+  if(typeof v==='number'&&v>=0)return v;
+  return isPrimary(id)?0:-1;
 }
 function readOpts(prefix){
   const out={};
@@ -1422,15 +1463,19 @@ async function saveAccess(){
   say('#ac_msg','ok','Saved and applied.');
   paintBridge();
 }
-async function saveDevice(id,primary){
+async function saveDevice(slot){
+  // A slot the bridge could not name. Every started device is in the plan, so this should not
+  // happen -- but the arithmetic below would quietly write nothing and report success, and a
+  // Save that says "Saved" and changes nothing is the worst of the available failures.
+  if(slot<0){say('#dv_msg','err','The bridge did not say which configured row this inverter came from, so this cannot be saved. Restarting it will re-establish that.');return}
   const opts=readOpts('dv_o_');
-  const body=primary
+  const body=slot===0
     ?{driver:{id:val('dv_drv'),label:val('dv_label'),...(Object.keys(opts).length?{options:opts}:{})}}
     :(()=>{
       // The array is replaced wholesale by the API, so it travels whole -- built from the
       // stored list with this one row rewritten, never from the DOM of the other rows.
       const arr=((cfg.additional_devices)||[]).map(d=>({driver_id:d.driver_id,label:d.label||'',options:{...(d.options||{})}}));
-      const idx=extraIndexOf(id);
+      const idx=slot-1;
       if(idx>=0&&idx<arr.length)arr[idx]={driver_id:val('dv_drv'),label:val('dv_label'),options:opts};
       return {additional_devices:arr};
     })();
@@ -1441,10 +1486,21 @@ async function saveDevice(id,primary){
   say('#dv_msg','ok','Saved. Takes effect after a restart.');
   invNextMs=0;loadInverters(true);
 }
+/// Whether a second row of this driver can run at all, straight from the driver list. Absent on
+/// a bridge running firmware from before the field existed, and the benefit of the doubt is the
+/// right default there: the firmware still refuses the row at boot and says why, which is worse
+/// than being told now but better than a page that forbids something the bridge allows.
+function canShare(drvId){
+  const d=((drivers&&drivers.drivers)||[]).find(x=>x.id===drvId);
+  return !d||d.supports_multiple_devices!==false;
+}
 /// What the firmware would refuse, or accept and then quietly skip at boot -- said here, next
 /// to the field, rather than as `additional_devices[2].driver_id` under a Save button.
 function addressProblem(body){
   const seen={};
+  // Drivers that poll one device per bridge, by row. planDevices() refuses the SECOND one and
+  // lets the first keep the bus, which is the same order this walks in.
+  const exclusive={};
   const rowOf=(drvId,options)=>{
     const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===drvId);
     for(const o of ((drv&&drv.options)||[])){
@@ -1469,6 +1525,15 @@ function addressProblem(body){
     // function had the same hole and kept it a day longer, so the collision stayed reachable by
     // typing the number in by hand and pressing Save.
     //
+    // Said here rather than discovered at boot. A row of an exclusive driver is accepted by the
+    // API, persisted, and then skipped by planDevices() -- after the restart the owner performed
+    // to apply it. The refusal was reachable only by doing all of that first. Checked before the
+    // address, because for such a row the address is beside the point: it cannot start at any.
+    if(!canShare(drvId)){
+      if(exclusive[drvId])return who+' cannot run beside '+exclusive[drvId].toLowerCase()+
+        ': this driver polls one device per bridge. The second row is skipped at boot.';
+      exclusive[drvId]=who;
+    }
     // No false positives from the protocols that do not address this way: an AA55 device is
     // found by serial number and declares no address option at all, so addressOf() returns ''
     // and it never enters the comparison.
@@ -1490,11 +1555,11 @@ function addressProblem(body){
   }
   return null;
 }
-async function removeDevice(id){ return removeExtraAt(extraIndexOf(id)) }
 /// Removes an extra device by its position in the CONFIGURATION, which is the only handle a row
 /// that has not started yet has.
 ///
-/// removeDevice() went through invIds -- the devices that actually started at boot -- so a row
+/// The removeDevice() this replaced went through invIds -- the devices that actually started at
+/// boot -- so a row
 /// added since the last restart was not in it, had no card, and therefore had no button either.
 /// The alert offering to "open Name, driver and address on the new inverter" pointed at
 /// something that did not exist, and the configuration could not be undone from the UI at all
@@ -1518,20 +1583,6 @@ async function removeExtraAt(idx){
 }
 /// The option a driver uses to hold its bus address, or null when it addresses some other way
 /// (an AA55 device is found by serial number and declares none).
-/// The additional_devices index a running device came from, or -1 when the bridge did not say.
-///
-/// The firmware plans the rows, starts them, and refuses some -- a driver that cannot share a
-/// bus, or a row resolving to an id another row already took, which skips the LATER one. So the
-/// running devices are not the configured rows minus a suffix, and every attempt to re-derive
-/// the mapping in here got it wrong: first by counting, then by matching driver ids. Both put a
-/// Remove button on a working inverter.
-///
-/// config_slot is that mapping, handed over by the only code that knows it. Slot 0 is the
-/// primary driver; 1..N are additional_devices[0..N-1].
-function extraIndexOf(id){
-  const slot=(devCache[id]||{}).config_slot;
-  return typeof slot==='number'&&slot>0?slot-1:-1;
-}
 function addressOptionOf(drvId){
   const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===drvId);
   return ((drv&&drv.options)||[]).find(o=>o.key==='unit_id'||o.key==='address')||null;
@@ -1566,6 +1617,14 @@ async function addExtra(){
   // picked here, by the same reading of the options that addressProblem() uses to complain.
   const primary=(cfg.driver||{}).id||'';
   if(!primary){alert('Choose a driver for the first inverter before adding a second.');return}
+  // The primary's driver is the guess below. When that driver polls one device per bridge the
+  // guess is guaranteed wrong, and the row would be accepted, persisted, and then skipped at the
+  // restart -- so it is refused here, with the reason, instead of being added.
+  if(!canShare(primary)){
+    alert('This driver polls one inverter per bridge, so a second row of it would never start. '
+      +'Change the first inverter to a driver that shares the bus, or use a second bridge.');
+    return;
+  }
   // The driver list is what says which option holds an address. Without it this would fall
   // through to "no address option" and hand the new row the driver's default -- straight onto
   // the primary. Refusing for a moment beats adding a row that cannot work.

@@ -31,7 +31,20 @@ const DriverDescriptor& descriptor() {
         // any register-shape heuristic, so when a device answers it, it is not a guess.
         x.probePriority           = 20;
         x.supportsAutoDetection   = true;
-        x.supportsMultipleDevices = false;
+        // Modbus RTU addresses by unit id, so several SunSpec devices on one bus is the
+        // ordinary arrangement rather than an exception -- and this driver already carries what
+        // that needs: a unit_id option and an addressOptionKey. The sibling Modbus driver says
+        // true for the same reason.
+        //
+        // It said false until 2026-07-29. Traced: the line arrived uncommented with the driver's
+        // first commit, docs/sunspec.md says nothing about it, and no later commit ever set it
+        // over a finding. Every neighbouring decision in this file carries its reasoning; this
+        // one carried none, which is what made it look like an oversight rather than a limit.
+        //
+        // NOT hardware-verified. Two SunSpec devices have never shared a real bus here -- the
+        // driver is Experimental and has only ever met one. What is verified is that the plan
+        // starts both rows (test/test_device_plan) and that the protocol permits it.
+        x.supportsMultipleDevices = true;
         x.supportsRead            = true;
         // The driver has a write path; whether a given DEVICE has one is a separate question,
         // answered by capabilities() after model 123 has been read. This flag is the static

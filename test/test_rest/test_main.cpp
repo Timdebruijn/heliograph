@@ -1788,10 +1788,24 @@ static void test_drivers_payload_drives_the_wizard() {
     TEST_ASSERT_TRUE(rest::buildDriversPayload(reg.availableDrivers(), json));
     auto doc = parse(json);
 
+    // Both answers must travel, and it matters that a driver saying NO is in the payload too:
+    // the page needs the refusal in order to stop offering a second row of it. Without this
+    // field the only way to learn the answer was to save a row, restart, and read the plan's
+    // complaint -- so the page guessed instead, and guessed from the primary's driver.
+    bool sawExclusive = false, sawShareable = false;
+    for (JsonObject d : doc["drivers"].as<JsonArray>()) {
+        TEST_ASSERT_TRUE_MESSAGE(d["supports_multiple_devices"].is<bool>(),
+                                 d["id"].as<const char*>());
+        if (d["supports_multiple_devices"].as<bool>()) sawShareable = true; else sawExclusive = true;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(sawShareable, "no driver reported that it can share the bus");
+    TEST_ASSERT_TRUE_MESSAGE(sawExclusive, "no driver reported that it cannot");
+
     bool foundEversolar = false;
     for (JsonObject d : doc["drivers"].as<JsonArray>()) {
         if (std::string(d["id"].as<const char*>()) == "eversolar_legacy") {
             foundEversolar = true;
+            TEST_ASSERT_TRUE(d["supports_multiple_devices"].as<bool>());
             TEST_ASSERT_EQUAL_STRING("beta", d["support_level"]);
             TEST_ASSERT_FALSE(d["supports_write"].as<bool>());
             // The wizard shows which line settings will actually be tried.

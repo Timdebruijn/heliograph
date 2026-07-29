@@ -127,6 +127,11 @@ produced nothing yet — so a zero accumulator is published as a reading.
 | `unit_id` | `1` | Modbus slave address on the RS485 bus, 1–247 |
 | `base_address` | `40000` | Where the `SunS` marker lives |
 
+**Several SunSpec devices on one bus.** Supported since 0.24.1: add a row per device and give
+each its own `unit_id`. That is how Modbus RTU addresses devices, so it is the ordinary
+arrangement rather than a special mode — but it has not been tried on real hardware here, only
+in a host test. If you run two and it misbehaves, that is worth an issue.
+
 **About the base address.** 40000 covers most devices; **50000** is the other common choice, and
 some vendors sit elsewhere entirely. It is a setting rather than a search on purpose: every
 extra guess costs a discovery round trip on a shared bus, and you know your device better than

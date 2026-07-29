@@ -130,7 +130,7 @@
     relays:{enabled:false,roles:[]}
   };
   const driversDoc = {drivers:[
-    {id:'eversolar_legacy',display_name:'EverSolar / Zeversolar legacy',support_level:'beta',
+    {id:'eversolar_legacy',supports_multiple_devices:true,display_name:'EverSolar / Zeversolar legacy',support_level:'beta',
       description:'AA55 framing over RS485, for TL-series inverters abandoned by their portal.',
       serial_profiles:[{baud_rate:9600,parity:'none',data_bits:8,stop_bits:1}],
       options:[
@@ -139,7 +139,7 @@
         {key:'address',display_name:'Assigned bus address',default_value:'16',
          min_value:16,max_value:254,
          description:'Address this bridge hands its inverter at registration. Leave at 16 unless more than one shares the loop.'}]},
-    {id:'growatt_modbus',display_name:'Growatt (Modbus)',support_level:'experimental',
+    {id:'growatt_modbus',supports_multiple_devices:true,display_name:'Growatt (Modbus)',support_level:'experimental',
       description:'Modbus RTU. The register map is a data file, so one driver serves several models.',
       serial_profiles:[{baud_rate:9600,parity:'none',data_bits:8,stop_bits:1}],
       options:[
@@ -147,9 +147,19 @@
          default_value:'',description:'Which model this unit is. It cannot be detected — probing identifies the protocol, never the model.'},
         {key:'unit_id',display_name:'Bus address',default_value:'1',min_value:1,max_value:247,
          description:'Must match the address set in the inverter’s own menu, and be unique on this bus.'}]},
-    {id:'mock',display_name:'Mock Inverter',support_level:'stable',
+    {id:'mock',supports_multiple_devices:true,display_name:'Mock Inverter',support_level:'stable',
       description:'A simulated three-phase hybrid, for UI and integration work with no bus.',
-      serial_profiles:[],options:[{key:'unit_id',display_name:'Bus address',default_value:'1'}]}
+      serial_profiles:[],options:[{key:'unit_id',display_name:'Bus address',default_value:'1'}]},
+    // The one driver that answers NO. It is here because the page must be able to say so BEFORE
+    // a restart -- the firmware refuses the second row at boot, which is the wrong moment to
+    // find out, and until this field existed the page had no way to know.
+    {id:'solax_x1',supports_multiple_devices:false,display_name:'SolaX X1 (AA55)',support_level:'experimental',
+      description:'One inverter per bridge: the address is handed out at registration, not read.',
+      serial_profiles:[{baud_rate:9600,parity:'none',data_bits:8,stop_bits:1}],
+      options:[
+        {key:'address',display_name:'Assigned bus address',default_value:'10',
+         min_value:10,max_value:254,
+         description:'Address this bridge hands its inverter at registration.'}]}
   ]};
   const diagnostics = {
     uptime_seconds:5061,firmware_version:'0.14.0',board:'Waveshare ESP32-S3-RS485-CAN',

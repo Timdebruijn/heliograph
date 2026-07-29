@@ -274,7 +274,105 @@ const tick=setInterval(async()=>{
       }
     }
 
-    // 1d. An OPEN PANEL is work in progress. A raw-bus recording runs for thirty seconds and a
+    // 1d. A pending row must be CORRECTABLE, not merely removable. It is the row most likely to
+    // still be wrong -- usually one address or one register map away from working -- and it was
+    // the only row that could not be fixed without restarting first, then fixing, then
+    // restarting again. It gets the same form a running inverter gets, keyed on the
+    // configuration slot, which is the only handle a row without a device id has.
+    cfg.additional_devices=[{driver_id:'growatt_modbus',label:'Garage',options:{profile:'sph_3_6kw',unit_id:'2'}},
+                            {driver_id:'eversolar_legacy',label:'Refused',options:{address:'17'}},
+                            {driver_id:'growatt_modbus',label:'Dak achter',options:{profile:'mic_tl_x',unit_id:'3'}}];
+    devCache['growatt_modbus-GW2400ABC'].config_slot=1;
+    devCache['growatt_modbus-GW3300XYZ'].config_slot=3;
+    panel=null; devDraft=null; paintInverters();
+    await new Promise(r=>setTimeout(r,120));
+    const pcard=[...document.querySelectorAll('#inv .card')]
+      .find(c=>c.textContent.includes('starts after a restart'));
+    const open=pcard&&[...pcard.querySelectorAll('button')]
+      .find(b=>/togglePanel\('x:/.test(b.getAttribute('onclick')||''));
+    if(!open) say('a pending row offers no way to correct it, only to delete it');
+    else{
+      open.click();
+      await new Promise(r=>setTimeout(r,150));
+      const drv=document.getElementById('dv_drv'), lab=document.getElementById('dv_label');
+      if(!drv||!lab) say('opening a pending row drew no form');
+      else{
+        // What is STORED for THAT row -- not the first row's values, which is what a form
+        // hanging off a running device would have had to fall back to.
+        if(drv.value!=='eversolar_legacy') say('the pending form shows the wrong driver: '+drv.value);
+        if(lab.value!=='Refused') say('the pending form shows the wrong name: '+lab.value);
+        const addr=document.getElementById('dv_o_address');
+        if(!addr) say('the pending form offers no address field');
+        else if(addr.value!=='17') say('the pending form shows the wrong address: '+addr.value);
+
+        // And Save must rewrite that slot and leave its siblings exactly as stored.
+        lab.value='Corrected';
+        let body=null; const rp=window.patch;
+        window.patch=async b=>{body=b;return{ok:true,body:{}}};
+        await saveDevice(2);
+        window.patch=rp;
+        const arr=body&&body.additional_devices;
+        if(!arr||arr.length!==3) say('saving a pending row did not send the whole device list');
+        else{
+          if(arr[1].label!=='Corrected') say('the edit landed on row '+arr.findIndex(d=>d.label==='Corrected')+', not row 1');
+          if(arr[0].label!=='Garage'||arr[2].label!=='Dak achter') say('saving one row rewrote its siblings');
+          if(arr[0].options.profile!=='sph_3_6kw') say('a sibling row lost its stored options');
+        }
+      }
+    }
+
+    // 1e. The form edits the CONFIGURATION, not the running device. Those differ for exactly as
+    // long as a saved change is waiting for a restart -- which is when someone is most likely to
+    // open the card again. Reading identity.driver_id showed the OLD driver there, so correcting
+    // a typo in the name and pressing Save wrote the old driver back over the pending change.
+    panel=null; devDraft=null;
+    const realDriver=cfg.driver;
+    cfg.driver={id:'mock',label:'Schuur',options:{unit_id:'4'}};
+    togglePanel('s:eversolar_legacy-EU00T112345678');
+    await new Promise(r=>setTimeout(r,150));
+    const psel=document.getElementById('dv_drv');
+    if(!psel) say('the primary settings panel drew no form');
+    else if(psel.value!=='mock'){
+      say('the form shows the running driver ('+psel.value+') instead of the saved one, so Save would revert the pending change');
+    }
+    togglePanel(null); cfg.driver=realDriver; devDraft=null;
+    await new Promise(r=>setTimeout(r,100));
+
+    // 1h. A driver that polls one device per bridge must be refused HERE, not at the restart.
+    // planDevices() accepts nothing about it: the API stores the row, the page shows it waiting,
+    // and the boot after the restart skips it. The page used to have no way to know -- the
+    // driver list did not carry the answer -- so it guessed by copying the primary's driver,
+    // which for such a driver is the one guess guaranteed to be wrong.
+    panel=null; devDraft=null;
+    const keepDriver=cfg.driver, keepExtras=cfg.additional_devices;
+    cfg.driver={id:'solax_x1',label:'Vader',options:{address:'10'}};
+    cfg.additional_devices=[];
+    let added=null, said=null;
+    const rp2=window.patch, ra2=window.alert;
+    window.patch=async b=>{added=b;return{ok:true,body:{}}};
+    window.alert=m=>{said=m};
+    await addExtra();
+    window.patch=rp2; window.alert=ra2;
+    if(added) say('a second row was added for a driver that polls one device per bridge');
+    if(!said||!/one inverter per bridge/i.test(said)) say('adding it was refused without saying why: '+said);
+
+    // And typing one in by hand must be refused for the same reason, with the reason. This is
+    // the path the alert cannot cover: an existing row whose driver is changed to an exclusive
+    // one and saved.
+    const twice=addressProblem({additional_devices:[{driver_id:'solax_x1',options:{address:'11'}}]});
+    if(!twice||!/one device per bridge/i.test(twice)){
+      say('two rows of a one-per-bridge driver were accepted: '+twice);
+    }
+    // A single row of it is fine -- it is the SECOND that cannot start. Refusing the first would
+    // make the driver unusable altogether.
+    cfg.additional_devices=[];
+    const once=addressProblem({driver:{id:'solax_x1',options:{address:'10'}},additional_devices:[]});
+    if(once) say('one row of a one-per-bridge driver was refused: '+once);
+    cfg.driver=keepDriver; cfg.additional_devices=keepExtras;
+    panel=null; devDraft=null; paintInverters();
+    await new Promise(r=>setTimeout(r,100));
+
+    // 1f. An OPEN PANEL is work in progress. A raw-bus recording runs for thirty seconds and a
     // firmware upload longer, and neither holds focus -- so the focus guard alone left both
     // being rebuilt every few seconds while they ran.
     togglePanel('cap');
@@ -292,7 +390,7 @@ const tick=setInterval(async()=>{
     await new Promise(r=>setTimeout(r,60));
     if(document.getElementById('panel-probe-2')) say('the tab never repainted again after closing the panel');
 
-    // 1e. A refusal must reach the reader from a PENDING card too. That card has no form, so
+    // 1g. A refusal must reach the reader from a PENDING card too. That card has no form, so
     // no #dv_msg, and say() begins with `if(!m)return` -- a 400 produced nothing at all: no
     // message, no alert, the row still sitting there. The firmware revalidates every remaining
     // row on any change to the array, so a legacy value in a SIBLING row refuses the removal of
