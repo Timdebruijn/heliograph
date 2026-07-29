@@ -835,7 +835,8 @@ function deviceForm(slot){
     <div class="hint">Shown here and in Home Assistant instead of the id. Renaming never changes the id, so history is kept.</div>
     <label for="dv_drv">Driver</label>
     <select id="dv_drv" onchange="devDraft.drv=this.value;paintInverters()">${list.map(x=>
-      `<option value="${esc(x.id)}" ${x.id===drvId?'selected':''}>${esc(x.display_name)} (${esc(x.support_level)})</option>`).join('')}</select>
+      `<option value="${esc(x.id)}" ${x.id===drvId?'selected':''}>${esc(x.display_name)} (${esc(x.support_level)})${
+        primary||canShare(x.id)?'':' — one inverter per bridge'}</option>`).join('')}</select>
     ${drvId!==storedDrvId?'<div class="hint" style="color:var(--warn)">A different driver from the one running. Its options below start at this driver\u2019s own defaults, not the stored ones.</div>':''}`;
   h+=optionFields(drv,stored,'dv_o_');
   h+=`<div class="acts">
@@ -1487,8 +1488,19 @@ async function saveDevice(slot){
 }
 /// What the firmware would refuse, or accept and then quietly skip at boot -- said here, next
 /// to the field, rather than as `additional_devices[2].driver_id` under a Save button.
+/// Whether a second row of this driver can run at all, straight from the driver list. Absent on
+/// a bridge running firmware from before the field existed, and the benefit of the doubt is the
+/// right default there: the firmware still refuses the row at boot and says why, which is worse
+/// than being told now but better than a page that forbids something the bridge allows.
+function canShare(drvId){
+  const d=((drivers&&drivers.drivers)||[]).find(x=>x.id===drvId);
+  return !d||d.supports_multiple_devices!==false;
+}
 function addressProblem(body){
   const seen={};
+  // Drivers that poll one device per bridge, by row. planDevices() refuses the SECOND one and
+  // lets the first keep the bus, which is the same order this walks in.
+  const exclusive={};
   const rowOf=(drvId,options)=>{
     const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===drvId);
     for(const o of ((drv&&drv.options)||[])){
@@ -1516,6 +1528,14 @@ function addressProblem(body){
     // No false positives from the protocols that do not address this way: an AA55 device is
     // found by serial number and declares no address option at all, so addressOf() returns ''
     // and it never enters the comparison.
+    // Said here rather than discovered at boot. A row of an exclusive driver is accepted by the
+    // API, persisted, and then skipped by planDevices() -- after the restart the owner performed
+    // to apply it. The refusal was reachable only by doing all of that first.
+    if(!canShare(drvId)){
+      if(exclusive[drvId])return who+' cannot run beside '+exclusive[drvId].toLowerCase()+
+        ': this driver polls one device per bridge. The second row is skipped at boot.';
+      exclusive[drvId]=who;
+    }
     const addr=addressOf(drvId,options);
     if(addr==='')return null;
     const key=addr;
@@ -1595,6 +1615,14 @@ async function addExtra(){
   // picked here, by the same reading of the options that addressProblem() uses to complain.
   const primary=(cfg.driver||{}).id||'';
   if(!primary){alert('Choose a driver for the first inverter before adding a second.');return}
+  // The primary's driver is the guess below. When that driver polls one device per bridge the
+  // guess is guaranteed wrong, and the row would be accepted, persisted, and then skipped at the
+  // restart -- so it is refused here, with the reason, instead of being added.
+  if(!canShare(primary)){
+    alert('This driver polls one inverter per bridge, so a second row of it would never start. '
+      +'Change the first inverter to a driver that shares the bus, or use a second bridge.');
+    return;
+  }
   // The driver list is what says which option holds an address. Without it this would fall
   // through to "no address option" and hand the new row the driver's default -- straight onto
   // the primary. Refusing for a moment beats adding a row that cannot work.

@@ -527,6 +527,10 @@ bool buildDriversPayload(const std::vector<DriverDescriptor>& drivers, std::stri
         e["supports_read"]   = d.supportsRead;
         e["supports_write"]  = d.supportsWrite;
         e["auto_detection"]  = d.supportsAutoDetection;
+        // Whether a second row of this driver can run at all. planDevices() refuses one that
+        // cannot, at boot, after the restart the owner performed to apply the change -- so
+        // without this field the page could only find out by trying. It guessed instead.
+        e["supports_multiple_devices"] = d.supportsMultipleDevices;
         JsonArray profiles   = e["serial_profiles"].to<JsonArray>();
         for (const auto& p : d.recommendedSerialProfiles) {
             JsonObject pr = profiles.add<JsonObject>();
