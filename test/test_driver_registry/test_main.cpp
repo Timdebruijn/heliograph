@@ -130,9 +130,10 @@ static void test_eversolar_descriptor_states_the_truth() {
     TEST_ASSERT_FALSE(d->supportsWrite);  // the protocol defines no write operation
     TEST_ASSERT_TRUE(d->supportsRead);
     TEST_ASSERT_TRUE(d->supportsAutoDetection);
-    // Beta since the Phase 3 exit criteria were met on real hardware (2026-07-19); may not
-    // claim Stable until the Phase 9 soak test passes.
-    TEST_ASSERT_EQUAL(DriverSupportLevel::Beta, d->supportLevel);
+    // Stable since 2026-07-29: eight clean unassisted sunrises on the production bridge, which
+    // is the only way the recovery path can be observed -- see the descriptor for the count and
+    // what the level still does not claim.
+    TEST_ASSERT_EQUAL(DriverSupportLevel::Stable, d->supportLevel);
     // Exactly one profile: 9600 8N1 is all the reference implementation ever uses.
     TEST_ASSERT_EQUAL_size_t(1, d->recommendedSerialProfiles.size());
     TEST_ASSERT_EQUAL_UINT32(9600, d->recommendedSerialProfiles[0].baudRate);
