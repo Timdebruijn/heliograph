@@ -292,6 +292,25 @@ const tick=setInterval(async()=>{
     await new Promise(r=>setTimeout(r,60));
     if(document.getElementById('panel-probe-2')) say('the tab never repainted again after closing the panel');
 
+    // 1e. A refusal must reach the reader from a PENDING card too. That card has no form, so
+    // no #dv_msg, and say() begins with `if(!m)return` -- a 400 produced nothing at all: no
+    // message, no alert, the row still sitting there. The firmware revalidates every remaining
+    // row on any change to the array, so a legacy value in a SIBLING row refuses the removal of
+    // an unrelated one, which is how a row became permanently unremovable in silence.
+    cfg.additional_devices=[...(cfg.additional_devices||[]),
+                            {driver_id:'growatt_modbus',label:'Pending',options:{unit_id:'9'}}];
+    paintInverters();
+    await new Promise(r=>setTimeout(r,120));
+    let told=null;
+    const realAlert2=window.alert, realConfirm=window.confirm, realPatch2=window.patch;
+    window.alert=m=>{told=m};
+    window.confirm=()=>true;
+    window.patch=async()=>({ok:false,status:400,why:'additional_devices[0].options: bad value'});
+    await removeExtraAt(cfg.additional_devices.length-1);
+    window.alert=realAlert2; window.confirm=realConfirm; window.patch=realPatch2;
+    if(!told) say('a refused removal from a pending card said nothing at all');
+    else if(!told.includes('bad value')) say('the refusal did not carry the reason: '+told);
+
     // 2. A control being used must survive the five-second refresh. Every paint replaces the
     // tab's innerHTML, which shuts an open <select> -- so the driver list could not be read to
     // the bottom before it closed itself.

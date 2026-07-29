@@ -1497,7 +1497,16 @@ async function removeExtraAt(idx){
   if(idx<0||idx>=arr.length){alert('That row is no longer in the configuration.');return}
   if(!confirm('Remove this inverter from the configuration? Its entities stay in Home Assistant showing their last value.'))return;
   const r=await patch({additional_devices:arr.filter((_,i)=>i!==idx)});
-  if(!r.ok){say('#dv_msg','err',esc(r.why));return}
+  if(!r.ok){
+    // #dv_msg only exists inside deviceForm, and a PENDING row has no form -- just this button.
+    // say() begins with `if(!m)return`, so a refusal from that card produced nothing at all: no
+    // message, no alert, the row still there. And a refusal is not exotic; the firmware
+    // revalidates every remaining row on any change to the array, so a legacy value in a
+    // SIBLING row rejects the removal of an unrelated one, forever, in silence.
+    if($('#dv_msg'))say('#dv_msg','err',esc(r.why));
+    else alert('Could not remove that row: '+r.why);
+    return;
+  }
   panel=null;invNextMs=0;loadInverters(true);
 }
 /// The option a driver uses to hold its bus address, or null when it addresses some other way
