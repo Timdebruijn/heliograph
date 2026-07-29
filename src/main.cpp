@@ -215,8 +215,44 @@ namespace {
 // marked verified, so nothing can move an inverter yet. And renaming the admin account stopped
 // double-encoding a non-ASCII password, which had been signing those users out at the next
 // admin action ever since the account could be renamed.
+// 0.24.0 is the release that watched somebody unbox one.
+//
+// A bridge that has just been provisioned has no inverter named in its configuration -- the
+// setup portal asks for a network and a password and nothing else -- so the firmware starts its
+// highest-priority driver, and that driver answers nothing. From the poll results alone that is
+// indistinguishable from a miswired bus, and the page said so: the FIRST screen after setup was
+// a red card naming three wiring faults, A/B swapped at the top, about a pair the owner had not
+// touched. The Live tab was quieter and no better -- a dash where the production goes and then
+// nothing at all. Both now read the configuration, which knows what the poll results cannot,
+// and offer the one thing left to do. The diagnosis is unchanged for a bus somebody HAS
+// connected, which is the only place it was ever right.
+//
+// Two things on that screen were simply broken. "Add one by hand" sent a row naming no driver,
+// which the firmware refuses by design, so the button could not work at all -- it now picks the
+// first free bus address rather than dropping the new unit on top of the existing one. And every
+// refresh replaced the tab it was drawing, which shut any open dropdown and emptied any
+// half-typed field; with an event arriving up to once a second, the driver list could not be
+// read to the bottom before it closed itself.
+//
+// THE BATTERY CARD CHANGES MEANING, so read this before wondering what happened. One colour used
+// to drive both the direction line and the charge bar, which made a full battery draw a red bar
+// whenever it happened to be charging. They answer different questions and now say so
+// separately: the bar is the LEVEL (red below 20%, amber below 50%, green above) and the line is
+// the DIRECTION -- up and green gaining, down and red giving back. Both the colours and the
+// arrows are the reverse of 0.18.0's. That arrow used to show which way current flows, which at
+// the terminals runs INTO a battery that is charging; it now shows which way the percentage is
+// heading, because that is the question somebody reading a percentage is asking.
+//
+// Also fixed: a "needs restart" badge that was static markup and therefore lit on every bridge,
+// always, next to five sibling cards that correctly say "changes here need a restart".
+//
+// Nothing else a bridge does changes. The rest of this release is a cleanup pass with no
+// behaviour in it -- a test that asserted against freed stack and passed by luck, twelve
+// duplicated capability declarations with no test on either copy, three tools spelling out the
+// same page pipeline, and the config write path stated once instead of at every route that
+// writes. A cold native build is warning-free for the first time.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 23
+#define HELIOGRAPH_VERSION_MINOR 24
 #define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
