@@ -181,9 +181,43 @@ namespace {
 // The exception-frame work carried a real gap out with it: the write path had only the happy
 // case, so the check that stops a stale exception from another request being read as the answer
 // to this one had never been exercised on the control path.
+// 0.23.0 replaces the local web UI. Eight tabs become five -- Live, Inverters, Integrations,
+// Health, Bridge -- grouped by what you are doing rather than by which endpoint the numbers came
+// from. Live leads with one answer instead of nine equal tiles, and a fleet total always carries
+// how many inverters it covers, so "2 037 W" can no longer quietly mean "two of the three
+// answered". No endpoint, field or payload changed to do it.
+//
+// The screen that earns the release is the one for an inverter that has never replied. It used
+// to say "check your wiring". It now names the three causes in the order they actually happen --
+// two units on one address, A and B swapped, termination in the wrong place -- each with the
+// test that settles it beside it, and an honest "no test, check the jumpers" for the one that
+// has none.
+//
+// The session chart is a ring buffer in the browser, filled from the status payload that already
+// arrives. The bridge stores no time series and gained no endpoint for it, which is why the
+// chart says "held in this browser" on screen.
+//
+// TWO CHANGES A BRIDGE OWNER WILL NOTICE:
+//
+// The page is served gzipped and no identity copy is kept, so `curl http://<bridge>/` needs
+// --compressed where it did not before. The /api/v1 endpoints are untouched. It buys 139 kB of
+// flash -- twice, because there are two OTA slots -- and sends 33 kB instead of 163 kB per load.
+//
+// One hybrid register map had ac.power.total pointing at an APPARENT power register, so those
+// bridges have been publishing volt-amperes as watts -- wrong by the power factor, to MQTT,
+// Prometheus, Modbus and Home Assistant alike. It points at real power now, and existing history
+// for that series is not comparable across this upgrade. Eleven channels the map ignored came
+// with it; four energy registers stay unmapped, because the sources disagree and a plausible
+// wrong number is worse than a missing one. Which map, and which registers, is in the release
+// notes and in the profile -- naming it here is the drivers layer's business, not this file's.
+//
+// Also: a driver write path is connected end to end and still gated shut -- no register row is
+// marked verified, so nothing can move an inverter yet. And renaming the admin account stopped
+// double-encoding a non-ASCII password, which had been signing those users out at the next
+// admin action ever since the account could be renamed.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 22
-#define HELIOGRAPH_VERSION_PATCH 1
+#define HELIOGRAPH_VERSION_MINOR 23
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
