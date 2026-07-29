@@ -71,6 +71,21 @@ BATTERY_CASES = [
     ("idle", 55, 0.4, ["idle"], ["charging at 0 W", "discharging at 0 W"]),
     # The middle band, so the amber threshold is not left to inspection.
     ("half full", 35, -200, ["var(--warn)"], []),
+    # A device reporting power but no state of charge. Asserted on the BAR's own markup, not on
+    # the card's text: this one is discharging, so var(--bad) is legitimately present on the
+    # direction line and a whole-card search would have passed for the wrong reason.
+    #
+    # The fill is invisible here -- an unknown level draws a rect of zero width, same as a
+    # genuine 0% -- and what tells them apart on screen is the em dash where the number goes.
+    # Pinned anyway: emitting "critically low" for a value nobody supplied is wrong wherever it
+    # ends up, and it stops being invisible the day this bar grows a minimum-width sliver.
+    (
+        "state of charge unknown",
+        "null",
+        -1240,
+        ['height="8" fill="var(--dim)"'],
+        ['height="8" fill="var(--bad)"'],
+    ),
 ]
 
 # Runs after the page has painted. Verdict goes in document.title, which --dump-dom gives back.

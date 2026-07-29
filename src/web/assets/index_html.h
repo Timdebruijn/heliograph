@@ -305,9 +305,14 @@ const SOC_LOW=20, SOC_HALF=50;
 /// answer different questions -- "how much is left" and "which way is it going" -- and one
 /// colour could only ever answer one of them.
 ///
-/// Unknown is not empty. A device can report battery power without a state of charge, and the
-/// percentage beside this already renders as an em dash; painting the empty bar red would turn
-/// "we were not told" into "critically low", which is the one thing the reading must never do.
+/// Unknown is not empty, and the colour says so even though nobody can currently see it: an
+/// unknown state of charge draws a rect of zero width, so the fill is invisible either way --
+/// what actually separates "we were not told" from "critically low" on screen is the em dash
+/// the percentage renders instead of a 0. Measured, not assumed (review, 2026-07-29).
+///
+/// The branch stays because emitting var(--bad) for a value nobody supplied is wrong wherever
+/// it ends up, and because the day this bar grows a minimum-width sliver so an empty battery is
+/// still visible, that sliver would be red for a reading that does not exist.
 function socColour(pct){
   if(pct===null||pct===undefined)return 'var(--dim)';
   return pct<SOC_LOW?'var(--bad)':pct<SOC_HALF?'var(--warn)':'var(--ok)';
@@ -484,8 +489,9 @@ function paintLive(){
   // EITHER channel brings the card up, not both. No shipped profile maps power without a state
   // of charge -- checked, 2026-07-29 -- but profiles are added a TOML row at a time and a half
   // mapped one is the ordinary intermediate state, not an exotic case. A contributor who maps
-  // the obvious power register before hunting down the SoC block then sees "— %" over a grey
-  // bar, which says what is missing; requiring both would have shown them nothing at all.
+  // the obvious power register before hunting down the SoC block then sees the card with "— %"
+  // where the number goes, which says what is missing; requiring both would have shown them
+  // nothing at all and read as "batteries are not supported".
   const batts=multi?fleet.filter(f=>f.battery_soc_pct!=null||f.battery_power_w!=null)
                    :(shown(m,'battery.soc')||shown(m,'battery.power')?[{single:true}]:[]);
   for(const f of batts){
