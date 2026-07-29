@@ -1463,6 +1463,10 @@ async function saveAccess(){
   paintBridge();
 }
 async function saveDevice(slot){
+  // A slot the bridge could not name. Every started device is in the plan, so this should not
+  // happen -- but the arithmetic below would quietly write nothing and report success, and a
+  // Save that says "Saved" and changes nothing is the worst of the available failures.
+  if(slot<0){say('#dv_msg','err','The bridge did not say which configured row this inverter came from, so this cannot be saved. Restarting it will re-establish that.');return}
   const opts=readOpts('dv_o_');
   const body=slot===0
     ?{driver:{id:val('dv_drv'),label:val('dv_label'),...(Object.keys(opts).length?{options:opts}:{})}}
