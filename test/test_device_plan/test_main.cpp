@@ -190,6 +190,34 @@ static void test_describe_row_names_the_label_when_there_is_one() {
     TEST_ASSERT_EQUAL_STRING("device 2 (Schuur)", app::describeRow(2, "Schuur").c_str());
 }
 
+/// The cases above use hand-built descriptors, which test the PLANNER. This one uses the real
+/// registry, because what it is about is one real driver's answer to "may I share a bus?".
+///
+/// SunSpec said no until 2026-07-29, with no comment and nothing in the docs explaining it,
+/// while declaring a unit_id option that only means something if several devices can differ in
+/// it. Modbus RTU addresses by unit id; several SunSpec devices on one bus is the ordinary
+/// arrangement. This test is what keeps that answer from quietly reverting.
+///
+/// It is not a hardware claim. Two SunSpec devices have never shared a real bus here.
+static void test_two_sunspec_devices_on_different_unit_ids_both_start() {
+    DriverRegistry registry;
+    registerBuiltinDrivers(registry);
+
+    Configuration config;
+    config.driver.id                 = "sunspec";
+    config.driver.options["unit_id"] = "1";
+    DriverSettings second;
+    second.id                 = "sunspec";
+    second.options["unit_id"] = "2";
+    config.additionalDevices.push_back(second);
+
+    const auto plan = app::planDevices(config, "sunspec", registry);
+
+    TEST_ASSERT_EQUAL_UINT32(2, plan.size());
+    TEST_ASSERT_TRUE(plan[0].shouldStart());
+    TEST_ASSERT_TRUE_MESSAGE(plan[1].shouldStart(), plan[1].problem.c_str());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_a_driver_that_shares_the_bus_may_appear_many_times);
@@ -202,5 +230,6 @@ int main() {
     RUN_TEST(test_rows_are_numbered_as_the_settings_page_shows_them);
     RUN_TEST(test_the_options_pointer_reaches_the_configured_options);
     RUN_TEST(test_describe_row_names_the_label_when_there_is_one);
+    RUN_TEST(test_two_sunspec_devices_on_different_unit_ids_both_start);
     return UNITY_END();
 }
