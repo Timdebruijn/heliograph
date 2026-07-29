@@ -254,6 +254,11 @@ const tick=setInterval(async()=>{
     cfg.additional_devices=[{driver_id:'growatt_modbus',label:'Garage',options:{unit_id:'2'}},
                             {driver_id:'eversolar_legacy',label:'Refused',options:{address:'17'}},
                             {driver_id:'growatt_modbus',label:'Dak achter',options:{unit_id:'3'}}];
+    // What the BRIDGE says started: slots 1 and 3. Slot 2 was refused. Said here rather than
+    // left to be inferred -- inferring it is what put the Remove button on a running inverter,
+    // twice.
+    devCache['growatt_modbus-GW2400ABC'].config_slot=1;
+    devCache['growatt_modbus-GW3300XYZ'].config_slot=3;
     paintInverters();
     await new Promise(r=>setTimeout(r,150));
     const pend=[...document.querySelectorAll('#inv .card')]
@@ -276,14 +281,14 @@ const tick=setInterval(async()=>{
     await new Promise(r=>setTimeout(r,200));
     const mark=document.createElement('span'); mark.id='panel-probe';
     document.getElementById('inv').appendChild(mark);
-    for(let i=0;i<5;i++){ S.totals.ac_power_w=2000+i; paint(); await new Promise(r=>setTimeout(r,20)); }
+    for(let i=0;i<5;i++){ S.totals.ac_power_w=2000+i; paintTick(); await new Promise(r=>setTimeout(r,20)); }
     if(!document.getElementById('panel-probe')) say('the tab was rebuilt under an open panel');
     // And it must resume the moment that panel is closed, or the tab is frozen for good.
     togglePanel('cap');
     await new Promise(r=>setTimeout(r,150));
     const mark2=document.createElement('span'); mark2.id='panel-probe-2';
     document.getElementById('inv').appendChild(mark2);
-    S.totals.ac_power_w=9999; paint();
+    S.totals.ac_power_w=9999; paintTick();
     await new Promise(r=>setTimeout(r,60));
     if(document.getElementById('panel-probe-2')) say('the tab never repainted again after closing the panel');
 
@@ -296,7 +301,7 @@ const tick=setInterval(async()=>{
     if(!sel) say('the wizard offers no driver dropdown to choose from');
     else{
       sel.focus();
-      paint();
+      paintTick();   // the five-second refresh arriving, not an action
       await new Promise(r=>setTimeout(r,50));
       if(document.querySelector('#wizcard select')!==sel){
         say('a refresh replaced the driver dropdown while it was being used');
@@ -312,7 +317,7 @@ const tick=setInterval(async()=>{
       await new Promise(r=>setTimeout(r,50));
       const probe=document.createElement('span'); probe.id='release-probe';
       document.getElementById('inv').appendChild(probe);
-      paint();
+      paintTick();
       await new Promise(r=>setTimeout(r,50));
       if(document.getElementById('release-probe')){
         say('the tab never repainted again after the control was left alone');
@@ -330,7 +335,7 @@ const tick=setInterval(async()=>{
       nav.focus();
       const marker=document.createElement('span');
       $('#live').appendChild(marker);
-      paint();
+      paintTick();
       await new Promise(r=>setTimeout(r,50));
       if(marker.isConnected) say('a focused nav button stopped the Live tab from updating');
     }
@@ -429,7 +434,7 @@ const tick=setInterval(async()=>{
     const before=document.getElementById('int').textContent;
     S.bridge.mqtt_connected=false;
     S.bridge.modbus_clients=3;
-    paint();
+    paintTick();
     await new Promise(r=>setTimeout(r,80));
     if(document.getElementById('int').textContent===before){
       say('the tab did not notice MQTT dropping or a Modbus client attaching');
@@ -437,7 +442,7 @@ const tick=setInterval(async()=>{
     // ...and it still must not rebuild itself for nothing.
     const probe=document.createElement('span'); probe.id='int-probe';
     document.getElementById('int').appendChild(probe);
-    paint();
+    paintTick();
     await new Promise(r=>setTimeout(r,80));
     if(!document.getElementById('int-probe')) say('an idle refresh rebuilt the tab anyway');
   }catch(e){ say('the integrations assertions threw: '+e.message); }
@@ -468,7 +473,7 @@ const tick=setInterval(async()=>{
         // Minutes, not seconds: up() renders 100..104 s as the same "1 m", so an assertion on
         // those would have watched a value that cannot move and called it frozen.
         diag.uptime_seconds=60*(i+1); diag.free_heap_bytes=180000+i; diag.poll_success_total=500+i;
-        paint();
+        paintTick();
         await new Promise(r=>setTimeout(r,20));
       }
       if(document.querySelector('#logbox')!==box) say('the log was rebuilt to move a counter');
@@ -507,7 +512,7 @@ const tick=setInterval(async()=>{
       for(let i=0;i<6;i++){
         S.bridge.time='2026-07-29 10:0'+i+':0'+i;
         S.bridge.wifi_rssi_dbm=-54-i;
-        paint();
+        paintTick();
         await new Promise(r=>setTimeout(r,20));
       }
       if(document.querySelector('#bk_sec')!==box) say('the tab was rebuilt while only the clock moved');

@@ -638,7 +638,10 @@ async function loadInverters(force){
   // and the result is the whole point of the repaint. Without it this is the five-second
   // refresh arriving, which must not tear the page out from under someone using a control on
   // it. Guarding paint() alone was not enough: this path repaints on its own (see readerIsBusy).
-  if(tab==='inv'&&(force||!readerIsBusy()))paintInverters();
+  // Same split as paint()/paintTick(): `force` is somebody's action and always draws. Without
+  // it this is the refresh arriving, and it must yield to an open panel exactly as the timer
+  // does -- this path is how a raw-bus recording was still being rebuilt mid-run.
+  if(tab==='inv'&&(force||(!readerIsBusy()&&!panel)))paintInverters();
 }
 function shapeOf(caps){
   if(!caps)return '—';
@@ -746,16 +749,12 @@ function paintInverters(){
   // started is still waiting. Each carries the one thing it needs, which is a way back out.
   if(!neverConfigured()){
     const extras=(cfg&&cfg.additional_devices)||[];
-    // Matched by DRIVER, not by position. Position holds only while every row starts in order,
-    // and planDevices refuses a row whose driver cannot share a bus while letting later ones
-    // through -- so [X, X, Y] starts X and Y, and counting would have called Y the pending one.
-    // Y is running; the Remove button on that card would have taken out the wrong inverter.
-    const running=invIds.slice(1).map(id=>((devCache[id]||{}).driver||{}).id
-                                       ||((devCache[id]||{}).identity||{}).driver_id||'');
-    const unmatched=[...running];
+    // Claimed slots, straight from the bridge. Guessing this by counting started devices, and
+    // then by matching driver ids, was wrong both times -- see extraIndexOf().
+    const claimed=new Set(invIds.map(id=>(devCache[id]||{}).config_slot)
+                                .filter(v=>typeof v==='number'));
     for(let i=0;i<extras.length;i++){
-      const at=unmatched.indexOf(extras[i].driver_id);
-      if(at>=0){unmatched.splice(at,1);continue}  // this row has a device of its own
+      if(claimed.has(i+1))continue;  // a device of its own is running for this row  // this row has a device of its own
       const e=extras[i], addr=addressOf(e.driver_id,e.options);
       const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===e.driver_id);
       h+=`<div class="card" style="border-color:var(--warn)">
@@ -859,7 +858,7 @@ function gateForms(){
 // Order is the boot order, and the primary is always first.
 function isPrimary(id){return invIds[0]===id}
 function extraOptionsFor(id){
-  const idx=invIds.indexOf(id)-1;
+  const idx=extraIndexOf(id);
   const arr=(cfg&&cfg.additional_devices)||[];
   return (arr[idx]||{}).options||{};
 }
@@ -1010,19 +1009,7 @@ function paintHealth(){
   <div class="card" style="margin-top:12px">
     <div class="between"><b>Counters</b><button class="alt pill" onclick="copyCounters(this)">Copy as text</button></div>
     <div class="hint">Named the way a person would ask for them; the raw field name is still on <code>/api/v1/diagnostics</code>, unchanged.</div>
-    <div class="groups" style="margin-top:14px">${DIAGGROUPS.map(([title,rows])=>
-      `<div><div class="k" style="margin-bottom:6px">${esc(title)}</div>${rows.map(([key,label,unit])=>{
-        let v=d[key];
-        if(v===undefined)return '';
-        if(v===null)v='—';
-        else if(unit==='kB')v=kb(v);
-        else if(unit==='up')v=up(v);
-        else if(unit)v=v+' '+unit;
-        else if(typeof v==='boolean')v=v?'yes':'no';
-        else if(typeof v==='number')v=sp(v);
-        else if(v==='')v='none since boot';
-        return `<div class="row rule"><span style="color:var(--mid)">${esc(label)}</span><span>${esc(v)}</span></div>`;
-      }).join('')}</div>`).join('')}</div>
+    <div class="groups" id="h_counters" style="margin-top:14px"></div>
   </div>`;
   $('#health').innerHTML=h;
   renderLogs();
@@ -1054,6 +1041,26 @@ async function loadLogs(force){
   logLines=d.lines||[];
   logMeta=`level ${d.level} — ${d.total} lines since boot, showing last ${d.returned}`;
   renderLogs();
+}
+/// The Counters card's contents. Its own function because liveFields() rewrites it on every
+/// poll: twenty-two readings, and "Failed in a row right now" is the one on this page whose
+/// entire purpose is to be watched live while somebody wiggles a wire. Rebuilding the whole tab
+/// to move them would take the log -- and the reader's place in it -- with it.
+function countersHtml(){
+  const d=diag||{};
+  return DIAGGROUPS.map(([title,rows])=>
+    `<div><div class="k" style="margin-bottom:6px">${esc(title)}</div>${rows.map(([key,label,unit])=>{
+      let v=d[key];
+      if(v===undefined)return '';
+      if(v===null)v='—';
+      else if(unit==='kB')v=kb(v);
+      else if(unit==='up')v=up(v);
+      else if(unit)v=v+' '+unit;
+      else if(typeof v==='boolean')v=v?'yes':'no';
+      else if(typeof v==='number')v=sp(v);
+      else if(v==='')v='none since boot';
+      return `<div class="row rule"><span style="color:var(--mid)">${esc(label)}</span><span>${esc(v)}</span></div>`;
+    }).join('')}</div>`).join('');
 }
 function renderLogs(){
   const box=$('#logbox');if(!box)return;
@@ -1423,7 +1430,7 @@ async function saveDevice(id,primary){
       // The array is replaced wholesale by the API, so it travels whole -- built from the
       // stored list with this one row rewritten, never from the DOM of the other rows.
       const arr=((cfg.additional_devices)||[]).map(d=>({driver_id:d.driver_id,label:d.label||'',options:{...(d.options||{})}}));
-      const idx=invIds.indexOf(id)-1;
+      const idx=extraIndexOf(id);
       if(idx>=0&&idx<arr.length)arr[idx]={driver_id:val('dv_drv'),label:val('dv_label'),options:opts};
       return {additional_devices:arr};
     })();
@@ -1476,7 +1483,7 @@ function addressProblem(body){
   }
   return null;
 }
-async function removeDevice(id){ return removeExtraAt(invIds.indexOf(id)-1) }
+async function removeDevice(id){ return removeExtraAt(extraIndexOf(id)) }
 /// Removes an extra device by its position in the CONFIGURATION, which is the only handle a row
 /// that has not started yet has.
 ///
@@ -1495,6 +1502,20 @@ async function removeExtraAt(idx){
 }
 /// The option a driver uses to hold its bus address, or null when it addresses some other way
 /// (an AA55 device is found by serial number and declares none).
+/// The additional_devices index a running device came from, or -1 when the bridge did not say.
+///
+/// The firmware plans the rows, starts them, and refuses some -- a driver that cannot share a
+/// bus, or a row resolving to an id another row already took, which skips the LATER one. So the
+/// running devices are not the configured rows minus a suffix, and every attempt to re-derive
+/// the mapping in here got it wrong: first by counting, then by matching driver ids. Both put a
+/// Remove button on a working inverter.
+///
+/// config_slot is that mapping, handed over by the only code that knows it. Slot 0 is the
+/// primary driver; 1..N are additional_devices[0..N-1].
+function extraIndexOf(id){
+  const slot=(devCache[id]||{}).config_slot;
+  return typeof slot==='number'&&slot>0?slot-1:-1;
+}
 function addressOptionOf(drvId){
   const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===drvId);
   return ((drv&&drv.options)||[]).find(o=>o.key==='unit_id'||o.key==='address')||null;
@@ -2156,8 +2177,24 @@ function liveFields(){
   set('#h_bus',`${esc((d.checksum_error_total||0)+(d.rs485_timeout_total||0)+(d.invalid_frame_total||0))}<span class="u"> since boot</span>`);
   set('#h_mem',`${esc(kb(d.free_heap_bytes))}<span class="u"> · low ${esc(kb(d.minimum_free_heap_bytes))}</span>`);
   set('#h_up',`${esc(d.uptime_seconds!=null?up(d.uptime_seconds):'—')}<span class="u"> · ${esc(d.reset_reason||'')}</span>`);
+  // The whole Counters card, not four tiles: everything in it moves, and the tile above it
+  // showing a different uptime from the row below was the tell that half of it had frozen.
+  const counters=$('#h_counters');
+  if(counters)counters.innerHTML=countersHtml();
 }
-function paint(){
+/// A repaint somebody ASKED for. Always draws, whatever is open or focused: opening a panel,
+/// switching tabs, saving a form. Anything that skipped here would be a button that does
+/// nothing.
+///
+/// This split is not decoration. The guards below used to sit in paint() itself, and
+/// togglePanel() calls paint() straight after setting `panel` -- so every Change button on the
+/// Bridge and Integrations tabs opened a panel that was then never rendered. No form, no error,
+/// no way to reach the network settings, the admin password, a backup restore or a manual
+/// firmware upload. Found by review, 2026-07-29, after my own tests missed it: they only ever
+/// opened panels on the Inverters tab, which redraws through loadInverters() instead.
+function paint(){ paintChrome(); liveFields(); drawTab(); }
+/// The five-second refresh arriving. Same drawing, but it yields to whoever is using the page.
+function paintTick(){
   paintChrome();
   liveFields();
   // The chrome above is a handful of text nodes and always safe to redraw. The tab below is
@@ -2168,9 +2205,12 @@ function paint(){
   // its thirty seconds, a discovery sweep -- none of those hold focus, and all of them had the
   // page rebuilt out from under them every few seconds while they ran (reported 2026-07-29).
   //
-  // liveFields() above has already run, so the numbers beside the panel stay current. What is
-  // frozen is the markup, and only for as long as something is deliberately open.
+  // liveFields() has already run, so the numbers beside the panel stay current. What is frozen
+  // is the markup, and only for as long as something is deliberately open.
   if(panel)return;
+  drawTab();
+}
+function drawTab(){
   const b=(S&&S.bridge)||{};
   if(tab==='live')paintLive();
   else if(tab==='inv')paintInverters();
@@ -2223,9 +2263,9 @@ async function refresh(){
       window.__updChecked=true;
       updatesEnabled().then(on=>{if(on)checkForUpdate(false).then(()=>{if(tab==='bridge')updRender()})});
     }
-    if(tab==='health'){await loadDiag();paint();if(!logPaused)loadLogs(false);return}
+    if(tab==='health'){await loadDiag();paintTick();if(!logPaused)loadLogs(false);return}
     if(tab==='inv')loadInverters(false);
-    paint();
+    paintTick();
   }catch(e){
     const el=$('#banner');
     el.textContent='Cannot reach the bridge: '+e.message;
