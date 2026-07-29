@@ -176,6 +176,92 @@ const tick=setInterval(()=>{
 """
 
 
+# The Inverters tab, which is where the page stops reporting and starts accepting input. Both
+# of these were reported from a real bridge on 2026-07-29 and neither is a layout question --
+# they are here because this is the only check that runs the actual page in a browser.
+INVERTERS_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+const done=()=>{document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK'};
+let tries=0;
+const tick=setInterval(async()=>{
+  if(!document.querySelector('.fleetrow') && ++tries<=80) return;
+  clearInterval(tick);
+  try{
+    goTab('inv');
+    await new Promise(r=>setTimeout(r,300));
+
+    // 1. "Add one by hand" must send a row the firmware will ACCEPT. It used to send
+    // {driver_id:''}, which validate() refuses with "must name a driver" -- so the button did
+    // nothing but raise an error, every time.
+    let sent=null;
+    const realPatch=window.patch;
+    window.patch=async b=>{sent=b;return{ok:true,body:{}}};
+    const realAlert=window.alert;
+    window.alert=()=>{};
+    await addExtra();
+    window.patch=realPatch; window.alert=realAlert;
+    if(!sent||!sent.additional_devices) say('adding a row by hand sent no device list');
+    else{
+      const row=sent.additional_devices[sent.additional_devices.length-1];
+      if(!row.driver_id) say('the new row names no driver, which the firmware refuses outright');
+      // And it must not land on an address something else already answers at: two units
+      // sharing one destroy each other's replies, and the row would be skipped at boot.
+      const addrOf=d=>String((d.options||{}).unit_id??(d.options||{}).address??'').trim();
+      const mine=addrOf(row);
+      if(mine!==''){
+        const others=[cfg.driver,...sent.additional_devices.slice(0,-1)].map(addrOf);
+        if(others.includes(mine)) say('the new row was given address '+mine+', already in use');
+      }
+    }
+
+    // 2. A control being used must survive the five-second refresh. Every paint replaces the
+    // tab's innerHTML, which shuts an open <select> -- so the driver list could not be read to
+    // the bottom before it closed itself.
+    togglePanel('wiz'); wizStep=4; paintInverters();
+    await new Promise(r=>setTimeout(r,100));
+    const sel=document.querySelector('#wizcard select');
+    if(!sel) say('the wizard offers no driver dropdown to choose from');
+    else{
+      sel.focus();
+      paint();
+      await new Promise(r=>setTimeout(r,50));
+      if(document.querySelector('#wizcard select')!==sel){
+        say('a refresh replaced the driver dropdown while it was being used');
+      }
+      // The other half: the guard must RELEASE. A tab that stops updating once anything was
+      // ever touched is a worse bug than the one being fixed.
+      sel.blur();
+      paint();
+      await new Promise(r=>setTimeout(r,50));
+      if(document.querySelector('#wizcard select')===sel){
+        say('the tab never repainted again after the control was left alone');
+      }
+    }
+
+    // 3. And it must not release too little. A BUTTON keeps focus after it is clicked, so
+    // counting one as "busy" would have frozen the Live tab the moment somebody opened it --
+    // a worse and quieter bug than the dropdown it was meant to fix.
+    goTab('live');
+    await new Promise(r=>setTimeout(r,200));
+    const nav=document.querySelector('nav button[data-t="live"]');
+    if(!nav) say('no nav button to test focus against');
+    else{
+      nav.focus();
+      const marker=document.createElement('span');
+      $('#live').appendChild(marker);
+      paint();
+      await new Promise(r=>setTimeout(r,50));
+      if(marker.isConnected) say('a focused nav button stopped the Live tab from updating');
+    }
+  }catch(e){ say('the interaction assertions threw: '+e.message); }
+  done();
+},25);
+})();
+"""
+
+
 def find_chrome() -> str | None:
     for name in (
         "google-chrome",
@@ -276,6 +362,11 @@ def main() -> int:
             page = build_page(stripped, stub, f"{{soc:{soc},power:{power}}}", js)
             verdict, _ = render(chrome, page, 1000, scratch, label)
             status |= report(f"battery {label}", verdict)
+
+        # The tab that takes input rather than only showing it.
+        page = build_page(stripped, stub, "{soc:68,power:-1240}", INVERTERS_JS)
+        verdict, _ = render(chrome, page, 1000, scratch, "inverters")
+        status |= report("inverters tab interaction", verdict)
 
     return status
 
