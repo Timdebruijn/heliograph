@@ -113,7 +113,7 @@
     modbus:{enabled:true,port:502,unit_id:1,max_clients:8,idle_timeout_seconds:120},
     polling:{interval_seconds:10},
     serial:{override:false,baud_rate:9600,parity:'none',data_bits:8,stop_bits:1},
-    driver:{id:'eversolar_legacy',label:'Schuur',options:{}},
+    driver:{id:'eversolar_legacy',label:'Schuur',options:{layout:'auto',address:'16'}},
     additional_devices:[
       {driver_id:'growatt_modbus',label:'Garage',options:{profile:'sph_3_6kw',unit_id:'2'}},
       {driver_id:'growatt_modbus',label:'Dak achter',options:{profile:'mic_tl_x',unit_id:'3'}}],
@@ -127,7 +127,13 @@
   const driversDoc = {drivers:[
     {id:'eversolar_legacy',display_name:'EverSolar / Zeversolar legacy',support_level:'beta',
       description:'AA55 framing over RS485, for TL-series inverters abandoned by their portal.',
-      serial_profiles:[{baud_rate:9600,parity:'none',data_bits:8,stop_bits:1}],options:[]},
+      serial_profiles:[{baud_rate:9600,parity:'none',data_bits:8,stop_bits:1}],
+      options:[
+        {key:'layout',display_name:'Payload layout',allowed_values:['auto','single','dual'],
+         default_value:'auto',description:'How to read the measurement payload; auto derives it from the frame length.'},
+        {key:'address',display_name:'Assigned bus address',default_value:'16',
+         min_value:16,max_value:254,
+         description:'Address this bridge hands its inverter at registration. Leave at 16 unless more than one shares the loop.'}]},
     {id:'growatt_modbus',display_name:'Growatt (Modbus)',support_level:'experimental',
       description:'Modbus RTU. The register map is a data file, so one driver serves several models.',
       serial_profiles:[{baud_rate:9600,parity:'none',data_bits:8,stop_bits:1}],

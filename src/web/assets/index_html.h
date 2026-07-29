@@ -586,7 +586,11 @@ async function loadInverters(force){
     }
   }catch(e){/* leave what is on screen: one failed request must not wipe a page being read */}
   finally{invBusy=false}
-  if(tab==='inv')paintInverters();
+  // `force` means a person just did something -- saved a device, removed one, added a row --
+  // and the result is the whole point of the repaint. Without it this is the five-second
+  // refresh arriving, which must not tear the page out from under someone using a control on
+  // it. Guarding paint() alone was not enough: this path repaints on its own (see readerIsBusy).
+  if(tab==='inv'&&(force||!readerIsBusy()))paintInverters();
 }
 function shapeOf(caps){
   if(!caps)return '—';
@@ -1387,16 +1391,44 @@ async function removeDevice(id){
   if(!r.ok){say('#dv_msg','err',esc(r.why));return}
   panel=null;invNextMs=0;loadInverters(true);
 }
+/// The option a driver uses to hold its bus address, or null when it addresses some other way
+/// (an AA55 device is found by serial number and declares none).
+function addressOptionOf(drvId){
+  const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===drvId);
+  return ((drv&&drv.options)||[]).find(o=>o.key==='unit_id'||o.key==='address')||null;
+}
 async function addExtra(){
   const arr=((cfg.additional_devices)||[]).map(d=>({driver_id:d.driver_id,label:d.label||'',options:{...(d.options||{})}}));
   if(arr.length+1>=((S&&S.bridge&&S.bridge.max_devices)||8)){alert('This firmware polls at most '+((S&&S.bridge&&S.bridge.max_devices)||8)+' inverters.');return}
-  // Deliberately empty: an extra device that names no driver is refused, and an address
-  // defaulting to the primary's would collide and be skipped at boot with only a log line.
-  arr.push({driver_id:'',label:'',options:{}});
+
+  // The row has to arrive COMPLETE. It used to be pushed empty, with a comment explaining that
+  // an extra device naming no driver is refused -- which is exactly what the firmware then did,
+  // every time: "additional_devices[N].driver_id: must name a driver". The button could not
+  // work at all (reported from hardware, 2026-07-29).
+  //
+  // The primary's driver is the guess, because a second inverter on one bus is usually another
+  // of the same, and it is one dropdown away from being changed. What must NOT be guessed is
+  // the address: leaving it at the driver's default puts it on top of the primary, and two
+  // units answering to one address destroy each other's replies. So the first free one is
+  // picked here, by the same reading of the options that addressProblem() uses to complain.
+  const primary=(cfg.driver||{}).id||'';
+  if(!primary){alert('Choose a driver for the first inverter before adding a second.');return}
+  const opt=addressOptionOf(primary);
+  const options={};
+  if(opt){
+    const taken=new Set([cfg.driver,...arr]
+      .map(d=>String((d.options||{})[opt.key]??'').trim()).filter(v=>v!==''));
+    let next=Number(opt.default_value||1);
+    const ceiling=Number(opt.max_value||247);
+    while(taken.has(String(next))&&next<ceiling)next++;
+    options[opt.key]=String(next);
+  }
+  arr.push({driver_id:primary,label:'',options});
   const r=await patch({additional_devices:arr});
   if(!r.ok){alert('Could not add a row: '+r.why);return}
   invNextMs=0;await loadInverters(true);
-  alert('A row was added. Open “Name, driver and address” on the new inverter to fill it in, then restart.');
+  alert('A row was added'+(opt?' at address '+options[opt.key]:'')+
+        '. Open “Name, driver and address” on it to set the make and the name, then restart.');
 }
 async function saveUpdateCheck(on){
   const r=await patch({updates:{check_enabled:on}});
@@ -1942,8 +1974,28 @@ function tzOptions(ntp){
 }
 
 // ---------------- paint and refresh ----------------
+/// True while the reader is in the middle of using a control on the current tab.
+///
+/// Every paint replaces a tab's innerHTML wholesale, which destroys and rebuilds the elements
+/// inside it. Do that to an OPEN <select> and it shuts -- and since refresh() runs on every
+/// event the bridge emits, up to once a second, the driver list on the Inverters tab could not
+/// be read at all: it closed before you reached the bottom of it (reported from hardware,
+/// 2026-07-29). A half-typed address or label went the same way.
+///
+/// Asked of the focused element rather than of a flag, because the question is "is somebody
+/// using this right now", and a select holds focus for exactly as long as its popup is open.
+/// A repaint requested BY the page -- a wizard step, a driver change -- calls its paint
+/// function directly and is unaffected; only the timer-driven path defers.
+function readerIsBusy(){
+  const el=document.activeElement;
+  if(!el||el===document.body)return false;
+  return el.tagName==='SELECT'||el.tagName==='INPUT'||el.tagName==='TEXTAREA';
+}
 function paint(){
   paintChrome();
+  // The chrome above is a handful of text nodes and always safe to redraw. The tab below is
+  // not, so a reader mid-interaction keeps what is on screen until they are done with it.
+  if(readerIsBusy())return;
   if(tab==='live')paintLive();
   else if(tab==='inv')paintInverters();
   else if(tab==='int')paintInt();
