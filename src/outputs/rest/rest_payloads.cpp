@@ -2,6 +2,8 @@
 
 #include "rest_payloads.h"
 
+#include <cstdio>
+
 #include <ArduinoJson.h>
 
 #include "outputs/json_util.h"
@@ -387,6 +389,31 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
     //
     // Absent, not an empty array, when there is nothing to report: [] would read as "the stack
     // walk found no frames", which is a different statement from "no dump is stored".
+    // Reset breadcrumbs, REST-only like the backtrace below and for the same reason:
+    // someone fetching /api/v1/diagnostics is asking on purpose, and a reset history never
+    // changes between reboots -- republishing it over MQTT every interval says nothing new.
+    // bootCount 0 = not wired (host default); absent rather than a fabricated "0 boots".
+    if (bridge.bootCount > 0) {
+        doc["boot_count"] = bridge.bootCount;
+        if (bridge.breadcrumbsCold) {
+            // Cold start: first boot ever, or power was lost. No previous life to report --
+            // null, not 0, because "it had been up 0 ms" is a different (false) statement.
+            doc["previous_uptime_ms"] = nullptr;
+            doc["reset_history"]      = nullptr;
+        } else {
+            doc["previous_uptime_ms"] = bridge.previousUptimeMs;
+            JsonArray hist            = doc["reset_history"].to<JsonArray>();
+            for (const auto& e : bridge.resetHistory) {
+                JsonObject h       = hist.add<JsonObject>();
+                h["reason"]        = e.resetReason;
+                h["uptime_ms"]     = e.uptimeMs;
+                char v[16];
+                snprintf(v, sizeof v, "%u.%u.%u", (e.firmware >> 16) & 0xFF,
+                         (e.firmware >> 8) & 0xFF, e.firmware & 0xFF);
+                h["firmware"] = v;
+            }
+        }
+    }
     if (bridge.coredumpPresent && !bridge.coredumpBacktrace.empty()) {
         JsonArray bt = doc["coredump_backtrace"].to<JsonArray>();
         for (const uint32_t pc : bridge.coredumpBacktrace) {

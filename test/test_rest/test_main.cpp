@@ -3,6 +3,10 @@
 
 #include <unity.h>
 
+#include <cstring>
+
+#include "diagnostics/breadcrumbs.h"
+
 #include <cmath>
 #include <cstring>
 
@@ -1869,6 +1873,96 @@ static void test_poll_duration_payload_absent_until_sampled() {
     TEST_ASSERT_TRUE(doc["poll_duration_last_ms"].is<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(0, doc["poll_duration_max_ms"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(0, doc["poll_duration_ewma_ms"].as<uint32_t>());
+/// Reset breadcrumbs (audit F4): the logic that must never fabricate history. Garbage
+/// storage -- which is what RTC RAM holds after power loss -- must read as a clean cold
+/// start, and a warm reset must append exactly one entry carrying the heartbeat as
+/// uptime-at-death.
+static void test_breadcrumbs_cold_then_warm() {
+    breadcrumbs::Storage st;
+    std::memset(&st, 0xA5, sizeof st);  // power-loss garbage
+
+    auto rec = breadcrumbs::begin(st, 3, 0x00001801);  // 0.24.1
+    TEST_ASSERT_TRUE(rec.coldStart);
+    TEST_ASSERT_EQUAL_UINT32(1, rec.bootCount);
+    TEST_ASSERT_EQUAL_size_t(0, rec.history.size());
+
+    // This life runs 65 s; heartbeat throttles to 1 Hz so 65 400 records as 65 400.
+    breadcrumbs::tick(st, 65400);
+    // A second tick inside the same second must not move the heartbeat.
+    breadcrumbs::tick(st, 65900);
+
+    // Watchdog reset (reason 6). The new boot sees the old life.
+    rec = breadcrumbs::begin(st, 6, 0x00001801);
+    TEST_ASSERT_FALSE(rec.coldStart);
+    TEST_ASSERT_EQUAL_UINT32(2, rec.bootCount);
+    TEST_ASSERT_EQUAL_size_t(1, rec.history.size());
+    TEST_ASSERT_EQUAL_UINT8(6, rec.history[0].resetReason);
+    TEST_ASSERT_EQUAL_UINT32(65400, rec.history[0].uptimeMs);
+    TEST_ASSERT_EQUAL_UINT32(0x00001801, rec.history[0].firmware);
+}
+
+/// The ring wraps keeping the NEWEST eight, oldest first -- position is the only ordering a
+/// clock-free record has, so getting it wrong silently reverses a failure timeline.
+static void test_breadcrumbs_ring_wraps_oldest_first() {
+    breadcrumbs::Storage st;
+    std::memset(&st, 0, sizeof st);
+    breadcrumbs::begin(st, 1, 1);  // cold
+    for (uint32_t i = 0; i < 10; ++i) {
+        breadcrumbs::tick(st, (i + 1) * 1000);
+        // Force distinct heartbeats per life: reason encodes which life died.
+        auto rec = breadcrumbs::begin(st, static_cast<uint8_t>(10 + i), 1);
+        TEST_ASSERT_FALSE(rec.coldStart);
+    }
+    auto rec = breadcrumbs::begin(st, 99, 1);
+    TEST_ASSERT_EQUAL_size_t(breadcrumbs::kRingSize, rec.history.size());
+    // Eleven lives died (reasons 10..19 then 99); the newest eight end with 99.
+    TEST_ASSERT_EQUAL_UINT8(99, rec.history.back().resetReason);
+    TEST_ASSERT_EQUAL_UINT8(13, rec.history.front().resetReason);
+}
+
+/// One flipped bit anywhere must read as cold: a torn RTC write may never become invented
+/// history. This is the mutation-facing test -- remove the CRC check and it fails.
+static void test_breadcrumbs_corruption_reads_as_cold() {
+    breadcrumbs::Storage st;
+    std::memset(&st, 0, sizeof st);
+    breadcrumbs::begin(st, 1, 1);
+    breadcrumbs::tick(st, 5000);
+    st.heartbeatUptimeMs ^= 0x4;  // torn write, CRC now stale
+
+    auto rec = breadcrumbs::begin(st, 6, 1);
+    TEST_ASSERT_TRUE(rec.coldStart);
+    TEST_ASSERT_EQUAL_UINT32(1, rec.bootCount);
+    TEST_ASSERT_EQUAL_size_t(0, rec.history.size());
+}
+
+/// On the wire: absent when not wired (bootCount 0), null previous/history on a cold start,
+/// full history with a decoded firmware string on a warm one.
+static void test_breadcrumbs_payload_shapes() {
+    auto bridge = makeBridge();
+    std::string json;
+    Diagnostics d;
+
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_FALSE(doc["boot_count"].is<uint32_t>());
+
+    bridge.bootCount       = 1;
+    bridge.breadcrumbsCold = true;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), bridge, json));
+    doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(1, doc["boot_count"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["previous_uptime_ms"].isNull());
+    TEST_ASSERT_TRUE(doc["reset_history"].isNull());
+
+    bridge.bootCount       = 4;
+    bridge.breadcrumbsCold = false;
+    bridge.previousUptimeMs = 65400;
+    bridge.resetHistory.push_back({6, 65400, 0x00001801});
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), bridge, json));
+    doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(65400, doc["previous_uptime_ms"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT8(6, doc["reset_history"][0]["reason"].as<uint8_t>());
+    TEST_ASSERT_EQUAL_STRING("0.24.1", doc["reset_history"][0]["firmware"]);
 }
 
 static void test_diagnostics_payload_has_no_secrets() {
@@ -2708,6 +2802,10 @@ int main(int, char**) {
     RUN_TEST(test_drivers_payload_drives_the_wizard);
     RUN_TEST(test_poll_duration_math);
     RUN_TEST(test_poll_duration_payload_absent_until_sampled);
+    RUN_TEST(test_breadcrumbs_cold_then_warm);
+    RUN_TEST(test_breadcrumbs_ring_wraps_oldest_first);
+    RUN_TEST(test_breadcrumbs_corruption_reads_as_cold);
+    RUN_TEST(test_breadcrumbs_payload_shapes);
     RUN_TEST(test_diagnostics_payload_has_no_secrets);
     RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);
     RUN_TEST(test_psram_is_reported_when_the_board_has_it);

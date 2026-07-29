@@ -6,6 +6,8 @@
 #pragma once
 
 #include <cstdint>
+
+#include "diagnostics/breadcrumbs.h"
 #include <string>
 #include <vector>
 
@@ -103,6 +105,17 @@ struct BridgeInfo {
     /// and a size that cannot disagree with its contents is one fewer thing to get wrong.
     std::vector<uint32_t> coredumpBacktrace;
     bool                  coredumpBacktraceCorrupted = false;
+
+    /// Reset breadcrumbs from RTC-domain SRAM (diagnostics/breadcrumbs.h): how many times
+    /// this device has booted since it last lost power, and how each previous life ended.
+    /// Same kind of one-shot boot fact as the coredump block above, carried here for the same
+    /// reason. bootCount 0 means "not wired" (host tests); the target always sets >= 1.
+    /// breadcrumbsCold true on a cold start -- previousUptimeMs and resetHistory are
+    /// meaningless then and outputs report them absent, per the coredump precedent.
+    uint32_t bootCount       = 0;
+    bool     breadcrumbsCold = true;
+    uint32_t previousUptimeMs = 0;
+    std::vector<breadcrumbs::Entry> resetHistory;
 
     /// The board this firmware is running on. Reported to Home Assistant as the bridge
     /// device's model.
