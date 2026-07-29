@@ -13,6 +13,7 @@
 #include "network/provisioning_policy.h"
 #include "ota/ota_manager.h"
 #include "ota/sha256.h"
+#include "support/configured_device.h"
 
 using namespace heliograph;
 using heliograph::ota::looksLikeFirmware;
@@ -1058,8 +1059,8 @@ static void test_extra_devices_survive_a_restart() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
     auto               c = provisionedConfig();
-    c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {{"unit_id", "2"}}});
-    c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {{"unit_id", "3"}}});
+    c.additionalDevices.push_back(test::configuredDevice("growatt_modbus", {{"unit_id", "2"}}));
+    c.additionalDevices.push_back(test::configuredDevice("growatt_modbus", {{"unit_id", "3"}}));
     TEST_ASSERT_TRUE(store.save(c));
 
     Configuration loaded;

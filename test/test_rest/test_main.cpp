@@ -24,6 +24,7 @@
 #include "support/fake_eversolar_device.h"
 #include "fixtures/eversolar_frames.h"
 #include "support/mock_transport.h"
+#include "support/configured_device.h"
 
 using namespace heliograph;
 using test::FakeEversolarDevice;
@@ -331,11 +332,11 @@ static void test_the_device_count_is_bounded() {
     Configuration c;
     ConfigError   e;
     for (size_t i = 0; i < kMaxDevices - 1; ++i) {
-        c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {}});
+        c.additionalDevices.push_back(test::configuredDevice("growatt_modbus"));
     }
     TEST_ASSERT_TRUE(validate(c, e));  // driver + kMaxDevices-1 == the cap
 
-    c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {}});
+    c.additionalDevices.push_back(test::configuredDevice("growatt_modbus"));
     TEST_ASSERT_FALSE(validate(c, e));
     TEST_ASSERT_EQUAL_STRING("additional_devices", e.field.c_str());
 }
@@ -346,7 +347,7 @@ static void test_the_device_count_is_bounded() {
 static void test_adding_a_device_requires_a_reboot() {
     const Configuration base;
     auto                more = base;
-    more.additionalDevices.push_back(DriverSettings{"sunspec", false, {}});
+    more.additionalDevices.push_back(test::configuredDevice("sunspec"));
     TEST_ASSERT_TRUE(configChangeRequiresReboot(base, more));
 
     auto retuned = more;
@@ -784,7 +785,7 @@ static void test_an_asserted_out_of_range_option_is_left_for_the_caller() {
 static void test_a_stored_out_of_range_extra_device_option_is_healed() {
     Configuration c;
     c.driver.id = "growatt_modbus";
-    c.additionalDevices.push_back(DriverSettings{"growatt_modbus", false, {{"unit_id", "300"}}});
+    c.additionalDevices.push_back(test::configuredDevice("growatt_modbus", {{"unit_id", "300"}}));
     ConfigError e;
     const auto  lookup = [](const std::string& id) -> const DriverDescriptor* {
         return id == "growatt_modbus" ? &boundedUnitIdDescriptor() : nullptr;
@@ -1033,7 +1034,7 @@ static void test_renaming_a_device_needs_a_restart() {
     TEST_ASSERT_TRUE(configChangeRequiresReboot(a, b));
 
     Configuration c = a;
-    c.additionalDevices.push_back(DriverSettings{"mock_inverter", false, {}, "Balkon"});
+    c.additionalDevices.push_back(test::configuredDevice("mock_inverter", {}, "Balkon"));
     Configuration d = c;
     d.additionalDevices[0].label = "Garage";
     TEST_ASSERT_TRUE(configChangeRequiresReboot(c, d));
