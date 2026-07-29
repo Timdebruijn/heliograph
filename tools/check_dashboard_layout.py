@@ -338,6 +338,40 @@ const tick=setInterval(async()=>{
     togglePanel(null); cfg.driver=realDriver; devDraft=null;
     await new Promise(r=>setTimeout(r,100));
 
+    // 1h. A driver that polls one device per bridge must be refused HERE, not at the restart.
+    // planDevices() accepts nothing about it: the API stores the row, the page shows it waiting,
+    // and the boot after the restart skips it. The page used to have no way to know -- the
+    // driver list did not carry the answer -- so it guessed by copying the primary's driver,
+    // which for such a driver is the one guess guaranteed to be wrong.
+    panel=null; devDraft=null;
+    const keepDriver=cfg.driver, keepExtras=cfg.additional_devices;
+    cfg.driver={id:'solax_x1',label:'Vader',options:{address:'10'}};
+    cfg.additional_devices=[];
+    let added=null, said=null;
+    const rp2=window.patch, ra2=window.alert;
+    window.patch=async b=>{added=b;return{ok:true,body:{}}};
+    window.alert=m=>{said=m};
+    await addExtra();
+    window.patch=rp2; window.alert=ra2;
+    if(added) say('a second row was added for a driver that polls one device per bridge');
+    if(!said||!/one inverter per bridge/i.test(said)) say('adding it was refused without saying why: '+said);
+
+    // And typing one in by hand must be refused for the same reason, with the reason. This is
+    // the path the alert cannot cover: an existing row whose driver is changed to an exclusive
+    // one and saved.
+    const twice=addressProblem({additional_devices:[{driver_id:'solax_x1',options:{address:'11'}}]});
+    if(!twice||!/one device per bridge/i.test(twice)){
+      say('two rows of a one-per-bridge driver were accepted: '+twice);
+    }
+    // A single row of it is fine -- it is the SECOND that cannot start. Refusing the first would
+    // make the driver unusable altogether.
+    cfg.additional_devices=[];
+    const once=addressProblem({driver:{id:'solax_x1',options:{address:'10'}},additional_devices:[]});
+    if(once) say('one row of a one-per-bridge driver was refused: '+once);
+    cfg.driver=keepDriver; cfg.additional_devices=keepExtras;
+    panel=null; devDraft=null; paintInverters();
+    await new Promise(r=>setTimeout(r,100));
+
     // 1f. An OPEN PANEL is work in progress. A raw-bus recording runs for thirty seconds and a
     // firmware upload longer, and neither holds focus -- so the focus guard alone left both
     // being rebuilt every few seconds while they ran.
