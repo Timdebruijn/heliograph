@@ -64,6 +64,44 @@ def assets() -> pathlib.Path:
     return ROOT / "src" / "web" / "assets"
 
 
+def served_page(page: str = "index_html.h") -> str:
+    """The page as the DEVICE SERVES IT: the literal, with the comments taken out.
+
+    The one function every other tool should call. check_dashboard_layout.py, make_screenshots.py
+    and preview_web.py each spelled out `strip_comments(extract(assets() / "index_html.h"))`,
+    which is three places to keep in step with a pipeline that has changed twice already. A
+    screenshot, a layout assertion and a preview of anything other than these bytes is a picture
+    of something no browser receives.
+    """
+    return strip_comments(extract(assets() / page))
+
+
+def inject_before_script(html: str, *scripts: str) -> str:
+    """Splices <script> blocks in AHEAD of the page's own.
+
+    Ahead, not after, and that ordering is the whole point: the injected stub replaces
+    window.fetch, and a page that has already fired its first request answers it from the
+    network instead -- which on a CI runner means a layout check that hangs, and on a desk means
+    a preview looking for a bridge that is not there.
+
+    Written once because it was written twice, in the check and in the preview server, with the
+    same reasoning restated in both.
+    """
+    at = html.find("<script>")
+    if at < 0:
+        raise SystemExit(
+            "no <script> in the page; the caller's assumptions need updating"
+        )
+    for s in scripts:
+        # A `</script>` anywhere in the injected source -- including inside a JS string --
+        # closes the block early, and the rest of it lands in the document as text. The page
+        # then renders, wrongly, with no error anywhere. Refusing beats emitting that.
+        if "</script>" in s:
+            raise SystemExit("injected script contains </script> and would close early")
+    block = "".join(f"<script>{s}</script>\n" for s in scripts)
+    return html[:at] + block + html[at:]
+
+
 def extract(path: pathlib.Path) -> str:
     """The raw string literal's contents, i.e. exactly the bytes the device serves today."""
     m = RAW.search(path.read_text(encoding="utf-8"))
