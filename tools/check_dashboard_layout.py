@@ -45,15 +45,32 @@ WIDTHS = (390, 700, 780, 1000, 1200)
 # Battery states, and what each must be able to say for itself. Rendered from the same page at
 # one width, because these are semantics and not layout.
 #
+# TWO questions, two answers, and the card must not confuse them. The DIRECTION line says which
+# way the charge is heading: up and green gaining, down and red giving back. The BAR says how
+# much is left, coloured by level alone. One variable used to drive both, so a full battery that
+# happened to be charging drew a red bar.
+#
 # Direction is carried by an ARROW as well as a colour, so it survives a reader who cannot tell
 # the red from the green, and the sign of the number never has to be decoded. Asserting only the
 # colour would let a future change drop the arrow and leave the meaning in a hue.
 BATTERY_CASES = [
     # (label, soc, power, must contain, must NOT contain)
-    ("discharging", 68, -1240, ["↑", "var(--ok)", 'title="discharging"'], ["-1240"]),
-    ("charging", 41, 1500, ["↓", "var(--bad)", 'title="charging"'], []),
+    # Discharging at a comfortable level: red on the line, green on the bar. Both appear, which
+    # is exactly what a single shared colour could not produce -- so this case alone would have
+    # failed before the split.
+    (
+        "discharging",
+        68,
+        -1240,
+        ["↓", "var(--bad)", 'title="discharging"', "var(--ok)"],
+        ["-1240"],
+    ),
+    # Charging while nearly empty: green on the line, red on the bar. The mirror image.
+    ("charging", 12, 1500, ["↑", "var(--ok)", 'title="charging"', "var(--bad)"], []),
     # A trickle that rounds away must not claim a direction next to a zero.
     ("idle", 55, 0.4, ["idle"], ["charging at 0 W", "discharging at 0 W"]),
+    # The middle band, so the amber threshold is not left to inspection.
+    ("half full", 35, -200, ["var(--warn)"], []),
 ]
 
 # Runs after the page has painted. Verdict goes in document.title, which --dump-dom gives back.
@@ -113,12 +130,19 @@ function check(){
     }
   }
 
-  // The legend became load-bearing the moment the word came out of the cell: it is the only
-  // place the arrows are explained. A battery on screen without it is undecodable.
+  // The legend became load-bearing the moment the word came out of the cell, and it now has
+  // TWO things to carry: what the arrow means, and that the bar answers a different question.
+  // Asserted separately, because dropping either half leaves a card that looks explained.
   const card=[...document.querySelectorAll('.card')].find(c=>c.querySelector('.soc'));
   if(!card) say('no battery card for a fleet that reports one');
-  else if(!card.textContent.includes('power going into the battery')){
-    say('the battery renders without the legend that explains its arrows');
+  else{
+    const legend=card.textContent;
+    if(!legend.includes('running on stored sun')){
+      say('the battery renders without the legend that explains its arrows');
+    }
+    if(!legend.includes('level and not the direction')){
+      say('the legend does not say the bar colour is the level rather than the direction');
+    }
   }
   return true;
 }

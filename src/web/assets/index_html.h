@@ -294,6 +294,24 @@ function bar(pct,colour){
   return `<div class="bar"><svg width="100%" height="6" viewBox="0 0 100 6" preserveAspectRatio="none">
     <rect x="0" y="0" width="${Math.max(0,Math.min(100,pct)).toFixed(1)}" height="6" fill="${colour||'var(--acc)'}"></rect></svg></div>`;
 }
+/// Where a state of charge stops being comfortable. Named because they are a judgement, not a
+/// measurement, and a reader should find them stated once rather than inferred from two
+/// literals inside a ternary.
+const SOC_LOW=20, SOC_HALF=50;
+/// The charge bar's colour, which follows the LEVEL and nothing else.
+///
+/// It used to follow the DIRECTION: the same variable coloured the bar and the charging/
+/// discharging line, so a full battery that happened to be charging drew a red bar. The two
+/// answer different questions -- "how much is left" and "which way is it going" -- and one
+/// colour could only ever answer one of them.
+///
+/// Unknown is not empty. A device can report battery power without a state of charge, and the
+/// percentage beside this already renders as an em dash; painting the empty bar red would turn
+/// "we were not told" into "critically low", which is the one thing the reading must never do.
+function socColour(pct){
+  if(pct===null||pct===undefined)return 'var(--dim)';
+  return pct<SOC_LOW?'var(--bad)':pct<SOC_HALF?'var(--warn)':'var(--ok)';
+}
 
 // ---------------- canonical measurements ----------------
 // Label, group and decimals per id. Order here IS the order on screen. Units are NOT here --
@@ -461,8 +479,13 @@ function paintLive(){
   }
   // Battery, when any device reports one. Direction is carried by an ARROW as well as a colour,
   // so it survives a reader who cannot tell red from green, and the sign of the number never
-  // has to be decoded. Red for charging is the household reading: discharging means the house
-  // is running on its own stored sun instead of buying it.
+  // has to be decoded.
+  //
+  // EITHER channel brings the card up, not both. No shipped profile maps power without a state
+  // of charge -- checked, 2026-07-29 -- but profiles are added a TOML row at a time and a half
+  // mapped one is the ordinary intermediate state, not an exotic case. A contributor who maps
+  // the obvious power register before hunting down the SoC block then sees "— %" over a grey
+  // bar, which says what is missing; requiring both would have shown them nothing at all.
   const batts=multi?fleet.filter(f=>f.battery_soc_pct!=null||f.battery_power_w!=null)
                    :(shown(m,'battery.soc')||shown(m,'battery.power')?[{single:true}]:[]);
   for(const f of batts){
@@ -470,23 +493,31 @@ function paintLive(){
     const p=f.single?(m['battery.power']||{}).value:f.battery_power_w;
     const idle=p==null||Math.abs(Number(fmt(Math.abs(p),0)))===0;
     const state=idle?'idle':(p>0?'charging':'discharging');
-    const colour=state==='charging'?'var(--bad)':state==='discharging'?'var(--ok)':'var(--dim)';
-    const arrow=state==='charging'?'\u2193':state==='discharging'?'\u2191':'';
+    // Direction, not level -- the bar below answers the other question. Up and green is the
+    // battery gaining, down and red is it giving back, so every cue on this card points the
+    // same way: green and upward mean more energy available.
+    //
+    // The arrow shows the state of charge moving, NOT the direction of power flow. Those are
+    // opposites at the terminals -- current goes INTO a battery that is charging -- and the
+    // earlier version chose the flow reading. One of the two has to lose, and a reader looking
+    // at a percentage is asking which way that number is heading.
+    const dirColour=state==='charging'?'var(--ok)':state==='discharging'?'var(--bad)':'var(--dim)';
+    const arrow=state==='charging'?'\u2191':state==='discharging'?'\u2193':'';
     const rows=f.single
       ?MEAS.filter(([id,,g])=>g==='Battery'&&shown(m,id)).map(([id,label])=>
         `<div class="fact"><div class="k">${esc(label)}</div><div>${esc(reading(m,id))}</div></div>`).join('')
       :`<div class="fact"><div class="k">Power</div><div>${esc(fmt(Math.abs(p),0))} W ${state==='charging'?'in':'out'}</div></div>`;
     h+=`<div class="card" style="margin-top:20px">
       <div class="between"><div class="k">Battery${f.single?'':' · '+esc(f.label||f.id)}</div>
-        <div style="font-size:13px;color:${colour}" title="${esc(state)}">${arrow} ${esc(idle?'idle':state+' at '+fmt(Math.abs(p),0)+' W')}</div></div>
+        <div style="font-size:13px;color:${dirColour}" title="${esc(state)}">${arrow} ${esc(idle?'idle':state+' at '+fmt(Math.abs(p),0)+' W')}</div></div>
       <div class="soc">
         <div style="display:flex;align-items:baseline;gap:6px"><span class="pct">${esc(fmt(soc,0))}</span><span class="dim" style="font-size:16px">%</span></div>
         <div class="track"><div class="bar2"><svg width="100%" height="8" viewBox="0 0 100 8" preserveAspectRatio="none">
-          <rect x="0" y="0" width="${Math.max(0,Math.min(100,Number(soc)||0))}" height="8" fill="${colour}"></rect></svg></div>
+          <rect x="0" y="0" width="${Math.max(0,Math.min(100,Number(soc)||0))}" height="8" fill="${socColour(soc)}"></rect></svg></div>
           <div class="between hint" style="margin-top:4px"><span>empty</span><span>full</span></div></div>
       </div>
       <div class="cols" style="margin-top:14px">${rows}</div>
-      <div class="hint" style="margin-top:12px">Down and red is power going into the battery; up and green is the house running on stored sun. The arrow carries it as well as the colour, so the meaning survives losing either one.</div>
+      <div class="hint" style="margin-top:12px">Up and green means the battery is filling; down and red means the house is running on stored sun. The arrow says it as well as the colour, so the meaning survives losing either one. The bar is the level and not the direction — red below ${SOC_LOW}%, amber below ${SOC_HALF}%, green above — and stays grey when the inverter reports power but no state of charge.</div>
     </div>`;
   }
   if(multi){
