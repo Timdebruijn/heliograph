@@ -735,10 +735,16 @@ static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     options.profile = &profile;
     GrowattDriver driver(transport, options);
 
-    TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
-    const auto& n = driver.capabilities().numeric[static_cast<size_t>(
-        InverterCommandType::SetActivePowerLimitPercent)];
-    TEST_ASSERT_FALSE(n.writable);
+    // Held by VALUE. capabilities() returns by value, so binding a reference into the result
+    // leaves it dangling the moment the full expression ends -- the assertion below then read
+    // freed stack, which happens to still hold the right answer often enough to pass. Caught by
+    // -Wdangling-gsl in the native build, where a second incremental `pio test` had been hiding
+    // it (audit, 2026-07-29).
+    const InverterCapabilities caps = driver.capabilities();
+    TEST_ASSERT_FALSE(caps.canWrite(InverterCapability::SetActivePowerLimit));
+    TEST_ASSERT_FALSE(
+        caps.numeric[static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent)]
+            .writable);
 
     InverterCommand cmd;
     cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
