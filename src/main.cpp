@@ -288,9 +288,29 @@ namespace {
 // form, instead of at the reboot afterwards. Devices report config_slot, which says which
 // configured row they came from -- the web UI had been guessing that, twice, and both guesses put
 // a Remove button on the wrong inverter.
+//
+// 0.24.2 changes nothing a bridge does. It adds two pieces of observability that came out of
+// a resource audit (docs/audit-2026-07-29.md), for whoever reads the diagnostics endpoint --
+// nothing in the web UI surfaces either yet.
+//
+// POLL DURATION: poll_success_total always counted attempts, never how long one took.
+// poll_duration_{count,last_ms,min_ms,max_ms,ewma_ms} answer that, successful polls only --
+// a failed poll lasts the transaction deadline by construction, and this fleet's inverter is
+// dark every night, so counting failures would peg the max at the deadline and drag the
+// average toward it a few thousand times per night. Absent, not zero, until the first sample:
+// a driver that answers in 0 ms (the mock does) is a real measurement, not a missing one.
+//
+// RESET BREADCRUMBS: boot_count, previous_uptime_ms and previous_firmware, kept in
+// RTC-domain SRAM, which survives a panic, a watchdog reset or a software reset even on a
+// board with no battery-backed clock -- the only board this project ships where that
+// mattered, because it has no other way to say how long the last life ran or what it was
+// running before it died. Clock-free by design: the field is uptime, never wall time, so a
+// board that boots at epoch zero is exactly as trustworthy as one with a real RTC. Absent
+// on a cold start (first boot, or power was lost -- indistinguishable, and both honestly
+// "cold"), because "it had been up 0 ms" would be a false statement, not a missing one.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 24
-#define HELIOGRAPH_VERSION_PATCH 1
+#define HELIOGRAPH_VERSION_PATCH 2
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
