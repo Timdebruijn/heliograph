@@ -3,6 +3,10 @@
 
 #include <unity.h>
 
+#include <cstring>
+
+#include "diagnostics/breadcrumbs.h"
+
 #include <cmath>
 #include <cstring>
 
@@ -1871,6 +1875,81 @@ static void test_poll_duration_payload_absent_until_sampled() {
     TEST_ASSERT_EQUAL_UINT32(0, doc["poll_duration_ewma_ms"].as<uint32_t>());
 }
 
+/// Reset breadcrumbs (audit F4, sixteen-byte variant): the logic that must never fabricate
+/// a past. Garbage storage -- what RTC RAM holds after power loss -- must read as a clean
+/// cold start, and a warm reset must report the previous life's heartbeat and firmware.
+static void test_breadcrumbs_cold_then_warm() {
+    breadcrumbs::Storage st;
+    std::memset(&st, 0xA5, sizeof st);  // power-loss garbage
+
+    auto rec = breadcrumbs::begin(st, 0x00001801);  // 0.24.1
+    TEST_ASSERT_TRUE(rec.coldStart);
+    TEST_ASSERT_EQUAL_UINT32(1, rec.bootCount);
+
+    // This life runs 65 s; the heartbeat throttles to 1 Hz, so a second tick inside the
+    // same second must not move it.
+    breadcrumbs::tick(st, 65400);
+    breadcrumbs::tick(st, 65900);
+
+    auto rec2 = breadcrumbs::begin(st, 0x00001802);  // the next boot runs 0.24.2
+    TEST_ASSERT_FALSE(rec2.coldStart);
+    TEST_ASSERT_EQUAL_UINT32(2, rec2.bootCount);
+    TEST_ASSERT_EQUAL_UINT32(65400, rec2.previousUptimeMs);
+    TEST_ASSERT_EQUAL_UINT32(0x00001801, rec2.previousFirmware);
+
+    // And the record begin() left behind must itself survive a third boot: count keeps
+    // climbing, and the previous firmware is now the one THIS boot wrote.
+    auto rec3 = breadcrumbs::begin(st, 0x00001802);
+    TEST_ASSERT_FALSE(rec3.coldStart);
+    TEST_ASSERT_EQUAL_UINT32(3, rec3.bootCount);
+    TEST_ASSERT_EQUAL_UINT32(0, rec3.previousUptimeMs);  // that life never ticked
+    TEST_ASSERT_EQUAL_UINT32(0x00001802, rec3.previousFirmware);
+}
+
+/// One flipped bit must read as cold: a torn RTC write may never become an invented past.
+/// This is the mutation-facing test -- remove the CRC comparison and it fails.
+static void test_breadcrumbs_corruption_reads_as_cold() {
+    breadcrumbs::Storage st;
+    std::memset(&st, 0, sizeof st);
+    breadcrumbs::begin(st, 1);
+    breadcrumbs::tick(st, 5000);
+    st.heartbeatUptimeMs ^= 0x4;  // torn write, CRC now stale
+
+    auto rec = breadcrumbs::begin(st, 1);
+    TEST_ASSERT_TRUE(rec.coldStart);
+    TEST_ASSERT_EQUAL_UINT32(1, rec.bootCount);
+}
+
+/// On the wire: absent when not wired (bootCount 0), null previous fields on a cold start,
+/// values with a decoded firmware string on a warm one. The death reason is deliberately
+/// NOT here -- it is the payload's existing reset_reason.
+static void test_breadcrumbs_payload_shapes() {
+    auto bridge = makeBridge();
+    std::string json;
+    Diagnostics d;
+
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_FALSE(doc["boot_count"].is<uint32_t>());
+
+    bridge.bootCount       = 1;
+    bridge.breadcrumbsCold = true;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), bridge, json));
+    doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(1, doc["boot_count"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["previous_uptime_ms"].isNull());
+    TEST_ASSERT_TRUE(doc["previous_firmware"].isNull());
+
+    bridge.bootCount        = 4;
+    bridge.breadcrumbsCold  = false;
+    bridge.previousUptimeMs = 65400;
+    bridge.previousFirmware = 0x00001801;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), bridge, json));
+    doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(65400, doc["previous_uptime_ms"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("0.24.1", doc["previous_firmware"]);
+}
+
 static void test_diagnostics_payload_has_no_secrets() {
     Rig r;
     r.poll();
@@ -2708,6 +2787,9 @@ int main(int, char**) {
     RUN_TEST(test_drivers_payload_drives_the_wizard);
     RUN_TEST(test_poll_duration_math);
     RUN_TEST(test_poll_duration_payload_absent_until_sampled);
+    RUN_TEST(test_breadcrumbs_cold_then_warm);
+    RUN_TEST(test_breadcrumbs_corruption_reads_as_cold);
+    RUN_TEST(test_breadcrumbs_payload_shapes);
     RUN_TEST(test_diagnostics_payload_has_no_secrets);
     RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);
     RUN_TEST(test_psram_is_reported_when_the_board_has_it);

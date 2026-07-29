@@ -104,6 +104,18 @@ struct BridgeInfo {
     std::vector<uint32_t> coredumpBacktrace;
     bool                  coredumpBacktraceCorrupted = false;
 
+    /// Reset breadcrumbs from RTC-domain SRAM (diagnostics/breadcrumbs.h): how many times
+    /// this device has booted since it last lost power, and how far the previous life got.
+    /// Same kind of one-shot boot fact as the coredump block above, carried here for the
+    /// same reason. bootCount 0 means "not wired" (host tests); the target always sets >= 1.
+    /// breadcrumbsCold true on a cold start -- the previous* fields are meaningless then and
+    /// outputs report them absent, per the coredump precedent. The previous life's death
+    /// reason is not here: it is this boot's resetReason, already above.
+    uint32_t bootCount        = 0;
+    bool     breadcrumbsCold  = true;
+    uint32_t previousUptimeMs = 0;
+    uint32_t previousFirmware = 0;
+
     /// The board this firmware is running on. Reported to Home Assistant as the bridge
     /// device's model.
     /// Set by main from board::kName; the default only serves host tests, which have no

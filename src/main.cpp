@@ -15,6 +15,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
+
+#include "diagnostics/breadcrumbs.h"
 #include <esp_timer.h>
 
 #include <algorithm>
@@ -463,8 +465,20 @@ void applySerialOverride() {
     }
 }
 
+// RTC-domain SRAM for the reset breadcrumbs. Sixteen bytes on purpose: the serial session
+// of 2026-07-29 (PR #147) measured that the full firmware's restart transition zeroes
+// bytes [16,116) of a larger struct here while the first sixteen survive -- cause still
+// unknown, bare sketches immune. This struct fits entirely inside the measured-surviving
+// window, CRC included; if the window ever shrinks, the CRC reads it as a cold start.
+RTC_NOINIT_ATTR breadcrumbs::Storage g_breadcrumbStore;
+static breadcrumbs::BootRecord       g_bootRecord;
+
 BridgeInfo bridgeInfo() {
     BridgeInfo info;
+    info.bootCount        = g_bootRecord.bootCount;
+    info.breadcrumbsCold  = g_bootRecord.coldStart;
+    info.previousUptimeMs = g_bootRecord.previousUptimeMs;
+    info.previousFirmware = g_bootRecord.previousFirmware;
     info.boardName        = board::kName;
     info.boardId          = board::kId;
     info.bridgeId         = g_wifi.bridgeId();
@@ -1241,6 +1255,12 @@ void setup() {
     // No GPIO forcing here. Earlier revisions drove GPIO47 low first thing, believing this
     // board was the Relay-1CH and that pin its relay. The real board (RS485-CAN) has no
     // relay, and the safest state for a pin with no known function is untouched hi-Z.
+    // First thing, before anything that could crash: a boot that dies during setup still
+    // leaves its predecessor's death recorded, and its own becomes the next entry.
+    g_bootRecord = breadcrumbs::begin(
+        g_breadcrumbStore, (static_cast<uint32_t>(kFirmwareMajor) << 16) |
+                               (static_cast<uint32_t>(kFirmwareMinor) << 8) | kFirmwarePatch);
+
     Serial.begin(115200);
     const uint32_t serialDeadline = millis() + 2000;
     while (!Serial && millis() < serialDeadline) {
@@ -1539,6 +1559,10 @@ void loop() {
         bootConfirmed = true;
         log::info("ota: image confirmed healthy; rollback cancelled");
     }
+
+    // Breadcrumb heartbeat: "this life reached this uptime". Throttled inside to one RTC-RAM
+    // write per second.
+    breadcrumbs::tick(g_breadcrumbStore, static_cast<uint32_t>(nowMs()));
 
     g_wifi.loop(nowMs());
     startOutputs();  // no-op until there is a network, and only ever runs once
