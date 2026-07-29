@@ -750,7 +750,7 @@ function paintInverters(){
   if(!neverConfigured()){
     const extras=(cfg&&cfg.additional_devices)||[];
     // Claimed slots, straight from the bridge. Guessing this by counting started devices, and
-    // then by matching driver ids, was wrong both times -- see extraIndexOf().
+    // then by matching driver ids, was wrong both times -- see slotOf().
     const claimed=new Set(invIds.map(id=>(devCache[id]||{}).config_slot)
                                 .filter(v=>typeof v==='number'));
     for(let i=0;i<extras.length;i++){
@@ -1558,7 +1558,8 @@ function addressProblem(body){
 /// Removes an extra device by its position in the CONFIGURATION, which is the only handle a row
 /// that has not started yet has.
 ///
-/// removeDevice() went through invIds -- the devices that actually started at boot -- so a row
+/// The removeDevice() this replaced went through invIds -- the devices that actually started at
+/// boot -- so a row
 /// added since the last restart was not in it, had no card, and therefore had no button either.
 /// The alert offering to "open Name, driver and address on the new inverter" pointed at
 /// something that did not exist, and the configuration could not be undone from the UI at all
