@@ -34,6 +34,18 @@ ota::OtaManager   g_ota;
 
 constexpr const char* kJson = "application/json";
 
+/// The 400 a rejected configuration gets, whoever rejected it.
+///
+/// A ConfigError's field name is optional, so the message is either "field: reason" or the
+/// bare reason. That choice was spelled out at three sites -- two parsing a PATCH body and one
+/// validating a restored backup, which reaches a ConfigError by a different route entirely.
+/// Three places for one sentence is three ways for two endpoints to word the same refusal
+/// differently.
+ApiError invalidConfig(const ConfigError& error) {
+    return {400, "invalid_config",
+            error.field.empty() ? error.message : error.field + ": " + error.message};
+}
+
 void sendError(AsyncWebServerRequest* request, const ApiError& error) {
     std::string body;
     if (!buildErrorPayload(error, "", body)) {
@@ -136,9 +148,7 @@ bool RestApi::applyBodyTo(AsyncWebServerRequest* request, Configuration& updated
     // sending bad JSON in a loop.
     releaseBody();
     if (!parsed) {
-        sendError(request, {400, "invalid_config",
-                            error.field.empty() ? error.message
-                                                : error.field + ": " + error.message});
+        sendError(request, invalidConfig(error));
         return false;
     }
     return true;
@@ -736,9 +746,7 @@ bool RestApi::begin() {
             // both would be invisible to either check on its own.
             ConfigError error;
             if (!validate(merged, error)) {
-                sendError(request, {400, "invalid_config",
-                                    error.field.empty() ? error.message
-                                                        : error.field + ": " + error.message});
+                sendError(request, invalidConfig(error));
                 return;
             }
             // Never leave the bridge without an admin password. A redacted backup restored onto

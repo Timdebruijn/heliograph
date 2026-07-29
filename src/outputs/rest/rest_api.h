@@ -155,12 +155,13 @@ private:
 
     /// Merges the collected body into `updated`, or answers 400 and returns false.
     ///
-    /// Releases the body either way, which is half of why this is one function: the release
-    /// belongs between the parse and the error, and writing that out three times is three
-    /// chances to leak the buffer down an error path. The other half is the message -- a
-    /// ConfigError carries an optional field name, and "field: message" versus bare "message"
-    /// was spelled out at every site, so a change to how a rejection reads would have had to
-    /// be made in all of them.
+    /// Releases the body either way, and that is the reason this is a function rather than a
+    /// pattern: the release belongs BETWEEN the parse and the error, so each of the two copies
+    /// was a chance to leak the buffer down an error path.
+    ///
+    /// The message itself is shaped by invalidConfig() in the .cpp, not here -- a third site
+    /// reaches the same 400 from validate() on a restored backup rather than from a patch, so
+    /// the wording has one owner and the parsing has another.
     bool applyBodyTo(AsyncWebServerRequest* request, Configuration& updated,
                      const DriverLookupFn& lookupDriver = {});
 
