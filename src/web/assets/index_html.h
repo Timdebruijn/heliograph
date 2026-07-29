@@ -746,7 +746,16 @@ function paintInverters(){
   // started is still waiting. Each carries the one thing it needs, which is a way back out.
   if(!neverConfigured()){
     const extras=(cfg&&cfg.additional_devices)||[];
-    for(let i=Math.max(0,invIds.length-1);i<extras.length;i++){
+    // Matched by DRIVER, not by position. Position holds only while every row starts in order,
+    // and planDevices refuses a row whose driver cannot share a bus while letting later ones
+    // through -- so [X, X, Y] starts X and Y, and counting would have called Y the pending one.
+    // Y is running; the Remove button on that card would have taken out the wrong inverter.
+    const running=invIds.slice(1).map(id=>((devCache[id]||{}).driver||{}).id
+                                       ||((devCache[id]||{}).identity||{}).driver_id||'');
+    const unmatched=[...running];
+    for(let i=0;i<extras.length;i++){
+      const at=unmatched.indexOf(extras[i].driver_id);
+      if(at>=0){unmatched.splice(at,1);continue}  // this row has a device of its own
       const e=extras[i], addr=addressOf(e.driver_id,e.options);
       const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===e.driver_id);
       h+=`<div class="card" style="border-color:var(--warn)">

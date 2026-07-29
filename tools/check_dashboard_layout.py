@@ -247,6 +247,28 @@ const tick=setInterval(async()=>{
       say('a configured row that has not started offers no way to remove it');
     }
 
+    // 1c. Which rows are pending is decided by DRIVER, not by position. planDevices refuses a
+    // row whose driver cannot share a bus and lets later ones through, so counting started
+    // devices names the wrong row -- and its Remove button would take out an inverter that is
+    // running perfectly well.
+    cfg.additional_devices=[{driver_id:'growatt_modbus',label:'Garage',options:{unit_id:'2'}},
+                            {driver_id:'eversolar_legacy',label:'Refused',options:{address:'17'}},
+                            {driver_id:'growatt_modbus',label:'Dak achter',options:{unit_id:'3'}}];
+    paintInverters();
+    await new Promise(r=>setTimeout(r,150));
+    const pend=[...document.querySelectorAll('#inv .card')]
+      .filter(c=>c.textContent.includes('starts after a restart'));
+    if(pend.length!==1) say('expected one pending row, drew '+pend.length);
+    else{
+      if(!pend[0].textContent.includes('Refused')){
+        say('the pending card names a running inverter: "'+pend[0].querySelector('b').textContent+'"');
+      }
+      const btn=pend[0].querySelector('button[onclick^="removeExtraAt"]');
+      if(!btn||btn.getAttribute('onclick')!=='removeExtraAt(1)'){
+        say('the remove button points at the wrong configuration row: '+(btn&&btn.getAttribute('onclick')));
+      }
+    }
+
     // 2. A control being used must survive the five-second refresh. Every paint replaces the
     // tab's innerHTML, which shuts an open <select> -- so the driver list could not be read to
     // the bottom before it closed itself.
