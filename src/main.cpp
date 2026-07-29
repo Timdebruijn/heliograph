@@ -251,9 +251,44 @@ namespace {
 // duplicated capability declarations with no test on either copy, three tools spelling out the
 // same page pipeline, and the config write path stated once instead of at every route that
 // writes. A cold native build is warning-free for the first time.
+// 0.24.1 is what a week of using 0.24.0 on a real bridge turned up, plus the first driver to
+// reach Stable.
+//
+// THE INVERTERS PAGE STOPS FIGHTING YOU. Every few seconds the page rebuilt the tab it was
+// drawing, so an open dropdown shut, a half-typed field emptied, a selected backup file was
+// forgotten, the health log scrolled back to the top, and a firmware upload or a raw-bus
+// recording had the page redrawn underneath it while it ran. It now redraws only what actually
+// changed, leaves any panel you have open alone, and never touches a control you are using.
+//
+// ADDING A SECOND INVERTER WORKS. "Add one by hand" was handing the new row the same bus address
+// the first inverter already answers at -- two units on one address destroy each other's replies
+// -- because it read only stored settings and a bridge configured through the wizard stores none,
+// answering at its driver's default instead. Address checks now resolve the way the firmware
+// does. A row that was added but has not started yet could be deleted but not corrected, so a
+// wrong address meant restarting, discovering the mistake, and restarting again; it now opens the
+// same form a running inverter has. And a removal the firmware refused used to produce nothing at
+// all -- no message, no error, the row still sitting there.
+//
+// SEVERAL SUNSPEC DEVICES MAY NOW SHARE ONE BUS, each with its own unit id, which is how Modbus
+// RTU addresses devices in the first place. The driver refused a second one with no reason
+// recorded anywhere; there is no protocol limit behind it. Not confirmed on hardware -- two
+// SunSpec devices have never shared a real bus here.
+//
+// ONE DRIVER REACHES STABLE, the first to do so -- the legacy AA55 one, not named here because
+// brand knowledge belongs in src/drivers/ and the rule holds for comments too. The gate was
+// unassisted sunrises: the bug it once carried appeared only at the night-to-morning transition,
+// and a reboot hides that by starting cold, so no bench test could ever close it. Eight
+// consecutive mornings, recovery getting faster rather than slower. The level still does not
+// claim two inverters on one bus, and that protocol defines no writes at all.
+//
+// For anything reading the API: /api/v1/drivers gains supports_multiple_devices, so a client can
+// refuse a second row of a one-device-per-bridge driver while somebody is still looking at the
+// form, instead of at the reboot afterwards. Devices report config_slot, which says which
+// configured row they came from -- the web UI had been guessing that, twice, and both guesses put
+// a Remove button on the wrong inverter.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 24
-#define HELIOGRAPH_VERSION_PATCH 0
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
