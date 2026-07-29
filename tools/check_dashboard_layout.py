@@ -306,6 +306,32 @@ const tick=setInterval(async()=>{
 """
 
 
+# A working bridge whose driver.id was never filled in. "Empty" means the firmware picks the
+# highest-priority driver, so somebody who wires up the inverter that driver serves and never
+# opens the wizard has exactly this configuration -- and 1850 W on screen.
+AUTOPICK_JS = r"""
+(function(){
+const fail=[];
+let tries=0;
+const tick=setInterval(async()=>{
+  if(!cfg && ++tries<=80) return;
+  clearInterval(tick);
+  try{
+    if(neverConfigured()) fail.push('a producing bridge was called unconfigured');
+    goTab('live');
+    await new Promise(r=>setTimeout(r,250));
+    const live=document.getElementById('live').textContent;
+    if(live.includes('No inverter set up yet')) fail.push('Live hides a producing inverter');
+    // sp() separates thousands with a THIN SPACE (U+2009), not an ordinary one. Matching on
+    // the plain-space form silently found nothing and reported the production as missing.
+    if(!live.includes('1\u2009850')) fail.push('Live does not show the production');
+  }catch(e){ fail.push('the auto-pick assertions threw: '+e.message); }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
+
+
 def find_chrome() -> str | None:
     for name in (
         "google-chrome",
@@ -419,6 +445,14 @@ def main() -> int:
         page = page.replace("</body>", f"<script>{FRESH_BRIDGE_JS}</script></body>", 1)
         verdict, _ = render(chrome, page, 1000, scratch, "fresh")
         status |= report("first run, nothing configured", verdict)
+
+        # The mirror image, and the reason the config alone is not the question: driver.id is
+        # equally empty here, but the inverter it auto-picked is answering.
+        auto = (ROOT / "tools" / "autopick_bridge.js").read_text(encoding="utf-8")
+        page = build_web.inject_before_script(stripped, auto)
+        page = page.replace("</body>", f"<script>{AUTOPICK_JS}</script></body>", 1)
+        verdict, _ = render(chrome, page, 1000, scratch, "autopick")
+        status |= report("auto-picked driver, answering", verdict)
 
     return status
 

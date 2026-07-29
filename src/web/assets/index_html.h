@@ -452,7 +452,15 @@ function isFleet(s){
 /// Undefined while cfg is still loading, and that is deliberate: "we have not asked yet" must
 /// not flash a first-run panel at somebody with four working inverters.
 function neverConfigured(){
-  return !!cfg && !((cfg.driver||{}).id||'') && !((cfg.additional_devices||[]).length);
+  if(!cfg||!S)return false;
+  if(((cfg.driver||{}).id||'')||((cfg.additional_devices||[]).length))return false;
+  // AND nothing is answering. An empty driver.id is a legitimate, documented setting -- "let
+  // the firmware pick the highest-priority driver" -- so a bridge wired to the inverter that
+  // driver happens to serve works perfectly with this field never filled in. Reading the config
+  // alone hid a fleet producing 1850 W behind "no inverter set up yet", which is a worse lie
+  // than the wiring accusation it replaced (review, 2026-07-29: found by rendering it).
+  if((S.totals||{}).devices_answering)return false;
+  return (S.device||{}).last_successful_poll_seconds_ago==null;
 }
 /// The one thing to do next, said once and shown wherever the reader happens to be.
 /// `here` is true when the Inverters tab is drawing it. That tab already carries the heading
