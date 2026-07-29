@@ -463,6 +463,7 @@ bool RestApi::begin() {
         bool        ok = false;
         if (sub.empty()) {
             ok = buildDevicePayload(*snapshot, deviceId, activeDescriptor(*snapshot),
+                                    context_.configSlotFor?context_.configSlotFor(deviceId):-1,
                                     context_.clock(), body);
         } else if (sub == "measurements") {
             ok = buildMeasurementsPayload(*snapshot, body);

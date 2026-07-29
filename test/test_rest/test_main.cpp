@@ -721,7 +721,7 @@ static void test_a_device_payload_says_when_it_last_answered() {
 
     std::string json;
     TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "growatt_modbus-2",
-                                              &eversolar::descriptor(), g_now + 45000, json));
+                                              &eversolar::descriptor(), 1, g_now + 45000, json));
     auto doc = parse(json);
     TEST_ASSERT_EQUAL_UINT32(45, doc["last_successful_poll_seconds_ago"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(0, doc["consecutive_poll_failures"].as<uint32_t>());
@@ -729,7 +729,7 @@ static void test_a_device_payload_says_when_it_last_answered() {
     // Never answered is its own state, not "0 seconds ago" -- that is a bus fault, and it must
     // not read as a device that replied a moment ago.
     DeviceState fresh;
-    TEST_ASSERT_TRUE(rest::buildDevicePayload(fresh, "growatt_modbus-3", nullptr, g_now, json));
+    TEST_ASSERT_TRUE(rest::buildDevicePayload(fresh, "growatt_modbus-3", nullptr, -1, g_now, json));
     TEST_ASSERT_TRUE(parse(json)["last_successful_poll_seconds_ago"].isNull());
 }
 
@@ -957,7 +957,7 @@ static void test_a_label_is_reported_beside_the_id_never_instead_of_it() {
     state.label             = "Schuur";
 
     std::string out;
-    TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "mock_inverter-1", nullptr, 1000, out, 4096));
+    TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "mock_inverter-1", nullptr, -1, 1000, out, 4096));
     auto doc = parse(out);
     TEST_ASSERT_EQUAL_STRING("mock_inverter-1", doc["id"].as<const char*>());
     TEST_ASSERT_EQUAL_STRING("Schuur", doc["label"].as<const char*>());
@@ -970,7 +970,7 @@ static void test_no_label_means_no_key_at_all() {
     state.identity.driverId = "mock_inverter";
 
     std::string out;
-    TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "mock_inverter-1", nullptr, 1000, out, 4096));
+    TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "mock_inverter-1", nullptr, -1, 1000, out, 4096));
     auto doc = parse(out);
     TEST_ASSERT_TRUE(doc["label"].isNull());
 }

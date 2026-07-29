@@ -310,11 +310,19 @@ bool buildDevicesPayload(const std::vector<std::string>& deviceIds, std::string&
 }
 
 bool buildDevicePayload(const DeviceState& state, const std::string& deviceId,
-                        const DriverDescriptor* driver, uint64_t nowMs, std::string& out,
-                        size_t maxBytes) {
+                        const DriverDescriptor* driver, int configSlot, uint64_t nowMs,
+                        std::string& out, size_t maxBytes) {
     JsonDocument doc;
     JsonObject   root = doc.to<JsonObject>();
     root["id"]        = deviceId;
+    // Which configured row started this device: 0 is the primary driver, 1..N are
+    // additional_devices[0..N-1]. Only setup() can answer it -- rows get refused and the
+    // survivors are not the configuration minus a suffix -- and a client that has to guess gets
+    // it wrong, which is how a Remove button ended up on a working inverter. Omitted rather than
+    // sent as -1 when unknown: absent is not a slot.
+    if (configSlot >= 0) {
+        root["config_slot"] = configSlot;
+    }
     // Outside `identity`, deliberately: identity is what the DEVICE reported, and a name the
     // operator typed does not belong in it.
     addOptional(root, "label", state.label);
