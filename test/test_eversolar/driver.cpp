@@ -3,6 +3,7 @@
 
 #include <unity.h>
 
+#include <bitset>
 #include <vector>
 
 #include "device/device_context.h"
@@ -48,6 +49,44 @@ static void test_begin_configures_the_only_known_profile() {
     TEST_ASSERT_EQUAL(SerialParity::None, r.transport.profile().parity);
     TEST_ASSERT_EQUAL_UINT8(8, r.transport.profile().dataBits);
     TEST_ASSERT_EQUAL_UINT8(1, r.transport.profile().stopBits);
+}
+
+// What this driver DECLARES it can read, pinned channel by channel.
+//
+// Nothing asserted this before, which mattered the moment the twelve addRead() calls became a
+// shared pmuPvCapabilities(): a refactor of a list nobody checks is a refactor nobody can
+// verify. The list is not cosmetic -- it is what /api/v1/devices/<id>/capabilities publishes
+// and what the dashboard uses to decide which rows exist, so a channel silently dropped here
+// disappears from every screen while the data keeps arriving.
+//
+// ReadErrors is the one to watch. This protocol variant carries no error field, and the other
+// driver sharing that helper does have one; if the shared list ever grows it, this inverter
+// starts advertising a channel that can never produce a value.
+static void test_the_declared_read_channels_are_exactly_the_pmu_pv_set() {
+    Rig r;
+    TEST_ASSERT_TRUE(r.begin());
+    const InverterCapabilities caps = r.driver.capabilities();
+
+    // EXACTLY, as a set comparison rather than a dozen has() calls. Spot-checking the twelve
+    // that should be there proves nothing about a thirteenth that should not, and ReadErrors
+    // arriving by accident is the specific failure this guards.
+    std::bitset<kCapabilityCount> expected;
+    for (const auto capability :
+         {InverterCapability::ReadAcPower, InverterCapability::ReadAcVoltage,
+          InverterCapability::ReadAcCurrent, InverterCapability::ReadGridFrequency,
+          InverterCapability::ReadDcVoltage, InverterCapability::ReadDcCurrent,
+          InverterCapability::ReadDcPower, InverterCapability::ReadEnergyToday,
+          InverterCapability::ReadEnergyTotal, InverterCapability::ReadTemperature,
+          InverterCapability::ReadOperatingHours, InverterCapability::ReadStatus}) {
+        expected.set(static_cast<size_t>(capability));
+    }
+    TEST_ASSERT_TRUE_MESSAGE(caps.read == expected,
+                             "declared read channels are not exactly the PMU PV set");
+    TEST_ASSERT_TRUE(caps.write.none());
+
+    TEST_ASSERT_EQUAL_UINT8(1, caps.phaseCount);
+    TEST_ASSERT_EQUAL_UINT8(1, caps.mpptCount);  // revised upward by a dual-string payload
+    TEST_ASSERT_FALSE(caps.hasBattery);
 }
 
 // The exact shape a bridge has after an OTA update from a firmware that predates the "address"
@@ -819,6 +858,7 @@ static void test_snapshots_are_immutable_and_independent() {
 
 void run_eversolar_driver() {
     RUN_TEST(test_begin_configures_the_only_known_profile);
+    RUN_TEST(test_the_declared_read_channels_are_exactly_the_pmu_pv_set);
     RUN_TEST(test_a_config_without_the_address_option_still_gets_the_first_address);
     RUN_TEST(test_an_out_of_range_stored_address_falls_back_rather_than_to_zero);
     RUN_TEST(test_begin_broadcasts_re_register);

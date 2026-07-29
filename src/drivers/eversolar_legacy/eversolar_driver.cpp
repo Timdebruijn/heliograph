@@ -2,6 +2,7 @@
 // See eversolar_driver.h for provenance.
 
 #include "eversolar_driver.h"
+#include "drivers/pmu_pv_capabilities.h"
 
 #include <cstring>
 
@@ -65,24 +66,13 @@ bool EversolarDriver::begin(Transport& transport) {
         return false;
     }
 
-    capabilities_ = InverterCapabilities{};
-    capabilities_.addRead(InverterCapability::ReadAcPower);
-    capabilities_.addRead(InverterCapability::ReadAcVoltage);
-    capabilities_.addRead(InverterCapability::ReadAcCurrent);
-    capabilities_.addRead(InverterCapability::ReadGridFrequency);
-    capabilities_.addRead(InverterCapability::ReadDcVoltage);
-    capabilities_.addRead(InverterCapability::ReadDcCurrent);
-    capabilities_.addRead(InverterCapability::ReadDcPower);
-    capabilities_.addRead(InverterCapability::ReadEnergyToday);
-    capabilities_.addRead(InverterCapability::ReadEnergyTotal);
-    capabilities_.addRead(InverterCapability::ReadTemperature);
-    capabilities_.addRead(InverterCapability::ReadOperatingHours);
-    capabilities_.addRead(InverterCapability::ReadStatus);
-    // Deliberately absent: ReadErrors (the protocol carries no error code field) and
-    // everything battery/multi-phase. write stays empty.
-    capabilities_.phaseCount = 1;
-    capabilities_.mpptCount  = 1;  // revised upward if a dual-string payload arrives
-    capabilities_.hasBattery = false;
+    // Shared with the other PMU-family driver; see pmu_pv_capabilities.h. mpptCount starts at 1
+    // and is revised upward if a dual-string payload arrives.
+    //
+    // Deliberately NOT added here: ReadErrors. This variant of the protocol carries no error
+    // code field, so declaring it would advertise a channel that can never produce a value.
+    // Battery and multi-phase are absent for the same reason, and write stays empty.
+    capabilities_ = pmuPvCapabilities();
 
     identity_               = DeviceIdentity{};
     identity_.manufacturer  = "Ever-Solar";
