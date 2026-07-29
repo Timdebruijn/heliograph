@@ -7,6 +7,7 @@
 #include <string>
 
 #include "diagnostics/logger.h"
+#include "drivers/pmu_pv_capabilities.h"
 
 namespace heliograph::solax {
 namespace {
@@ -48,23 +49,11 @@ bool SolaxDriver::begin(Transport& transport) {
         return false;
     }
 
-    capabilities_ = InverterCapabilities{};
-    capabilities_.addRead(InverterCapability::ReadAcPower);
-    capabilities_.addRead(InverterCapability::ReadAcVoltage);
-    capabilities_.addRead(InverterCapability::ReadAcCurrent);
-    capabilities_.addRead(InverterCapability::ReadGridFrequency);
-    capabilities_.addRead(InverterCapability::ReadDcVoltage);
-    capabilities_.addRead(InverterCapability::ReadDcCurrent);
-    capabilities_.addRead(InverterCapability::ReadDcPower);
-    capabilities_.addRead(InverterCapability::ReadEnergyToday);
-    capabilities_.addRead(InverterCapability::ReadEnergyTotal);
-    capabilities_.addRead(InverterCapability::ReadTemperature);
-    capabilities_.addRead(InverterCapability::ReadOperatingHours);
-    capabilities_.addRead(InverterCapability::ReadStatus);
-    capabilities_.addRead(InverterCapability::ReadErrors);  // 32-bit fault bitmask
-    capabilities_.phaseCount = 1;
-    capabilities_.mpptCount  = 1;  // datasheet; revised upward if PV2 shows real voltage
-    capabilities_.hasBattery = false;
+    // Shared with the other PMU-family driver; see pmu_pv_capabilities.h. mpptCount starts at
+    // 1 per the datasheet and is revised upward if PV2 turns out to show real voltage.
+    capabilities_ = pmuPvCapabilities();
+    // This variant's own addition: the payload carries a 32-bit fault bitmask.
+    capabilities_.addRead(InverterCapability::ReadErrors);
 
     identity_              = DeviceIdentity{};
     identity_.manufacturer = "SolaX";

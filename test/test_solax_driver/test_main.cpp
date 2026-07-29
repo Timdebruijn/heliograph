@@ -7,6 +7,7 @@
 
 #include <unity.h>
 
+#include <bitset>
 #include <cstring>
 #include <vector>
 
@@ -274,6 +275,38 @@ static void test_noise_before_the_reply_does_not_cost_the_reply() {
     TEST_ASSERT_EQUAL(static_cast<int>(PollResult::Ok), static_cast<int>(driver.poll(state)));
 }
 
+// The same pin as the other PMU-family driver has, and for the same reason -- this one needed
+// it more, not less. Sharing pmuPvCapabilities() between two drivers means an edit there moves
+// BOTH, and this is the driver with something to lose: ReadErrors is its own addition, declared
+// next to the shared call rather than inside it. Nothing was asserting that line existed.
+static void test_the_declared_read_channels_are_the_pmu_pv_set_plus_errors() {
+    MockTransport transport;
+    SolaxDriver   driver(transport);
+    TEST_ASSERT_TRUE(driver.begin(transport));
+    const InverterCapabilities caps = driver.capabilities();
+
+    std::bitset<kCapabilityCount> expected;
+    for (const auto capability :
+         {InverterCapability::ReadAcPower, InverterCapability::ReadAcVoltage,
+          InverterCapability::ReadAcCurrent, InverterCapability::ReadGridFrequency,
+          InverterCapability::ReadDcVoltage, InverterCapability::ReadDcCurrent,
+          InverterCapability::ReadDcPower, InverterCapability::ReadEnergyToday,
+          InverterCapability::ReadEnergyTotal, InverterCapability::ReadTemperature,
+          InverterCapability::ReadOperatingHours, InverterCapability::ReadStatus,
+          // This variant's own: the payload carries a 32-bit fault bitmask. Drop the addRead
+          // beside the shared call and this is the only thing that notices.
+          InverterCapability::ReadErrors}) {
+        expected.set(static_cast<size_t>(capability));
+    }
+    TEST_ASSERT_TRUE_MESSAGE(caps.read == expected,
+                             "declared read channels are not the PMU PV set plus ReadErrors");
+    TEST_ASSERT_TRUE(caps.write.none());
+
+    TEST_ASSERT_EQUAL_UINT8(1, caps.phaseCount);
+    TEST_ASSERT_EQUAL_UINT8(1, caps.mpptCount);  // at boot; PV2 revises it, see below
+    TEST_ASSERT_FALSE(caps.hasBattery);
+}
+
 static void test_pv2_channels_appear_only_when_pv2_shows_real_voltage() {
     MockTransport   transport;
     FakeSolaxDevice device;
@@ -314,6 +347,7 @@ int main(int, char**) {
     RUN_TEST(test_silence_from_an_empty_bus_is_not_registered);
     RUN_TEST(test_probe_reports_serial_and_identity_evidence);
     RUN_TEST(test_noise_before_the_reply_does_not_cost_the_reply);
+    RUN_TEST(test_the_declared_read_channels_are_the_pmu_pv_set_plus_errors);
     RUN_TEST(test_pv2_channels_appear_only_when_pv2_shows_real_voltage);
     return UNITY_END();
 }
