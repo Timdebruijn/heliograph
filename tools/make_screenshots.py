@@ -28,7 +28,6 @@ import http.server
 import json
 import pathlib
 import re
-import shutil
 import socketserver
 import subprocess
 import sys
@@ -215,22 +214,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(encoded)
 
 
-def find_chrome() -> str:
-    for name in (
-        "google-chrome",
-        "google-chrome-stable",
-        "chromium",
-        "chromium-browser",
-    ):
-        found = shutil.which(name)
-        if found:
-            return found
-    mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-    if pathlib.Path(mac).exists():
-        return mac
-    raise SystemExit("no Chrome or Chromium on PATH to render with")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -279,7 +262,9 @@ def main() -> int:
 
     Handler.page = extract_page()
     Handler.data = data
-    chrome = find_chrome()
+    chrome = build_web.find_chrome()
+    if chrome is None:
+        raise SystemExit("no Chrome or Chromium on PATH to render with")
 
     with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
         port = server.server_address[1]
