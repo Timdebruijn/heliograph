@@ -2174,7 +2174,14 @@ function paint(){
   const b=(S&&S.bridge)||{};
   if(tab==='live')paintLive();
   else if(tab==='inv')paintInverters();
-  else if(tab==='int')drawIfChanged('int',[cfg,panel,pending.length],paintInt);
+  // Configuration AND the connection states this tab exists to report. Leaving those out is
+  // the mirror of the bug being fixed: MQTT drops, a Modbus client attaches, and the page keeps
+  // showing what was true a minute ago because nothing in its signature moved. Found by listing
+  // what the function renders against what the signature covers, not by reading it.
+  else if(tab==='int')drawIfChanged('int',
+    [cfg,panel,pending.length,b.mqtt_connected,b.modbus_listening,b.modbus_clients,
+     ((S&&S.devices)||[]).length],
+    paintInt);
   // Structure only: which filter, whether the log is paused, the level in the dropdown, and
   // whether a crash dump is on board. Not one counter -- those tick every poll, and including
   // them would rebuild the log and throw the reader back to the top of it every few seconds.

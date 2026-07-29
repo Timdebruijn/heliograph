@@ -411,6 +411,42 @@ const tick=setInterval(async()=>{
 """
 
 
+# The Integrations tab reports connection states -- MQTT up or down, how many Modbus clients are
+# attached. Those are exactly what somebody opens that tab to look at, and leaving them out of
+# its signature is the mirror of the bug this change fixes: the page would sit there showing what
+# was true a minute ago.
+INTEGRATIONS_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+let tries=0;
+const tick=setInterval(async()=>{
+  if((!cfg||!S) && ++tries<=80) return;
+  clearInterval(tick);
+  try{
+    goTab('int');
+    await new Promise(r=>setTimeout(r,400));
+    const before=document.getElementById('int').textContent;
+    S.bridge.mqtt_connected=false;
+    S.bridge.modbus_clients=3;
+    paint();
+    await new Promise(r=>setTimeout(r,80));
+    if(document.getElementById('int').textContent===before){
+      say('the tab did not notice MQTT dropping or a Modbus client attaching');
+    }
+    // ...and it still must not rebuild itself for nothing.
+    const probe=document.createElement('span'); probe.id='int-probe';
+    document.getElementById('int').appendChild(probe);
+    paint();
+    await new Promise(r=>setTimeout(r,80));
+    if(!document.getElementById('int-probe')) say('an idle refresh rebuilt the tab anyway');
+  }catch(e){ say('the integrations assertions threw: '+e.message); }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
+
+
 # The Health tab: counters that tick on every poll, and a log the reader scrolls through. The
 # tab was rebuilt to move those counters, which threw the log -- and the reader's place in it --
 # back to the top every few seconds.
@@ -621,6 +657,10 @@ def main() -> int:
         page = build_page(stripped, stub, "{soc:68,power:-1240}", HEALTH_JS)
         verdict, _ = render(chrome, page, 1000, scratch, "health")
         status |= report("health keeps your place in the log", verdict)
+
+        page = build_page(stripped, stub, "{soc:68,power:-1240}", INTEGRATIONS_JS)
+        verdict, _ = render(chrome, page, 1000, scratch, "int")
+        status |= report("integrations still reports what changed", verdict)
 
     return status
 
