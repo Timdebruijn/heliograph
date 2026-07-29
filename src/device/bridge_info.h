@@ -6,8 +6,6 @@
 #pragma once
 
 #include <cstdint>
-
-#include "diagnostics/breadcrumbs.h"
 #include <string>
 #include <vector>
 
