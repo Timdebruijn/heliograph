@@ -35,6 +35,11 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 
 Each driver in `/api/v1/drivers` declares its own options, and the web UI renders them
 generically from that declaration — a new driver's settings appear with no frontend change.
+
+It also declares `supports_multiple_devices`: whether a second row of that driver can run at
+all. A driver that answers `false` polls one device per bridge, and `planDevices()` skips the
+second row at boot — after the restart that was performed to apply it. The field exists so a
+client can refuse that row while the reader is still looking at the form.
 An option is one of three shapes:
 
 | Shape | Declared as | Rendered as | Refused when |

@@ -28,6 +28,18 @@ const DriverDescriptor& descriptor() {
         // info layout) tell them apart automatically.
         x.probePriority           = 8;
         x.supportsAutoDetection   = true;
+        // The only driver left saying no, and unlike the others it is not saying "impossible".
+        //
+        // The mechanism EverSolar uses looks available here: same AA55 family, same broadcast
+        // offline query that a registered inverter ignores, and the same per-row assigned
+        // address. This driver has no RE_REGISTER at all, so the specific hazard that makes a
+        // second instance dangerous over there -- a starting instance telling the already-polling
+        // inverter to forget its address -- does not exist in this one.
+        //
+        // It stays false because this driver has never exchanged a byte with a real inverter
+        // (the descriptor above says so, and the one field session returned nothing). Enabling a
+        // second instance would be building an untested path on top of an unverified one. Turn it
+        // on when a single X1 is confirmed working, not before.
         x.supportsMultipleDevices = false;
         x.supportsRead            = true;
         x.supportsWrite           = false;

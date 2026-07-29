@@ -29,6 +29,21 @@ Line: 9600 8N1. Master = PMU address `01 00`; inverters live at `00 <addr>`.
    established once and kept through timeouts; recovery is a plain offline query
    (sunrise-incident discipline, 2026-07-21).
 
+## One inverter per bridge, for now
+
+The driver declares `supportsMultipleDevices = false`, so a second configured row of it is
+refused at boot. That is **caution, not a protocol limit**. The mechanism the sibling EverSolar
+driver uses is available here in full: step 1 above is the same broadcast that a registered
+inverter ignores, so instances starting in configuration order each register the next
+unregistered unit, and each row already carries its own assigned address. Point 4 makes it
+safer here than there — with no RE_REGISTER frame, a starting instance cannot tell an
+already-polling inverter to forget its address.
+
+What is missing is evidence: this driver has never exchanged a byte with a real inverter (see
+the field findings below). Enabling a second instance would build an untested path on top of an
+unverified one. Turn it on once a single X1 is confirmed working, and note here what confirmed
+it.
+
 ## Status report payload (`11 82`)
 
 Lengths per generation: G2 = 50, G1 = 52 (+CT Pgrid), G3 = 56. First 50 bytes are common;
