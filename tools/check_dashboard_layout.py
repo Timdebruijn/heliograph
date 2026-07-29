@@ -269,6 +269,24 @@ const tick=setInterval(async()=>{
       }
     }
 
+    // 1d. An OPEN PANEL is work in progress. A raw-bus recording runs for thirty seconds and a
+    // firmware upload longer, and neither holds focus -- so the focus guard alone left both
+    // being rebuilt every few seconds while they ran.
+    togglePanel('cap');
+    await new Promise(r=>setTimeout(r,200));
+    const mark=document.createElement('span'); mark.id='panel-probe';
+    document.getElementById('inv').appendChild(mark);
+    for(let i=0;i<5;i++){ S.totals.ac_power_w=2000+i; paint(); await new Promise(r=>setTimeout(r,20)); }
+    if(!document.getElementById('panel-probe')) say('the tab was rebuilt under an open panel');
+    // And it must resume the moment that panel is closed, or the tab is frozen for good.
+    togglePanel('cap');
+    await new Promise(r=>setTimeout(r,150));
+    const mark2=document.createElement('span'); mark2.id='panel-probe-2';
+    document.getElementById('inv').appendChild(mark2);
+    S.totals.ac_power_w=9999; paint();
+    await new Promise(r=>setTimeout(r,60));
+    if(document.getElementById('panel-probe-2')) say('the tab never repainted again after closing the panel');
+
     // 2. A control being used must survive the five-second refresh. Every paint replaces the
     // tab's innerHTML, which shuts an open <select> -- so the driver list could not be read to
     // the bottom before it closed itself.
@@ -379,6 +397,86 @@ const tick=setInterval(async()=>{
     // the plain-space form silently found nothing and reported the production as missing.
     if(!live.includes('1\u2009850')) fail.push('Live does not show the production');
   }catch(e){ fail.push('the auto-pick assertions threw: '+e.message); }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
+
+
+# The Health tab: counters that tick on every poll, and a log the reader scrolls through. The
+# tab was rebuilt to move those counters, which threw the log -- and the reader's place in it --
+# back to the top every few seconds.
+HEALTH_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+let tries=0;
+const tick=setInterval(async()=>{
+  if((!cfg||!diag) && ++tries<=80) return;
+  clearInterval(tick);
+  try{
+    goTab('health');
+    await new Promise(r=>setTimeout(r,400));
+    const box=document.querySelector('#logbox');
+    if(!box) say('no log box on the Health tab');
+    else{
+      for(let i=0;i<5;i++){
+        // Minutes, not seconds: up() renders 100..104 s as the same "1 m", so an assertion on
+        // those would have watched a value that cannot move and called it frozen.
+        diag.uptime_seconds=60*(i+1); diag.free_heap_bytes=180000+i; diag.poll_success_total=500+i;
+        paint();
+        await new Promise(r=>setTimeout(r,20));
+      }
+      if(document.querySelector('#logbox')!==box) say('the log was rebuilt to move a counter');
+      // The other half: the counters must still be moving.
+      if(!/5 m/.test(document.querySelector('#h_up').textContent)) say('the uptime stopped updating');
+      if(!/504/.test(document.querySelector('#h_polls').textContent)) say('the poll counter stopped updating');
+    }
+  }catch(e){ say('the health assertions threw: '+e.message); }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
+
+
+# The Bridge tab, which is all configuration and two readouts that move on their own. Nothing
+# there needs rebuilding when the clock ticks -- and rebuilding it cost a ticked "include
+# passwords" box and a chosen backup file every few seconds, because innerHTML replaces the
+# elements underneath it and takes everything not in cfg with them.
+BRIDGE_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+let tries=0;
+const tick=setInterval(async()=>{
+  if((!cfg||!S) && ++tries<=80) return;
+  clearInterval(tick);
+  try{
+    goTab('bridge');
+    await new Promise(r=>setTimeout(r,400));
+    const box=document.querySelector('#bk_sec');
+    if(!box){ say('no include-passwords checkbox to test'); }
+    else{
+      box.checked=true;
+      box.blur();                       // not focused: the focus guard must not be what saves it
+      const clockBefore=document.querySelector('#bridge_clock').textContent;
+      for(let i=0;i<6;i++){
+        S.bridge.time='2026-07-29 10:0'+i+':0'+i;
+        S.bridge.wifi_rssi_dbm=-54-i;
+        paint();
+        await new Promise(r=>setTimeout(r,20));
+      }
+      if(document.querySelector('#bk_sec')!==box) say('the tab was rebuilt while only the clock moved');
+      if(!box.checked) say('the ticked box was reset by a repaint');
+      // ...and the data must still be live. A tab that never updates is the other failure.
+      if(document.querySelector('#bridge_clock').textContent===clockBefore){
+        say('the clock stopped updating');
+      }
+      if(!document.querySelector('#bridge_wifi').textContent.includes('-59')){
+        say('the signal strength stopped updating');
+      }
+    }
+  }catch(e){ say('the bridge assertions threw: '+e.message); }
   document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
 },25);
 })();
@@ -506,6 +604,15 @@ def main() -> int:
         page = page.replace("</body>", f"<script>{AUTOPICK_JS}</script></body>", 1)
         verdict, _ = render(chrome, page, 1000, scratch, "autopick")
         status |= report("auto-picked driver, answering", verdict)
+
+        # Data keeps moving; the page around it does not get rebuilt.
+        page = build_page(stripped, stub, "{soc:68,power:-1240}", BRIDGE_JS)
+        verdict, _ = render(chrome, page, 1000, scratch, "bridge")
+        status |= report("bridge tab keeps what you typed", verdict)
+
+        page = build_page(stripped, stub, "{soc:68,power:-1240}", HEALTH_JS)
+        verdict, _ = render(chrome, page, 1000, scratch, "health")
+        status |= report("health keeps your place in the log", verdict)
 
     return status
 
