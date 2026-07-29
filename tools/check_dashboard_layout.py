@@ -208,12 +208,43 @@ const tick=setInterval(async()=>{
       if(!row.driver_id) say('the new row names no driver, which the firmware refuses outright');
       // And it must not land on an address something else already answers at: two units
       // sharing one destroy each other's replies, and the row would be skipped at boot.
-      const addrOf=d=>String((d.options||{}).unit_id??(d.options||{}).address??'').trim();
-      const mine=addrOf(row);
+      // Resolved the way the FIRMWARE resolves it: stored option, else the declared default
+      // (DriverDescriptor::optionOr). Written out here rather than calling the page's own
+      // addressOf(), so that a page which resolves it wrongly cannot agree with itself.
+      //
+      // The earlier version of this assertion read stored options only -- the same blind spot as
+      // the code it was testing -- so it watched a real bridge hand a second inverter the
+      // address the first was already answering at, and said nothing.
+      const addrOf=(driverId,options)=>{
+        const drv=((drivers&&drivers.drivers)||[]).find(x=>x.id===driverId)||{};
+        const opt=(drv.options||[]).find(o=>o.key==='unit_id'||o.key==='address');
+        if(!opt)return '';
+        const stored=String((options||{})[opt.key]??'').trim();
+        return stored!==''?stored:String(opt.default_value??'').trim();
+      };
+      const mine=addrOf(row.driver_id,row.options);
       if(mine!==''){
-        const others=[cfg.driver,...sent.additional_devices.slice(0,-1)].map(addrOf);
+        const others=[[cfg.driver.id,cfg.driver.options],
+                      ...sent.additional_devices.slice(0,-1).map(d=>[d.driver_id,d.options])]
+          .map(([i,o])=>addrOf(i,o));
         if(others.includes(mine)) say('the new row was given address '+mine+', already in use');
       }
+    }
+
+    // 1b. A row that is in the configuration but has not started must be VISIBLE and must
+    // offer a way back out. It has no device id, so it gets no ordinary card -- which is how a
+    // freshly added row became impossible to remove without a reboot, on a bridge whose owner
+    // had just been told to open a panel that did not exist.
+    cfg.additional_devices=[...(cfg.additional_devices||[]),
+                            {driver_id:'growatt_modbus',label:'',options:{unit_id:'9'}}];
+    paintInverters();
+    await new Promise(r=>setTimeout(r,100));
+    const inv=document.getElementById('inv');
+    if(!inv.textContent.includes('starts after a restart')){
+      say('a configured row that has not started is nowhere on the page');
+    }
+    if(![...inv.querySelectorAll('button')].some(b=>/removeExtraAt/.test(b.getAttribute('onclick')||''))){
+      say('a configured row that has not started offers no way to remove it');
     }
 
     // 2. A control being used must survive the five-second refresh. Every paint replaces the
