@@ -848,6 +848,16 @@ void startRestApi() {
         }
         return 0;
     };
+    // The same table, answering the other question the outside world cannot work out for
+    // itself: which configured row a running device came from.
+    ctx.configSlotFor = [](const DeviceId& id) -> int {
+        for (size_t i = 0; i < g_configSlotIds.size(); ++i) {
+            if (g_configSlotIds[i] == id) {
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    };
     ctx.saveConfig  = [](const Configuration& c) { return g_store.save(c); };
     // Request only -- the poll itself runs on rs485Task, exactly like discovery. Running
     // pollOnce() here executed a seconds-long bus transaction inside an AsyncTCP callback and
