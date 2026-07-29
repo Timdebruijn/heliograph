@@ -12,6 +12,11 @@ void Diagnostics::setLastError(const std::string& message) {
 DiagnosticsSnapshot Diagnostics::snapshot() const {
     DiagnosticsSnapshot s;
     s.pollSuccessTotal        = pollSuccessTotal_.load(std::memory_order_relaxed);
+    s.pollDurationCount       = pollDurationCount_.load(std::memory_order_relaxed);
+    s.pollDurationLastMs      = pollDurationLastMs_.load(std::memory_order_relaxed);
+    s.pollDurationMinMs       = pollDurationMinMs_.load(std::memory_order_relaxed);
+    s.pollDurationMaxMs       = pollDurationMaxMs_.load(std::memory_order_relaxed);
+    s.pollDurationEwmaMs      = pollDurationEwmaMs_.load(std::memory_order_relaxed);
     s.pollFailureTotal        = pollFailureTotal_.load(std::memory_order_relaxed);
     s.consecutivePollFailures = consecutivePollFailures_.load(std::memory_order_relaxed);
     s.checksumErrorTotal      = checksumErrorTotal_.load(std::memory_order_relaxed);

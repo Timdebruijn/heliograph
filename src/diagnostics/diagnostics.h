@@ -14,6 +14,22 @@ namespace heliograph {
 
 struct DiagnosticsSnapshot {
     uint32_t pollSuccessTotal          = 0;
+    /// Duration of SUCCESSFUL polls only, in ms since the poll started. A failed poll lasts
+    /// the transaction deadline by construction -- a constant -- and this fleet's inverter is
+    /// dark every night, so counting failures would peg max at the deadline and drag the EWMA
+    /// toward it a few thousand times per night. Failures are already counted above; what this
+    /// answers is "how long does a poll take when the bus works", which is the number that
+    /// moves when something else (web traffic, a second core user) is in the way.
+    /// pollDurationCount is the presence signal: the mock driver polls in 0 ms, so a zero
+    /// duration is a real sample and cannot double as "no data".
+    uint32_t pollDurationCount         = 0;
+    uint32_t pollDurationLastMs        = 0;
+    uint32_t pollDurationMinMs         = 0;
+    uint32_t pollDurationMaxMs         = 0;
+    /// EWMA with alpha 1/8, integer arithmetic, seeded by the first sample. Chosen over a mean
+    /// so a load change shows within ~a minute at a 10 s poll interval instead of being
+    /// averaged into days of history.
+    uint32_t pollDurationEwmaMs        = 0;
     uint32_t pollFailureTotal          = 0;
     uint32_t consecutivePollFailures   = 0;
     uint32_t checksumErrorTotal        = 0;
@@ -87,6 +103,33 @@ public:
         loopStackFreeBytes_.store(bytes, std::memory_order_relaxed);
     }
 
+    /// One successful poll's duration. Single writer (rs485Task owns the bus, so every poll
+    /// and therefore every sample happens on it); the atomics are for the readers on the web
+    /// task, same as every counter here. No CAS needed for min/max under a single writer.
+    void recordPollDuration(uint32_t ms) {
+        const uint32_t n = pollDurationCount_.load(std::memory_order_relaxed);
+        pollDurationLastMs_.store(ms, std::memory_order_relaxed);
+        if (n == 0) {
+            pollDurationMinMs_.store(ms, std::memory_order_relaxed);
+            pollDurationMaxMs_.store(ms, std::memory_order_relaxed);
+            pollDurationEwmaMs_.store(ms, std::memory_order_relaxed);
+        } else {
+            if (ms < pollDurationMinMs_.load(std::memory_order_relaxed)) {
+                pollDurationMinMs_.store(ms, std::memory_order_relaxed);
+            }
+            if (ms > pollDurationMaxMs_.load(std::memory_order_relaxed)) {
+                pollDurationMaxMs_.store(ms, std::memory_order_relaxed);
+            }
+            const uint32_t ewma = pollDurationEwmaMs_.load(std::memory_order_relaxed);
+            // Integer EWMA, alpha 1/8. Signed intermediate: ms < ewma must pull DOWN.
+            pollDurationEwmaMs_.store(
+                static_cast<uint32_t>(static_cast<int64_t>(ewma) +
+                                      (static_cast<int64_t>(ms) - ewma) / 8),
+                std::memory_order_relaxed);
+        }
+        pollDurationCount_.store(n + 1, std::memory_order_relaxed);
+    }
+
     /// Cheap atomic read for hot-path callers (the boot-confirm check runs every loop()
     /// iteration; a full snapshot() would copy a std::string each time).
     uint32_t pollSuccessTotal() const {
@@ -110,6 +153,11 @@ private:
     std::atomic<uint32_t> modbusClientConnections_{0};
     std::atomic<uint32_t> restRequestTotal_{0};
     std::atomic<uint32_t> mqttPublishFailureTotal_{0};
+    std::atomic<uint32_t> pollDurationCount_{0};
+    std::atomic<uint32_t> pollDurationLastMs_{0};
+    std::atomic<uint32_t> pollDurationMinMs_{0};
+    std::atomic<uint32_t> pollDurationMaxMs_{0};
+    std::atomic<uint32_t> pollDurationEwmaMs_{0};
     std::atomic<uint64_t> lastSuccessfulPollMs_{0};
     std::atomic<uint32_t> rs485StackFreeBytes_{0};
     std::atomic<uint32_t> loopStackFreeBytes_{0};

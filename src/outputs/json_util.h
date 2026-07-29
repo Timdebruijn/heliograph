@@ -208,6 +208,17 @@ inline void writeDiagnostics(JsonObject doc, const DiagnosticsSnapshot& d,
     addClockFields(doc, bridge);
 
     doc["poll_success_total"]              = d.pollSuccessTotal;
+    // Absent, not zero, until a poll has succeeded. The mock driver polls in 0 ms, so a zero
+    // duration is a real measurement -- the count is the presence signal, not the values.
+    // Successful polls only; DiagnosticsSnapshot's field comment carries the reason. One
+    // definition here serves REST and MQTT alike, same as every other diagnostics field.
+    if (d.pollDurationCount > 0) {
+        doc["poll_duration_count"]   = d.pollDurationCount;
+        doc["poll_duration_last_ms"] = d.pollDurationLastMs;
+        doc["poll_duration_min_ms"]  = d.pollDurationMinMs;
+        doc["poll_duration_max_ms"]  = d.pollDurationMaxMs;
+        doc["poll_duration_ewma_ms"] = d.pollDurationEwmaMs;
+    }
     doc["poll_failure_total"]              = d.pollFailureTotal;
     doc["consecutive_poll_failures"]       = d.consecutivePollFailures;
     doc["checksum_error_total"]            = d.checksumErrorTotal;

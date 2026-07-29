@@ -1137,7 +1137,12 @@ void rs485Task(void* /*arg*/) {
             // back through /api/v1/status, which serves the FIRST device -- so sending the poll
             // anywhere else made the button report that nothing had happened.
             if (g_manualPollRequested.exchange(false)) {
-                const PollResult r = g_contexts.front()->pollOnce();
+                const uint64_t   pollStart = nowMs();
+                const PollResult r         = g_contexts.front()->pollOnce();
+                if (r == PollResult::Ok) {
+                    g_diagnostics.recordPollDuration(
+                        static_cast<uint32_t>(nowMs() - pollStart));
+                }
                 if (r != PollResult::Ok) {
                     log::warn("manual poll of %s: %s", g_deviceIds.front().c_str(),
                               pollResultName(r));
@@ -1149,7 +1154,16 @@ void rs485Task(void* /*arg*/) {
                 if (!ctx.due(nowMs())) {
                     continue;
                 }
-                const PollResult r = ctx.pollOnce();
+                const uint64_t   pollStart = nowMs();
+                const PollResult r         = ctx.pollOnce();
+                if (r == PollResult::Ok) {
+                    // Wall time of the whole transaction as this task experienced it --
+                    // preemption included, which is the point: this is the number that moves
+                    // when something else contends for the core or the bus stalls short of a
+                    // timeout. Failures are excluded; the snapshot field's comment says why.
+                    g_diagnostics.recordPollDuration(
+                        static_cast<uint32_t>(nowMs() - pollStart));
+                }
                 if (r != PollResult::Ok) {
                     // Bounded: one line per attempt, no payload, no growth over time. The device
                     // ID rather than a position: a position among the STARTED devices is not the
