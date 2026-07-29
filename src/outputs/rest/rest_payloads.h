@@ -151,7 +151,7 @@ bool buildDevicesPayload(const std::vector<std::string>& deviceIds, std::string&
 /// this is the ONLY payload there is, so "started but has never returned a byte" and "working"
 /// were indistinguishable outside the status endpoint (review, 2026-07-25).
 bool buildDevicePayload(const DeviceState& state, const std::string& deviceId,
-                        const DriverDescriptor* driver, uint64_t nowMs, std::string& out,
+                        const DriverDescriptor* driver, int configSlot, uint64_t nowMs, std::string& out,
                         size_t maxBytes = kMaxResponseBytes);
 
 bool buildMeasurementsPayload(const DeviceState& state, std::string& out,

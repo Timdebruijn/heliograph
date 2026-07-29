@@ -254,6 +254,11 @@ const tick=setInterval(async()=>{
     cfg.additional_devices=[{driver_id:'growatt_modbus',label:'Garage',options:{unit_id:'2'}},
                             {driver_id:'eversolar_legacy',label:'Refused',options:{address:'17'}},
                             {driver_id:'growatt_modbus',label:'Dak achter',options:{unit_id:'3'}}];
+    // What the BRIDGE says started: slots 1 and 3. Slot 2 was refused. Said here rather than
+    // left to be inferred -- inferring it is what put the Remove button on a running inverter,
+    // twice.
+    devCache['growatt_modbus-GW2400ABC'].config_slot=1;
+    devCache['growatt_modbus-GW3300XYZ'].config_slot=3;
     paintInverters();
     await new Promise(r=>setTimeout(r,150));
     const pend=[...document.querySelectorAll('#inv .card')]
@@ -269,6 +274,43 @@ const tick=setInterval(async()=>{
       }
     }
 
+    // 1d. An OPEN PANEL is work in progress. A raw-bus recording runs for thirty seconds and a
+    // firmware upload longer, and neither holds focus -- so the focus guard alone left both
+    // being rebuilt every few seconds while they ran.
+    togglePanel('cap');
+    await new Promise(r=>setTimeout(r,200));
+    const mark=document.createElement('span'); mark.id='panel-probe';
+    document.getElementById('inv').appendChild(mark);
+    for(let i=0;i<5;i++){ S.totals.ac_power_w=2000+i; paintTick(); await new Promise(r=>setTimeout(r,20)); }
+    if(!document.getElementById('panel-probe')) say('the tab was rebuilt under an open panel');
+    // And it must resume the moment that panel is closed, or the tab is frozen for good.
+    togglePanel('cap');
+    await new Promise(r=>setTimeout(r,150));
+    const mark2=document.createElement('span'); mark2.id='panel-probe-2';
+    document.getElementById('inv').appendChild(mark2);
+    S.totals.ac_power_w=9999; paintTick();
+    await new Promise(r=>setTimeout(r,60));
+    if(document.getElementById('panel-probe-2')) say('the tab never repainted again after closing the panel');
+
+    // 1e. A refusal must reach the reader from a PENDING card too. That card has no form, so
+    // no #dv_msg, and say() begins with `if(!m)return` -- a 400 produced nothing at all: no
+    // message, no alert, the row still sitting there. The firmware revalidates every remaining
+    // row on any change to the array, so a legacy value in a SIBLING row refuses the removal of
+    // an unrelated one, which is how a row became permanently unremovable in silence.
+    cfg.additional_devices=[...(cfg.additional_devices||[]),
+                            {driver_id:'growatt_modbus',label:'Pending',options:{unit_id:'9'}}];
+    paintInverters();
+    await new Promise(r=>setTimeout(r,120));
+    let told=null;
+    const realAlert2=window.alert, realConfirm=window.confirm, realPatch2=window.patch;
+    window.alert=m=>{told=m};
+    window.confirm=()=>true;
+    window.patch=async()=>({ok:false,status:400,why:'additional_devices[0].options: bad value'});
+    await removeExtraAt(cfg.additional_devices.length-1);
+    window.alert=realAlert2; window.confirm=realConfirm; window.patch=realPatch2;
+    if(!told) say('a refused removal from a pending card said nothing at all');
+    else if(!told.includes('bad value')) say('the refusal did not carry the reason: '+told);
+
     // 2. A control being used must survive the five-second refresh. Every paint replaces the
     // tab's innerHTML, which shuts an open <select> -- so the driver list could not be read to
     // the bottom before it closed itself.
@@ -278,17 +320,25 @@ const tick=setInterval(async()=>{
     if(!sel) say('the wizard offers no driver dropdown to choose from');
     else{
       sel.focus();
-      paint();
+      paintTick();   // the five-second refresh arriving, not an action
       await new Promise(r=>setTimeout(r,50));
       if(document.querySelector('#wizcard select')!==sel){
         say('a refresh replaced the driver dropdown while it was being used');
       }
       // The other half: the guard must RELEASE. A tab that stops updating once anything was
       // ever touched is a worse bug than the one being fixed.
+      //
+      // Both guards have to come off, and this assertion predates the second one: blurring the
+      // dropdown leaves the WIZARD open, and an open panel is deliberately left alone now. So
+      // close that too, or this asserts a repaint that is correctly refused.
       sel.blur();
-      paint();
+      togglePanel('wiz');
       await new Promise(r=>setTimeout(r,50));
-      if(document.querySelector('#wizcard select')===sel){
+      const probe=document.createElement('span'); probe.id='release-probe';
+      document.getElementById('inv').appendChild(probe);
+      paintTick();
+      await new Promise(r=>setTimeout(r,50));
+      if(document.getElementById('release-probe')){
         say('the tab never repainted again after the control was left alone');
       }
     }
@@ -304,7 +354,7 @@ const tick=setInterval(async()=>{
       nav.focus();
       const marker=document.createElement('span');
       $('#live').appendChild(marker);
-      paint();
+      paintTick();
       await new Promise(r=>setTimeout(r,50));
       if(marker.isConnected) say('a focused nav button stopped the Live tab from updating');
     }
@@ -379,6 +429,122 @@ const tick=setInterval(async()=>{
     // the plain-space form silently found nothing and reported the production as missing.
     if(!live.includes('1\u2009850')) fail.push('Live does not show the production');
   }catch(e){ fail.push('the auto-pick assertions threw: '+e.message); }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
+
+
+# The Integrations tab reports connection states -- MQTT up or down, how many Modbus clients are
+# attached. Those are exactly what somebody opens that tab to look at, and leaving them out of
+# its signature is the mirror of the bug this change fixes: the page would sit there showing what
+# was true a minute ago.
+INTEGRATIONS_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+let tries=0;
+const tick=setInterval(async()=>{
+  if((!cfg||!S) && ++tries<=80) return;
+  clearInterval(tick);
+  try{
+    goTab('int');
+    await new Promise(r=>setTimeout(r,400));
+    const before=document.getElementById('int').textContent;
+    S.bridge.mqtt_connected=false;
+    S.bridge.modbus_clients=3;
+    paintTick();
+    await new Promise(r=>setTimeout(r,80));
+    if(document.getElementById('int').textContent===before){
+      say('the tab did not notice MQTT dropping or a Modbus client attaching');
+    }
+    // ...and it still must not rebuild itself for nothing.
+    const probe=document.createElement('span'); probe.id='int-probe';
+    document.getElementById('int').appendChild(probe);
+    paintTick();
+    await new Promise(r=>setTimeout(r,80));
+    if(!document.getElementById('int-probe')) say('an idle refresh rebuilt the tab anyway');
+  }catch(e){ say('the integrations assertions threw: '+e.message); }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
+
+
+# The Health tab: counters that tick on every poll, and a log the reader scrolls through. The
+# tab was rebuilt to move those counters, which threw the log -- and the reader's place in it --
+# back to the top every few seconds.
+HEALTH_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+let tries=0;
+const tick=setInterval(async()=>{
+  if((!cfg||!diag) && ++tries<=80) return;
+  clearInterval(tick);
+  try{
+    goTab('health');
+    await new Promise(r=>setTimeout(r,400));
+    const box=document.querySelector('#logbox');
+    if(!box) say('no log box on the Health tab');
+    else{
+      for(let i=0;i<5;i++){
+        // Minutes, not seconds: up() renders 100..104 s as the same "1 m", so an assertion on
+        // those would have watched a value that cannot move and called it frozen.
+        diag.uptime_seconds=60*(i+1); diag.free_heap_bytes=180000+i; diag.poll_success_total=500+i;
+        paintTick();
+        await new Promise(r=>setTimeout(r,20));
+      }
+      if(document.querySelector('#logbox')!==box) say('the log was rebuilt to move a counter');
+      // The other half: the counters must still be moving.
+      if(!/5 m/.test(document.querySelector('#h_up').textContent)) say('the uptime stopped updating');
+      if(!/504/.test(document.querySelector('#h_polls').textContent)) say('the poll counter stopped updating');
+    }
+  }catch(e){ say('the health assertions threw: '+e.message); }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
+
+
+# The Bridge tab, which is all configuration and two readouts that move on their own. Nothing
+# there needs rebuilding when the clock ticks -- and rebuilding it cost a ticked "include
+# passwords" box and a chosen backup file every few seconds, because innerHTML replaces the
+# elements underneath it and takes everything not in cfg with them.
+BRIDGE_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+let tries=0;
+const tick=setInterval(async()=>{
+  if((!cfg||!S) && ++tries<=80) return;
+  clearInterval(tick);
+  try{
+    goTab('bridge');
+    await new Promise(r=>setTimeout(r,400));
+    const box=document.querySelector('#bk_sec');
+    if(!box){ say('no include-passwords checkbox to test'); }
+    else{
+      box.checked=true;
+      box.blur();                       // not focused: the focus guard must not be what saves it
+      const clockBefore=document.querySelector('#bridge_clock').textContent;
+      for(let i=0;i<6;i++){
+        S.bridge.time='2026-07-29 10:0'+i+':0'+i;
+        S.bridge.wifi_rssi_dbm=-54-i;
+        paintTick();
+        await new Promise(r=>setTimeout(r,20));
+      }
+      if(document.querySelector('#bk_sec')!==box) say('the tab was rebuilt while only the clock moved');
+      if(!box.checked) say('the ticked box was reset by a repaint');
+      // ...and the data must still be live. A tab that never updates is the other failure.
+      if(document.querySelector('#bridge_clock').textContent===clockBefore){
+        say('the clock stopped updating');
+      }
+      if(!document.querySelector('#bridge_wifi').textContent.includes('-59')){
+        say('the signal strength stopped updating');
+      }
+    }
+  }catch(e){ say('the bridge assertions threw: '+e.message); }
   document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
 },25);
 })();
@@ -506,6 +672,19 @@ def main() -> int:
         page = page.replace("</body>", f"<script>{AUTOPICK_JS}</script></body>", 1)
         verdict, _ = render(chrome, page, 1000, scratch, "autopick")
         status |= report("auto-picked driver, answering", verdict)
+
+        # Data keeps moving; the page around it does not get rebuilt.
+        page = build_page(stripped, stub, "{soc:68,power:-1240}", BRIDGE_JS)
+        verdict, _ = render(chrome, page, 1000, scratch, "bridge")
+        status |= report("bridge tab keeps what you typed", verdict)
+
+        page = build_page(stripped, stub, "{soc:68,power:-1240}", HEALTH_JS)
+        verdict, _ = render(chrome, page, 1000, scratch, "health")
+        status |= report("health keeps your place in the log", verdict)
+
+        page = build_page(stripped, stub, "{soc:68,power:-1240}", INTEGRATIONS_JS)
+        verdict, _ = render(chrome, page, 1000, scratch, "int")
+        status |= report("integrations still reports what changed", verdict)
 
     return status
 

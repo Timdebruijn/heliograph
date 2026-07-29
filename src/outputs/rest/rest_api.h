@@ -59,6 +59,16 @@ struct RestContext {
     /// because only main knows the mapping from configuration slot to device, and because
     /// otherwise the only way to learn it is to count positions in the device list.
     std::function<uint8_t(const DeviceId&)> modbusUnitIdFor;
+
+    /// Which CONFIGURED row this running device came from: 0 is the primary driver, 1..N are
+    /// additional_devices[0..N-1]. -1 when the id matches no configured slot.
+    ///
+    /// Only setup() knows this. It plans the rows, starts them, and watches some of them be
+    /// refused -- a driver that cannot share a bus, or a second row resolving to an id another
+    /// row already took -- so the surviving devices are NOT the configured rows minus a suffix.
+    /// The web UI guessed the mapping twice, by counting and then by driver id, and both guesses
+    /// put a Remove button on the wrong inverter. This hands over the answer instead.
+    std::function<int(const DeviceId&)> configSlotFor;
     /// Persist the configuration. Returns false if it could not be written.
     std::function<bool(const Configuration&)> saveConfig;
     /// Force an immediate poll. Returns false if the bus is busy.
