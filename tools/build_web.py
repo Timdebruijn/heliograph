@@ -92,6 +92,12 @@ def inject_before_script(html: str, *scripts: str) -> str:
         raise SystemExit(
             "no <script> in the page; the caller's assumptions need updating"
         )
+    for s in scripts:
+        # A `</script>` anywhere in the injected source -- including inside a JS string --
+        # closes the block early, and the rest of it lands in the document as text. The page
+        # then renders, wrongly, with no error anywhere. Refusing beats emitting that.
+        if "</script>" in s:
+            raise SystemExit("injected script contains </script> and would close early")
     block = "".join(f"<script>{s}</script>\n" for s in scripts)
     return html[:at] + block + html[at:]
 
