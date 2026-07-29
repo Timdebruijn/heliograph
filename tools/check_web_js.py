@@ -268,20 +268,27 @@ def check_address_collision(script, scratch):
     serial number and declares no unit_id -- must not be dragged into a collision it cannot
     have, or the card cries wolf on a perfectly good bus.
     """
-    body = extract_function(script, "addressProblem")
-    if body is None:
-        print(
-            "FAIL: addressProblem() not found in index_html.h; this check needs updating"
-        )
-        return 1
+    # addressProblem leans on both of these now: an address is the stored option OR the driver's
+    # declared default, and resolving only the first is the blind spot this check exists to keep
+    # closed. Pulled in rather than stubbed, so the test exercises the real resolution.
+    parts = []
+    for fn in ("addressOptionOf", "addressOf", "addressProblem"):
+        piece = extract_function(script, fn)
+        if piece is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(piece)
+    body = "\n".join(parts)
     harness = (
         """
 // Only what addressProblem reads. `sunspec` and `growatt_modbus` both declare unit_id;
 // `eversolar_legacy` declares none, which is what makes it the false-positive case.
 const drivers = {drivers:[
-  {id:'growatt_modbus', options:[{key:'unit_id', display_name:'Modbus unit id'}]},
-  {id:'sunspec',        options:[{key:'unit_id', display_name:'Modbus unit id'}]},
-  {id:'eversolar_legacy', options:[]},
+  {id:'growatt_modbus', options:[{key:'unit_id', display_name:'Modbus unit id', default_value:'1'}]},
+  {id:'sunspec',        options:[{key:'unit_id', display_name:'Modbus unit id', default_value:'1'}]},
+  // Declares an address with a default of 16, exactly as the real descriptor does. An empty
+  // options list here would have made the fallback untestable.
+  {id:'eversolar_legacy', options:[{key:'address', display_name:'Assigned bus address', default_value:'16'}]},
 ]};
 const cfg = {driver:{}, additional_devices:[]};
 """
@@ -297,7 +304,19 @@ const check = (label, body, wantCollision) => {
   }
 };
 
-// THE case: two different Modbus drivers, one bus, one address.
+// THE case this was blind to: the primary stores NOTHING and answers at its declared default,
+// which is how a bridge configured through the wizard looks. Typing that number into an extra by
+// hand was accepted, and the two then collided on the bus.
+check('primary at its default + extra typed to match', {
+  driver:{id:'growatt_modbus', options:{}},
+  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'1'}}]}, true);
+
+// And across two drivers, since the bus does not care which one is polling.
+check('eversolar primary at default 16 + growatt@16', {
+  driver:{id:'eversolar_legacy', options:{}},
+  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'16'}}]}, true);
+
+// Two different Modbus drivers, one bus, one address.
 check('growatt@2 + sunspec@2', {
   driver:{id:'growatt_modbus', options:{unit_id:'2'}},
   additional_devices:[{driver_id:'sunspec', options:{unit_id:'2'}}]}, true);
@@ -317,16 +336,19 @@ check('eversolar + growatt@2', {
   driver:{id:'eversolar_legacy', options:{}},
   additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'2'}}]}, false);
 
-// Two of them: neither has an address, so there is nothing to compare.
-check('eversolar + eversolar', {
+// Two of them, neither storing an address -- so BOTH answer at the declared default of 16, and
+// that is a real collision on a real bus. This case expected "no collision" until the check
+// learned to resolve defaults, which is exactly the misconfiguration it could not see.
+check('eversolar + eversolar, both at the default', {
   driver:{id:'eversolar_legacy', options:{}},
-  additional_devices:[{driver_id:'eversolar_legacy', options:{}}]}, false);
+  additional_devices:[{driver_id:'eversolar_legacy', options:{}}]}, true);
 
-// An empty address field is unanswered, not address "". Two blanks are not a collision --
-// the firmware has not been told a number yet.
-check('two blank addresses', {
+// An empty field is not address "": the firmware falls back to the declared default, so two
+// blanks are two devices on the SAME default. Also flipped by resolving defaults, and for the
+// better -- leaving both blank is a bus where nothing answers, which is worth being told.
+check('two blank addresses fall back to the same default', {
   driver:{id:'growatt_modbus', options:{unit_id:''}},
-  additional_devices:[{driver_id:'sunspec', options:{unit_id:''}}]}, false);
+  additional_devices:[{driver_id:'sunspec', options:{unit_id:''}}]}, true);
 
 // Whitespace is not a different address.
 check('growatt@2 + sunspec@" 2 "', {

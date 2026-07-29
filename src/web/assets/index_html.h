@@ -1463,11 +1463,18 @@ function addressProblem(body){
     // keying on driver+address let the likeliest real collision through unreported -- in the
     // card built to report exactly that (review, 2026-07-28).
     //
+    // Resolved through addressOf(), which falls back to the DECLARED DEFAULT the way
+    // DriverDescriptor::optionOr does. Reading stored options only was the blind spot that let
+    // addExtra hand a second inverter the address the first was already answering at; this
+    // function had the same hole and kept it a day longer, so the collision stayed reachable by
+    // typing the number in by hand and pressing Save.
+    //
     // No false positives from the protocols that do not address this way: an AA55 device is
-    // found by serial number and declares no unit_id, so addr is undefined and it is skipped.
-    const addr=(options||{}).unit_id??(options||{}).address;
-    if(addr===undefined||String(addr).trim()==='')return null;
-    const key=String(addr).trim();
+    // found by serial number and declares no address option at all, so addressOf() returns ''
+    // and it never enters the comparison.
+    const addr=addressOf(drvId,options);
+    if(addr==='')return null;
+    const key=addr;
     if(seen[key])return who+' has the same address as '+seen[key]+'. Each inverter on the bus needs its own.';
     seen[key]=who;
     return null;
