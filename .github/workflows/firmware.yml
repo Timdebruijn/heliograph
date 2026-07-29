@@ -61,6 +61,11 @@ jobs:
               - 'platformio.ini'
               - 'partitions_*.csv'
               - 'tools/gen_profiles.py'
+              # A pre: extra_script in every `pio run`: it strips and gzips the web page into
+              # the header the firmware compiles in. Missing from this list until 2026-07-29,
+              # which let a PR changing only this file go green without one firmware build --
+              # found when exactly such a PR skipped all four boards.
+              - 'tools/build_web.py'
               - '.github/workflows/firmware.yml'
       - id: envs
         env:

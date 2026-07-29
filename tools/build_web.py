@@ -32,6 +32,7 @@ from __future__ import annotations
 import gzip
 import pathlib
 import re
+import shutil
 import sys
 
 ROOT = pathlib.Path.cwd()
@@ -44,6 +45,28 @@ PAGES = [
 ]
 
 RAW = re.compile(r'R"HTML\((.*?)\)HTML"', re.S)
+
+
+def find_chrome() -> str | None:
+    """A Chrome or Chromium binary to render with, or None.
+
+    Lives here because this is the module every page-rendering tool already imports; it
+    existed twice, in check_dashboard_layout and make_screenshots, each with its own browser
+    list -- the drift that invites is two tools disagreeing about which browser they found.
+    Returning None rather than raising keeps the softer contract; a caller that cannot
+    continue without a browser raises at its own call site, with its own message.
+    """
+    for name in (
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+    ):
+        found = shutil.which(name)
+        if found:
+            return found
+    mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    return mac if pathlib.Path(mac).exists() else None
 
 
 def set_root(root: pathlib.Path) -> None:
