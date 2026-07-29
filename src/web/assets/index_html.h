@@ -975,11 +975,14 @@ const DIAGGROUPS=[
 function paintHealth(){
   const d=diag||{};
   const busErrors=(d.checksum_error_total||0)+(d.rs485_timeout_total||0)+(d.invalid_frame_total||0);
+  // The four counters move on every poll. They are written by liveFields() into their own
+  // nodes, so the tab around them -- the log and its scroll position, the level dropdown, the
+  // pause box -- is never rebuilt to move a number.
   let h=`<div class="tiles">
-    <div class="card"><div class="k">Polls succeeded</div><div class="v">${esc(d.poll_success_total??'—')}<span class="u"> · ${esc(d.poll_failure_total??0)} failed</span></div></div>
-    <div class="card"><div class="k">Bus errors</div><div class="v">${esc(busErrors)}<span class="u"> since boot</span></div></div>
-    <div class="card"><div class="k">Memory free</div><div class="v">${esc(kb(d.free_heap_bytes))}<span class="u"> · low ${esc(kb(d.minimum_free_heap_bytes))}</span></div></div>
-    <div class="card"><div class="k">Last restart</div><div class="v">${esc(d.uptime_seconds!=null?up(d.uptime_seconds):'—')}<span class="u"> · ${esc(d.reset_reason||'')}</span></div></div>
+    <div class="card"><div class="k">Polls succeeded</div><div class="v" id="h_polls"></div></div>
+    <div class="card"><div class="k">Bus errors</div><div class="v" id="h_bus"></div></div>
+    <div class="card"><div class="k">Memory free</div><div class="v" id="h_mem"></div></div>
+    <div class="card"><div class="k">Last restart</div><div class="v" id="h_up"></div></div>
   </div>`;
   if(d.coredump_present){
     h+=`<div class="card bad" style="margin-top:12px"><b>A crash dump is stored</b>
@@ -1109,9 +1112,9 @@ function paintBridge(){
     <div class="between"><b>Network</b>
       <button class="alt sm" onclick="togglePanel('net')">${panel==='net'?'Close':'Change'}</button></div>
     <div class="cols" style="margin-top:12px">
-      <div class="fact"><div class="k">WiFi</div><div>${esc(c.wifi.ssid||'—')}${b.wifi_rssi_dbm!=null?' · '+esc(b.wifi_rssi_dbm)+' dBm':''}</div></div>
+      <div class="fact"><div class="k">WiFi</div><div>${esc(c.wifi.ssid||'—')}<span id="bridge_wifi"></span></div></div>
       <div class="fact"><div class="k">Address</div><div>${c.wifi.ip?esc(c.wifi.ip)+' (static)':'automatic (DHCP)'}</div></div>
-      <div class="fact"><div class="k">Clock</div><div>${b.time_synced?esc(b.time||'—'):'not synced'}</div></div>
+      <div class="fact"><div class="k">Clock</div><div id="bridge_clock"></div></div>
     </div>
     ${panel==='net'?netForm(c):''}
   </div>
@@ -1173,6 +1176,7 @@ function paintBridge(){
     <div class="acts"><button class="danger sm" onclick="factoryReset()">Erase and restart</button></div>
   </div></div>`;
   $('#bridge').innerHTML=h;
+  liveFields();  // the card was just rebuilt; put the moving readouts back straight away
   if(panel==='net')wireNetForm();
   updRender();
 }
@@ -2119,16 +2123,75 @@ function readerIsBusy(){
   // treating that as "busy" would have stopped the Live tab updating the moment you opened it.
   return !['checkbox','radio','button','submit','reset'].includes((el.type||'').toLowerCase());
 }
+/// Last signature drawn per tab, so a tab whose content has not moved is left alone.
+let drawn={};
+/// Redraws only when something the tab SHOWS has changed.
+///
+/// Rebuilding identical markup is not free. innerHTML replaces the elements underneath it, and
+/// everything the reader put there that is not in the configuration goes with them: a ticked
+/// box, a chosen file, an open dropdown, the scroll position. On the Bridge tab that meant
+/// "include passwords" unticking itself and a selected backup file disappearing, every few
+/// seconds, because the tab was being rebuilt for no reason at all (reported 2026-07-29).
+///
+/// The signature must contain what the tab RENDERS and nothing that merely ticks beside it. The
+/// first version of this took everything the tab reads, which included the clock -- so the
+/// signature changed every second and the whole exercise bought nothing. Fields that move on
+/// their own are updated in place instead; see liveFields().
+function drawIfChanged(key,signature,draw){
+  const sig=JSON.stringify(signature);
+  if(drawn[key]===sig)return;
+  drawn[key]=sig;
+  draw();
+}
+/// The handful of readouts that move without anything being configured. Written straight into
+/// their own nodes, so the card around them is never rebuilt to keep a clock ticking.
+function liveFields(){
+  const b=(S&&S.bridge)||{};
+  const wifi=$('#bridge_wifi'), clock=$('#bridge_clock');
+  if(wifi)wifi.textContent=b.wifi_rssi_dbm!=null?' · '+b.wifi_rssi_dbm+' dBm':'';
+  if(clock)clock.textContent=b.time_synced?(b.time||'—'):'not synced';
+  const d=diag||{};
+  const set=(id,html)=>{const e=$(id);if(e)e.innerHTML=html};
+  set('#h_polls',`${esc(d.poll_success_total??'—')}<span class="u"> · ${esc(d.poll_failure_total??0)} failed</span>`);
+  set('#h_bus',`${esc((d.checksum_error_total||0)+(d.rs485_timeout_total||0)+(d.invalid_frame_total||0))}<span class="u"> since boot</span>`);
+  set('#h_mem',`${esc(kb(d.free_heap_bytes))}<span class="u"> · low ${esc(kb(d.minimum_free_heap_bytes))}</span>`);
+  set('#h_up',`${esc(d.uptime_seconds!=null?up(d.uptime_seconds):'—')}<span class="u"> · ${esc(d.reset_reason||'')}</span>`);
+}
 function paint(){
   paintChrome();
+  liveFields();
   // The chrome above is a handful of text nodes and always safe to redraw. The tab below is
   // not, so a reader mid-interaction keeps what is on screen until they are done with it.
   if(readerIsBusy())return;
+  // An OPEN PANEL is work in progress, and the timer has no business rebuilding underneath it.
+  // Focus alone was not enough: a firmware upload showing progress, a raw-bus recording running
+  // its thirty seconds, a discovery sweep -- none of those hold focus, and all of them had the
+  // page rebuilt out from under them every few seconds while they ran (reported 2026-07-29).
+  //
+  // liveFields() above has already run, so the numbers beside the panel stay current. What is
+  // frozen is the markup, and only for as long as something is deliberately open.
+  if(panel)return;
+  const b=(S&&S.bridge)||{};
   if(tab==='live')paintLive();
   else if(tab==='inv')paintInverters();
-  else if(tab==='int')paintInt();
-  else if(tab==='health')paintHealth();
-  else if(tab==='bridge')paintBridge();
+  else if(tab==='int')drawIfChanged('int',[cfg,panel,pending.length],paintInt);
+  // Structure only: which filter, whether the log is paused, the level in the dropdown, and
+  // whether a crash dump is on board. Not one counter -- those tick every poll, and including
+  // them would rebuild the log and throw the reader back to the top of it every few seconds.
+  else if(tab==='health')drawIfChanged('health',
+    [logFilter,logPaused,cfg&&cfg.logging&&cfg.logging.level,!!diag,
+     (diag||{}).coredump_present,(diag||{}).coredump_task,(diag||{}).coredump_pc,
+     // Signed in or not: the log block offers a sign-in link instead of the log itself, so it
+     // is structure. Read from sessionStorage rather than a helper -- there is no authed(),
+     // which I found by calling one (review, 2026-07-29).
+     (diag||{}).coredump_cause_name,!!sessionStorage.getItem('hg_auth')],
+    paintHealth);
+  // Configuration, the restart queue, which panel is open, and the two identity fields that
+  // only change across an update. NOT the clock and NOT the signal strength -- liveFields()
+  // above keeps those current without touching anything around them.
+  else if(tab==='bridge')drawIfChanged('bridge',
+    [cfg,panel,pending,b.firmware_version,b.hostname,b.board_id,b.time_synced,updLatest],
+    paintBridge);
 }
 async function refresh(){
   try{
