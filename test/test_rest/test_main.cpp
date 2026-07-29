@@ -1817,6 +1817,60 @@ static void test_drivers_payload_drives_the_wizard() {
     TEST_ASSERT_TRUE(foundEversolar);
 }
 
+/// The EWMA/min/max math behind poll_duration_*. Directly on Diagnostics: the numbers exist
+/// to detect contention (audit F1/F7, 2026-07-29), so the math being wrong quietly would
+/// defeat the only reason the metric exists.
+static void test_poll_duration_math() {
+    Diagnostics d;
+
+    // Before any sample: count 0, and the payload must omit the fields entirely (below).
+    TEST_ASSERT_EQUAL_UINT32(0, d.snapshot().pollDurationCount);
+
+    // First sample seeds everything, including the EWMA -- no drift up from a zero seed.
+    d.recordPollDuration(400);
+    auto s = d.snapshot();
+    TEST_ASSERT_EQUAL_UINT32(1, s.pollDurationCount);
+    TEST_ASSERT_EQUAL_UINT32(400, s.pollDurationLastMs);
+    TEST_ASSERT_EQUAL_UINT32(400, s.pollDurationMinMs);
+    TEST_ASSERT_EQUAL_UINT32(400, s.pollDurationMaxMs);
+    TEST_ASSERT_EQUAL_UINT32(400, s.pollDurationEwmaMs);
+
+    // A slower poll: max moves, min stays, ewma steps 1/8 of the gap: 400 + (720-400)/8 = 440.
+    d.recordPollDuration(720);
+    s = d.snapshot();
+    TEST_ASSERT_EQUAL_UINT32(400, s.pollDurationMinMs);
+    TEST_ASSERT_EQUAL_UINT32(720, s.pollDurationMaxMs);
+    TEST_ASSERT_EQUAL_UINT32(440, s.pollDurationEwmaMs);
+
+    // A faster poll must pull the EWMA DOWN -- the signed-intermediate case. A mock-speed
+    // 0 ms sample is also a legal value, not a sentinel: 440 + (0-440)/8 = 385.
+    d.recordPollDuration(0);
+    s = d.snapshot();
+    TEST_ASSERT_EQUAL_UINT32(0, s.pollDurationMinMs);
+    TEST_ASSERT_EQUAL_UINT32(0, s.pollDurationLastMs);
+    TEST_ASSERT_EQUAL_UINT32(385, s.pollDurationEwmaMs);
+    TEST_ASSERT_EQUAL_UINT32(3, s.pollDurationCount);
+}
+
+/// Absent-not-zero on the wire: no fields before the first sample, all five after -- and a
+/// 0 ms mock poll must still count as present.
+static void test_poll_duration_payload_absent_until_sampled() {
+    Diagnostics d;
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), makeBridge(), json));
+    auto doc = parse(json);
+    TEST_ASSERT_FALSE(doc["poll_duration_count"].is<uint32_t>());
+    TEST_ASSERT_FALSE(doc["poll_duration_ewma_ms"].is<uint32_t>());
+
+    d.recordPollDuration(0);
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), makeBridge(), json));
+    doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT32(1, doc["poll_duration_count"].as<uint32_t>());
+    TEST_ASSERT_TRUE(doc["poll_duration_last_ms"].is<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["poll_duration_max_ms"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["poll_duration_ewma_ms"].as<uint32_t>());
+}
+
 static void test_diagnostics_payload_has_no_secrets() {
     Rig r;
     r.poll();
@@ -2652,6 +2706,8 @@ int main(int, char**) {
     RUN_TEST(test_devices_payload);
     RUN_TEST(test_measurements_payload_omits_unsupported);
     RUN_TEST(test_drivers_payload_drives_the_wizard);
+    RUN_TEST(test_poll_duration_math);
+    RUN_TEST(test_poll_duration_payload_absent_until_sampled);
     RUN_TEST(test_diagnostics_payload_has_no_secrets);
     RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);
     RUN_TEST(test_psram_is_reported_when_the_board_has_it);
