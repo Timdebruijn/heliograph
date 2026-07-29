@@ -399,19 +399,15 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
             // Cold start: first boot ever, or power was lost. No previous life to report --
             // null, not 0, because "it had been up 0 ms" is a different (false) statement.
             doc["previous_uptime_ms"] = nullptr;
-            doc["reset_history"]      = nullptr;
+            doc["previous_firmware"]  = nullptr;
         } else {
+            // How the previous life ENDED is this boot's reset_reason, already in this
+            // payload -- these two fields say how long it ran and what it was running.
             doc["previous_uptime_ms"] = bridge.previousUptimeMs;
-            JsonArray hist            = doc["reset_history"].to<JsonArray>();
-            for (const auto& e : bridge.resetHistory) {
-                JsonObject h       = hist.add<JsonObject>();
-                h["reason"]        = e.resetReason;
-                h["uptime_ms"]     = e.uptimeMs;
-                char v[16];
-                snprintf(v, sizeof v, "%u.%u.%u", (e.firmware >> 16) & 0xFF,
-                         (e.firmware >> 8) & 0xFF, e.firmware & 0xFF);
-                h["firmware"] = v;
-            }
+            char v[16];
+            snprintf(v, sizeof v, "%u.%u.%u", (bridge.previousFirmware >> 16) & 0xFF,
+                     (bridge.previousFirmware >> 8) & 0xFF, bridge.previousFirmware & 0xFF);
+            doc["previous_firmware"] = v;
         }
     }
     if (bridge.coredumpPresent && !bridge.coredumpBacktrace.empty()) {

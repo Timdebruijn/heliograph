@@ -465,15 +465,11 @@ void applySerialOverride() {
     }
 }
 
-// RTC-domain SRAM for the reset breadcrumbs. HARDWARE PERSISTENCE IS CURRENTLY BROKEN and
-// the PR carrying this is blocked on it: measured on the Relay-6CH (2026-07-29 evening, both
-// the slow bank 0x50000200 and .rtc.force_fast), something in the prebuilt-core runtime
-// rewrites this region during normal operation -- with the heartbeat disabled, even the CRC
-// begin() writes at boot never survives to the next boot, so every boot reads cold. The
-// suspected mechanism is a linker/lib mismatch around the core's own RTC-slow users (system
-// time keeping survives resets through this bank); root-causing needs a serial session or a
-// minimal repro sketch, not more OTA loops. The logic is host-tested and correct; only the
-// storage's survival is unproven. See docs/audit-2026-07-29.md F4.
+// RTC-domain SRAM for the reset breadcrumbs. Sixteen bytes on purpose: the serial session
+// of 2026-07-29 (PR #147) measured that the full firmware's restart transition zeroes
+// bytes [16,116) of a larger struct here while the first sixteen survive -- cause still
+// unknown, bare sketches immune. This struct fits entirely inside the measured-surviving
+// window, CRC included; if the window ever shrinks, the CRC reads it as a cold start.
 RTC_NOINIT_ATTR breadcrumbs::Storage g_breadcrumbStore;
 static breadcrumbs::BootRecord       g_bootRecord;
 
@@ -481,10 +477,8 @@ BridgeInfo bridgeInfo() {
     BridgeInfo info;
     info.bootCount        = g_bootRecord.bootCount;
     info.breadcrumbsCold  = g_bootRecord.coldStart;
-    if (!g_bootRecord.coldStart && !g_bootRecord.history.empty()) {
-        info.previousUptimeMs = g_bootRecord.history.back().uptimeMs;
-        info.resetHistory     = g_bootRecord.history;
-    }
+    info.previousUptimeMs = g_bootRecord.previousUptimeMs;
+    info.previousFirmware = g_bootRecord.previousFirmware;
     info.boardName        = board::kName;
     info.boardId          = board::kId;
     info.bridgeId         = g_wifi.bridgeId();
@@ -1264,9 +1258,8 @@ void setup() {
     // First thing, before anything that could crash: a boot that dies during setup still
     // leaves its predecessor's death recorded, and its own becomes the next entry.
     g_bootRecord = breadcrumbs::begin(
-        g_breadcrumbStore, static_cast<uint8_t>(esp_reset_reason()),
-        (static_cast<uint32_t>(kFirmwareMajor) << 16) |
-            (static_cast<uint32_t>(kFirmwareMinor) << 8) | kFirmwarePatch);
+        g_breadcrumbStore, (static_cast<uint32_t>(kFirmwareMajor) << 16) |
+                               (static_cast<uint32_t>(kFirmwareMinor) << 8) | kFirmwarePatch);
 
     Serial.begin(115200);
     const uint32_t serialDeadline = millis() + 2000;
