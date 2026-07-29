@@ -60,6 +60,11 @@ def main() -> int:
                 status |= check_auth_fetch_race(script, scratch)
                 status |= check_fleet_mode(script, scratch)
                 status |= check_address_collision(script, scratch)
+    # A final verdict, because the per-check lines are not the last thing printed: a failing
+    # check dumps node's stderr after its own FAIL line, and any tail of this output then shows
+    # a later check's OK. That is not hypothetical -- a real failure was read as green that way
+    # (2026-07-29). check_layering.sh has always ended with a verdict; this now does too.
+    print(f"RESULT: {'PASS' if status == 0 else 'FAIL'}")
     return status
 
 
@@ -272,7 +277,7 @@ def check_address_collision(script, scratch):
     # declared default, and resolving only the first is the blind spot this check exists to keep
     # closed. Pulled in rather than stubbed, so the test exercises the real resolution.
     parts = []
-    for fn in ("addressOptionOf", "addressOf", "addressProblem"):
+    for fn in ("addressOptionOf", "addressOf", "canShare", "addressProblem"):
         piece = extract_function(script, fn)
         if piece is None:
             print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
@@ -289,6 +294,10 @@ const drivers = {drivers:[
   // Declares an address with a default of 16, exactly as the real descriptor does. An empty
   // options list here would have made the fallback untestable.
   {id:'eversolar_legacy', options:[{key:'address', display_name:'Assigned bus address', default_value:'16'}]},
+  // The one that answers NO. addressProblem() refuses a SECOND row of it whatever the addresses
+  // say, because planDevices() skips that row at boot whatever the addresses say.
+  {id:'solax_x1', supports_multiple_devices:false,
+   options:[{key:'address', display_name:'Assigned bus address', default_value:'10'}]},
 ]};
 const cfg = {driver:{}, additional_devices:[]};
 """
@@ -354,6 +363,33 @@ check('two blank addresses fall back to the same default', {
 check('growatt@2 + sunspec@" 2 "', {
   driver:{id:'growatt_modbus', options:{unit_id:'2'}},
   additional_devices:[{driver_id:'sunspec', options:{unit_id:' 2 '}}]}, true);
+
+// A driver that polls one device per bridge. Distinct addresses do not save it: planDevices()
+// refuses the second row at boot regardless, so saying "no problem" here would be the page
+// blessing a row that cannot start.
+const excl = (label, body, want) => {
+  const got = addressProblem(body);
+  const said = !!got && got.includes('one device per bridge');
+  if (said !== want) {
+    console.error(`${label}: got ${JSON.stringify(got)}, wanted ${want ? 'a refusal' : 'none'}`);
+    bad++;
+  }
+};
+excl('two solax rows on different addresses', {
+  driver:{id:'solax_x1', options:{address:'10'}},
+  additional_devices:[{driver_id:'solax_x1', options:{address:'11'}}]}, true);
+// One of it is the ordinary case and must stay allowed, or the driver is unusable.
+excl('one solax row', {
+  driver:{id:'solax_x1', options:{address:'10'}}, additional_devices:[]}, false);
+// And it must not spill onto drivers that can share.
+excl('two growatt rows', {
+  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'3'}}]}, false);
+// A driver that omits the field -- an older bridge, or any driver added before it existed.
+// The benefit of the doubt is the documented default.
+excl('a driver that says nothing either way', {
+  driver:{id:'eversolar_legacy', options:{address:'16'}},
+  additional_devices:[{driver_id:'eversolar_legacy', options:{address:'17'}}]}, false);
 
 process.exit(bad === 0 ? 0 : 1);
 """
