@@ -154,16 +154,13 @@ def find_chrome() -> str | None:
 def build_page(stripped: str, stub: str, battery: str, extra_js: str) -> str:
     """The served page with the stub attached, and the assertions after it.
 
-    The stub goes in BEFORE the page's own <script>: it replaces window.fetch, and a page that
-    has already fired its first request would answer from the network instead.
+    The battery override goes in ahead of the stub so the stub reads it; both go ahead of the
+    page's own script, for the reason build_web.inject_before_script explains. The assertions
+    go LAST, after the page has defined everything they inspect.
     """
-    prelude = (
-        f"<script>window.__demoBattery={battery};</script>\n<script>{stub}</script>\n"
+    page = build_web.inject_before_script(
+        stripped, f"window.__demoBattery={battery};", stub
     )
-    at = stripped.find("<script>")
-    if at < 0:
-        raise SystemExit("no <script> in the page; this check needs updating")
-    page = stripped[:at] + prelude + stripped[at:]
     return page.replace("</body>", f"<script>{extra_js}</script></body>", 1)
 
 
@@ -205,9 +202,7 @@ def report(label: str, verdict: str) -> int:
 
 
 def main() -> int:
-    stripped = build_web.strip_comments(
-        build_web.extract(build_web.assets() / "index_html.h")
-    )
+    stripped = build_web.served_page()
     stub = (ROOT / "tools" / "demo_fleet.js").read_text(encoding="utf-8")
 
     chrome = find_chrome()

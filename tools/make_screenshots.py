@@ -161,7 +161,7 @@ def extract_page() -> str:
     screenshot of the authored source would be a picture of something no browser ever receives,
     and the one transformation between the two deletes lines for a living.
     """
-    return build_web.strip_comments(build_web.extract(ASSET))
+    return build_web.served_page()
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):

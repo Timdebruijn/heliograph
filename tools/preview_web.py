@@ -28,19 +28,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def page() -> bytes:
-    """The served page with the stub spliced in ahead of its own script.
-
-    Ahead of it, not after: the stub replaces window.fetch, and a page that has already fired
-    its first request would go looking for a bridge that is not there.
-    """
-    html = build_web.strip_comments(
-        build_web.extract(build_web.assets() / "index_html.h")
-    )
+    """The served page with the demo fleet spliced in ahead of its own script."""
     stub = (ROOT / "tools" / "demo_fleet.js").read_text(encoding="utf-8")
-    at = html.find("<script>")
-    if at < 0:
-        raise SystemExit("no <script> in the page; this script needs updating")
-    return (html[:at] + f"<script>{stub}</script>\n" + html[at:]).encode("utf-8")
+    return build_web.inject_before_script(build_web.served_page(), stub).encode("utf-8")
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
