@@ -10,24 +10,36 @@
 // boots at epoch 0 as on one with an RTC. The reason the previous life ended is not stored
 // at all: the boot that reads this record learns it first-hand from esp_reset_reason().
 //
-// WHY SIXTEEN BYTES, AND NOT THE RING THIS STARTED AS. The first version kept an
-// eight-entry history ring in a 120-byte struct. On real hardware (Relay-6CH, 2026-07-29,
-// serial session -- see PR #147) the full firmware's restart transition zeroes bytes
-// [16,116) of that struct on every single reset, while bytes [0,16) survive; a bare sketch
-// on the same board, same flavor, same bank, survives entirely. What performs that zeroing
-// is still unknown -- bootloader BSS, absolute-address writers, OTA-slot ping-pong and
-// mid-life corruption were all ruled out with direct evidence -- so this design trusts ONLY
-// the sixteen bytes that were measured to survive, with the CRC inside them. If even that
-// window ever stops surviving, the CRC turns it into a clean cold start: wrong data is
-// worse than no data, and a cold start is not wrong. The ring returns if the
-// grow-the-repro investigation ever names the culprit; git history has it.
+// EVERY MEMBER HERE IS A PLAIN INTEGER WITH NO INITIALISER, AND THAT IS LOAD-BEARING.
+// A default member initialiser -- `uint32_t bootCount = 0;` -- makes the type
+// non-trivially-default-constructible, and the compiler then emits a static initialiser
+// that runs from .init_array on EVERY boot and zeroes the object. `RTC_NOINIT_ATTR` places
+// the storage where a reset cannot clear it; it does not stop our own startup code from
+// clearing it. The section attribute and the type's triviality have to agree, and only the
+// type is checked by the compiler.
+//
+// This is not theoretical. The first version of this file kept an eight-entry history ring
+// whose Entry struct had `= 0` on its three members. On hardware the ring came back zeroed
+// after every reset while the surrounding integers survived, which looked exactly like a
+// platform fault and was chased as one for an evening (PR #147). It was this rule. Proven
+// by A/B on a Relay-6CH, 2026-07-30: the identical struct without the initialisers survives
+// six consecutive reboots with its ring intact; add the three `= 0` back and the corruption
+// returns on the very next boot, deterministically.
+//
+// The sixteen-byte shape is therefore a choice, not a limit -- the ring could come back. It
+// stays small because a boot counter, the previous life's uptime and its firmware answer
+// the question this exists for, and a smaller trusted surface is a smaller thing to get
+// wrong. If the ring ever returns, the rule above is what makes it work.
 //
 // Host-testable end to end: the logic operates on a caller-owned Storage struct, and only
-// main.cpp places that struct in RTC_NOINIT_ATTR memory.
+// main.cpp places that struct in RTC_NOINIT_ATTR memory. Note that the host tests cannot
+// catch a violation of the rule above -- there is no .init_array/RTC split on the host, so
+// a reintroduced initialiser passes every test and fails only on the device.
 
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
 
 namespace heliograph::breadcrumbs {
 
@@ -45,6 +57,20 @@ struct Storage {
     /// whose CRC lived at offset 116 and only survived by accident of layout.
     uint32_t crc;
 };
+
+// The guard for the rule at the top of this file, and the only one that can exist: the host
+// tests cannot catch this, because the failure needs .init_array and RTC memory to be
+// different things. Adding an initialiser to any member of Storage -- or nesting a type that
+// has one -- breaks this build instead of silently zeroing the record on every boot of every
+// device. Both traits are needed: `trivially_default_constructible` is what stops the
+// compiler emitting a startup initialiser, and `trivially_copyable` keeps memcpy/CRC over the
+// raw bytes well-defined.
+static_assert(std::is_trivially_default_constructible_v<Storage>,
+              "Storage must have no default member initialisers: a non-trivial default "
+              "constructor emits a static initialiser that zeroes RTC_NOINIT memory on every "
+              "boot. See the note at the top of this file.");
+static_assert(std::is_trivially_copyable_v<Storage>,
+              "Storage is CRC'd and memcpy'd as raw bytes.");
 
 /// What begin() learned about the past, for the diagnostics payload.
 struct BootRecord {
