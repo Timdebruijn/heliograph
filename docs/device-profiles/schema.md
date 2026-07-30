@@ -145,12 +145,12 @@ be dispatched.
 | `space` | string | yes | Must be `"holding"` — Modbus writes target holding registers; input registers are read-only by definition. |
 | `address` | int | yes | First register. Does *not* need to be inside a read `[[block]]` (write-only registers exist). |
 | `type` | string | yes | `u16`, `s16`, `u32`, `s32`. Raw value = `value / scale`. |
-| `function` | string | no (derived) | `"write_single"` (FC 06) or `"write_multiple"` (FC 16). Defaults to FC 06 for one word, FC 16 for two; set explicitly when a firmware demands FC 16 for single registers. |
+| `function` | string | no (derived) | `"write_single"` (FC 06) or `"write_multiple"` (FC 16). Defaults to FC 06 for one word, FC 16 for two. **The driver serves FC 06 only**: a row set to `"write_multiple"` validates and is then refused at dispatch, so setting it is a way to *record* that a firmware demands FC 16 — deliberately dormant, not a way to enable it. See [write-path.md](write-path.md). |
 | `scale` | number | no (1.0) | Same semantics as read registers. |
-| `unit` | string | yes | Same set as read registers. |
+| `unit` | string | yes (numeric rows) | Same set as read registers. Refused on a mode row — a selection has no unit. |
 | `minimum` / `maximum` | number | **yes** (numeric rows) | Bounds in canonical units. Mandatory — the dispatcher refuses unbounded writes, so the schema refuses unbounded rows. Refused on a mode row. |
 | `options` | array | **yes** (mode rows) | The selectable modes: `[{ value = 0, label = "Self-consumption" }, …]`, with the vendor's own numbering. Only for `set_battery_operating_mode`; refused on a numeric row, and required on a mode one. At most 16. |
-| `step` | number | no (1) | Setpoint granularity. |
+| `step` | number | no (1) | Setpoint granularity. Refused on a mode row, like `minimum`/`maximum`/`unit`: all four describe a range, and a mode row is a list. |
 | `verified` | bool | no (**false**) | `true` only after the row is confirmed on real hardware. An unverified row is documentation, never a capability. |
 
 Value-less commands (`start`, `stop`, `synchronize_time`) cannot be expressed as a write row —

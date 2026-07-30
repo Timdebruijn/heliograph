@@ -207,12 +207,14 @@ def parse_profile(
     display = _require(meta, "display_name", str, f"{where} [profile]")
     if not display:
         raise ProfileError(f"{where}: display_name must not be empty")
+    check_text(display, f"{where} [profile]", "display_name")
     # Required, not optional-with-a-default. One driver now serves several vendors, so the
     # profile is the only thing that knows the brand -- and an empty manufacturer would show up
     # in Home Assistant as a device with no maker, which reads as a bug in the bridge.
     manufacturer = _require(meta, "manufacturer", str, f"{where} [profile]")
     if not manufacturer:
         raise ProfileError(f"{where}: manufacturer must not be empty")
+    check_text(manufacturer, f"{where} [profile]", "manufacturer")
     phases = _require(meta, "phases", int, f"{where} [profile]")
     if not 1 <= phases <= 3:
         raise ProfileError(f"{where}: phases must be 1-3, got {phases}")
@@ -321,6 +323,7 @@ def parse_profile(
         name = _require(r, "display_name", str, rw)
         if not name:
             raise ProfileError(f"{rw}: display_name must not be empty")
+        check_text(name, rw, "display_name")
         space = _require(r, "space", str, rw)
         if space not in SPACES:
             raise ProfileError(f"{rw}: space must be one of {sorted(SPACES)}")
@@ -349,6 +352,7 @@ def parse_profile(
             raise ProfileError(f"{rw}: scale must be a number")
         if scale == 0:
             raise ProfileError(f"{rw}: scale must not be 0 (every reading would be 0)")
+        check_finite(float(scale), rw, "scale")
         unit = _require(r, "unit", str, rw)
         if unit not in UNITS:
             raise ProfileError(f"{rw}: unknown unit '{unit}'; known: {sorted(UNITS)}")
@@ -357,6 +361,7 @@ def parse_profile(
         offset = r.get("offset", 0.0)
         if isinstance(offset, bool) or not isinstance(offset, (int, float)):
             raise ProfileError(f"{rw}: offset must be a number")
+        check_finite(float(offset), rw, "offset")
         parsed_regs.append(
             {
                 "measurement": mid,
@@ -389,6 +394,7 @@ def parse_profile(
         name = _require(wr, "display_name", str, ww)
         if not name:
             raise ProfileError(f"{ww}: display_name must not be empty")
+        check_text(name, ww, "display_name")
         space = _require(wr, "space", str, ww)
         if space != "holding":
             raise ProfileError(
@@ -415,6 +421,7 @@ def parse_profile(
         scale = wr.get("scale", 1.0)
         if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale == 0:
             raise ProfileError(f"{ww}: scale must be a non-zero number")
+        check_finite(float(scale), ww, "scale")
         # Read rows may carry a negative scale -- that is how a device reporting the opposite sign
         # convention to ours gets corrected. A WRITE row may not: execute() computes
         # raw = value / scale and refuses anything below zero as out of range, so a negative scale
@@ -500,6 +507,7 @@ def parse_profile(
                 label = _require(opt, "label", str, ow)
                 if not label:
                     raise ProfileError(f"{ow}: label must not be empty")
+                check_text(label, ow, "label")
                 # Home Assistant identifies a select option BY its label, so two options sharing
                 # one would give the user a dropdown where one entry silently shadows the other.
                 if label in seen_labels:
@@ -534,11 +542,13 @@ def parse_profile(
                     )
                 if isinstance(val, bool) or not isinstance(val, (int, float)):
                     raise ProfileError(f"{ww}: '{key}' must be a number")
+                check_finite(float(val), ww, key)
             if not minimum < maximum:
                 raise ProfileError(f"{ww}: minimum must be < maximum")
             step = wr.get("step", 1.0)
             if isinstance(step, bool) or not isinstance(step, (int, float)) or step <= 0:
                 raise ProfileError(f"{ww}: step must be a positive number")
+            check_finite(float(step), ww, "step")
             row.update(
                 {
                     "unit": unit,
@@ -571,6 +581,36 @@ def parse_profile(
 
 def cpp_symbol(pid: str) -> str:
     return "".join(part.capitalize() for part in pid.split("_"))
+
+
+def check_text(value: str, where: str, key: str) -> str:
+    """Refuse text that cannot survive the trip into a C++ string literal.
+
+    TOML basic strings decode escapes, so `display_name = "Roof\\nArray"` arrives here holding a
+    real newline -- which inside a "..." literal is an unterminated string and a compiler error
+    two steps removed from the file that caused it. A NUL is worse: it compiles, and then
+    truncates the label at runtime with nothing to show for it.
+
+    Rejected rather than escaped. A control character in a human-readable name is a typo every
+    time, and the error belongs here, where the file and the key can be named.
+    """
+    for ch in value:
+        if ord(ch) < 0x20 or ord(ch) == 0x7F:
+            raise ProfileError(
+                f"{where}: '{key}' contains a control character (0x{ord(ch):02X}); "
+                f"names are single-line text"
+            )
+    return value
+
+
+def check_finite(value: float, where: str, key: str) -> float:
+    """TOML has `nan`, `inf` and `-inf` as legal float literals, and tomllib hands them straight
+    over. They pass every bound check written as a comparison -- nan compares false against
+    everything -- and then cpp_float() emits `nan.0` or a bare `inf`, neither of which is a C++
+    float literal. The build fails somewhere unrecognisable instead of here."""
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ProfileError(f"{where}: '{key}' must be a finite number")
+    return value
 
 
 def cpp_string(s: str) -> str:
@@ -756,6 +796,20 @@ def run(check_only: bool = False) -> int:
         ids = [p["id"] for p in profiles]
         for dup in {i for i in ids if ids.count(i) > 1}:
             errors.append(f"profile id '{dup}' is defined in more than one file")
+        # Two DIFFERENT ids can still collapse to one C++ identifier: cpp_symbol() splits on
+        # underscores and capitalises, so `a_b` and `a__b` both become `AB`. The check above
+        # compares the ids as written and sees no duplicate, and the collision then surfaces as a
+        # redefinition error deep in a generated file -- which is exactly the sort of failure this
+        # script exists to turn into a sentence naming the file that caused it.
+        symbols: dict[str, str] = {}
+        for p in profiles:
+            sym = cpp_symbol(p["id"])
+            if sym in symbols and symbols[sym] != p["id"]:
+                errors.append(
+                    f"profile ids '{symbols[sym]}' and '{p['id']}' both generate the C++ "
+                    f"symbol '{sym}'; give one of them a distinct id"
+                )
+            symbols[sym] = p["id"]
         defaults = [p for p in profiles if p["default"]]
         if not profiles:
             errors.append(

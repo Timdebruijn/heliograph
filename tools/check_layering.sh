@@ -18,6 +18,17 @@ echo "==> 1. Brand-specific knowledge must live only in src/drivers/"
 # and the alternative (splicing the string together to dodge this grep) would hide exactly what
 # the grep is for. Requiring the marker keeps the exemption per-line and greppable, so it cannot
 # quietly widen into "config may talk about brands".
+marked=$(grep -rn 'LEGACY-CONFIG-ID' src/ --exclude-dir=drivers 2>/dev/null | wc -l | tr -d ' ')
+if [ "$marked" -gt 1 ]; then
+    # The exemption is meant to cover exactly one dead identifier. A second marker means either a
+    # second rename (write the reason down and raise this number deliberately) or somebody
+    # reaching for the marker to silence an unrelated brand-name leak. Either way it is a
+    # decision, not something to inherit silently -- an unbounded per-line opt-out would let this
+    # rule rot into "config may talk about brands", which is what the grep exists to prevent.
+    echo "FAIL: $marked LEGACY-CONFIG-ID markers outside src/drivers/; exactly 1 is expected:"
+    grep -rn 'LEGACY-CONFIG-ID' src/ --exclude-dir=drivers
+    status=1
+fi
 if hits=$(grep -rniE 'eversolar|zeversolar|growatt|solax|deye|sunsynk|solis|goodwe' \
         src/ --exclude-dir=drivers 2>/dev/null | grep -v 'LEGACY-CONFIG-ID'); then
     echo "FAIL: manufacturer names found outside src/drivers/:"

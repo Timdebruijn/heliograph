@@ -596,22 +596,22 @@ static void test_the_profile_registry_finds_sph_and_rejects_unknown_ids() {
 // enumerates the ids so validateDriverOptions refuses a typo at configuration time, instead of
 // optionsFrom() silently falling back to SPH.
 static void test_the_profile_option_enumerates_every_compiled_profile() {
-    TEST_ASSERT_EQUAL_UINT32(2, profileCount());
+    // Deliberately no hardcoded count. This test pins that the option lists EVERY compiled
+    // profile, which is a relationship, not a number -- asserting "2" made adding a profile fail
+    // a test about the option list, which teaches the wrong lesson and invites bumping the
+    // literal without checking what it guards.
+    TEST_ASSERT_TRUE(profileCount() >= 2);
 
-    bool sawSph = false;
-    bool sawMic = false;
+    const auto& allowed = descriptor().options[1].allowedValues;
     for (size_t i = 0; i < profileCount(); ++i) {
         const std::string id = profileAt(i).id;
-        sawSph               = sawSph || id == "sph";
-        sawMic               = sawMic || id == "mic_tl_x";
+        TEST_ASSERT_TRUE_MESSAGE(std::find(allowed.begin(), allowed.end(), id) != allowed.end(),
+                                 "a compiled profile is missing from the option's allowed values");
     }
-    TEST_ASSERT_TRUE(sawSph);
-    TEST_ASSERT_TRUE(sawMic);
 
     // Out of range folds to the first entry rather than reading past the array.
     TEST_ASSERT_EQUAL_PTR(&profileAt(0), &profileAt(profileCount()));
 
-    const auto& allowed = descriptor().options[1].allowedValues;
     TEST_ASSERT_EQUAL_STRING("profile", descriptor().options[1].key.c_str());
     TEST_ASSERT_EQUAL_UINT32(profileCount() + 1, allowed.size());
     // "" must survive as an allowed value: it is the documented default meaning "use the
@@ -822,6 +822,155 @@ const WriteMapping kUnverifiedWrites[] = {
 // about the DATA. Nothing asserted the driver acts on it, so deleting the check in writeFor()
 // left every test green while unverified research became a live control surface on somebody's
 // inverter. Found by mutation-testing this change, not by reading it.
+// --- the Deye/Sunsynk single-phase hybrid profile ------------------------------------------
+
+namespace {
+/// The three holding blocks the profile declares: 96-125, 150-192, 240-247.
+void makeDeyeBlocks(BlockData blocks[3]) {
+    blocks[0] = {RegSpace::Holding, 96, 30, {}};
+    blocks[1] = {RegSpace::Holding, 150, 43, {}};
+    blocks[2] = {RegSpace::Holding, 240, 8, {}};
+}
+}  // namespace
+
+static void test_the_deye_profile_describes_a_single_phase_two_string_hybrid() {
+    const DeviceProfile* p = findProfile("deye_sun_xk_sg");
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_EQUAL_STRING("Deye", p->manufacturer);
+    TEST_ASSERT_EQUAL_UINT8(1, p->phaseCount);
+    // Two, not three: a third string exists in one source and not the other, and mppts is what
+    // the profile actually maps rather than what the family can have.
+    TEST_ASSERT_EQUAL_UINT8(2, p->mpptCount);
+    TEST_ASSERT_TRUE(p->hasBattery);
+
+    // Every block is holding. This family has no input registers at all, and reading function 04
+    // against it would answer nothing on a bus that is wired correctly.
+    TEST_ASSERT_EQUAL_UINT32(3, p->blockCount);
+    for (size_t i = 0; i < p->blockCount; ++i) {
+        TEST_ASSERT_EQUAL(RegSpace::Holding, p->blocks[i].space);
+    }
+}
+
+static void test_the_deye_profile_decodes_a_realistic_frame() {
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+
+    setReg(blocks[0], 96, 0);
+    setReg(blocks[0], 97, 41230);  // E-total     -> 4123.0 kWh
+    setReg(blocks[0], 108, 173);   // E-today     -> 17.3 kWh
+    setReg(blocks[0], 109, 3210);  // PV1 V       -> 321.0 V
+    setReg(blocks[0], 110, 42);    // PV1 I       -> 4.2 A
+    setReg(blocks[0], 111, 2980);  // PV2 V       -> 298.0 V
+    setReg(blocks[0], 112, 38);    // PV2 I       -> 3.8 A
+    setReg(blocks[1], 150, 2331);  // Grid V      -> 233.1 V
+    setReg(blocks[1], 164, 1450);  // Current     -> 14.5 A
+    setReg(blocks[1], 175, 3320);  // AC power    -> 3320 W
+    setReg(blocks[1], 182, 1284);  // Batt temp   -> 28.4 °C  (biased by 100)
+    setReg(blocks[1], 183, 5320);  // Batt V      -> 53.2 V
+    setReg(blocks[1], 184, 76);    // Batt SoC    -> 76 %
+    setReg(blocks[1], 186, 1350);  // PV1 W
+    setReg(blocks[1], 187, 1140);  // PV2 W
+
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 3, m, 1000);
+
+    TEST_ASSERT_EQUAL_DOUBLE(4123.0, m.find(measurement_id::kEnergyTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(17.3, m.find(measurement_id::kEnergyToday)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(321.0, m.find(measurement_id::kDcMppt1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(4.2, m.find(measurement_id::kDcMppt1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(1350.0, m.find(measurement_id::kDcMppt1Power)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(298.0, m.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(1140.0, m.find(measurement_id::kDcMppt2Power)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(233.1, m.find(measurement_id::kAcL1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(14.5, m.find(measurement_id::kAcL1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(3320.0, m.find(measurement_id::kAcPowerTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(53.2, m.find(measurement_id::kBatteryVoltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(76.0, m.find(measurement_id::kBatterySoc)->value);
+
+    // The biased register, which is the whole reason `offset` exists. Raw 1284 is 28.4 °C, not
+    // 128.4 -- and a profile that dropped the offset would publish a battery permanently on fire.
+    TEST_ASSERT_EQUAL_DOUBLE(28.4, m.find(measurement_id::kBatteryTemperature)->value);
+}
+
+// Below the bias is genuinely below zero: an outdoor battery on a winter morning.
+static void test_the_deye_battery_temperature_survives_a_freezing_morning() {
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+    setReg(blocks[1], 182, 964);  // -3.6 °C
+
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 3, m, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(-3.6, m.find(measurement_id::kBatteryTemperature)->value);
+}
+
+// A hybrid charging its battery from the grid pushes AC power the other way. Declared s16 in the
+// profile for exactly this: read unsigned, a 2 kW import would publish as roughly 63 megawatts.
+static void test_the_deye_ac_power_goes_negative_while_importing() {
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+    setReg(blocks[1], 175, 0xF830);  // -2000
+
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 3, m, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(-2000.0, m.find(measurement_id::kAcPowerTotal)->value);
+}
+
+// The channels held back because the sources do not agree, or do not say. Pinned as ABSENT so
+// that adding one later is a deliberate act with a bench reading behind it, rather than
+// something that drifts in unnoticed.
+static void test_the_deye_profile_publishes_nothing_it_could_not_source() {
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+    // Plausible values in every register the profile deliberately leaves alone.
+    setReg(blocks[1], 190, 1500);  // battery power  -- direction unstated by both sources
+    setReg(blocks[1], 191, 2800);  // battery current -- same
+    setReg(blocks[1], 192, 4999);  // frequency -- grid or load, sources disagree
+    setReg(blocks[1], 169, 800);   // grid flow -- signed and bidirectional, cannot split
+
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 3, m, 1000);
+
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryCurrent));
+    TEST_ASSERT_NULL(m.find(measurement_id::kAcFrequency));
+    TEST_ASSERT_NULL(m.find(measurement_id::kGridImportPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kGridExportPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kTemperature));   // 90/91: sources disagree which
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcPowerTotal));  // no whole-array register
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcMppt3Power));  // third string: one source only
+}
+
+// The mode row is declared and doubly dormant, and the SECOND reason is the one a flipped
+// `verified` flag would not fix: both sources write this family with FC16, which this firmware's
+// write path refuses. Enabling it needs FC16 support, not a flag.
+static void test_the_deye_mode_row_is_declared_and_refused_for_two_reasons() {
+    const DeviceProfile* p = findProfile("deye_sun_xk_sg");
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_EQUAL_UINT32(1, p->writeCount);
+
+    const WriteMapping& w = p->writes[0];
+    TEST_ASSERT_EQUAL(InverterCommandType::SetBatteryOperatingMode, w.command);
+    TEST_ASSERT_EQUAL_UINT16(244, w.address);
+    TEST_ASSERT_FALSE(w.verified);
+    TEST_ASSERT_TRUE(w.useWriteMultiple);
+    TEST_ASSERT_EQUAL_UINT32(3, w.optionCount);
+    TEST_ASSERT_EQUAL_STRING("Zero Export", w.options[2].label);
+    TEST_ASSERT_EQUAL_INT32(2, w.options[2].value);
+
+    // And dormant in effect: no capability, and the command refused.
+    MockTransport  transport;
+    ProfileOptions options;
+    options.profile = p;
+    ModbusProfileDriver driver(transport, options);
+    TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetBatteryOperatingMode));
+
+    InverterCommand cmd;
+    cmd.type      = InverterCommandType::SetBatteryOperatingMode;
+    cmd.enumValue = 2;
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, driver.execute(cmd));
+    TEST_ASSERT_TRUE(transport.writes.empty());
+}
+
 static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     MockTransport transport;
     echoWrites(transport);
@@ -1119,6 +1268,12 @@ int main(int, char**) {
     RUN_TEST(test_the_mic_profile_probes_3000_but_publishes_nothing_from_it);
     RUN_TEST(test_the_mic_profile_decodes_a_realistic_frame);
     RUN_TEST(test_the_mic_profile_converts_half_seconds_to_hours);
+    RUN_TEST(test_the_deye_profile_describes_a_single_phase_two_string_hybrid);
+    RUN_TEST(test_the_deye_profile_decodes_a_realistic_frame);
+    RUN_TEST(test_the_deye_battery_temperature_survives_a_freezing_morning);
+    RUN_TEST(test_the_deye_ac_power_goes_negative_while_importing);
+    RUN_TEST(test_the_deye_profile_publishes_nothing_it_could_not_source);
+    RUN_TEST(test_the_deye_mode_row_is_declared_and_refused_for_two_reasons);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);

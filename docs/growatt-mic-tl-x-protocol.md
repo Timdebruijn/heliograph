@@ -141,7 +141,7 @@ between that row and a byte on the bus:
 2. The driver has no write path at all yet; `execute()` returns `Unsupported`, and the
    descriptor declares `supportsWrite = false`.
 
-Both are asserted in `test/test_growatt_driver/test_main.cpp`, so neither can be dropped by
+Both are asserted in `test/test_modbus_profile/test_main.cpp`, so neither can be dropped by
 accident.
 
 One note for whoever does the bench session: some protocol revisions describe **255** as
@@ -209,6 +209,18 @@ address in turn and confirm exactly one answers, at the address you expect.
    > Note `driver_id` here where the `driver` section uses `id`. Sending the array replaces it,
    > so send all the extra units at once. Restart afterwards. Check `/api/v1/devices` after the
    > restart: you should see one entry per unit, named `modbus_profile-1`, `-2`, `-3`.
+   >
+   > **Upgrading from a firmware older than the `modbus_profile` rename?** Those ids used to
+   > read `growatt_modbus-1`, `-2`, `-3`. The stored configuration migrates itself, so the
+   > bridge keeps polling every unit — but a device id is what Home Assistant and Prometheus
+   > key on, and it is derived from the driver id. On the first boot after the upgrade, every
+   > device in `additional_devices` is therefore announced under a new id: Home Assistant
+   > retires the old entities and creates new ones, so their recorder history does not carry
+   > over, and Prometheus starts a fresh series. The **primary** device is unaffected — its
+   > topics are keyed on the bridge id, not the driver.
+   >
+   > If that history matters to you, export it before upgrading. There is no way to keep both
+   > the old ids and a driver name that no longer claims to be one vendor.
    >
    > **Or let the wizard find them.** Extended discovery sweeps addresses 1–8, so it reports one
    > candidate per unit with the address each answered at — which is also how you confirm that

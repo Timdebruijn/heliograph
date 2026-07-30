@@ -779,7 +779,11 @@ static void test_discovery_signature_changes_when_a_mode_is_renumbered() {
     static constexpr EnumOption kRenamed[] = {
         {0, "Self-consumption"}, {2, "Compulsory"}, {3, "External EMS"}};
 
-    const uint32_t base = discoverySignature(modeState(kTestModes, 3));
+    // uint64_t, matching what discoverySignature returns. Narrowing this to uint32_t threw away
+    // the top half of the hash and then compared it against full 64-bit values, so the
+    // assertions below were true whatever the signature did -- a test that could not fail,
+    // guarding the one invariant most worth guarding.
+    const uint64_t base = discoverySignature(modeState(kTestModes, 3));
     TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenumbered, 3)));
     TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenamed, 3)));
     // And dropping one is a change too, not merely a shorter list that hashes the same.

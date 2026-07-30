@@ -1,0 +1,325 @@
+# SPDX-License-Identifier: MIT
+#
+# Deye / Sunsynk SUN-xK-SG single-phase hybrid — Modbus RTU register profile.
+#
+# STATUS: transcribed from two INDEPENDENT hardware-exercised implementations that agree on
+# every row below. NOT confirmed against a real inverter by this project. See
+# docs/deye-sun-xk-sg-protocol.md for the reasoning, the disagreements that kept rows OUT of
+# this file, and the bring-up checklist.
+#
+# Sunsynk is the same hardware under a different badge; both projects below treat them as one
+# map, which is why `manufacturer` says Deye and the display name mentions both.
+#
+# SOURCES (read directly, not summarised):
+#   A. kellerza/sunsynk, src/sunsynk/definitions/single_phase.py
+#      Python library + Home Assistant OS add-on, large user base.
+#      NOTE its factor convention: a NEGATIVE factor means "read this register as signed", not
+#      "negate it" -- reg_to_value() does unpack_value(signed=factor < 0) and then multiplies by
+#      abs(factor). Reading -1 as a negation would invert half this map.
+#   B. kbialek/deye-inverter-mqtt, src/deye_sensors_deye_hybrid.py
+#      Independent implementation, own MQTT bridge, own Modbus codec.
+#      NOTE: StephanJoubert/home_assistant_solarman's deye_hybrid.yaml is NOT a third source --
+#      it is byte-identical to this project's generated ha_definitions/deye_hybrid_ha.yaml
+#      (verified by checksum). Counting it would have turned one source into two.
+#
+# REGISTER SPACE: holding (function 03), for everything. Both sources read holding exclusively
+# (A: read_holding_registers; B: __build_modbus_read_holding_registers_request_frame).
+#
+# ------------------------------------------------------------------------------------------
+# THE ONE THING TO KNOW BEFORE TRUSTING SOURCE A ALONE
+#
+# Source A's single_phase.py assigns FOUR registers twice. Its AUX/generator-port block claims
+# 181-186 for generator voltages and currents, while its battery and PV blocks claim:
+#
+#   182  battery temperature   (AUX block also claims: generator L2 voltage)
+#   183  battery voltage       (AUX block also claims: generator L3 voltage)
+#   184  battery SOC           (AUX block also claims: generator L1 current)
+#   186  PV1 power             (AUX block also claims: generator L3 current)
+#
+# Source B has no AUX block and assigns exactly the battery/PV meanings. So the tie is broken by
+# an independent implementation, and it breaks AGAINST the AUX interpretation -- which looks like
+# a three-phase map pasted into the single-phase file. The rows below follow battery/PV.
+#
+# If a bring-up dump shows a plausible generator voltage at 182 rather than a battery
+# temperature, this is the note to come back to.
+# ------------------------------------------------------------------------------------------
+
+[profile]
+driver = "modbus_profile"
+id = "deye_sun_xk_sg"
+display_name = "Deye/Sunsynk SUN-xK-SG hybrid (single phase)"
+manufacturer = "Deye"
+default = false        # sph.toml holds the driver default
+phases = 1
+mppts = 2
+battery = true
+transports = ["rtu"]
+
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# ------------------------------------------------------------------------------------------
+# Read blocks.
+#
+# Three, deliberately wider than the mapped rows: the driver TRACE-dumps every raw block, and a
+# wide dump is what lets the first bring-up session settle the three open questions in
+# docs/deye-sun-xk-sg-protocol.md in one pass instead of three visits.
+#
+# The second block deliberately runs to 192 so the frequency question is answerable from the
+# dump: 192 is the only frequency register both sources carry, and they disagree about whether
+# it is the GRID frequency or the inverter's output frequency. Nothing is mapped from it.
+#
+# The third block exists to show the current value of holding 244, the mode register declared at
+# the bottom of this file, before anything ever considers writing to it.
+# ------------------------------------------------------------------------------------------
+
+[[block]]
+space = "holding"
+start = 96
+count = 30      # 96-125: lifetime energy (96/97), day PV energy (108), PV1/PV2 V+I (109-112)
+
+[[block]]
+space = "holding"
+start = 150
+count = 43      # 150-192: grid V, AC current + power, battery, PV1/PV2 power, and reg 192
+
+[[block]]
+space = "holding"
+start = 240
+count = 8       # 240-247: the mode register at 244, read so its value is visible in the dump
+
+# --- DC / PV side -------------------------------------------------------------------------
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 Voltage"
+space = "holding"
+address = 109
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.mppt_1.current"
+display_name = "PV1 Current"
+space = "holding"
+address = 110
+type = "u16"
+scale = 0.1
+unit = "A"
+
+# Declared unsigned: source B says signed=False outright, source A's factor of -1 means "signed"
+# in its own convention. For PV power the two decode identically at every physically possible
+# value -- a string cannot produce 32 kW on this hardware -- so this is the safe reading of a
+# disagreement that has no consequence.
+[[register]]                    # high confidence — both sources; see the note on 186 above
+measurement = "dc.mppt_1.power"
+display_name = "PV1 Power"
+space = "holding"
+address = 186
+type = "u16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 Voltage"
+space = "holding"
+address = 111
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.mppt_2.current"
+display_name = "PV2 Current"
+space = "holding"
+address = 112
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # high confidence — both sources
+measurement = "dc.mppt_2.power"
+display_name = "PV2 Power"
+space = "holding"
+address = 187
+type = "u16"
+scale = 1.0
+unit = "W"
+
+# A THIRD string (113/114 voltage+current, 188 power) appears in source A and NOT in source B.
+# Larger models in this family genuinely have three or four trackers, so this is probably right
+# for those -- but "probably right for a model this profile may not be describing" is exactly
+# what the two-source rule exists to keep out. `mppts = 2` says what is mapped. A three-string
+# unit shows its extra string in the raw dump, and adding it then is one row per quantity.
+
+# --- AC side ------------------------------------------------------------------------------
+
+# The INVERTER's own output power, which is what both sources surface as the headline figure
+# (A: "Inverter power"; B: "Total Power"). Signed in both: a hybrid pulls power the other way
+# while charging its battery from the grid, and reading that as unsigned would publish a house
+# charging at 2 kW as a 65 MW producer.
+#
+# Not the same register as the GRID flow at 169, which is deliberately left unmapped -- see the
+# gap list in the protocol doc. On a hybrid the two genuinely differ, and mapping grid flow onto
+# this id would make the energy dashboard count house consumption as production.
+[[register]]                    # high confidence — both sources, same scale, both signed
+measurement = "ac.power.total"
+display_name = "AC Power"
+space = "holding"
+address = 175
+type = "s16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "ac.phase_l1.voltage"
+display_name = "Grid Voltage"
+space = "holding"
+address = 150
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence — both sources, both signed
+measurement = "ac.phase_l1.current"
+display_name = "Inverter Current"
+space = "holding"
+address = 164
+type = "s16"
+scale = 0.01
+unit = "A"
+
+# --- Energy -------------------------------------------------------------------------------
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "energy.today"
+display_name = "Energy Today"
+space = "holding"
+address = 108
+type = "u16"
+scale = 0.1
+unit = "kWh"
+
+[[register]]                    # high confidence — both sources (A reads (96,97) as a pair)
+measurement = "energy.total"
+display_name = "Energy Total"
+space = "holding"
+address = 96
+type = "u32"
+scale = 0.1
+unit = "kWh"
+
+# --- Battery ------------------------------------------------------------------------------
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "battery.soc"
+display_name = "Battery SoC"
+space = "holding"
+address = 184
+type = "u16"
+scale = 1.0
+unit = "%"
+
+[[register]]                    # high confidence — both sources, identical scale
+measurement = "battery.voltage"
+display_name = "Battery Voltage"
+space = "holding"
+address = 183
+type = "u16"
+scale = 0.01
+unit = "V"
+
+# The reason `offset` exists in this schema. The register is BIASED so it never goes negative on
+# the wire: it reads 1000 for 0 °C. Both sources apply exactly this correction -- source B as an
+# explicit offset = -100.0, source A through its TempSensor class, whose reg_to_value() is
+# (raw * factor) - 100. Two independent implementations, one identical arithmetic.
+[[register]]                    # high confidence — both sources agree including the bias
+measurement = "battery.temperature"
+display_name = "Battery Temperature"
+space = "holding"
+address = 182
+type = "u16"
+scale = 0.1
+offset = -100.0
+unit = "°C"
+
+# ==============================================================================================
+# DELIBERATELY NOT MAPPED — the full reasoning is in docs/deye-sun-xk-sg-protocol.md
+# ==============================================================================================
+#
+# battery.power (190) and battery.current (191). Both sources agree on the addresses, the scales
+# and that both are signed. NEITHER states which DIRECTION positive means. Our convention is
+# positive = charging, and getting it backwards produces a battery graph that is confidently
+# inverted -- worse than an absent one, because nothing about it looks wrong. One bench reading
+# during a charge settles it, and a negative `scale` then corrects it in this file if needed.
+#
+# ac.frequency. Source A maps grid frequency to 79; source B has no register 79 at all. The only
+# frequency register both carry is 192, and source A calls it the LOAD frequency while source B
+# publishes it as ac/frequency. On a hybrid that can run off-grid those are different physical
+# quantities. Block 2 reads 192 so one dump settles it.
+#
+# inverter.temperature (90 and 91). Both sources agree these are temperatures with the same
+# 0.1/-100 decoding, and they disagree about WHICH IS WHICH: source A says 90 is the DC
+# transformer and 91 the radiator; source B calls 90 "DC Temperature" (while naming its topic
+# radiator_temp) and 91 "AC Temperature". There is one canonical inverter.temperature and no
+# agreed answer about which register fills it, so it stays out.
+#
+# dc.power.total. Neither source reads a whole-array PV power register; both sum the strings.
+# A profile cannot do arithmetic, and summing is not what this schema expresses.
+#
+# grid.import_power / grid.export_power. Register 169 is a single SIGNED bidirectional value.
+# Our two channels are separate unsigned rails, and splitting one into two needs arithmetic.
+#
+# Max Sell power (245), the export limit. Source A bounds it by the inverter's RATED POWER, read
+# at runtime from registers 16/17 -- so the maximum differs per model, from 3 kW to 12 kW across
+# this family. A [[write]] row needs a STATIC maximum, and inventing one would either refuse
+# legitimate setpoints on a big unit or accept impossible ones on a small one. It needs either a
+# per-model profile or a schema that can bound a setpoint by another register; both are real work,
+# not a row.
+
+# ------------------------------------------------------------------------------------------
+# Writable setpoint — DECLARED, AND STRUCTURALLY DORMANT.
+#
+# Holding 244 selects how the inverter treats surplus: export it, serve essential loads only, or
+# hold export at zero. Source A enumerates the three values explicitly; source B does not carry
+# this register at all, so unlike every read row above this one rests on a SINGLE source. That is
+# recorded here because the [[write]] section exists for exactly that -- research, reviewed, with
+# its provenance attached -- and never acted upon while `verified = false`.
+#
+# It is dormant twice over, and the second reason is the interesting one:
+#
+#   1. verified = false, as every shipped row is until somebody confirms it on hardware.
+#   2. function = "write_multiple" (FC16), which this firmware's write path refuses outright.
+#      That is not a guess about the device: BOTH sources write Deye registers with FC16 even for
+#      a single register -- source A says so in as many words ("Sunsynk support function code
+#      0x10"), and source B's frame builder emits 01 10 unconditionally. Neither ever sends FC06.
+#      So declaring write_single here would be transcribing a function code no implementation
+#      uses, to make a row look live that would then fail on the wire.
+#
+# Enabling this therefore needs FC16 support in the Modbus client, not just a flipped flag. See
+# docs/device-profiles/write-path.md.
+# ------------------------------------------------------------------------------------------
+
+[[write]]
+command = "set_battery_operating_mode"
+display_name = "Load Handling"
+space = "holding"
+address = 244
+type = "u16"
+function = "write_multiple"
+verified = false
+options = [
+  { value = 0, label = "Allow Export" },
+  { value = 1, label = "Essentials Only" },
+  { value = 2, label = "Zero Export" },
+]
+
+# NOT declared, though source A carries them: "Priority Load" (243), "Solar Export" (247) and
+# "Use Timer" (248) are single BITS inside shared registers (bitmask 1). FC06 and FC16 both write
+# whole registers, so setting one bit needs read-modify-write, and writing the whole register
+# would clear whatever else lives in it. The generator rejects a `bitmask` key by name for this
+# reason. A masked setpoint needs read-modify-write support first.
