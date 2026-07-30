@@ -3,9 +3,9 @@
 """Generate C++ driver profile tables from TOML device profiles.
 
 Device profiles live in profiles/<family>/*.toml. Each file describes one register-map
-profile for a table-driven driver (today: growatt_modbus). This script validates them
+profile for a table-driven driver (today: modbus_profile). This script validates them
 against the canonical measurement vocabulary in src/device/measurement.h and emits
-src/drivers/growatt_modbus/profiles_generated.cpp — constexpr tables, zero runtime
+src/drivers/modbus_profile/profiles_generated.cpp — constexpr tables, zero runtime
 parsing on the ESP32.
 
 Runs in two modes:
@@ -46,7 +46,7 @@ def set_root(root: Path) -> None:
     MEASUREMENT_H = ROOT / "src" / "device" / "measurement.h"
     COMMAND_CPP = ROOT / "src" / "device" / "command.cpp"
     PROFILES_DIR = ROOT / "profiles"
-    OUTPUT = ROOT / "src" / "drivers" / "growatt_modbus" / "profiles_generated.cpp"
+    OUTPUT = ROOT / "src" / "drivers" / "modbus_profile" / "profiles_generated.cpp"
 
 
 try:
@@ -54,7 +54,7 @@ try:
 except NameError:
     set_root(Path.cwd())  # provisional; the PlatformIO branch below overrides this
 
-# Mirrors GrowattDriver::kMaxBlocks (growatt_driver.h). The driver's scratch buffer holds
+# Mirrors ModbusProfileDriver::kMaxBlocks (modbus_profile_driver.h). The driver's scratch buffer holds
 # this many blocks; a profile asking for more would silently drop reads.
 MAX_BLOCKS = 8
 # Modbus read limit: at most 125 registers per transaction.
@@ -77,8 +77,8 @@ UNITS: dict[str, tuple[str, str]] = {
     "s": ("Second", "Duration"),
 }
 
-# Register data type -> (words, signed). 32-bit values are high word first (the Modbus
-# convention Growatt uses); a device with swapped word order needs decoder support first.
+# Register data type -> (words, signed). 32-bit values are high word first (what nearly every
+# Modbus inverter does); a device with swapped word order needs decoder support first.
 TYPES: dict[str, tuple[int, bool]] = {
     "u16": (1, False),
     "s16": (1, True),
@@ -167,10 +167,10 @@ def parse_profile(
 
     meta = _require(data, "profile", dict, f"{where}")
     driver = _require(meta, "driver", str, f"{where} [profile]")
-    if driver != "growatt_modbus":
+    if driver != "modbus_profile":
         raise ProfileError(
             f"{where}: unknown driver '{driver}' "
-            f"(only 'growatt_modbus' is table-driven today)"
+            f"(only 'modbus_profile' is table-driven today)"
         )
 
     pid = _require(meta, "id", str, f"{where} [profile]")
@@ -179,6 +179,12 @@ def parse_profile(
     display = _require(meta, "display_name", str, f"{where} [profile]")
     if not display:
         raise ProfileError(f"{where}: display_name must not be empty")
+    # Required, not optional-with-a-default. One driver now serves several vendors, so the
+    # profile is the only thing that knows the brand -- and an empty manufacturer would show up
+    # in Home Assistant as a device with no maker, which reads as a bug in the bridge.
+    manufacturer = _require(meta, "manufacturer", str, f"{where} [profile]")
+    if not manufacturer:
+        raise ProfileError(f"{where}: manufacturer must not be empty")
     phases = _require(meta, "phases", int, f"{where} [profile]")
     if not 1 <= phases <= 3:
         raise ProfileError(f"{where}: phases must be 1-3, got {phases}")
@@ -331,7 +337,7 @@ def parse_profile(
         )
 
     # [[write]] rows: read-only is the default — a register is writable only when declared
-    # here, and even then it stays dormant (see WriteMapping in growatt_registers.h).
+    # here, and even then it stays dormant (see WriteMapping in profile_tables.h).
     writes = data.get("write", [])
     seen_commands: set[str] = set()
     parsed_writes = []
@@ -416,6 +422,7 @@ def parse_profile(
         "path": where,
         "id": pid,
         "display_name": display,
+        "manufacturer": manufacturer,
         "default": default,
         "phases": phases,
         "mppts": mppts,
@@ -450,15 +457,15 @@ def generate(
     w("// SPDX-License-Identifier: MIT")
     w("//")
     w("// GENERATED FILE -- DO NOT EDIT.")
-    w("// Emitted by tools/gen_profiles.py from profiles/growatt/*.toml. To change a")
+    w("// Emitted by tools/gen_profiles.py from profiles/*/*.toml. To change a")
     w("// register map, edit the TOML and rebuild; this file is regenerated pre-build")
     w("// and is not committed. See docs/adding-a-device.md.")
     w("")
     w("#include <cstring>")
     w("")
-    w('#include "drivers/growatt_modbus/growatt_registers.h"')
+    w('#include "drivers/modbus_profile/profile_tables.h"')
     w("")
-    w("namespace heliograph::growatt {")
+    w("namespace heliograph::profile {")
     w("namespace {")
     for p in profiles:
         sym = cpp_symbol(p["id"])
@@ -507,12 +514,15 @@ def generate(
                 )
             w("};")
     w("")
-    w("constexpr GrowattProfile kProfiles[] = {")
+    w("constexpr DeviceProfile kProfiles[] = {")
     for p in profiles:
         sym = cpp_symbol(p["id"])
         w(
             f"    {{{cpp_string(p['id'])}, {cpp_string(p['display_name'])}, "
-            f"{'true' if p['battery'] else 'false'}, {p['phases']}, {p['mppts']},"
+            f"{cpp_string(p['manufacturer'])},"
+        )
+        w(
+            f"     {'true' if p['battery'] else 'false'}, {p['phases']}, {p['mppts']},"
         )
         w(f"     k{sym}Blocks, sizeof(k{sym}Blocks) / sizeof(k{sym}Blocks[0]),")
         w(f"     k{sym}Mappings, sizeof(k{sym}Mappings) / sizeof(k{sym}Mappings[0]),")
@@ -539,11 +549,11 @@ def generate(
     w("")
     w("}  // namespace")
     w("")
-    w("const GrowattProfile* findProfile(const char* id) {")
+    w("const DeviceProfile* findProfile(const char* id) {")
     w("    if (id == nullptr) {")
     w("        return nullptr;")
     w("    }")
-    w("    for (const GrowattProfile& p : kProfiles) {")
+    w("    for (const DeviceProfile& p : kProfiles) {")
     w("        if (std::strcmp(p.id, id) == 0) {")
     w("            return &p;")
     w("        }")
@@ -554,16 +564,16 @@ def generate(
     default_index = next(i for i, p in enumerate(profiles) if p["default"])
     w(f"// [profile] default = true in {profiles[default_index]['path']}.")
     w(
-        f"const GrowattProfile& defaultProfile() {{ return kProfiles[{default_index}]; }}"
+        f"const DeviceProfile& defaultProfile() {{ return kProfiles[{default_index}]; }}"
     )
     w("")
     w("size_t profileCount() { return sizeof(kProfiles) / sizeof(kProfiles[0]); }")
     w("")
-    w("const GrowattProfile& profileAt(size_t index) {")
+    w("const DeviceProfile& profileAt(size_t index) {")
     w("    return kProfiles[index < profileCount() ? index : 0];")
     w("}")
     w("")
-    w("}  // namespace heliograph::growatt")
+    w("}  // namespace heliograph::profile")
     w("")
     return "\n".join(lines)
 
@@ -592,7 +602,7 @@ def run(check_only: bool = False) -> int:
         if not profiles:
             errors.append(
                 f"no profiles found under {PROFILES_DIR.relative_to(ROOT)}/ "
-                f"-- the growatt driver needs at least one"
+                f"-- the profile-driven driver needs at least one"
             )
         elif len(defaults) != 1:
             errors.append(

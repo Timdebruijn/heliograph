@@ -194,7 +194,7 @@ own address before you connect them together.
 > ```
 > curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
 >   -H 'Content-Type: application/json' \
->   -d '{"additional_devices":[{"driver_id":"growatt_modbus","options":{"unit_id":"2"}}]}'
+>   -d '{"additional_devices":[{"driver_id":"modbus_profile","options":{"unit_id":"2"}}]}'
 > ```
 >
 > **Extended discovery sweeps addresses 1–8**, so the wizard reports one candidate per inverter

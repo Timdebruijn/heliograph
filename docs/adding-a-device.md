@@ -158,7 +158,7 @@ exactly like an inverter that does not report it.
 ## 3. Writing the profile
 
 1. Copy [`profiles/_template.toml`](../profiles/_template.toml) to
-   `profiles/<family>/<your_device>.toml`. Field reference:
+   `profiles/<vendor>/<your_device>.toml`. Field reference:
    [device-profiles/schema.md](device-profiles/schema.md); allowed measurement ids:
    [device-profiles/canonical-measurements.md](device-profiles/canonical-measurements.md).
 2. Declare **wide read blocks** during bring-up (e.g. the whole 0–124 base range), not
@@ -185,7 +185,7 @@ exactly like an inverter that does not report it.
    drivers), or OTA-upload the `.bin` if a bridge is already installed.
 2. Select the driver and, if not the default, your profile in the bridge web UI
    (driver option `profile = <your id>`).
-3. Set log level to `trace` and watch `/api/v1/logs`: the `GROWATT in <addr>: ...`
+3. Set log level to `trace` and watch `/api/v1/logs`: the `MODBUS unit <n> in <addr>: ...`
    lines are the raw register dump. Verify each mapped register against the device
    display **at that moment**.
 4. Check the published values: `/api/v1/status`, MQTT, Home Assistant. Watch a full

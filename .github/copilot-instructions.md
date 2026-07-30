@@ -38,7 +38,7 @@ Outputs read immutable `DeviceState` snapshots. They never talk to a driver dire
 1. Write a TOML file in `profiles/<family>/`. Schema: `docs/device-profiles/schema.md`.
 2. Run `python3 tools/gen_profiles.py --check` to validate.
 3. The build pre-script (`tools/gen_profiles.py`) regenerates
-   `src/drivers/growatt_modbus/profiles_generated.cpp` automatically.
+   `src/drivers/modbus_profile/profiles_generated.cpp` automatically.
 
 See `docs/adding-a-device.md` for the full workflow.
 
@@ -108,7 +108,7 @@ CI runs the same checks plus both firmware builds.
 | Family | Protocol | Driver directory |
 |---|---|---|
 | EverSolar / Zeversolar legacy TL | PMU (AA55) over RS485 | `src/drivers/eversolar_legacy/` |
-| Growatt SPH hybrid | Modbus RTU | `src/drivers/growatt_modbus/` |
+| Growatt SPH hybrid, MIC TL-X | Modbus RTU | `src/drivers/modbus_profile/` (profile-driven) |
 | SolaX X1 series | PMU (AA55) over RS485 | `src/drivers/solax_x1/` |
 
 All drivers are **read-only**. Write support requires hardware-verified register maps

@@ -187,7 +187,7 @@ address in turn and confirm exactly one answers, at the address you expect.
    the 120 Ω termination rule. 9600 8N1 is what the profile declares — if your units are set to
    something else, run **extended** discovery (quick only tries the first profile) and the
    wizard stores the line settings that answered.
-3. Configure the driver: `growatt_modbus`, register map `mic_tl_x`, `unit_id` as set in step 1.
+3. Configure the driver: `modbus_profile`, register map `mic_tl_x`, `unit_id` as set in step 1.
    Both are fields in the discovery wizard's confirm step, and in *Settings → Driver*. The
    wizard offers back whatever is already stored, so re-running it does not undo a working
    setup — but on a fresh bridge the map starts unset and the step cannot be completed until
@@ -202,13 +202,13 @@ address in turn and confirm exactly one answers, at the address you expect.
    > curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
    >   -H 'Content-Type: application/json' \
    >   -d '{"additional_devices":[
-   >         {"driver_id":"growatt_modbus","options":{"unit_id":"2","profile":"mic_tl_x"}},
-   >         {"driver_id":"growatt_modbus","options":{"unit_id":"3","profile":"mic_tl_x"}}]}'
+   >         {"driver_id":"modbus_profile","options":{"unit_id":"2","profile":"mic_tl_x"}},
+   >         {"driver_id":"modbus_profile","options":{"unit_id":"3","profile":"mic_tl_x"}}]}'
    > ```
    >
    > Note `driver_id` here where the `driver` section uses `id`. Sending the array replaces it,
    > so send all the extra units at once. Restart afterwards. Check `/api/v1/devices` after the
-   > restart: you should see one entry per unit, named `growatt_modbus-1`, `-2`, `-3`.
+   > restart: you should see one entry per unit, named `modbus_profile-1`, `-2`, `-3`.
    >
    > **Or let the wizard find them.** Extended discovery sweeps addresses 1–8, so it reports one
    > candidate per unit with the address each answered at — which is also how you confirm that
@@ -217,17 +217,17 @@ address in turn and confirm exactly one answers, at the address you expect.
    > Quick discovery is unchanged: default address only.
    >
    > **All three units reach every output.** REST and Home Assistant key them by device id;
-   > Prometheus labels each series `device="growatt_modbus-<RS485 address>"`; Modbus TCP serves
+   > Prometheus labels each series `device="modbus_profile-<RS485 address>"`; Modbus TCP serves
    > them at `modbus.unit_id` plus the **configuration row index** — units 1, 2, 3 with the
    > defaults. The register map is identical at each unit, so point your client at a different
    > unit id and everything is in the same place.
    >
    > Those two numbers are not the same thing, and they only coincide because this page has you
-   > assign 1/2/3. Put the units on 1, 2 and 5 and the third is `growatt_modbus-5` in Prometheus
+   > assign 1/2/3. Put the units on 1, 2 and 5 and the third is `modbus_profile-5` in Prometheus
    > while Modbus TCP serves it at unit **3**. The mapping is in the boot log
-   > (`modbus: unit 3 -> growatt_modbus-5`) and in `modbus_unit_id` on each entry of the
+   > (`modbus: unit 3 -> modbus_profile-5`) and in `modbus_unit_id` on each entry of the
    > `devices` array in `/api/v1/status`.
-4. Set log level to `trace` and read `/api/v1/logs`. The `GROWATT in <addr>: ...` lines are
+4. Set log level to `trace` and read `/api/v1/logs`. The `MODBUS unit <n> in <addr>: ...` lines are
    the raw block dump.
 5. Check the dump against the inverter's own app: PV voltage, AC power, today's energy,
    total energy. All four should match without any arithmetic on your part.

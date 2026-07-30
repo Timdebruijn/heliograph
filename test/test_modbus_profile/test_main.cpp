@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Growatt driver: pure register->canonical decoding, and the Modbus poll path against a
+// Profile-driven Modbus driver: pure register->canonical decoding, and the poll path against a
 // scripted SPH. The register map itself is unvalidated hardware-wise; these tests pin the
 // DECODING (scaling, 16/32-bit, sign, undeclared-when-unread) so a wrong value on the bench
 // means a wrong table row, not a wrong decoder.
@@ -12,13 +12,13 @@
 #include <vector>
 
 #include "device/device_state.h"
-#include "drivers/growatt_modbus/growatt_driver.h"
-#include "drivers/growatt_modbus/growatt_registers.h"
+#include "drivers/modbus_profile/modbus_profile_driver.h"
+#include "drivers/modbus_profile/profile_tables.h"
 #include "protocols/modbus/modbus_rtu.h"
 #include "support/mock_transport.h"
 
 using namespace heliograph;
-using namespace heliograph::growatt;
+using namespace heliograph::profile;
 using heliograph::test::MockTransport;
 
 void setUp() {}
@@ -152,7 +152,7 @@ static heliograph::test::Responder sphResponder() {
 static void test_a_full_poll_decodes_measurements_over_the_bus() {
     MockTransport transport;
     transport.setResponder(sphResponder());
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
 
     DeviceState state;
     state.lastPollAttemptMs = 5000;
@@ -164,7 +164,7 @@ static void test_a_full_poll_decodes_measurements_over_the_bus() {
 
 static void test_silence_is_a_timeout() {
     MockTransport transport;  // no responder -> reads return 0
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
 
     DeviceState state;
     state.lastPollAttemptMs = 5000;
@@ -193,7 +193,7 @@ static heliograph::test::Responder alwaysException() {
 static void test_all_blocks_refused_is_not_registered() {
     MockTransport transport;
     transport.setResponder(alwaysException());
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
 
     DeviceState state;
     state.lastPollAttemptMs = 5000;
@@ -228,7 +228,7 @@ static void test_one_refused_block_does_not_sink_the_poll() {
         reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
         return true;
     });
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
 
     DeviceState state;
     state.lastPollAttemptMs = 5000;
@@ -254,7 +254,7 @@ static void test_a_refused_block_outranks_a_timeout_in_the_outcome() {
         reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
         return true;
     });
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
     DeviceState   state;
     state.lastPollAttemptMs = 5000;
     TEST_ASSERT_EQUAL(PollResult::NotRegistered, driver.poll(state));
@@ -282,7 +282,7 @@ static void test_a_corrupt_reply_is_reported_as_a_checksum_error() {
         reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
         return true;
     });
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
     DeviceState   state;
     state.lastPollAttemptMs = 5000;
     TEST_ASSERT_EQUAL(PollResult::ChecksumError, driver.poll(state));
@@ -313,7 +313,7 @@ static void test_a_corrupt_block_is_counted_even_when_the_poll_succeeds() {
         reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
         return true;
     });
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
     DeviceState   state;
     state.lastPollAttemptMs = 5000;
 
@@ -350,7 +350,7 @@ static void test_a_silent_probe_block_moves_no_bus_counter() {
         reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
         return true;
     });
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
     DeviceState   state;
     state.lastPollAttemptMs = 5000;
 
@@ -384,7 +384,7 @@ static void test_a_silent_mapped_block_is_still_counted() {
         reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
         return true;
     });
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
     DeviceState   state;
     state.lastPollAttemptMs = 5000;
 
@@ -398,7 +398,7 @@ static void test_a_silent_mapped_block_is_still_counted() {
 static void test_a_refused_block_moves_no_bus_counter() {
     MockTransport transport;
     transport.setResponder(alwaysException());
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
 
     DeviceState state;
     state.lastPollAttemptMs = 5000;
@@ -425,7 +425,7 @@ static void test_an_intact_reply_from_another_unit_is_not_a_checksum_error() {
         reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
         return true;
     });
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
     DeviceState   state;
     state.lastPollAttemptMs = 5000;
     TEST_ASSERT_EQUAL(PollResult::InvalidFrame, driver.poll(state));
@@ -440,7 +440,7 @@ static void test_a_sustained_noise_trickle_hits_the_transaction_deadline() {
     // unit, function (bit7 clear), byte-count 250 -> the parser stays "incomplete" forever
     // (frame length 255 never arrives byte-by-byte), so only the deadline can end the loop.
     transport.noisePattern = {0x01, 0x04, 0xFA};
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
 
     DeviceState state;
     state.lastPollAttemptMs = 5000;
@@ -453,7 +453,7 @@ static void test_a_sustained_noise_trickle_hits_the_transaction_deadline() {
 
 static void test_execute_is_unsupported_read_only() {
     MockTransport transport;
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
     InverterCommand cmd;
     cmd.type = InverterCommandType::SetBatteryOperatingMode;
     TEST_ASSERT_EQUAL(CommandResult::Unsupported, driver.execute(cmd));
@@ -462,16 +462,16 @@ static void test_execute_is_unsupported_read_only() {
 // --- transport line configuration ---------------------------------------------------------
 
 // begin() must configure the UART for this driver's protocol, exactly as the EverSolar
-// driver does. Without it, a boot that goes straight into the Growatt driver (no discovery
+// driver does. Without it, a boot that goes straight into this driver (no discovery
 // run first, which is every reboot after the driver is selected) polls an unconfigured
 // UART and hears silence forever. Found in the 2026-07-21 discovery review.
 static void test_begin_configures_the_serial_line() {
     MockTransport transport;
-    GrowattDriver driver(transport);
+    ModbusProfileDriver driver(transport);
 
     TEST_ASSERT_TRUE(driver.begin(transport));
     TEST_ASSERT_EQUAL_UINT32(1, transport.configureCalls);
-    // First recommended profile from the descriptor: the Growatt factory default, 9600 8N1.
+    // First recommended profile from the descriptor: the generic 9600 8N1 fallback.
     TEST_ASSERT_EQUAL_UINT32(9600, transport.profile().baudRate);
 }
 
@@ -479,8 +479,8 @@ static void test_begin_configures_the_serial_line() {
 // candidates: the profile knows what this family actually ships with.
 static void test_a_profile_declared_serial_overrides_the_descriptor_default() {
     static const RegBlock       kOneBlock[] = {{RegSpace::Input, 0, 8}};
-    static const GrowattProfile kCustom     = {
-        "custom", "Custom (115200)", false, 1, 1,
+    static const DeviceProfile kCustom     = {
+        "custom", "Custom (115200)", "Test", false, 1, 1,
         kOneBlock, 1, nullptr, 0,
         nullptr, 0,
         /*supportsRtu=*/true, /*supportsTcp=*/false, /*tcpPort=*/0,
@@ -488,9 +488,9 @@ static void test_a_profile_declared_serial_overrides_the_descriptor_default() {
         SerialProfile{115200, SerialParity::None, 8, 1, 1000, 3},
     };
     MockTransport  transport;
-    GrowattOptions options;
+    ProfileOptions options;
     options.profile = &kCustom;
-    GrowattDriver driver(transport, options);
+    ModbusProfileDriver driver(transport, options);
 
     TEST_ASSERT_TRUE(driver.begin(transport));
     TEST_ASSERT_EQUAL_UINT32(115200, transport.profile().baudRate);
@@ -498,11 +498,11 @@ static void test_a_profile_declared_serial_overrides_the_descriptor_default() {
 
 // --- generated profile registry -----------------------------------------------------------
 
-// The tables come out of tools/gen_profiles.py (profiles/growatt/*.toml). These pin the
+// The tables come out of tools/gen_profiles.py (profiles/*/*.toml). These pin the
 // lookup contract the driver options rely on: a typo'd profile id must come back nullptr
 // (loud fallback in optionsFrom), and the default must be the SPH profile.
 static void test_the_profile_registry_finds_sph_and_rejects_unknown_ids() {
-    const GrowattProfile* sph = findProfile("sph");
+    const DeviceProfile* sph = findProfile("sph");
     TEST_ASSERT_NOT_NULL(sph);
     TEST_ASSERT_EQUAL_STRING("sph", sph->id);
     TEST_ASSERT_TRUE(sph->hasBattery);
@@ -556,7 +556,7 @@ static void test_the_profile_option_enumerates_every_compiled_profile() {
 }
 
 static void test_the_mic_profile_describes_a_single_phase_single_tracker_string_inverter() {
-    const GrowattProfile* mic = findProfile("mic_tl_x");
+    const DeviceProfile* mic = findProfile("mic_tl_x");
     TEST_ASSERT_NOT_NULL(mic);
     TEST_ASSERT_FALSE(mic->hasBattery);
     TEST_ASSERT_EQUAL_UINT8(1, mic->phaseCount);
@@ -573,7 +573,7 @@ static void test_the_mic_profile_describes_a_single_phase_single_tracker_string_
 // bring-up dump answers the question, and until it does, no published reading may come from
 // a range nobody has confirmed this device speaks.
 static void test_the_mic_profile_probes_3000_but_publishes_nothing_from_it() {
-    const GrowattProfile* mic = findProfile("mic_tl_x");
+    const DeviceProfile* mic = findProfile("mic_tl_x");
     TEST_ASSERT_NOT_NULL(mic);
 
     bool probesTheOpenRange = false;
@@ -692,8 +692,8 @@ const WriteMapping kMultiWordWrites[] = {
      2, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, true},
 };
 
-GrowattProfile profileWith(const WriteMapping* writes, size_t count) {
-    GrowattProfile p = *findProfile("mic_tl_x");
+DeviceProfile profileWith(const WriteMapping* writes, size_t count) {
+    DeviceProfile p = *findProfile("mic_tl_x");
     p.writes         = writes;
     p.writeCount     = count;
     return p;
@@ -730,10 +730,10 @@ const WriteMapping kUnverifiedWrites[] = {
 static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     MockTransport transport;
     echoWrites(transport);
-    GrowattProfile profile = profileWith(kUnverifiedWrites, 1);
-    GrowattOptions options;
+    DeviceProfile profile = profileWith(kUnverifiedWrites, 1);
+    ProfileOptions options;
     options.profile = &profile;
-    GrowattDriver driver(transport, options);
+    ModbusProfileDriver driver(transport, options);
 
     // Held by VALUE. capabilities() returns by value, so binding a reference into the result
     // leaves it dangling the moment the full expression ends -- the assertion below then read
@@ -757,10 +757,10 @@ static void test_an_unverified_row_is_neither_advertised_nor_executed() {
 
 static void test_a_verified_row_becomes_an_advertised_setpoint() {
     MockTransport  transport;
-    GrowattProfile profile = profileWith(kTestWrites, 1);
-    GrowattOptions options;
+    DeviceProfile profile = profileWith(kTestWrites, 1);
+    ProfileOptions options;
     options.profile = &profile;
-    GrowattDriver driver(transport, options);
+    ModbusProfileDriver driver(transport, options);
 
     const auto caps = driver.capabilities();
     TEST_ASSERT_TRUE(caps.canWrite(InverterCapability::SetActivePowerLimit));
@@ -776,11 +776,11 @@ static void test_a_verified_row_becomes_an_advertised_setpoint() {
 static void test_a_verified_row_writes_the_register_it_names() {
     MockTransport transport;
     echoWrites(transport);
-    GrowattProfile profile = profileWith(kTestWrites, 1);
-    GrowattOptions options;
+    DeviceProfile profile = profileWith(kTestWrites, 1);
+    ProfileOptions options;
     options.unitId  = 2;
     options.profile = &profile;
-    GrowattDriver driver(transport, options);
+    ModbusProfileDriver driver(transport, options);
 
     InverterCommand cmd;
     cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
@@ -800,10 +800,10 @@ static void test_a_verified_row_writes_the_register_it_names() {
 static void test_a_value_outside_the_row_bounds_never_reaches_the_bus() {
     MockTransport transport;
     echoWrites(transport);
-    GrowattProfile profile = profileWith(kTestWrites, 1);
-    GrowattOptions options;
+    DeviceProfile profile = profileWith(kTestWrites, 1);
+    ProfileOptions options;
     options.profile = &profile;
-    GrowattDriver driver(transport, options);
+    ModbusProfileDriver driver(transport, options);
 
     InverterCommand cmd;
     cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
@@ -816,10 +816,10 @@ static void test_a_value_outside_the_row_bounds_never_reaches_the_bus() {
 
 static void test_a_row_needing_write_multiple_is_refused_not_faked() {
     MockTransport  transport;
-    GrowattProfile profile = profileWith(kMultiWordWrites, 1);
-    GrowattOptions options;
+    DeviceProfile profile = profileWith(kMultiWordWrites, 1);
+    ProfileOptions options;
     options.profile = &profile;
-    GrowattDriver driver(transport, options);
+    ModbusProfileDriver driver(transport, options);
 
     // The client speaks FC06 only. Sending a single-register write for a two-register row would
     // put half a value in the device, which is worse than declining.
@@ -843,10 +843,10 @@ static void test_a_device_that_refuses_is_rejected_not_reported_as_a_fault() {
         reply.push_back(static_cast<uint8_t>(crc >> 8));
         return true;
     });
-    GrowattProfile profile = profileWith(kTestWrites, 1);
-    GrowattOptions options;
+    DeviceProfile profile = profileWith(kTestWrites, 1);
+    ProfileOptions options;
     options.profile = &profile;
-    GrowattDriver driver(transport, options);
+    ModbusProfileDriver driver(transport, options);
 
     InverterCommand cmd;
     cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
@@ -860,7 +860,7 @@ static void test_a_device_that_refuses_is_rejected_not_reported_as_a_fault() {
 // bench session sets verified = true AND the driver grows a write path (execute() still
 // returns Unsupported). Both gates are asserted here so neither can be dropped unnoticed.
 static void test_the_mic_power_limit_write_row_is_declared_but_dormant() {
-    const GrowattProfile* mic = findProfile("mic_tl_x");
+    const DeviceProfile* mic = findProfile("mic_tl_x");
     TEST_ASSERT_NOT_NULL(mic);
     TEST_ASSERT_EQUAL_UINT32(1, mic->writeCount);
 
@@ -875,7 +875,26 @@ static void test_the_mic_power_limit_write_row_is_declared_but_dormant() {
     TEST_ASSERT_EQUAL_DOUBLE(100.0, w.maximum);
     TEST_ASSERT_FALSE(w.verified);
 
-    TEST_ASSERT_FALSE(descriptor().supportsWrite);
+    // And dormant in effect, not just on paper. This used to assert descriptor().supportsWrite
+    // was false, which stopped meaning anything once the driver grew a write path: that flag
+    // answers "can this driver ever write", the honest answer to which is now yes. What the
+    // shipped profile must guarantee is narrower and more useful -- a device configured with
+    // THIS map advertises no setpoint and refuses the command.
+    MockTransport transport;
+    ProfileOptions options;
+    options.profile = mic;
+    ModbusProfileDriver driver(transport, options);
+
+    const InverterCapabilities caps = driver.capabilities();
+    TEST_ASSERT_FALSE(caps.canWrite(InverterCapability::SetActivePowerLimit));
+    TEST_ASSERT_FALSE(
+        caps.numeric[static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent)]
+            .writable);
+
+    InverterCommand command;
+    command.type         = InverterCommandType::SetActivePowerLimitPercent;
+    command.numericValue = 50.0;
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, driver.execute(command));
 }
 
 int main(int, char**) {

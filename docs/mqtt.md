@@ -43,7 +43,7 @@ discovery config topics. Devices beyond the first also carry their address in th
 (`… #2`), because identical inverters report an identical model and no serial number.
 
 `<device_id>` is the id REST uses, frozen at boot: the driver id plus the configured address,
-e.g. `growatt_modbus-2`. It is **not** the serial number even for drivers that report one — the
+e.g. `modbus_profile-2`. It is **not** the serial number even for drivers that report one — the
 serial arrives during the first poll, long after the id is needed.
 
 ### Removing or re-addressing a device

@@ -76,7 +76,7 @@ Two rules worth knowing:
   Home Assistant's Modbus integration defaults to 0. Answering them means a configuration copied
   from a single-inverter example works rather than returning an exception.
 
-**Which unit is which inverter** is in the boot log (`modbus: unit 2 -> growatt_modbus-2`, one
+**Which unit is which inverter** is in the boot log (`modbus: unit 2 -> modbus_profile-2`, one
 line per device) and in `/api/v1/status`, where every entry of the `devices` array carries
 `modbus_unit_id`. Do not count positions in the device list: that list omits devices that did
 not start, and the unit ids do not.

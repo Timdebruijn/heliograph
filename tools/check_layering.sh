@@ -11,8 +11,15 @@ status=0
 echo "==> 1. Brand-specific knowledge must live only in src/drivers/"
 # Applies to comments too: the canonical model should not explain itself in terms of one
 # driver, or the rule rots into "well, it is only a comment".
+#
+# One exemption, marked in the source with LEGACY-CONFIG-ID: a driver id that was RENAMED still
+# has to be recognised when it comes back off flash, so the config migration must name it once.
+# That is a dead identifier, not brand knowledge -- no register, no framing, no protocol quirk --
+# and the alternative (splicing the string together to dodge this grep) would hide exactly what
+# the grep is for. Requiring the marker keeps the exemption per-line and greppable, so it cannot
+# quietly widen into "config may talk about brands".
 if hits=$(grep -rniE 'eversolar|zeversolar|growatt|solax|deye|sunsynk|solis|goodwe' \
-        src/ --exclude-dir=drivers 2>/dev/null); then
+        src/ --exclude-dir=drivers 2>/dev/null | grep -v 'LEGACY-CONFIG-ID'); then
     echo "FAIL: manufacturer names found outside src/drivers/:"
     echo "$hits"
     status=1

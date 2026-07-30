@@ -40,9 +40,10 @@
 # dump rather than surfacing as an authoritative-looking value.
 
 [profile]
-driver = "growatt_modbus"
+driver = "modbus_profile"
 id = "mic_tl_x"
 display_name = "Growatt MIC TL-X (0.6-3.3 kW)"
+manufacturer = "Growatt"
 default = false        # sph.toml holds the driver default
 phases = 1
 mppts = 1

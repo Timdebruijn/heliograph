@@ -1,4 +1,4 @@
-# Device profile template — copy this file to profiles/<family>/<your_device>.toml.
+# Device profile template — copy this file to profiles/<vendor>/<your_device>.toml.
 #
 # A profile teaches the bridge how to read one device family over a register-map protocol
 # (Modbus RTU today). It is pure data: the build generates C++ tables from it, validates
@@ -15,9 +15,10 @@
 # from a forum post.
 
 [profile]
-driver = "growatt_modbus"      # which driver consumes this profile (see schema.md)
+driver = "modbus_profile"      # which driver consumes this profile (see schema.md)
 id = "my_device"               # stable lowercase id; users select it via the `profile` option
 display_name = "Vendor Model (power range)"
+manufacturer = "Vendor"        # the brand; one driver serves them all, so only this says which
 default = false                # exactly ONE profile per driver has `default = true`
 phases = 1                     # AC phases: 1 or 3
 mppts = 2                      # MPPT/string inputs: 0-8

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-// See growatt_driver.h for provenance.
+// See modbus_profile_driver.h for provenance.
 
-#include "growatt_driver.h"
+#include "modbus_profile_driver.h"
 
 #include <cstdio>
 #include <cstring>
@@ -10,7 +10,7 @@
 #include "protocols/modbus/modbus_client.h"
 #include "protocols/modbus/modbus_rtu.h"
 
-namespace heliograph::growatt {
+namespace heliograph::profile {
 namespace {
 
 constexpr uint32_t kResponseTimeoutMs = 1000;
@@ -31,7 +31,7 @@ void traceBlock(uint8_t unitId, RegSpace space, uint16_t start, uint16_t count,
     constexpr uint16_t perLine = 8;
     for (uint16_t i = 0; i < count; i += perLine) {
         char line[128];
-        int  pos = snprintf(line, sizeof(line), "GROWATT unit %u %s %u:",
+        int  pos = snprintf(line, sizeof(line), "MODBUS unit %u %s %u:",
                             static_cast<unsigned>(unitId), spaceName,
                             static_cast<unsigned>(start + i));
         for (uint16_t j = 0; j < perLine && i + j < count; ++j) {
@@ -43,38 +43,38 @@ void traceBlock(uint8_t unitId, RegSpace space, uint16_t start, uint16_t count,
 
 }  // namespace
 
-GrowattOptions optionsFrom(const heliograph::DriverOptions& values) {
-    GrowattOptions o;
+ProfileOptions optionsFrom(const heliograph::DriverOptions& values) {
+    ProfileOptions o;
     // Range comes from the descriptor's own DriverOption, not from a literal repeated here.
     long unit = 0;
     if (descriptor().numericOption(values, "unit_id", unit)) {
         o.unitId = static_cast<uint8_t>(unit);
     } else {
         // Falling back silently would poll the wrong slave with no clue why it is silent.
-        log::warn("GROWATT unit_id '%s' invalid, using %u",
+        log::warn("MODBUS unit_id '%s' invalid, using %u",
                   descriptor().optionOr(values, "unit_id").c_str(),
                   static_cast<unsigned>(o.unitId));
     }
     const std::string profileId = descriptor().optionOr(values, "profile");
     if (!profileId.empty()) {
-        if (const GrowattProfile* p = findProfile(profileId.c_str())) {
+        if (const DeviceProfile* p = findProfile(profileId.c_str())) {
             o.profile = p;
         } else {
             // Same reasoning as unit_id above: a typo must not silently poll with the wrong
             // register map -- fall back loudly.
-            log::warn("GROWATT profile '%s' unknown, using '%s'", profileId.c_str(),
+            log::warn("MODBUS profile '%s' unknown, using '%s'", profileId.c_str(),
                       defaultProfile().id);
         }
     }
     return o;
 }
 
-GrowattDriver::GrowattDriver(Transport& transport, GrowattOptions options)
+ModbusProfileDriver::ModbusProfileDriver(Transport& transport, ProfileOptions options)
     : transport_(&transport), options_(options) {}
 
-const DriverDescriptor& GrowattDriver::descriptor() const { return growatt::descriptor(); }
+const DriverDescriptor& ModbusProfileDriver::descriptor() const { return profile::descriptor(); }
 
-bool GrowattDriver::begin(Transport& transport) {
+bool ModbusProfileDriver::begin(Transport& transport) {
     transport_ = &transport;
     // Configure the line for this protocol, exactly as the EverSolar driver does. Without
     // this, a boot that goes straight into this driver -- every reboot once it is the
@@ -89,7 +89,7 @@ bool GrowattDriver::begin(Transport& transport) {
     return !profiles.empty() && transport.configure(profiles.front());
 }
 
-GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t start, uint16_t count,
+ModbusProfileDriver::ReadResult ModbusProfileDriver::readBlock(RegSpace space, uint16_t start, uint16_t count,
                                                    uint16_t* out, bool probe) {
     if (transport_ == nullptr) {
         return ReadResult::TransportError;
@@ -99,7 +99,7 @@ GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t star
 
     // The exchange itself is protocol-generic and lives in protocols/modbus/modbus_client:
     // SunSpec needs the identical transaction against a completely different register map.
-    // What stays here is the part that is Growatt's business -- which register space a block
+    // What stays here is the part that is the profile's business -- which register space a block
     // means, and the TRACE dump the bring-up procedure depends on.
     const modbus::ReadTiming timing{kTransactionDeadlineMs, kResponseTimeoutMs};
     const auto outcome =
@@ -135,11 +135,11 @@ GrowattDriver::ReadResult GrowattDriver::readBlock(RegSpace space, uint16_t star
     return ReadResult::Protocol;
 }
 
-PollResult GrowattDriver::poll(DeviceState& state) {
+PollResult ModbusProfileDriver::poll(DeviceState& state) {
     if (transport_ == nullptr) {
         return PollResult::TransportError;
     }
-    const GrowattProfile& profile = *options_.profile;
+    const DeviceProfile& profile = *options_.profile;
 
     size_t validCount  = 0;
     bool   sawCrcError = false;  // bytes arrived corrupted -> the cable, not the configuration
@@ -164,19 +164,19 @@ PollResult GrowattDriver::poll(DeviceState& state) {
                 break;
             case ReadResult::Exception:
                 sawResponse = true;
-                log::warn("GROWATT unit %u block %u+%u refused (exception 0x%02X) -- skipped",
+                log::warn("MODBUS unit %u block %u+%u refused (exception 0x%02X) -- skipped",
                           options_.unitId, b.start, b.count, lastException_);
                 break;
             case ReadResult::Crc:
                 sawResponse = true;
                 sawCrcError = true;
-                log::warn("GROWATT unit %u block %u+%u failed checksum -- check ground, termination "
+                log::warn("MODBUS unit %u block %u+%u failed checksum -- check ground, termination "
                           "and cable routing", options_.unitId, b.start, b.count);
                 break;
             case ReadResult::Protocol:
                 sawResponse = true;
                 sawBadFrame = true;
-                log::warn("GROWATT unit %u block %u+%u unreadable (bad frame) -- skipped",
+                log::warn("MODBUS unit %u block %u+%u unreadable (bad frame) -- skipped",
                           options_.unitId, b.start, b.count);
                 break;
             case ReadResult::Timeout:
@@ -232,7 +232,7 @@ PollResult GrowattDriver::poll(DeviceState& state) {
     return PollResult::Ok;
 }
 
-ProbeResult GrowattDriver::probe() {
+ProbeResult ModbusProfileDriver::probe() {
     ProbeResult result;
     if (transport_ == nullptr) {
         return result;
@@ -248,7 +248,12 @@ ProbeResult GrowattDriver::probe() {
         result.checksumValid  = true;
         result.confidenceScore += 40;
         result.evidence.push_back("Modbus device answered a register read with a valid CRC");
-        result.detectedManufacturer = "Growatt";
+        // The SELECTED profile's vendor, which is a statement about what was configured, not
+        // about what answered. Every Modbus RTU device on the planet replies to a register read
+        // the same way; nothing in that reply identifies a brand. Naming one vendor here used to
+        // be harmless because there was only one family of profiles -- with several vendors in
+        // the tree it would assert an identification the probe cannot make.
+        result.detectedManufacturer = options_.profile->manufacturer;
     } else if (r == ReadResult::Exception) {
         // It answered, just not for that range: still a Modbus device on this unit id.
         result.responded = true;
@@ -271,9 +276,9 @@ ProbeResult GrowattDriver::probe() {
     return result;
 }
 
-DeviceIdentity GrowattDriver::identity() const {
+DeviceIdentity ModbusProfileDriver::identity() const {
     DeviceIdentity id;
-    id.manufacturer = "Growatt";
+    id.manufacturer = options_.profile->manufacturer;
     id.model        = options_.profile->displayName;
     id.protocolName = "Modbus RTU";
     id.driverId     = descriptor().id;
@@ -290,7 +295,7 @@ DeviceIdentity GrowattDriver::identity() const {
 /// Three separate reasons to say no, and they are checked here so that capabilities() and
 /// execute() can never disagree about which commands exist -- a driver that ADVERTISES a
 /// setpoint and then refuses it is worse than one that never offered.
-const WriteMapping* GrowattDriver::writeFor(InverterCommandType type) const {
+const WriteMapping* ModbusProfileDriver::writeFor(InverterCommandType type) const {
     for (size_t i = 0; i < options_.profile->writeCount; ++i) {
         const WriteMapping& w = options_.profile->writes[i];
         if (w.command != type) {
@@ -313,7 +318,7 @@ const WriteMapping* GrowattDriver::writeFor(InverterCommandType type) const {
     return nullptr;
 }
 
-InverterCapabilities GrowattDriver::capabilities() const {
+InverterCapabilities ModbusProfileDriver::capabilities() const {
     InverterCapabilities caps;
     caps.phaseCount = options_.profile->phaseCount;
     caps.mpptCount  = options_.profile->mpptCount;
@@ -338,7 +343,7 @@ InverterCapabilities GrowattDriver::capabilities() const {
     return caps;
 }
 
-CommandResult GrowattDriver::execute(const InverterCommand& command) {
+CommandResult ModbusProfileDriver::execute(const InverterCommand& command) {
     if (transport_ == nullptr) {
         return CommandResult::Unsupported;
     }
@@ -384,4 +389,4 @@ CommandResult GrowattDriver::execute(const InverterCommand& command) {
     }
 }
 
-}  // namespace heliograph::growatt
+}  // namespace heliograph::profile

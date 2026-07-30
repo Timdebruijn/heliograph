@@ -260,7 +260,7 @@ static void test_configured_options_reach_the_created_driver() {
     registerBuiltinDrivers(registry);
     heliograph::test::MockTransport transport;
 
-    auto driver = registry.create("growatt_modbus", transport, {{"unit_id", "3"}});
+    auto driver = registry.create("modbus_profile", transport, {{"unit_id", "3"}});
     TEST_ASSERT_NOT_NULL(driver.get());
     TEST_ASSERT_TRUE(driver->begin(transport));
 

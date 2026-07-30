@@ -235,7 +235,7 @@ const tick=setInterval(async()=>{
     // freshly added row became impossible to remove without a reboot, on a bridge whose owner
     // had just been told to open a panel that did not exist.
     cfg.additional_devices=[...(cfg.additional_devices||[]),
-                            {driver_id:'growatt_modbus',label:'',options:{unit_id:'9'}}];
+                            {driver_id:'modbus_profile',label:'',options:{unit_id:'9'}}];
     paintInverters();
     await new Promise(r=>setTimeout(r,100));
     const inv=document.getElementById('inv');
@@ -250,14 +250,14 @@ const tick=setInterval(async()=>{
     // row whose driver cannot share a bus and lets later ones through, so counting started
     // devices names the wrong row -- and its Remove button would take out an inverter that is
     // running perfectly well.
-    cfg.additional_devices=[{driver_id:'growatt_modbus',label:'Garage',options:{unit_id:'2'}},
+    cfg.additional_devices=[{driver_id:'modbus_profile',label:'Garage',options:{unit_id:'2'}},
                             {driver_id:'eversolar_legacy',label:'Refused',options:{address:'17'}},
-                            {driver_id:'growatt_modbus',label:'Dak achter',options:{unit_id:'3'}}];
+                            {driver_id:'modbus_profile',label:'Dak achter',options:{unit_id:'3'}}];
     // What the BRIDGE says started: slots 1 and 3. Slot 2 was refused. Said here rather than
     // left to be inferred -- inferring it is what put the Remove button on a running inverter,
     // twice.
-    devCache['growatt_modbus-GW2400ABC'].config_slot=1;
-    devCache['growatt_modbus-GW3300XYZ'].config_slot=3;
+    devCache['modbus_profile-GW2400ABC'].config_slot=1;
+    devCache['modbus_profile-GW3300XYZ'].config_slot=3;
     paintInverters();
     await new Promise(r=>setTimeout(r,150));
     const pend=[...document.querySelectorAll('#inv .card')]
@@ -278,11 +278,11 @@ const tick=setInterval(async()=>{
     // the only row that could not be fixed without restarting first, then fixing, then
     // restarting again. It gets the same form a running inverter gets, keyed on the
     // configuration slot, which is the only handle a row without a device id has.
-    cfg.additional_devices=[{driver_id:'growatt_modbus',label:'Garage',options:{profile:'sph_3_6kw',unit_id:'2'}},
+    cfg.additional_devices=[{driver_id:'modbus_profile',label:'Garage',options:{profile:'sph_3_6kw',unit_id:'2'}},
                             {driver_id:'eversolar_legacy',label:'Refused',options:{address:'17'}},
-                            {driver_id:'growatt_modbus',label:'Dak achter',options:{profile:'mic_tl_x',unit_id:'3'}}];
-    devCache['growatt_modbus-GW2400ABC'].config_slot=1;
-    devCache['growatt_modbus-GW3300XYZ'].config_slot=3;
+                            {driver_id:'modbus_profile',label:'Dak achter',options:{profile:'mic_tl_x',unit_id:'3'}}];
+    devCache['modbus_profile-GW2400ABC'].config_slot=1;
+    devCache['modbus_profile-GW3300XYZ'].config_slot=3;
     panel=null; devDraft=null; paintInverters();
     await new Promise(r=>setTimeout(r,120));
     const pcard=[...document.querySelectorAll('#inv .card')]
@@ -395,7 +395,7 @@ const tick=setInterval(async()=>{
     // row on any change to the array, so a legacy value in a SIBLING row refuses the removal of
     // an unrelated one, which is how a row became permanently unremovable in silence.
     cfg.additional_devices=[...(cfg.additional_devices||[]),
-                            {driver_id:'growatt_modbus',label:'Pending',options:{unit_id:'9'}}];
+                            {driver_id:'modbus_profile',label:'Pending',options:{unit_id:'9'}}];
     paintInverters();
     await new Promise(r=>setTimeout(r,120));
     let told=null;

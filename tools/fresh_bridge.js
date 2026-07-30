@@ -44,7 +44,7 @@
                 default_value:'auto',description:'auto derives it from the frame length.'},
                {key:'address',display_name:'Assigned bus address',default_value:'16',
                 min_value:16,max_value:254,description:'Handed to the inverter at registration.'}]},
-    {id:'growatt_modbus',display_name:'Growatt (Modbus)',support_level:'experimental',
+    {id:'modbus_profile',display_name:'Modbus RTU (profile-driven)',support_level:'experimental',
       description:'Modbus RTU. The register map is a data file.',
       serial_profiles:[{baud_rate:9600,parity:'none',data_bits:8,stop_bits:1}],
       options:[{key:'profile',display_name:'Register map',allowed_values:['','sph_3_6kw','mic_tl_x'],

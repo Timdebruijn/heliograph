@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 //
-// Growatt register map — the brand knowledge, table-driven so a second family (MIN TL-XH,
-// MOD, MIC) is a new table rather than a new driver. See docs/growatt-sph-protocol.md.
+// Register-map tables — the vendor knowledge, held as data so a new inverter family is a new
+// table rather than a new driver.
 //
 // Platform independent: no Arduino/ESP-IDF, so the register→canonical mapping is host-tested.
-// The IO (Modbus transactions) lives in growatt_driver.cpp; this file only says how a raw
-// register word becomes a canonical measurement.
+// The IO (Modbus transactions) lives in modbus_profile_driver.cpp; this file only says how a
+// raw register word becomes a canonical measurement.
 //
 // The tables themselves are NOT hand-written: they are generated at build time from the TOML
-// device profiles in profiles/growatt/ (tools/gen_profiles.py → profiles_generated.cpp).
-// Adding a Growatt family is a TOML file, not C++ — see docs/adding-a-device.md.
+// device profiles in profiles/<vendor>/ (tools/gen_profiles.py → profiles_generated.cpp).
+// Adding a model is a TOML file, not C++ — see docs/adding-a-device.md.
 
 #pragma once
 
@@ -20,7 +20,7 @@
 #include "device/measurement.h"
 #include "transport/serial_profile.h"
 
-namespace heliograph::growatt {
+namespace heliograph::profile {
 
 enum class RegSpace : uint8_t { Input, Holding };
 
@@ -73,9 +73,13 @@ struct WriteMapping {
     bool                verified;     ///< confirmed on hardware; unverified rows stay dormant
 };
 
-struct GrowattProfile {
+struct DeviceProfile {
     const char* id;           ///< stable, e.g. "sph"
-    const char* displayName;  ///< e.g. "Growatt SPH (3-6 kW)"
+    const char* displayName;  ///< e.g. "SPH (3-6 kW)"
+    /// The vendor this map belongs to, declared per profile rather than per driver: one driver
+    /// serves many brands, so this is the only place that can honestly answer "what is it".
+    /// Reported as the device identity, which is what Home Assistant shows.
+    const char* manufacturer;
     bool        hasBattery;
     uint8_t     phaseCount;
     uint8_t     mpptCount;
@@ -100,11 +104,11 @@ struct GrowattProfile {
 /// Looks up a profile by its stable id (e.g. "sph"). Returns nullptr when unknown, so a
 /// config typo is a loud warning with a fallback rather than a silent wrong map.
 /// Implemented in profiles_generated.cpp (build-time generated from profiles/growatt/).
-const GrowattProfile* findProfile(const char* id);
+const DeviceProfile* findProfile(const char* id);
 
 /// The profile marked `default = true` in its TOML file — used when the `profile` driver
 /// option is not set. Implemented in profiles_generated.cpp.
-const GrowattProfile& defaultProfile();
+const DeviceProfile& defaultProfile();
 
 /// Enumerates the compiled-in profiles, so the descriptor can offer them as the option's
 /// allowed values instead of accepting free-form text. With more than one profile in the
@@ -113,7 +117,7 @@ const GrowattProfile& defaultProfile();
 /// time is the only point where that is still visible to the user.
 /// Both implemented in profiles_generated.cpp.
 size_t                profileCount();
-const GrowattProfile& profileAt(size_t index);
+const DeviceProfile& profileAt(size_t index);
 
 /// Raw register data read back from the device, one entry per block.
 struct BlockData {
@@ -131,7 +135,7 @@ bool findRegister(const BlockData* blocks, size_t blockCount, RegSpace space, ui
 /// Fills `measurements` from the raw blocks according to `profile`. Pure and host-tested: a
 /// register whose block was not read is left undeclared, never published as zero. `ts` is the
 /// poll timestamp stamped on each reading.
-void applyProfile(const GrowattProfile& profile, const BlockData* blocks, size_t blockCount,
+void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t blockCount,
                   MeasurementSet& measurements, uint64_t ts);
 
-}  // namespace heliograph::growatt
+}  // namespace heliograph::profile

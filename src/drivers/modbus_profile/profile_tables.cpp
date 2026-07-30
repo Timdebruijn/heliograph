@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 
-#include "growatt_registers.h"
+#include "profile_tables.h"
 
 // The profile tables (register maps, read blocks) live in profiles_generated.cpp, emitted
 // at build time from profiles/growatt/*.toml. This file keeps only the decode logic.
 
-namespace heliograph::growatt {
+namespace heliograph::profile {
 
 bool findRegister(const BlockData* blocks, size_t blockCount, RegSpace space, uint16_t address,
                   uint16_t& out) {
@@ -19,7 +19,7 @@ bool findRegister(const BlockData* blocks, size_t blockCount, RegSpace space, ui
     return false;
 }
 
-void applyProfile(const GrowattProfile& profile, const BlockData* blocks, size_t blockCount,
+void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t blockCount,
                   MeasurementSet& measurements, uint64_t ts) {
     for (size_t i = 0; i < profile.mappingCount; ++i) {
         const RegisterMapping& mp = profile.mappings[i];
@@ -50,4 +50,4 @@ void applyProfile(const GrowattProfile& profile, const BlockData* blocks, size_t
     }
 }
 
-}  // namespace heliograph::growatt
+}  // namespace heliograph::profile

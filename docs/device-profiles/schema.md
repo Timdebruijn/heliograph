@@ -1,9 +1,9 @@
 # Device profile schema
 
-A device profile is one TOML file in `profiles/<family>/` describing how to read one
+A device profile is one TOML file in `profiles/<vendor>/` describing how to read one
 device family over a register-map protocol. At build time `tools/gen_profiles.py`
 validates every profile and generates the C++ tables the driver polls from
-(`src/drivers/growatt_modbus/profiles_generated.cpp` — generated, git-ignored, never
+(`src/drivers/modbus_profile/profiles_generated.cpp` — generated, git-ignored, never
 edited). A broken profile fails the **build** with a validation message; nothing invalid
 can reach a running device.
 
@@ -24,9 +24,10 @@ Files whose name starts with `_` (like the template) are skipped.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `driver` | string | yes | The C++ driver that consumes this profile. Only `"growatt_modbus"` is table-driven today; see [Scope](#scope) for what qualifies. |
+| `driver` | string | yes | The C++ driver that consumes this profile. Only `"modbus_profile"` is table-driven today; see [Scope](#scope) for what qualifies. |
 | `id` | string | yes | Stable lowercase identifier (`[a-z][a-z0-9_]*`), unique across all profiles. Users select it with the driver's `profile` option; treat it as API, never rename it. |
 | `display_name` | string | yes | Human-readable model name, e.g. `"Growatt SPH (3-6 kW)"`. Becomes the reported model identity. |
+| `manufacturer` | string | yes | The vendor, e.g. `"Growatt"`. One driver serves every brand, so the profile is the only thing that knows this; it is what Home Assistant shows as the device's maker. |
 | `default` | bool | no (false) | Profile used when the `profile` option is unset. Exactly **one** profile per driver must set this. |
 | `phases` | int | yes | AC phases, 1–3. |
 | `mppts` | int | yes | MPPT/string inputs, 0–8. |
@@ -99,7 +100,7 @@ Decoded as `value = raw * scale`, after sign extension for `s16`/`s32`.
 | `measurement` | string | yes | Canonical id from [canonical-measurements.md](canonical-measurements.md). Each id may be mapped at most once per profile. |
 | `display_name` | string | yes | Human name for dashboards/Home Assistant. |
 | `space` | string | yes | `"input"` or `"holding"`. |
-| `address` | int | yes | First register. A 32-bit type also reads `address + 1`; the **high word comes first** (the convention Growatt and most Modbus inverters use — see word order caveat in [adding-a-device.md](../adding-a-device.md)). |
+| `address` | int | yes | First register. A 32-bit type also reads `address + 1`; the **high word comes first** (the convention nearly every Modbus inverter uses — see word order caveat in [adding-a-device.md](../adding-a-device.md)). |
 | `type` | string | yes | `u16`, `s16`, `u32`, `s32`. `s*` is two's-complement signed — use it for anything that can be negative (power that can flow both ways, temperatures). |
 | `scale` | number | no (1.0) | Multiplier for the raw integer. A device reporting tenths uses `0.1`. Must not be 0. |
 | `unit` | string | yes | One of `W` `V` `A` `Hz` `°C` (or `C`) `kWh` `h` `%` `dBm` `s`. The measurement *type* (Power, Voltage, …) is derived from the unit, so you never touch internal enums. |
@@ -150,6 +151,11 @@ By design. Being honest about the boundary saves contributors wasted effort:
 
 ## Scope
 
-`driver = "growatt_modbus"` today. The Growatt driver is the generic consumer for
-Modbus-RTU register-map devices; a genuinely different register-map protocol family
+`driver = "modbus_profile"` today. That driver is the generic consumer for Modbus-RTU
+register-map devices, whatever the badge on the front: the brand lives in the profile's
+`manufacturer` field, not in the driver. A genuinely different register-map protocol family
 would get its own table-driven driver and reuse this same profile pipeline.
+
+The id was `growatt_modbus` up to config version 1, when every profile it served was one
+vendor's map. Stored configurations are migrated on load
+(`src/config/configuration_store.cpp`); profile ids themselves never changed.

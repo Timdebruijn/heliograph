@@ -130,7 +130,7 @@ track so a burst of setpoint traffic can never swallow them. See docs/architectu
    no register data at all — the response's `level` field tells you which level is active.
 3. Wire RS485 to the SYS/COM port, run the **extended** discovery scan (quick tries only
    9600; extended also tries 115200).
-4. `curl -u admin "http://<bridge>/api/v1/logs?limit=60"` — the `GROWATT in <reg>: ...` lines
+4. `curl -u admin "http://<bridge>/api/v1/logs?limit=60"` — the `MODBUS unit <n> in <reg>: ...` lines
    are the raw blocks. Whichever range (1000-series vs 3000-series) carries real values
    settles the register generation.
 5. Compare SoC / battery voltage / power against the inverter display; correct

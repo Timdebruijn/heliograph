@@ -5,7 +5,7 @@
 //
 // The aggregate form the tests used --
 //
-//     DriverSettings{"growatt_modbus", false, {{"unit_id", "2"}}}
+//     DriverSettings{"modbus_profile", false, {{"unit_id", "2"}}}
 //
 // warns about the field it leaves off (-Wmissing-field-initializers on `label`), which is the
 // harmless half. The other half is that it is positional: `label` was added to the end of the

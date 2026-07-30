@@ -15,9 +15,10 @@
 # Sources and the open register-generation question: docs/growatt-sph-protocol.md.
 
 [profile]
-driver = "growatt_modbus"
+driver = "modbus_profile"
 id = "sph"
 display_name = "Growatt SPH (3-6 kW)"
+manufacturer = "Growatt"
 default = true      # profile used when the `profile` driver option is not set
 phases = 1
 mppts = 2

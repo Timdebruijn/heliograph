@@ -619,7 +619,7 @@ static void test_missing_fields_fall_back_to_defaults() {
     backend.write(kStorageKeyConfig, R"({"version":1,"wifi":{"ssid":"minimaal"}})");
 
     Configuration c;
-    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(c));
+    TEST_ASSERT_EQUAL(LoadResult::Migrated, store.load(c));
     TEST_ASSERT_EQUAL_STRING("minimaal", c.wifi.ssid.c_str());
     TEST_ASSERT_EQUAL_UINT32(10, c.polling.intervalSeconds);  // default
     TEST_ASSERT_TRUE(c.security.readOnlyMode);                // default, and it matters
@@ -1045,7 +1045,7 @@ static void test_a_config_without_a_serial_section_keeps_the_driver_in_charge() 
                   R"("driver":{"id":"eversolar_legacy"}})");
 
     Configuration loaded;
-    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_EQUAL(LoadResult::Migrated, store.load(loaded));
     TEST_ASSERT_FALSE(loaded.serial.enabled);
     // ...and the defaults underneath are the driver-neutral ones, not zeroes that would
     // configure an impossible line if the flag were ever flipped by hand.
@@ -1059,14 +1059,14 @@ static void test_extra_devices_survive_a_restart() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
     auto               c = provisionedConfig();
-    c.additionalDevices.push_back(test::configuredDevice("growatt_modbus", {{"unit_id", "2"}}));
-    c.additionalDevices.push_back(test::configuredDevice("growatt_modbus", {{"unit_id", "3"}}));
+    c.additionalDevices.push_back(test::configuredDevice("modbus_profile", {{"unit_id", "2"}}));
+    c.additionalDevices.push_back(test::configuredDevice("modbus_profile", {{"unit_id", "3"}}));
     TEST_ASSERT_TRUE(store.save(c));
 
     Configuration loaded;
     TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
     TEST_ASSERT_EQUAL_UINT32(2, loaded.additionalDevices.size());
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus", loaded.additionalDevices[0].id.c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile", loaded.additionalDevices[0].id.c_str());
     TEST_ASSERT_EQUAL_STRING("2", loaded.additionalDevices[0].options["unit_id"].c_str());
     TEST_ASSERT_EQUAL_STRING("3", loaded.additionalDevices[1].options["unit_id"].c_str());
 }
@@ -1082,7 +1082,7 @@ static void test_a_config_without_the_device_list_stays_single_device() {
                   R"("driver":{"id":"eversolar_legacy"}})");
 
     Configuration loaded;
-    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_EQUAL(LoadResult::Migrated, store.load(loaded));
     TEST_ASSERT_TRUE(loaded.additionalDevices.empty());
     TEST_ASSERT_EQUAL_STRING("eversolar_legacy", loaded.driver.id.c_str());
 }
@@ -1099,11 +1099,41 @@ static void test_a_nameless_stored_device_is_dropped_not_fatal() {
                   R"("additional_devices":[{"options":{"unit_id":"2"}},{"driver_id":"sunspec"}]})");
 
     Configuration loaded;
-    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_EQUAL(LoadResult::Migrated, store.load(loaded));
     TEST_ASSERT_EQUAL_UINT32(1, loaded.additionalDevices.size());
     TEST_ASSERT_EQUAL_STRING("sunspec", loaded.additionalDevices[0].id.c_str());
     ConfigError e;
     TEST_ASSERT_TRUE(validate(loaded, e));  // and what survived is saveable
+}
+
+// Config version 2: the table-driven Modbus driver's id stopped naming one vendor.
+//
+// Without this migration a bridge that had been polling inverters for months would come up with
+// a stored driver id matching no compiled-in driver -- no inverter at all, and nothing on the
+// dashboard to say why. Both places an id is stored have to move, which is the half of this that
+// is easy to miss: migrating only the primary driver leaves a three-inverter bus reporting one
+// inverter, and a dashboard that still shows data looks like a working bridge.
+static void test_the_renamed_profile_driver_id_is_migrated_everywhere() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    backend.write(kStorageKeyConfig,
+                  R"({"version":1,"wifi":{"ssid":"thuisnetwerk"},)"
+                  R"("driver":{"id":"growatt_modbus","options":{"profile":"mic_tl_x"}},)"
+                  R"("additional_devices":[{"driver_id":"growatt_modbus","options":{"unit_id":"2"}},)"
+                  R"({"driver_id":"eversolar_legacy","options":{}}]})");
+
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Migrated, store.load(loaded));
+    TEST_ASSERT_EQUAL_STRING("modbus_profile", loaded.driver.id.c_str());
+    TEST_ASSERT_EQUAL_UINT32(2, loaded.additionalDevices.size());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile", loaded.additionalDevices[0].id.c_str());
+    // Untouched: the rename applies to exactly one id, and a migration that rewrote every
+    // driver id would be a far worse bug than the one it fixes.
+    TEST_ASSERT_EQUAL_STRING("eversolar_legacy", loaded.additionalDevices[1].id.c_str());
+    // The profile selection rides along. It is the register map, so losing it would silently
+    // fall back to the default profile -- another vendor's map, reporting plausible wrong values.
+    TEST_ASSERT_EQUAL_STRING("mic_tl_x", loaded.driver.options.at("profile").c_str());
+    TEST_ASSERT_EQUAL_UINT16(kConfigVersion, loaded.version);
 }
 
 // Which device ids were announced to the broker is the one fact nothing else survives a reboot
@@ -1121,7 +1151,7 @@ static void test_the_announcement_records_the_tree_it_went_to() {
     mqtt::AnnouncementRecord record;
     record.baseTopic       = "solarbridge";
     record.discoveryPrefix = "homeassistant";
-    record.devices         = {{"eversolar_legacy-16", true}, {"growatt_modbus-2", false}};
+    record.devices         = {{"eversolar_legacy-16", true}, {"modbus_profile-2", false}};
     TEST_ASSERT_TRUE(store.setAnnouncement(record));
 
     ConfigurationStore reloaded(backend);
@@ -1132,7 +1162,7 @@ static void test_the_announcement_records_the_tree_it_went_to() {
     TEST_ASSERT_EQUAL_UINT32(2, back.devices.size());
     TEST_ASSERT_TRUE(back.devices[0].primary);
     TEST_ASSERT_FALSE(back.devices[1].primary);
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", back.devices[1].id.c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile-2", back.devices[1].id.c_str());
 }
 
 /// Both older shapes still read. Their ids survive; their prefixes are UNKNOWN rather than
@@ -1144,7 +1174,7 @@ static void test_older_announcement_records_still_read_with_unknown_prefixes() {
     ConfigurationStore store(backend);
 
     // Oldest: bare strings, before the primary flag existed.
-    backend.write(kStorageKeyAnnounced, R"(["eversolar_legacy-16","growatt_modbus-2"])");
+    backend.write(kStorageKeyAnnounced, R"(["eversolar_legacy-16","modbus_profile-2"])");
     auto bare = store.announcement();
     TEST_ASSERT_FALSE(bare.prefixesKnown());
     TEST_ASSERT_EQUAL_UINT32(2, bare.devices.size());
@@ -1171,11 +1201,11 @@ static void test_announced_devices_round_trip_and_start_empty() {
     mqtt::AnnouncementRecord announced;
     announced.baseTopic       = "heliograph";
     announced.discoveryPrefix = "homeassistant";
-    announced.devices         = {{"growatt_modbus-1", true}, {"growatt_modbus-2", false}};
+    announced.devices         = {{"modbus_profile-1", true}, {"modbus_profile-2", false}};
     TEST_ASSERT_TRUE(store.setAnnouncement(announced));
     const auto back = store.announcement().devices;
     TEST_ASSERT_EQUAL_UINT32(2, back.size());
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", back[1].id.c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile-2", back[1].id.c_str());
     // Which tree a device was announced on is half the fact: without it, a device promoted into
     // the `driver` slot keeps its id, is never seen as removed, and leaves its whole per-device
     // entity set behind forever.
@@ -1193,7 +1223,7 @@ static void test_announced_devices_round_trip_and_start_empty() {
 static void test_announced_bookkeeping_reads_the_flat_id_list() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
-    backend.write(kStorageKeyAnnounced, R"(["eversolar-1","growatt_modbus-2"])");
+    backend.write(kStorageKeyAnnounced, R"(["eversolar-1","modbus_profile-2"])");
 
     const auto back = store.announcement().devices;
     TEST_ASSERT_EQUAL_UINT32(2, back.size());
@@ -1221,7 +1251,7 @@ static void test_corrupt_announced_bookkeeping_is_not_fatal() {
 static void test_a_factory_reset_forgets_what_was_announced() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
-    store.setAnnouncement({"heliograph", "homeassistant", {{"growatt_modbus-1", true}}});
+    store.setAnnouncement({"heliograph", "homeassistant", {{"modbus_profile-1", true}}});
     TEST_ASSERT_TRUE(store.factoryReset());
     TEST_ASSERT_TRUE(store.announcement().devices.empty());
 }
@@ -1463,6 +1493,7 @@ int main(int, char**) {
     RUN_TEST(test_extra_devices_survive_a_restart);
     RUN_TEST(test_a_config_without_the_device_list_stays_single_device);
     RUN_TEST(test_a_nameless_stored_device_is_dropped_not_fatal);
+    RUN_TEST(test_the_renamed_profile_driver_id_is_migrated_everywhere);
     RUN_TEST(test_the_announcement_records_the_tree_it_went_to);
     RUN_TEST(test_older_announcement_records_still_read_with_unknown_prefixes);
     RUN_TEST(test_announced_devices_round_trip_and_start_empty);
