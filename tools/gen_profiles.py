@@ -91,6 +91,11 @@ TYPES: dict[str, tuple[int, bool]] = {
 
 SPACES = {"input": "Input", "holding": "Holding"}
 
+# 32-bit word order. High-word-first is what nearly every Modbus inverter does and stays the
+# default; "low_first" exists because at least one vendor datasheet specifies it for a register
+# that same datasheet recommends using.
+WORD_ORDERS = {"high_first": "false", "low_first": "true"}
+
 PARITIES = {"none": "None", "even": "Even", "odd": "Odd"}
 
 # Commands that are not numeric setpoints (no value, no min/max) and therefore cannot be
@@ -362,6 +367,16 @@ def parse_profile(
         if isinstance(offset, bool) or not isinstance(offset, (int, float)):
             raise ProfileError(f"{rw}: offset must be a number")
         check_finite(float(offset), rw, "offset")
+        word_order = r.get("word_order", "high_first")
+        if word_order not in WORD_ORDERS:
+            raise ProfileError(f"{rw}: word_order must be one of {sorted(WORD_ORDERS)}")
+        # Refused rather than ignored on a 16-bit row: a word order on a single register is a
+        # sign the author believes the value spans two, and silently accepting it would leave
+        # that misunderstanding in the file looking honoured.
+        if word_order != "high_first" and words != 2:
+            raise ProfileError(
+                f"{rw}: word_order applies to 32-bit values only; '{rtype}' is one register"
+            )
         parsed_regs.append(
             {
                 "measurement": mid,
@@ -371,6 +386,7 @@ def parse_profile(
                 "type": rtype,
                 "scale": float(scale),
                 "offset": float(offset),
+                "word_order": word_order,
                 "unit": unit,
             }
         )
@@ -439,6 +455,11 @@ def parse_profile(
             raise ProfileError(
                 f"{ww}: offset is not supported on a write row (read rows only) -- the write "
                 f"path does not invert it, so the register would receive the wrong value"
+            )
+        if "word_order" in wr:
+            raise ProfileError(
+                f"{ww}: word_order is not supported on a write row -- the write path sends a "
+                f"single 16-bit register (FC06), so there is no word order to choose"
             )
         # Part of a register is not something FC06 can set: it writes all sixteen bits, so a
         # masked field would clear whatever shares the register with it. Several vendors do pack a
@@ -664,7 +685,7 @@ def generate(
             w(
                 f"     RegSpace::{SPACES[r['space']]}, {r['address']}, {words}, "
                 f"{cpp_float(r['scale'])}, {'true' if signed else 'false'}, "
-                f"{cpp_float(r['offset'])}}},"
+                f"{cpp_float(r['offset'])}, {WORD_ORDERS[r['word_order']]}}},"
             )
         w("};")
         w(f"constexpr RegBlock k{sym}Blocks[] = {{")

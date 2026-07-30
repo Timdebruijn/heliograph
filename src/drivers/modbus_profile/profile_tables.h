@@ -42,6 +42,15 @@ struct RegisterMapping {
     ///
     /// Defaulted so it can be appended here without touching hand-written aggregate initialisers.
     double offset = 0.0;
+    /// True when a 32-bit value stores its LOW word at the lower address. Ignored for `words == 1`.
+    ///
+    /// Nearly every Modbus inverter is high-word-first, which is why that is the default and was
+    /// the only option for a long time. But at least one vendor datasheet specifies the other
+    /// order for a register it also recommends over the alternative -- so "open an issue rather
+    /// than mapping it wrong" meant declining to read the register the manufacturer points you
+    /// at. Getting this wrong is not a rounding error: a 2 kW reading decodes as roughly 34
+    /// megawatts, and the reverse decodes as zero.
+    bool lowWordFirst = false;
 };
 
 /// A contiguous register range to read in one Modbus transaction. Kept small and explicit so a

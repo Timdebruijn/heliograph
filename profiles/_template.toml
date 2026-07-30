@@ -62,6 +62,9 @@ count = 125
 #                 — but only when a source states the direction, never as a guess.
 #   offset        optional, added after scaling. For a biased register: a device that
 #                 reports 1000 for 0 °C is scale = 0.1, offset = -100.
+#   word_order    optional, 32-bit values only: "high_first" (default) or "low_first"
+#                 when the device puts the LOW half at the lower address. Check a source
+#                 that states it -- guessing costs a factor of 65536.
 #   unit          W V A Hz °C kWh h % dBm s — must match the measurement's physics
 # ------------------------------------------------------------------------------------------
 

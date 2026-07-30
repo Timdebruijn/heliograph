@@ -88,8 +88,10 @@ registers against the **inverter's own display or app**:
 - **32-bit values** occupy two consecutive registers, almost always **high word
   first**: `value = reg[n] * 65536 + reg[n+1]`. If a power reading looks absurdly huge
   or jumps wildly, you are probably reading one half of a pair, or the word order is
-  swapped (the profile format currently supports high-word-first only — if your device
-  is genuinely low-word-first, open an issue).
+  swapped. A genuinely low-word-first register maps with `word_order = "low_first"` —
+  but only on the word of a source that states it, because the two orders differ by a
+  factor of 65536 and one direction of that mistake lands near zero rather than looking
+  absurd.
 - **Signed values:** anything that can flow both ways (battery power, grid
   import/export) or go below zero (temperature). A raw value near 65535 that "should"
   be small and negative is a signed 16-bit (`65535` = −1). Use `s16`/`s32`.

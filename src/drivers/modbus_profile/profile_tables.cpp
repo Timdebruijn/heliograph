@@ -30,11 +30,16 @@ void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t 
         }
         int64_t raw = hi;
         if (mp.words == 2) {
-            uint16_t lo = 0;
-            if (!findRegister(blocks, blockCount, mp.space, mp.address + 1, lo)) {
+            uint16_t second = 0;
+            if (!findRegister(blocks, blockCount, mp.space, mp.address + 1, second)) {
                 continue;
             }
-            raw = (static_cast<int64_t>(hi) << 16) | lo;
+            // `hi` is whatever sits at the mapping's own address; which HALF that is depends on
+            // the device. Naming the locals after position rather than significance is deliberate
+            // -- the bug this guards against is exactly the one where the two get conflated.
+            const uint16_t high = mp.lowWordFirst ? second : hi;
+            const uint16_t low  = mp.lowWordFirst ? hi : second;
+            raw = (static_cast<int64_t>(high) << 16) | low;
         }
 
         if (mp.isSigned) {

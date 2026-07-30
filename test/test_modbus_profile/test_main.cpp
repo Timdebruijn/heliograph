@@ -171,6 +171,69 @@ static void test_a_negative_scale_negates_the_reading() {
     TEST_ASSERT_EQUAL_DOUBLE(200.0, charging.find(measurement_id::kBatteryPower)->value);
 }
 
+// A 32-bit value whose LOW word sits at the lower address. Nearly every Modbus inverter is the
+// other way round, which is why high-word-first is the default -- but a vendor datasheet that
+// specifies this order for a register it also recommends using is not something to decline to
+// read. Getting it backwards is not a rounding error: the pair below decodes as ~34 MW.
+static void test_a_low_word_first_pair_decodes_the_other_way_round() {
+    static const RegBlock kBlock[] = {{RegSpace::Input, 0, 8}};
+    static const RegisterMapping kLowFirst[] = {
+        {measurement_id::kBatteryPower, MeasurementType::Power, Unit::Watt, "Battery Power",
+         RegSpace::Input, 2, 2, 1.0, true, 0.0, /*lowWordFirst=*/true},
+    };
+    static const RegisterMapping kHighFirst[] = {
+        {measurement_id::kBatteryPower, MeasurementType::Power, Unit::Watt, "Battery Power",
+         RegSpace::Input, 2, 2, 1.0, true, 0.0, /*lowWordFirst=*/false},
+    };
+    DeviceProfile p = *findProfile("mic_tl_x");
+    p.blocks        = kBlock;
+    p.blockCount    = 1;
+    p.mappingCount  = 1;
+
+    BlockData blocks[1];
+    blocks[0] = {RegSpace::Input, 0, 8, {}};
+    // 2000 W as low-word-first: low half at register 2, high half at register 3.
+    setReg(blocks[0], 2, 2000);
+    setReg(blocks[0], 3, 0);
+
+    p.mappings = kLowFirst;
+    MeasurementSet low;
+    applyProfile(p, blocks, 1, low, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(2000.0, low.find(measurement_id::kBatteryPower)->value);
+
+    // The same bytes read the default way round are the failure this flag exists to prevent.
+    p.mappings = kHighFirst;
+    MeasurementSet high;
+    applyProfile(p, blocks, 1, high, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(131072000.0, high.find(measurement_id::kBatteryPower)->value);
+}
+
+// Sign extension has to happen AFTER the words are put in the right order, or a negative value
+// reassembles as a large positive one -- and on a battery register that is the difference
+// between "charging at 2 kW" and "discharging at 4.29 gigawatts".
+static void test_a_low_word_first_pair_still_sign_extends() {
+    static const RegBlock kBlock[] = {{RegSpace::Input, 0, 8}};
+    static const RegisterMapping kMappings[] = {
+        {measurement_id::kBatteryPower, MeasurementType::Power, Unit::Watt, "Battery Power",
+         RegSpace::Input, 2, 2, 1.0, true, 0.0, /*lowWordFirst=*/true},
+    };
+    DeviceProfile p = *findProfile("mic_tl_x");
+    p.blocks        = kBlock;
+    p.blockCount    = 1;
+    p.mappings      = kMappings;
+    p.mappingCount  = 1;
+
+    BlockData blocks[1];
+    blocks[0] = {RegSpace::Input, 0, 8, {}};
+    // -2000 = 0xFFFFF830: low word 0xF830 at the lower address, high word 0xFFFF above it.
+    setReg(blocks[0], 2, 0xF830);
+    setReg(blocks[0], 3, 0xFFFF);
+
+    MeasurementSet m;
+    applyProfile(p, blocks, 1, m, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(-2000.0, m.find(measurement_id::kBatteryPower)->value);
+}
+
 static void test_a_register_in_an_unread_block_is_left_undeclared() {
     // Only the base block present; battery registers live in a block we did not pass.
     BlockData blocks[1];
@@ -1113,6 +1176,116 @@ static void test_the_solis_setpoints_are_declared_and_dormant() {
     TEST_ASSERT_TRUE(transport.writes.empty());
 }
 
+// --- the Sungrow SH residential hybrid profile ----------------------------------------------
+
+namespace {
+void makeSungrowBlocks(BlockData blocks[3]) {
+    blocks[0] = {RegSpace::Input, 5000, 40, {}};
+    blocks[1] = {RegSpace::Input, 5213, 32, {}};
+    blocks[2] = {RegSpace::Input, 13000, 50, {}};
+}
+}  // namespace
+
+static void test_the_sungrow_profile_decodes_a_realistic_frame() {
+    BlockData blocks[3];
+    makeSungrowBlocks(blocks);
+
+    setReg(blocks[0], 5007, 415);    // temperature -> 41.5 °C
+    setReg(blocks[0], 5010, 3450);   // MPPT1 V     -> 345.0 V
+    setReg(blocks[0], 5011, 62);     // MPPT1 I     -> 6.2 A
+    setReg(blocks[0], 5012, 3310);   // MPPT2 V     -> 331.0 V
+    setReg(blocks[0], 5013, 58);     // MPPT2 I     -> 5.8 A
+    setReg(blocks[0], 5016, 0);
+    setReg(blocks[0], 5017, 4050);   // DC power    -> 4050 W (high word first)
+    setReg(blocks[0], 5018, 2338);   // Phase A V   -> 233.8 V
+    setReg(blocks[1], 5241, 5002);   // frequency   -> 50.02 Hz
+    setReg(blocks[2], 13001, 187);   // E-today     -> 18.7 kWh
+    setReg(blocks[2], 13002, 0);
+    setReg(blocks[2], 13003, 30150); // E-total     -> 3015.0 kWh
+    setReg(blocks[2], 13019, 5240);  // Batt V      -> 524.0 V
+    setReg(blocks[2], 13022, 872);   // Batt SoC    -> 87.2 % (tenths!)
+    setReg(blocks[2], 13024, 231);   // Batt temp   -> 23.1 °C
+    setReg(blocks[2], 13030, 141);   // Phase A I   -> 14.1 A
+    setReg(blocks[2], 13033, 0);
+    setReg(blocks[2], 13034, 3720);  // AC power    -> 3720 W
+
+    MeasurementSet m;
+    applyProfile(*findProfile("sungrow_sh_hybrid"), blocks, 3, m, 1000);
+
+    TEST_ASSERT_EQUAL_DOUBLE(41.5, m.find(measurement_id::kTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(345.0, m.find(measurement_id::kDcMppt1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(6.2, m.find(measurement_id::kDcMppt1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(331.0, m.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(4050.0, m.find(measurement_id::kDcPowerTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(233.8, m.find(measurement_id::kAcL1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(14.1, m.find(measurement_id::kAcL1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(50.02, m.find(measurement_id::kAcFrequency)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(18.7, m.find(measurement_id::kEnergyToday)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(3015.0, m.find(measurement_id::kEnergyTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(524.0, m.find(measurement_id::kBatteryVoltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(23.1, m.find(measurement_id::kBatteryTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(3720.0, m.find(measurement_id::kAcPowerTotal)->value);
+
+    // Tenths of a percent in both sources. Read as whole percent this is a battery at 872%.
+    TEST_ASSERT_EQUAL_DOUBLE(87.2, m.find(measurement_id::kBatterySoc)->value);
+}
+
+// The battery-power row is the one that needed two schema features at once, so it gets its own
+// test: the pair is LOW word first, and the device's sign convention is the opposite of ours.
+static void test_the_sungrow_battery_power_is_reordered_and_reoriented() {
+    BlockData blocks[3];
+    makeSungrowBlocks(blocks);
+
+    // The device says -2000 W while CHARGING at 2 kW. Low word at the lower address.
+    setReg(blocks[1], 5213, 0xF830);  // low half of -2000
+    setReg(blocks[1], 5214, 0xFFFF);  // high half
+
+    MeasurementSet m;
+    applyProfile(*findProfile("sungrow_sh_hybrid"), blocks, 3, m, 1000);
+
+    // Our convention is positive while charging, so the row's scale = -1 flips it.
+    TEST_ASSERT_EQUAL_DOUBLE(2000.0, m.find(measurement_id::kBatteryPower)->value);
+
+    // Discharging at 1.5 kW: the device reports +1500, we publish -1500.
+    setReg(blocks[1], 5213, 1500);
+    setReg(blocks[1], 5214, 0);
+    MeasurementSet out;
+    applyProfile(*findProfile("sungrow_sh_hybrid"), blocks, 3, out, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(-1500.0, out.find(measurement_id::kBatteryPower)->value);
+}
+
+static void test_the_sungrow_setpoints_are_declared_and_dormant() {
+    const DeviceProfile* p = findProfile("sungrow_sh_hybrid");
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_EQUAL_STRING("Sungrow", p->manufacturer);
+    TEST_ASSERT_EQUAL_UINT32(2, p->writeCount);
+
+    for (size_t i = 0; i < p->writeCount; ++i) {
+        TEST_ASSERT_FALSE(p->writes[i].verified);
+    }
+
+    const WriteMapping* mode = nullptr;
+    for (size_t i = 0; i < p->writeCount; ++i) {
+        if (p->writes[i].command == InverterCommandType::SetBatteryOperatingMode) {
+            mode = &p->writes[i];
+        }
+    }
+    TEST_ASSERT_NOT_NULL(mode);
+    TEST_ASSERT_EQUAL_UINT16(13049, mode->address);
+    TEST_ASSERT_EQUAL_UINT32(4, mode->optionCount);
+    // 1 is absent from the vendor's numbering, and the gap is deliberate: option index 1 is
+    // mode 2, not mode 1.
+    TEST_ASSERT_EQUAL_INT32(2, mode->options[1].value);
+    TEST_ASSERT_EQUAL_STRING("Forced mode", mode->options[1].label);
+
+    MockTransport  transport;
+    ProfileOptions options;
+    options.profile = p;
+    ModbusProfileDriver driver(transport, options);
+    TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetExportLimit));
+    TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetBatteryOperatingMode));
+}
+
 static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     MockTransport transport;
     echoWrites(transport);
@@ -1387,6 +1560,8 @@ int main(int, char**) {
     RUN_TEST(test_pv_power_is_an_unsigned_32bit_pair);
     RUN_TEST(test_a_biased_register_decodes_through_its_offset);
     RUN_TEST(test_a_negative_scale_negates_the_reading);
+    RUN_TEST(test_a_low_word_first_pair_decodes_the_other_way_round);
+    RUN_TEST(test_a_low_word_first_pair_still_sign_extends);
     RUN_TEST(test_a_register_in_an_unread_block_is_left_undeclared);
     RUN_TEST(test_find_register_reports_out_of_range);
     RUN_TEST(test_a_full_poll_decodes_measurements_over_the_bus);
@@ -1420,6 +1595,9 @@ int main(int, char**) {
     RUN_TEST(test_the_solis_ac_power_goes_negative_while_importing);
     RUN_TEST(test_the_solis_profile_publishes_nothing_the_sources_disputed);
     RUN_TEST(test_the_solis_setpoints_are_declared_and_dormant);
+    RUN_TEST(test_the_sungrow_profile_decodes_a_realistic_frame);
+    RUN_TEST(test_the_sungrow_battery_power_is_reordered_and_reoriented);
+    RUN_TEST(test_the_sungrow_setpoints_are_declared_and_dormant);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);

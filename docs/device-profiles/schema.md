@@ -100,10 +100,11 @@ Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`.
 | `measurement` | string | yes | Canonical id from [canonical-measurements.md](canonical-measurements.md). Each id may be mapped at most once per profile. |
 | `display_name` | string | yes | Human name for dashboards/Home Assistant. |
 | `space` | string | yes | `"input"` or `"holding"`. |
-| `address` | int | yes | First register. A 32-bit type also reads `address + 1`; the **high word comes first** (the convention nearly every Modbus inverter uses — see word order caveat in [adding-a-device.md](../adding-a-device.md)). |
+| `address` | int | yes | First register. A 32-bit type also reads `address + 1`; the **high word comes first** by default (what nearly every Modbus inverter does). Set `word_order` when a source says otherwise. |
 | `type` | string | yes | `u16`, `s16`, `u32`, `s32`. `s*` is two's-complement signed — use it for anything that can be negative (power that can flow both ways, temperatures). |
 | `scale` | number | no (1.0) | Multiplier for the raw integer. A device reporting tenths uses `0.1`. Must not be 0. **May be negative** — see below. |
 | `offset` | number | no (0.0) | Added after scaling. For registers that store a *biased* value so it never goes negative on the wire: several vendors report `1000` for 0 °C, which is `scale = 0.1, offset = -100`. |
+| `word_order` | string | no (`"high_first"`) | 32-bit values only. `"low_first"` when the device stores the LOW half at the lower address. Refused on a 16-bit row and on write rows. |
 | `unit` | string | yes | One of `W` `V` `A` `Hz` `°C` (or `C`) `kWh` `h` `%` `dBm` `s`. The measurement *type* (Power, Voltage, …) is derived from the unit, so you never touch internal enums. |
 
 ### Correcting a sign convention
@@ -174,9 +175,11 @@ By design. Being honest about the boundary saves contributors wasted effort:
 - **Acting on writes.** A `[[write]]` row *records* a writable register; it cannot
   *enable* writing. That requires `verified = true` plus a driver write path — see the
   `[[write]]` section above.
-- **Word-order variants.** 32-bit values are high-word-first. A device that is
-  low-word-first needs decoder support first — open an issue rather than mapping it
-  wrong.
+- ~~**Word-order variants.**~~ Supported since a vendor datasheet turned up specifying
+  low-word-first for a register that same datasheet recommends using — see `word_order`
+  above. High-word-first remains the default and is what nearly every device does. Getting
+  this wrong is not subtle in one direction and invisible in the other: 2 kW read the wrong
+  way round is about 34 MW, while a large value read the wrong way round can land near zero.
 
 ## Scope
 
