@@ -497,7 +497,9 @@ def parse_profile(
             for j, opt in enumerate(options):
                 ow = f"{ww} options[{j}]"
                 if not isinstance(opt, dict):
-                    raise ProfileError(f"{ow}: each option must be a table with value + label")
+                    raise ProfileError(
+                        f"{ow}: each option must be a table with value + label"
+                    )
                 value = _require(opt, "value", int, ow)
                 if not 0 <= value <= 0xFFFF:
                     raise ProfileError(f"{ow}: value must be 0-65535")
@@ -531,7 +533,9 @@ def parse_profile(
                 )
             unit = _require(wr, "unit", str, ww)
             if unit not in UNITS:
-                raise ProfileError(f"{ww}: unknown unit '{unit}'; known: {sorted(UNITS)}")
+                raise ProfileError(
+                    f"{ww}: unknown unit '{unit}'; known: {sorted(UNITS)}"
+                )
             minimum = wr.get("minimum")
             maximum = wr.get("maximum")
             for key, val in (("minimum", minimum), ("maximum", maximum)):
@@ -546,7 +550,11 @@ def parse_profile(
             if not minimum < maximum:
                 raise ProfileError(f"{ww}: minimum must be < maximum")
             step = wr.get("step", 1.0)
-            if isinstance(step, bool) or not isinstance(step, (int, float)) or step <= 0:
+            if (
+                isinstance(step, bool)
+                or not isinstance(step, (int, float))
+                or step <= 0
+            ):
                 raise ProfileError(f"{ww}: step must be a positive number")
             check_finite(float(step), ww, "step")
             row.update(
@@ -715,9 +723,7 @@ def generate(
             f"    {{{cpp_string(p['id'])}, {cpp_string(p['display_name'])}, "
             f"{cpp_string(p['manufacturer'])},"
         )
-        w(
-            f"     {'true' if p['battery'] else 'false'}, {p['phases']}, {p['mppts']},"
-        )
+        w(f"     {'true' if p['battery'] else 'false'}, {p['phases']}, {p['mppts']},")
         w(f"     k{sym}Blocks, sizeof(k{sym}Blocks) / sizeof(k{sym}Blocks[0]),")
         w(f"     k{sym}Mappings, sizeof(k{sym}Mappings) / sizeof(k{sym}Mappings[0]),")
         if p["writes"]:
@@ -757,9 +763,7 @@ def generate(
     w("")
     default_index = next(i for i, p in enumerate(profiles) if p["default"])
     w(f"// [profile] default = true in {profiles[default_index]['path']}.")
-    w(
-        f"const DeviceProfile& defaultProfile() {{ return kProfiles[{default_index}]; }}"
-    )
+    w(f"const DeviceProfile& defaultProfile() {{ return kProfiles[{default_index}]; }}")
     w("")
     w("size_t profileCount() { return sizeof(kProfiles) / sizeof(kProfiles[0]); }")
     w("")
