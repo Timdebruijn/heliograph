@@ -13,6 +13,7 @@
 
 #include <ArduinoJson.h>
 
+#include <cmath>
 #include <optional>
 #include <string>
 
@@ -339,7 +340,12 @@ inline bool parseCommandRequest(const std::string& json, InverterCommand& out,
             error = {"value", "required and must be a number for this command type"};
             return false;
         }
-        parsed.numericValue = doc["value"].as<double>();
+        const double value = doc["value"].as<double>();
+        if (!std::isfinite(value)) {
+            error = {"value", "must be finite"};
+            return false;
+        }
+        parsed.numericValue = value;
     } else if (commandTakesEnumValue(type)) {
         if (!doc["enum_value"].is<int>()) {
             error = {"enum_value", "required and must be an integer for this command type"};
@@ -348,7 +354,18 @@ inline bool parseCommandRequest(const std::string& json, InverterCommand& out,
         parsed.enumValue = doc["enum_value"].as<int>();
     }
     if (doc["request_id"].is<const char*>()) {
-        parsed.requestId = doc["request_id"].as<const char*>();
+        const std::string requestId = doc["request_id"].as<const char*>();
+        if (requestId.size() > kMaxRequestIdLength) {
+            error = {"request_id", "too long"};
+            return false;
+        }
+        // Reserved for auto-generated ids (see kAutoRequestIdPrefix's own comment) -- refusing
+        // rather than silently accepting keeps the two id spaces from ever colliding.
+        if (requestId.rfind(kAutoRequestIdPrefix, 0) == 0) {
+            error = {"request_id", "the 'auto-' prefix is reserved"};
+            return false;
+        }
+        parsed.requestId = requestId;
     }
 
     out = parsed;

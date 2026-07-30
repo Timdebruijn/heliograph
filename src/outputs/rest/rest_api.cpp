@@ -939,7 +939,14 @@ bool RestApi::begin() {
                 return;
             }
             std::string body;
-            json_util::buildCommandAcceptedPayload(*requestId, body);
+            if (!json_util::buildCommandAcceptedPayload(*requestId, body)) {
+                // The command is genuinely enqueued at this point -- only the ack body
+                // failed to serialise. Reported as a server error rather than sending an
+                // empty 202, which would tell the caller "accepted" with no request_id to
+                // poll the outcome by.
+                sendError(request, {500, "payload_too_large", "response exceeded its bound"});
+                return;
+            }
             request->send(202, kJson, body.c_str());
         },
         nullptr,

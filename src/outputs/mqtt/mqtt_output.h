@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <functional>
+#include <mutex>
 #include <optional>
 
 #include "commands/command_dispatcher.h"
@@ -191,6 +192,15 @@ private:
     Diagnostics* diagnostics_ = nullptr;
 
     std::vector<Channel> channels_;
+    /// Guards channels_'s STRUCTURE (channelFor()'s push_back can reallocate it) and each
+    /// Channel's pendingCommandRequestId. Both are touched from two tasks: loop() and
+    /// channelFor() run on whatever task calls loop() (rs485Task), onMessage's new command
+    /// handling runs on espMqttClient's own task -- the same task boundary resyncRequested_
+    /// and relayAckRequested_ already guard against, but those are lone bools; a vector and a
+    /// string need a mutex, not an atomic. Every OTHER Channel field (topics, uniqueBase,
+    /// throttle, discoveryPublished, discoveredSignature) stays single-task (only loop()/
+    /// channelFor() ever touch them), so nothing else needs to take this lock.
+    std::mutex channelsMutex_;
     PublishPolicy        publishPolicy_;
 
     // espMqttClient's setClientId/setWill/setServer/setCredentials store the POINTER, not a

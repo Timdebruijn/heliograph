@@ -711,6 +711,45 @@ static void test_parse_command_request_leaves_request_id_empty_when_omitted() {
     TEST_ASSERT_TRUE(out.requestId.empty());
 }
 
+// kAutoRequestIdPrefix is reserved for submitCommand()'s own auto-generated ids (main.cpp) --
+// a caller that supplies one anyway must be refused, not silently accepted, or the two id
+// spaces could collide and CommandQueue::outcomeFor() would hand back the wrong request's
+// outcome (review, 2026-07-30).
+static void test_parse_command_request_rejects_a_caller_id_using_the_reserved_prefix() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_FALSE(
+        parseCommandRequest(R"({"type":"start","request_id":"auto-3"})", out, error));
+    TEST_ASSERT_EQUAL_STRING("request_id", error.field.c_str());
+}
+
+static void test_parse_command_request_rejects_an_oversized_request_id() {
+    InverterCommand     out;
+    CommandRequestError error;
+    const std::string   tooLong(kMaxRequestIdLength + 1, 'x');
+    const std::string   json = R"({"type":"start","request_id":")" + tooLong + "\"}";
+    TEST_ASSERT_FALSE(parseCommandRequest(json, out, error));
+    TEST_ASSERT_EQUAL_STRING("request_id", error.field.c_str());
+}
+
+static void test_parse_command_request_accepts_a_request_id_at_the_length_limit() {
+    InverterCommand     out;
+    CommandRequestError error;
+    const std::string   atLimit(kMaxRequestIdLength, 'x');
+    const std::string   json = R"({"type":"start","request_id":")" + atLimit + "\"}";
+    TEST_ASSERT_TRUE(parseCommandRequest(json, out, error));
+    TEST_ASSERT_EQUAL_STRING(atLimit.c_str(), out.requestId.c_str());
+}
+
+static void test_parse_command_request_rejects_a_non_finite_value() {
+    InverterCommand     out;
+    CommandRequestError error;
+    // 1e400 overflows a double to +Infinity when ArduinoJson parses it.
+    TEST_ASSERT_FALSE(parseCommandRequest(
+        R"({"type":"set_active_power_limit_percent","value":1e400})", out, error));
+    TEST_ASSERT_EQUAL_STRING("value", error.field.c_str());
+}
+
 // --- shared command payload builders (json_util.h) ------------------------------------------
 //
 // The REST 202/GET-outcome bodies and MQTT's command_topic acks all go through these; one
@@ -804,6 +843,10 @@ int main(int, char**) {
     RUN_TEST(test_parse_command_request_needs_neither_field_for_start);
     RUN_TEST(test_parse_command_request_carries_a_supplied_request_id);
     RUN_TEST(test_parse_command_request_leaves_request_id_empty_when_omitted);
+    RUN_TEST(test_parse_command_request_rejects_a_caller_id_using_the_reserved_prefix);
+    RUN_TEST(test_parse_command_request_rejects_an_oversized_request_id);
+    RUN_TEST(test_parse_command_request_accepts_a_request_id_at_the_length_limit);
+    RUN_TEST(test_parse_command_request_rejects_a_non_finite_value);
 
     RUN_TEST(test_build_command_accepted_payload);
     RUN_TEST(test_build_command_rejected_payload);

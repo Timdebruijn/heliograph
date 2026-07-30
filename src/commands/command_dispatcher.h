@@ -47,8 +47,11 @@ public:
     ///
     /// Thread-safe for its own state. CommandSource names Mqtt, Rest, ModbusTcp and Web, and the
     /// burst counter is read-modify-write, so two concurrent commands could each see the last
-    /// free slot and both take it. (Nothing constructs a dispatcher yet -- there is no write
-    /// path. This is what the contract must be when there is one.)
+    /// free slot and both take it. (g_commandDispatcher is now constructed in main.cpp, but
+    /// dispatch() is only ever called from rs485Task, one at a time -- CommandQueue's single
+    /// pending slot serialises every REST/MQTT submission before it gets here. The race this
+    /// note describes would need a second caller of dispatch() itself, which does not exist
+    /// today; this is the contract the class must still uphold if one ever does.)
     ///
     /// The lock covers ONLY the rate-limiter bookkeeping and is released before the driver runs.
     /// execute() on a real driver is an RS485 transaction that waits up to 2 s for the bus lock

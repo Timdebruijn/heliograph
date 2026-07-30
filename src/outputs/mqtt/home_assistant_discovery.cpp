@@ -219,12 +219,22 @@ uint64_t discoverySignature(const DeviceState& state) {
         sig = fnv1aAppend(sig, m.id);
     }
     // Command entities (below) are derived from the write bitset and, for a numeric one, its
-    // published bounds. Folded in here for the same reason the measurement loop above is:
-    // every shipping driver has this bitset fixed for the life of the firmware today, so this
-    // never actually changes anything yet -- but the moment a profile-declared write row is
-    // marked verified for real hardware, a stale or missing command entity would otherwise sit
-    // there until the next reconnect, the same class of bug the relay-roles fingerprint exists
-    // to prevent.
+    // supported/writable flags and published bounds. Folded in here for the same reason the
+    // measurement loop above is: every shipping driver has this bitset fixed for the life of
+    // the firmware today, so this never actually changes anything yet -- but the moment a
+    // profile-declared write row is marked verified for real hardware, a stale or missing
+    // command entity would otherwise sit there until the next reconnect, the same class of bug
+    // the relay-roles fingerprint exists to prevent.
+    //
+    // Mirrors buildDiscoveryEntities' own gate term for term -- write bitset, then the enum
+    // skip, then numeric supported/writable -- because a fingerprint that reacts to LESS than
+    // the condition it is meant to track is worse than no fingerprint at all: it looks like
+    // protection while silently missing the one flip that matters most. An earlier version of
+    // this loop hashed the bounds unconditionally whenever the write bit was set, never
+    // checking cap.supported/cap.writable at all -- so a NumericCapability pre-populated with
+    // real bounds but supported=false produced the SAME hash before and after supported later
+    // flipped true, even though that is exactly the "verified" transition the comment above
+    // claims to cover (review, 2026-07-30).
     for (size_t i = 0; i < kCommandTypeCount; ++i) {
         const auto type       = static_cast<InverterCommandType>(i);
         const auto capability = requiredCapability(type);
@@ -232,12 +242,24 @@ uint64_t discoverySignature(const DeviceState& state) {
             !state.capabilities.write.test(static_cast<size_t>(capability))) {
             continue;
         }
-        sig = fnv1aAppend(sig, commandTypeName(type));
+        if (commandTakesEnumValue(type)) {
+            // buildDiscoveryEntities never builds an entity for these either -- nothing to
+            // fingerprint.
+            continue;
+        }
         if (commandTakesNumericValue(type)) {
             const NumericCapability& cap = state.capabilities.numeric[i];
-            char                     buf[64];
+            if (!cap.supported || !cap.writable) {
+                // Exactly buildDiscoveryEntities' own refusal: a write bit with no usable
+                // range publishes no entity, so it must leave no trace here either.
+                continue;
+            }
+            sig = fnv1aAppend(sig, commandTypeName(type));
+            char buf[64];
             snprintf(buf, sizeof(buf), "%.6g:%.6g:%.6g", cap.minimum, cap.maximum, cap.step);
             sig = fnv1aAppend(sig, buf);
+        } else {
+            sig = fnv1aAppend(sig, commandTypeName(type));
         }
     }
     return sig;

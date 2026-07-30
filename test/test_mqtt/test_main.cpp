@@ -737,6 +737,40 @@ static void test_discovery_signature_changes_when_a_writable_bound_changes() {
     TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
 }
 
+// The exact scenario a review caught the signature missing (2026-07-30): a NumericCapability
+// can be pre-populated with real bounds ahead of hardware verification, with `supported` still
+// false -- buildDiscoveryEntities correctly builds no entity for that. The day `supported`
+// flips true with the SAME bounds (the verification event itself), the entity set changes from
+// "none" to "one number entity", and the signature must change too, or MqttOutput never
+// notices there is now something new to announce.
+static void test_discovery_signature_changes_when_supported_flips_with_unchanged_bounds() {
+    DeviceState a = pollWritableMockState();
+    const size_t idx =
+        static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent);
+    a.capabilities.numeric[idx].supported = false;
+
+    DeviceState b = a;
+    b.capabilities.numeric[idx].supported = true;
+    // Bounds deliberately IDENTICAL to a's -- only `supported` differs.
+
+    TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
+}
+
+// The mirror image: writable=false must behave the same way, and a command with no numeric
+// value at all (start/stop) must still be able to change the signature via just the write
+// bitset, independent of the numeric-specific gate above.
+static void test_discovery_signature_changes_when_writable_flips_with_unchanged_bounds() {
+    DeviceState a = pollWritableMockState();
+    const size_t idx =
+        static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent);
+    a.capabilities.numeric[idx].writable = false;
+
+    DeviceState b = a;
+    b.capabilities.numeric[idx].writable = true;
+
+    TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
+}
+
 static void test_the_mock_hybrid_gets_battery_and_phase_entities_for_free() {
     // The architectural claim, on the discovery side: no code here knows about batteries or
     // three-phase devices, yet both appear.
@@ -1323,6 +1357,8 @@ int main(int, char**) {
     RUN_TEST(test_start_and_stop_get_button_entities);
     RUN_TEST(test_an_enum_command_gets_no_entity_even_if_the_capability_is_granted);
     RUN_TEST(test_discovery_signature_changes_when_a_writable_bound_changes);
+    RUN_TEST(test_discovery_signature_changes_when_supported_flips_with_unchanged_bounds);
+    RUN_TEST(test_discovery_signature_changes_when_writable_flips_with_unchanged_bounds);
     RUN_TEST(test_the_mock_hybrid_gets_battery_and_phase_entities_for_free);
     RUN_TEST(test_bridge_diagnostic_entities);
     RUN_TEST(test_relay_entities_follow_count_and_enabled);

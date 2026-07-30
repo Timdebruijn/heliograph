@@ -468,7 +468,10 @@ std::atomic<uint32_t> g_commandRequestCounter{0};
 /// paths that could each think they alone hold "the" pending slot.
 std::optional<std::string> submitCommand(const std::string& deviceId, InverterCommand command) {
     if (command.requestId.empty()) {
-        command.requestId = "req-" + std::to_string(g_commandRequestCounter.fetch_add(1) + 1);
+        // kAutoRequestIdPrefix is reserved: parseCommandRequest refuses any caller-supplied id
+        // starting with it, so this can never collide with one a REST/MQTT caller picked.
+        command.requestId =
+            kAutoRequestIdPrefix + std::to_string(g_commandRequestCounter.fetch_add(1) + 1);
     }
     const std::string requestId = command.requestId;
     if (!g_commandQueue.submit({deviceId, std::move(command)})) {
@@ -1223,9 +1226,11 @@ void rs485Task(void* /*arg*/) {
         // there must never be an iteration that both polls a device and dispatches a command,
         // for the same bus-ownership reason discovery and capture cannot overlap a poll either.
         //
-        // Nothing submits to g_commandQueue today (no shipping driver accepts a command, and no
-        // REST route or MQTT topic exists to reach it) -- this drains whatever a future caller
-        // puts there, following exactly the request/consume shape already established above.
+        // REST and MQTT both reach g_commandQueue today (see submitCommand() above) -- what
+        // still does NOT exist is a driver that accepts anything put here: every shipping
+        // driver's execute() returns CommandResult::Unsupported, so this drains a queue that
+        // can genuinely fill but can never yet succeed, following the same request/consume
+        // shape already established above for discovery and capture.
         if (auto request = g_commandQueue.take()) {
             DeviceContext* target = nullptr;
             for (size_t i = 0; i < g_deviceIds.size(); ++i) {
