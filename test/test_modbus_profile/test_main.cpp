@@ -918,8 +918,9 @@ static void test_the_deye_profile_decodes_a_realistic_frame() {
     BlockData blocks[3];
     makeDeyeBlocks(blocks);
 
-    setReg(blocks[0], 96, 0);
-    setReg(blocks[0], 97, 41230);  // E-total     -> 4123.0 kWh
+    // Low word first: both sources read this family that way, so the low half is at 96.
+    setReg(blocks[0], 96, 41230);  // E-total     -> 4123.0 kWh (low half)
+    setReg(blocks[0], 97, 0);      //                           (high half)
     setReg(blocks[0], 108, 173);   // E-today     -> 17.3 kWh
     setReg(blocks[0], 109, 3210);  // PV1 V       -> 321.0 V
     setReg(blocks[0], 110, 42);    // PV1 I       -> 4.2 A
@@ -1195,19 +1196,21 @@ static void test_the_sungrow_profile_decodes_a_realistic_frame() {
     setReg(blocks[0], 5011, 62);     // MPPT1 I     -> 6.2 A
     setReg(blocks[0], 5012, 3310);   // MPPT2 V     -> 331.0 V
     setReg(blocks[0], 5013, 58);     // MPPT2 I     -> 5.8 A
-    setReg(blocks[0], 5016, 0);
-    setReg(blocks[0], 5017, 4050);   // DC power    -> 4050 W (high word first)
+    // LOW WORD FIRST, like every 32-bit value on this family: the low half sits at the lower
+    // address. Read the default way round these would decode as hundreds of megawatts.
+    setReg(blocks[0], 5016, 4050);   // DC power    -> 4050 W (low half)
+    setReg(blocks[0], 5017, 0);      //                        (high half)
     setReg(blocks[0], 5018, 2338);   // Phase A V   -> 233.8 V
     setReg(blocks[1], 5241, 5002);   // frequency   -> 50.02 Hz
     setReg(blocks[2], 13001, 187);   // E-today     -> 18.7 kWh
-    setReg(blocks[2], 13002, 0);
-    setReg(blocks[2], 13003, 30150); // E-total     -> 3015.0 kWh
+    setReg(blocks[2], 13002, 30150); // E-total     -> 3015.0 kWh (low half)
+    setReg(blocks[2], 13003, 0);
     setReg(blocks[2], 13019, 5240);  // Batt V      -> 524.0 V
     setReg(blocks[2], 13022, 872);   // Batt SoC    -> 87.2 % (tenths!)
     setReg(blocks[2], 13024, 231);   // Batt temp   -> 23.1 °C
     setReg(blocks[2], 13030, 141);   // Phase A I   -> 14.1 A
-    setReg(blocks[2], 13033, 0);
-    setReg(blocks[2], 13034, 3720);  // AC power    -> 3720 W
+    setReg(blocks[2], 13033, 3720);  // AC power    -> 3720 W (low half)
+    setReg(blocks[2], 13034, 0);
 
     MeasurementSet m;
     applyProfile(*findProfile("sungrow_sh_hybrid"), blocks, 3, m, 1000);
@@ -1568,6 +1571,51 @@ static void test_the_mic_and_min_profiles_share_a_layout_and_differ_in_strings()
     TEST_ASSERT_FALSE(min->writes[0].verified);
 }
 
+// Word order is a per-FAMILY property, and this pins it per family rather than per row.
+//
+// This is the test that would have caught the bug it exists because of. The Sungrow profile
+// originally declared low-word-first on its battery-power row alone, with a comment asserting
+// that row was "the opposite of every other 32-bit value in this file" -- which was false: the
+// source declares `swap: word` on all 21 of its 32-bit sensors. Six rows were therefore out by a
+// factor of 65536, and the decode test did NOT catch it, because that test was written from the
+// profile and so agreed with the mistake.
+//
+// A frame-decoding test can only confirm the profile matches itself. Asserting the CONVENTION
+// independently is what catches a row that was missed.
+static void test_the_declared_word_order_is_consistent_within_each_family() {
+    struct Family {
+        const char* id;
+        bool        lowWordFirst;
+        const char* why;
+    };
+    // Verified against each profile's own sources, mechanically, not by reading its comments.
+    static const Family kFamilies[] = {
+        {"sungrow_sh_hybrid", true, "all 21 of source B's 32-bit sensors carry swap: word"},
+        {"deye_sun_xk_sg", true, "source A is little-endian; source B defaults low_word_first"},
+        {"solis_rhi_hybrid", false, "source B lists [low, high], so high sits at the lower address"},
+        {"huawei_sun2000", false, "the library decodes with a big-endian struct format"},
+        {"goodwe_et_hybrid", false, "read_bytes4 is int.from_bytes(..., byteorder='big')"},
+        {"mic_tl_x", false, "growatt-local assembles (value << 16) | next"},
+        {"min_tl_x", false, "same map and same assembly as the MIC"},
+    };
+
+    for (const Family& f : kFamilies) {
+        const DeviceProfile* p = findProfile(f.id);
+        TEST_ASSERT_NOT_NULL_MESSAGE(p, f.id);
+        size_t checked = 0;
+        for (size_t i = 0; i < p->mappingCount; ++i) {
+            const RegisterMapping& m = p->mappings[i];
+            if (m.words != 2) {
+                continue;  // word order is meaningless for a single register
+            }
+            ++checked;
+            TEST_ASSERT_EQUAL_MESSAGE(f.lowWordFirst, m.lowWordFirst, f.why);
+        }
+        // A family with no 32-bit rows would pass this vacuously, so require at least one.
+        TEST_ASSERT_TRUE_MESSAGE(checked > 0, f.id);
+    }
+}
+
 static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     MockTransport transport;
     echoWrites(transport);
@@ -1890,6 +1938,7 @@ int main(int, char**) {
     RUN_TEST(test_the_goodwe_profile_declares_no_setpoints);
     RUN_TEST(test_the_goodwe_profile_holds_back_the_unsourced_channels);
     RUN_TEST(test_the_mic_and_min_profiles_share_a_layout_and_differ_in_strings);
+    RUN_TEST(test_the_declared_word_order_is_consistent_within_each_family);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);

@@ -40,7 +40,9 @@ glyph codes did not survive extraction**. Where that happened, the row is identi
 profile by its address, type and unit from the document, with the *name* taken from source B.
 That split is called out per row in the profile comments; it is not a detail to paper over.
 
-## The numbering trap
+## Two traps, and both apply to every row
+
+### The numbering trap
 
 **The vendor document numbers registers from 1. Modbus addresses them from 0.**
 
@@ -54,6 +56,22 @@ relationship was verified mechanically across **all 88** of its addressed entrie
 
 Every address in the profile is a PDU address. Off by one here reads a neighbouring register that
 is usually also a plausible number — the kind of wrong that survives a casual bench check.
+
+### The word-order trap
+
+**This family stores every double-word value LOW WORD FIRST.** Source B declares `swap: word` on
+**all 21** of its 32-bit sensors — checked mechanically, no exceptions — and the vendor document
+says the same in its type definitions.
+
+So every `u32`/`s32` row in the profile carries `word_order = "low_first"`. An earlier version of
+this document and the profile had it on the battery-power row alone, with a comment claiming that
+row was "the opposite of every other 32-bit value in this map". That was false, and it cost six
+rows a factor of 65536 each — 4 kW of PV would have published as about 262 megawatts.
+
+It was caught in review by checking the source mechanically instead of believing the comment, and
+the profile now has a test asserting the convention per family rather than per row. The
+frame-decoding test did **not** catch it: that test was written from the profile, so it agreed
+with the mistake.
 
 ## Mapped registers
 
@@ -115,8 +133,7 @@ the datasheet steers you here rather than to the unsigned alternative at 13022.
 Two things follow:
 
 1. **`word_order = "low_first"`.** Source B reads this pair with `swap: word` — the low half sits
-   at the *lower* address, the opposite of every other 32-bit value in this map. Read the default
-   way round, 2 kW decodes as roughly 34 megawatts.
+   at the *lower* address. Read the default way round, 2 kW decodes as roughly 34 megawatts.
 2. **`scale = -1`.** Our canonical convention is positive while *charging* (the SunSpec storage
    convention). This device states the opposite, so the sign is flipped in the profile rather
    than in C++.

@@ -417,6 +417,11 @@ these **must not** change; only append at the end.
 | 12 | error code | 27 | `battery.discharge_power` |
 | 13 | `ac.phase_l1.power` | 28 | `grid.import_power` |
 | 14 | `ac.phase_l2.voltage` | 29 | `grid.export_power` |
+| 30 | `dc.mppt_3.voltage` | 35 | `dc.mppt_4.power` |
+| 31 | `dc.mppt_3.current` | 36 | `dc.mppt_5.voltage` |
+| 32 | `dc.mppt_3.power` | 37 | `dc.mppt_5.current` |
+| 33 | `dc.mppt_4.voltage` | 38 | `dc.mppt_5.power` |
+| 34 | `dc.mppt_4.current` | 39 | `load.power` |
 
 Bit `n` is in register `610 + n/16`, at bit position `n % 16`.
 

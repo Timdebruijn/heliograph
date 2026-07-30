@@ -266,9 +266,24 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
     static const ValidityBit kMpptPowerBit[] = {
         ValidityBit::DcMppt1Power, ValidityBit::DcMppt2Power, ValidityBit::DcMppt3Power,
         ValidityBit::DcMppt4Power, ValidityBit::DcMppt5Power};
+    // All SIX arrays, not just the first. The loop below indexes every one of them with the same
+    // `i`, so a mismatch in any of them is either an out-of-bounds read or -- worse, because it
+    // compiles and runs -- a string's value paired with another string's validity bit. An earlier
+    // version asserted only on kMpptVoltage while its comment claimed to guard "the list", which
+    // left five of the six unguarded.
     static_assert(sizeof(kMpptVoltage) / sizeof(kMpptVoltage[0]) == reg::kMaxMpptSlots,
                   "one id per published MPPT slot: a shorter list silently drops a string, a "
                   "longer one writes over the battery block at register 300");
+    static_assert(sizeof(kMpptCurrent) / sizeof(kMpptCurrent[0]) == reg::kMaxMpptSlots,
+                  "MPPT current ids must match the slot count");
+    static_assert(sizeof(kMpptPower) / sizeof(kMpptPower[0]) == reg::kMaxMpptSlots,
+                  "MPPT power ids must match the slot count");
+    static_assert(sizeof(kMpptVoltageBit) / sizeof(kMpptVoltageBit[0]) == reg::kMaxMpptSlots,
+                  "MPPT voltage validity bits must match the slot count");
+    static_assert(sizeof(kMpptCurrentBit) / sizeof(kMpptCurrentBit[0]) == reg::kMaxMpptSlots,
+                  "MPPT current validity bits must match the slot count");
+    static_assert(sizeof(kMpptPowerBit) / sizeof(kMpptPowerBit[0]) == reg::kMaxMpptSlots,
+                  "MPPT power validity bits must match the slot count");
     for (uint16_t i = 0; i < reg::kMaxMpptSlots; ++i) {
         const uint16_t base = static_cast<uint16_t>(reg::kMpptBase + i * reg::kMpptStride);
         publishMeasurement(state, kMpptVoltage[i], base + reg::kMpptVoltageOffset,

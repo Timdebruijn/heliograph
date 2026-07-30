@@ -28,6 +28,16 @@
 #
 # Every address below is a PDU address. Off by one here reads a neighbouring register that is
 # usually also a valid number, which is the kind of wrong that survives a casual bench check.
+#
+# THE SECOND TRAP, and it applies to every 32-bit row here: this family stores double-word values
+# LOW WORD FIRST. Source B declares `swap: word` on all 21 of its 32-bit sensors -- checked
+# mechanically, no exceptions -- and the vendor document says the same in its type definitions.
+#
+# So every u32/s32 row below carries `word_order = "low_first"`. An earlier version of this file
+# had it on the battery-power row alone, with a comment asserting that row was "the opposite of
+# every other 32-bit value in this file". That was simply false, and it cost six rows a factor of
+# 65536 each: 4 kW of PV would have published as roughly 262 megawatts. Caught in review, by
+# checking the source mechanically rather than believing the comment.
 # ------------------------------------------------------------------------------------------
 
 [profile]
@@ -116,6 +126,7 @@ space = "input"
 address = 5016
 type = "u32"
 scale = 1.0
+word_order = "low_first"
 unit = "W"
 
 # --- AC side ------------------------------------------------------------------------------
@@ -129,6 +140,7 @@ space = "input"
 address = 13033
 type = "s32"
 scale = 1.0
+word_order = "low_first"
 unit = "W"
 
 [[register]]                    # vendor doc row 22 (5019, U16, 0.1V) + source B
@@ -194,6 +206,7 @@ space = "input"
 address = 13002
 type = "u32"
 scale = 0.1
+word_order = "low_first"
 unit = "kWh"
 
 # --- Battery ------------------------------------------------------------------------------
@@ -209,9 +222,8 @@ unit = "kWh"
 #
 # Two things follow, and neither could be expressed before this profile existed:
 #
-#   1. word_order = "low_first". Source B reads this pair with `swap: word`, i.e. the LOW half
-#      sits at the lower address -- the opposite of every other 32-bit value in this file. Read
-#      the default way round, 2 kW decodes as about 34 megawatts.
+#   1. word_order = "low_first" -- like EVERY 32-bit value in this family, see the note at the
+#      top of this file. Read the default way round, 2 kW decodes as about 34 megawatts.
 #   2. scale = -1. Our convention is positive = charging (the SunSpec storage convention); this
 #      device states the opposite, so the sign is flipped here in data rather than in C++.
 #
@@ -264,6 +276,7 @@ space = "input"
 address = 13040
 type = "u32"
 scale = 0.1
+word_order = "low_first"
 unit = "kWh"
 
 [[register]]                    # vendor doc (13027, U32, 0.1kWh) + source B
@@ -273,6 +286,7 @@ space = "input"
 address = 13026
 type = "u32"
 scale = 0.1
+word_order = "low_first"
 unit = "kWh"
 
 # --- House load ----------------------------------------------------------------------------
@@ -290,6 +304,7 @@ space = "input"
 address = 13007
 type = "s32"
 scale = 1.0
+word_order = "low_first"
 unit = "W"
 
 # ==============================================================================================

@@ -39,6 +39,16 @@ as a negation would invert every signed row in the file.
 `ha_definitions/deye_hybrid_ha.yaml` (same MD5). It is source B in another format. Counting it
 would have turned one implementation into two and defeated the whole point of cross-checking.
 
+## Word order: low word first
+
+**Every double-word value on this family stores its LOW half at the lower address.** Source A's
+helper says so outright ("All inverters are little-endian"); source B's `DoubleRegisterSensor`
+takes `low_word_first=True` as its default and the relevant row does not override it.
+
+Only one mapped row here is 32-bit — `energy.total` at 96 — and it carries
+`word_order = "low_first"`. Read the default way round it would publish roughly 270 million kWh,
+which is obvious; the same mistake on a power register would not be.
+
 ## The double-assignment in source A
 
 Source A's `single_phase.py` claims four registers twice. Its AUX/generator-port block takes

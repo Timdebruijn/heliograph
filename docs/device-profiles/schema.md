@@ -115,9 +115,12 @@ a fixed pattern, one per register width. Decoded as a number that is not obvious
 inverter asleep for the night reports 3276.7 °C, and a hybrid map pointed at an inverter with no
 battery reports 6553.5 % state of charge, all night, every night.
 
-`invalid` names that pattern. A register holding it is left undeclared — the same outcome as a
-register whose block was never read, and the same rule as everywhere else here: **missing is not
-zero**, and a channel we cannot read is absent rather than invented.
+`invalid` names that pattern. A register holding it is skipped — exactly as a register whose
+block was never read is skipped, and with the same consequences: a channel that has never been
+seen stays undeclared, and one that WAS read successfully on an earlier poll keeps its last value
+until the normal staleness window expires, after which every output publishes null. The rule is
+the one that applies everywhere here: **missing is not zero**, and a channel we cannot read is
+absent rather than invented.
 
 Take the value from documentation, not from a hunch about what looks like a sentinel. A real
 reading can sit right next to one (`0x7FFE` is a perfectly good temperature), and the comparison

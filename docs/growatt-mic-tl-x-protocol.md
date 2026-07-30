@@ -154,15 +154,18 @@ device so far:
 - it needs no DRM wiring and no relay board, so it works on the plain RS485-CAN board.
 
 It is declared in the profile as a `[[write]]` row against the canonical
-`set_active_power_limit_percent` command — and it is **dormant**. Two independent gates stand
-between that row and a byte on the bus:
+`set_active_power_limit_percent` command — and it is **dormant**, held by a single gate:
+`verified = false` in the profile. Only a bench session flips it.
 
-1. `verified = false` in the profile. Only a bench session flips this.
-2. The driver has no write path at all yet; `execute()` returns `Unsupported`, and the
-   descriptor declares `supportsWrite = false`.
+That used to be two gates. The second was "the driver has no write path at all", which stopped
+being true when mode setpoints landed: `execute()` now writes a single holding register over
+FC06 and the descriptor declares `supportsWrite = true`. So this row is one confirmed bench
+session away from being live, not two — see
+[write-path.md](device-profiles/write-path.md) for what that path can and cannot do.
 
-Both are asserted in `test/test_modbus_profile/test_main.cpp`, so neither can be dropped by
-accident.
+The gate is asserted in `test/test_modbus_profile/test_main.cpp`, both as a fact about the row
+and as a fact about the driver: a device on this profile advertises no setpoint and refuses the
+command.
 
 One note for whoever does the bench session: some protocol revisions describe **255** as
 "limit disabled". The declared bound stops at 100 rather than allowing 255, because a
@@ -193,8 +196,10 @@ factory default 1 (Growatt Protocol II). Connect one inverter at a time — whil
 still on address 1 you cannot address them individually — write the new address, then move to
 the next unit and chain them once each has its own.
 
-Heliograph has no write path, so this route needs a generic Modbus tool for the one-time
-write (`mbpoll` or similar). `tools/read_modbus.py` in this repo reads only.
+Heliograph cannot do this write for you: its write path only serves setpoints a profile
+declares as a `[[write]]` row, and a device's Modbus address is not one of them. So this route
+needs a generic Modbus tool for the one-time write (`mbpoll` or similar); `tools/read_modbus.py`
+in this repo reads only.
 
 Whichever route you take, verify before chaining: with a single inverter on the bus, poll each
 address in turn and confirm exactly one answers, at the address you expect.

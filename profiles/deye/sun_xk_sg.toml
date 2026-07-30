@@ -184,7 +184,12 @@ type = "u16"
 scale = 0.1
 unit = "V"
 
-[[register]]                    # high confidence — both sources, both signed
+# Signedness is SINGLE-SOURCED, and the row says so rather than claiming agreement. Source B
+# declares signed=True; source A's factor is a positive 0.01, which by its own convention
+# (negative factor = signed, see the header) means it reads this register UNSIGNED. The two
+# decode identically for any current a working inverter draws, and s16 is the safer pick on a
+# hybrid that can reverse -- but "both sources agree" was the wrong thing to write here.
+[[register]]                    # address/scale: both sources. Signedness: source B only.
 measurement = "ac.phase_l1.current"
 display_name = "Inverter Current"
 space = "holding"
@@ -204,13 +209,19 @@ type = "u16"
 scale = 0.1
 unit = "kWh"
 
-[[register]]                    # high confidence — both sources (A reads (96,97) as a pair)
+# LOW WORD FIRST, like every double-word value on this family. Source A's helper says so in as
+# many words ("All inverters are little-endian"); source B's DoubleRegisterSensor defaults to
+# `low_word_first=True` and this row does not override it. Read the default way round, 4123 kWh
+# would publish as roughly 270 million kWh -- obvious here, but the same mistake on a power
+# register is not.
+[[register]]                    # high confidence — both sources, including the word order
 measurement = "energy.total"
 display_name = "Energy Total"
 space = "holding"
 address = 96
 type = "u32"
 scale = 0.1
+word_order = "low_first"
 unit = "kWh"
 
 # --- Battery ------------------------------------------------------------------------------

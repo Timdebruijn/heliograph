@@ -374,6 +374,15 @@ def parse_profile(
         if invalid is not None:
             if isinstance(invalid, bool) or not isinstance(invalid, int):
                 raise ProfileError(f"{rw}: invalid must be an integer raw value")
+            # Zero is refused outright. It is a legitimate reading almost everywhere in this
+            # domain -- AC power at night, battery current at rest, a string in the dark -- so a
+            # sentinel of 0 would permanently and silently suppress real zeroes, which is the one
+            # value this project is most careful never to fabricate OR discard.
+            if invalid == 0:
+                raise ProfileError(
+                    f"{rw}: invalid must not be 0 -- zero is a real reading on almost every "
+                    f"channel, and a sentinel of 0 would suppress it forever"
+                )
             limit = 0xFFFF if words == 1 else 0xFFFFFFFF
             if not 0 <= invalid <= limit:
                 raise ProfileError(
