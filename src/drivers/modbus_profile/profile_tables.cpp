@@ -46,7 +46,7 @@ void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t 
         }
 
         measurements.declare(mp.measurementId, mp.type, mp.unit, mp.displayName);
-        measurements.set(mp.measurementId, static_cast<double>(raw) * mp.scale, ts);
+        measurements.set(mp.measurementId, static_cast<double>(raw) * mp.scale + mp.offset, ts);
     }
 }
 

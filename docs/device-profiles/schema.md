@@ -93,7 +93,7 @@ map, not about the wire. See [prometheus.md](../prometheus.md).
 ## `[[register]]` — 1 or more per file
 
 One canonical measurement fed by one register (or register pair).
-Decoded as `value = raw * scale`, after sign extension for `s16`/`s32`.
+Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
@@ -102,8 +102,27 @@ Decoded as `value = raw * scale`, after sign extension for `s16`/`s32`.
 | `space` | string | yes | `"input"` or `"holding"`. |
 | `address` | int | yes | First register. A 32-bit type also reads `address + 1`; the **high word comes first** (the convention nearly every Modbus inverter uses — see word order caveat in [adding-a-device.md](../adding-a-device.md)). |
 | `type` | string | yes | `u16`, `s16`, `u32`, `s32`. `s*` is two's-complement signed — use it for anything that can be negative (power that can flow both ways, temperatures). |
-| `scale` | number | no (1.0) | Multiplier for the raw integer. A device reporting tenths uses `0.1`. Must not be 0. |
+| `scale` | number | no (1.0) | Multiplier for the raw integer. A device reporting tenths uses `0.1`. Must not be 0. **May be negative** — see below. |
+| `offset` | number | no (0.0) | Added after scaling. For registers that store a *biased* value so it never goes negative on the wire: several vendors report `1000` for 0 °C, which is `scale = 0.1, offset = -100`. |
 | `unit` | string | yes | One of `W` `V` `A` `Hz` `°C` (or `C`) `kWh` `h` `%` `dBm` `s`. The measurement *type* (Power, Voltage, …) is derived from the unit, so you never touch internal enums. |
+
+### Correcting a sign convention
+
+A **negative `scale`** negates the reading, which is how a device that reports the opposite sign
+convention to ours gets corrected in the profile. The canonical convention is
+`battery.power` positive while *charging* (see
+[canonical-measurements.md](canonical-measurements.md)); a device reporting positive while
+discharging maps with `scale = -1`.
+
+Only do this when a source *states* the direction. If the register is documented merely as
+"battery power" with no sign convention given, leave the row out and settle it on the bench —
+getting it backwards produces a dashboard that is confidently inverted, which is worse than a
+missing channel.
+
+Neither `offset` nor a negative `scale` is accepted on a `[[write]]` row: the write path computes
+`raw = value / scale`, refuses a negative raw, and does not invert an offset. The build rejects
+both rather than emitting a row that passes review and then silently refuses or mis-writes every
+value.
 
 ## `[[write]]` — optional: writable setpoint registers
 

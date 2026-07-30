@@ -191,8 +191,11 @@ exactly like an inverter that does not report it.
 4. Check the published values: `/api/v1/status`, MQTT, Home Assistant. Watch a full
    day if you can — sunrise, full sun, and (for hybrids) charge→discharge crossover,
    where sign conventions reveal themselves. `battery.power` must be **positive while
-   charging** (our convention; negate-on-map is not supported yet, so if your device
-   reports it inverted, note it and open an issue).
+   charging** (our convention). A device that reports it inverted is corrected in the
+   profile with a negative `scale` — see
+   [schema.md](device-profiles/schema.md#correcting-a-sign-convention). Only do that once
+   you have *seen* which way it points: a confidently inverted battery graph is worse than
+   no battery graph.
 
 ### Before opening the PR
 

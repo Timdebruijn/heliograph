@@ -96,6 +96,81 @@ static void test_pv_power_is_an_unsigned_32bit_pair() {
     TEST_ASSERT_EQUAL_DOUBLE(1200.0, m.find(measurement_id::kDcPowerTotal)->value);
 }
 
+// A biased register: the device stores temperature offset so it never goes negative on the wire,
+// reporting 1000 for 0 degrees. Without an offset the choice was publishing 100 C or publishing
+// no temperature at all, and temperature is not an optional channel -- it is the one that says
+// an inverter is derating in a hot loft.
+static void test_a_biased_register_decodes_through_its_offset() {
+    static const RegBlock kBlock[] = {{RegSpace::Input, 0, 8}};
+    static const RegisterMapping kMappings[] = {
+        {measurement_id::kTemperature, MeasurementType::Temperature, Unit::Celsius, "Temperature",
+         RegSpace::Input, 5, 1, 0.1, false, -100.0},
+    };
+    DeviceProfile p = *findProfile("mic_tl_x");
+    p.blocks        = kBlock;
+    p.blockCount    = 1;
+    p.mappings      = kMappings;
+    p.mappingCount  = 1;
+
+    BlockData blocks[1];
+    blocks[0] = {RegSpace::Input, 0, 8, {}};
+
+    setReg(blocks[0], 5, 1000);  // the biased zero
+    MeasurementSet m;
+    applyProfile(p, blocks, 1, m, 1000);
+    // WITHIN, not EQUAL: 1000 * 0.1 is 100.00000000000001 in binary floating point, so
+    // subtracting the bias leaves ~5.6e-15 rather than a clean zero. That is the representation,
+    // not the decode -- every output rounds it to 0.0 at one decimal. EQUAL_DOUBLE cannot express
+    // this: Unity scales its tolerance by the EXPECTED value, so against 0.0 it demands exact
+    // equality, which no scale-then-bias arithmetic can promise.
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.0, m.find(measurement_id::kTemperature)->value);
+
+    setReg(blocks[0], 5, 1234);  // 23.4 C
+    MeasurementSet warm;
+    applyProfile(p, blocks, 1, warm, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(23.4, warm.find(measurement_id::kTemperature)->value);
+
+    // And below the bias is genuinely below zero, which is the whole reason the bias exists.
+    setReg(blocks[0], 5, 950);
+    MeasurementSet cold;
+    applyProfile(p, blocks, 1, cold, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(-5.0, cold.find(measurement_id::kTemperature)->value);
+}
+
+// A negative scale negates, which is how a device reporting the opposite sign convention to ours
+// is corrected in data rather than in C++. Pinned because the docs claimed for a while that this
+// was impossible while the decoder had always allowed it -- so the capability was real and
+// undocumented, which is the state in which somebody eventually "fixes" it by adding an abs().
+static void test_a_negative_scale_negates_the_reading() {
+    static const RegBlock kBlock[] = {{RegSpace::Input, 0, 8}};
+    static const RegisterMapping kMappings[] = {
+        {measurement_id::kBatteryPower, MeasurementType::Power, Unit::Watt, "Battery Power",
+         RegSpace::Input, 2, 1, -1.0, true, 0.0},
+    };
+    DeviceProfile p = *findProfile("mic_tl_x");
+    p.blocks        = kBlock;
+    p.blockCount    = 1;
+    p.mappings      = kMappings;
+    p.mappingCount  = 1;
+
+    BlockData blocks[1];
+    blocks[0] = {RegSpace::Input, 0, 8, {}};
+
+    // Raw 500 in a "positive means discharging" device is 500 W leaving the battery, which is
+    // -500 W in our convention (positive = charging).
+    setReg(blocks[0], 2, 500);
+    MeasurementSet m;
+    applyProfile(p, blocks, 1, m, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(-500.0, m.find(measurement_id::kBatteryPower)->value);
+
+    // And the sign extension still happens first: raw -200 (charging, on that device) becomes
+    // +200 W here rather than 65336.
+    setReg(blocks[0], 2, 0xFF38);
+    MeasurementSet charging;
+    applyProfile(p, blocks, 1, charging, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(200.0, charging.find(measurement_id::kBatteryPower)->value);
+}
+
 static void test_a_register_in_an_unread_block_is_left_undeclared() {
     // Only the base block present; battery registers live in a block we did not pass.
     BlockData blocks[1];
@@ -904,6 +979,8 @@ int main(int, char**) {
     RUN_TEST(test_temperature_is_signed);
     RUN_TEST(test_battery_power_is_a_signed_32bit_pair);
     RUN_TEST(test_pv_power_is_an_unsigned_32bit_pair);
+    RUN_TEST(test_a_biased_register_decodes_through_its_offset);
+    RUN_TEST(test_a_negative_scale_negates_the_reading);
     RUN_TEST(test_a_register_in_an_unread_block_is_left_undeclared);
     RUN_TEST(test_find_register_reports_out_of_range);
     RUN_TEST(test_a_full_poll_decodes_measurements_over_the_bus);

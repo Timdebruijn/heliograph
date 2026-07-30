@@ -324,6 +324,11 @@ def parse_profile(
         unit = _require(r, "unit", str, rw)
         if unit not in UNITS:
             raise ProfileError(f"{rw}: unknown unit '{unit}'; known: {sorted(UNITS)}")
+        # value = raw * scale + offset. Zero for almost every register; not zero for the ones
+        # that store a biased temperature so it never goes negative on the wire.
+        offset = r.get("offset", 0.0)
+        if isinstance(offset, bool) or not isinstance(offset, (int, float)):
+            raise ProfileError(f"{rw}: offset must be a number")
         parsed_regs.append(
             {
                 "measurement": mid,
@@ -332,6 +337,7 @@ def parse_profile(
                 "address": address,
                 "type": rtype,
                 "scale": float(scale),
+                "offset": float(offset),
                 "unit": unit,
             }
         )
@@ -381,6 +387,24 @@ def parse_profile(
         scale = wr.get("scale", 1.0)
         if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale == 0:
             raise ProfileError(f"{ww}: scale must be a non-zero number")
+        # Read rows may carry a negative scale -- that is how a device reporting the opposite sign
+        # convention to ours gets corrected. A WRITE row may not: execute() computes
+        # raw = value / scale and refuses anything below zero as out of range, so a negative scale
+        # here produces a row that passes every check and then rejects every value sent to it.
+        if scale < 0:
+            raise ProfileError(
+                f"{ww}: scale must be positive on a write row -- the write path computes "
+                f"raw = value / scale and refuses a negative raw, so a negative scale makes "
+                f"the row silently undispatchable (negative scale IS allowed on read rows)"
+            )
+        # Same reason, one step further: the inverse of raw * scale + offset is
+        # (value - offset) / scale, which the write path does not implement. Accepting the key
+        # here would write a value the device reads back as something else.
+        if "offset" in wr:
+            raise ProfileError(
+                f"{ww}: offset is not supported on a write row (read rows only) -- the write "
+                f"path does not invert it, so the register would receive the wrong value"
+            )
         unit = _require(wr, "unit", str, ww)
         if unit not in UNITS:
             raise ProfileError(f"{ww}: unknown unit '{unit}'; known: {sorted(UNITS)}")
@@ -482,7 +506,8 @@ def generate(
             )
             w(
                 f"     RegSpace::{SPACES[r['space']]}, {r['address']}, {words}, "
-                f"{cpp_float(r['scale'])}, {'true' if signed else 'false'}}},"
+                f"{cpp_float(r['scale'])}, {'true' if signed else 'false'}, "
+                f"{cpp_float(r['offset'])}}},"
             )
         w("};")
         w(f"constexpr RegBlock k{sym}Blocks[] = {{")

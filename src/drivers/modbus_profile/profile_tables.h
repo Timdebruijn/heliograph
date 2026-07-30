@@ -33,8 +33,15 @@ struct RegisterMapping {
     RegSpace        space;
     uint16_t        address;     ///< first register
     uint8_t         words;       ///< 1 = 16-bit, 2 = 32-bit (high word first)
-    double          scale;       ///< raw * scale = value
+    double          scale;       ///< raw * scale + offset = value
     bool            isSigned;    ///< interpret the raw integer as two's-complement
+    /// Added to the scaled value. Zero for almost every register, and not zero for the ones that
+    /// matter: several vendors store temperature biased so it never goes negative on the wire,
+    /// reporting 1000 for 0 °C. Without this the only options were publishing 100 °C or not
+    /// publishing temperature at all, and temperature is not an optional channel.
+    ///
+    /// Defaulted so it can be appended here without touching hand-written aggregate initialisers.
+    double offset = 0.0;
 };
 
 /// A contiguous register range to read in one Modbus transaction. Kept small and explicit so a
