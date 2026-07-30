@@ -16,6 +16,7 @@
 #include "outputs/json_util.h"
 #include "outputs/mqtt/announced_devices.h"
 #include "outputs/mqtt/home_assistant_discovery.h"
+#include "outputs/mqtt/mqtt_output.h"
 #include "outputs/mqtt/mqtt_payloads.h"
 #include "outputs/mqtt/mqtt_topics.h"
 #include "outputs/mqtt/publish_policy.h"
@@ -1157,6 +1158,32 @@ static void test_an_unchanged_line_up_forgets_nothing() {
 }
 
 
+/// The memory guard in front of every publish (audit F5). espMqttClient has this policy
+/// already but compares against max(internal, PSRAM), so on a board with 8 MB of idle PSRAM it
+/// never fires while the allocation itself comes from internal SRAM. This predicate is that
+/// same 16 KB intent, measured on the pool that actually pays.
+///
+/// This pins the PREDICATE, not the wiring around it. MqttOutput itself is ESP32-only (no
+/// fake espMqttClient exists to run its loop() on the host), so the rule added alongside this
+/// guard -- a refused publish must not be recorded as delivered, or a Home Assistant entity or
+/// a relay ack can go missing until an unrelated reconnect or signature change retriggers it,
+/// see loop()'s discovery/relay-ack commits in mqtt_output.cpp -- is verified by review and by
+/// the compile/layering/build checks, not by a test that can inject a refusal and observe the
+/// retry. Recorded here rather than left implicit (review, 2026-07-30).
+static void test_publish_memory_guard() {
+    // Comfortable: the figure a healthy 6CH reports for this exact call -- 90 100 B, measured
+    // 2026-07-30 via max_alloc_heap_bytes, which main.cpp fills from ESP.getMaxAllocHeap().
+    TEST_ASSERT_FALSE(refusePublishForMemory(90100));
+    // The threshold is a floor, not a target: at exactly the floor there is still room.
+    TEST_ASSERT_FALSE(refusePublishForMemory(kMinFreeBlockBytes));
+    TEST_ASSERT_TRUE(refusePublishForMemory(kMinFreeBlockBytes - 1));
+    // The case this exists for: PSRAM would report megabytes free, internal SRAM is nearly
+    // gone. Only the internal figure reaches this function, so the answer is refuse.
+    TEST_ASSERT_TRUE(refusePublishForMemory(4096));
+    TEST_ASSERT_TRUE(refusePublishForMemory(0));
+}
+
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_every_announceable_measurement_is_clearable);
@@ -1223,5 +1250,6 @@ int main(int, char**) {
     RUN_TEST(test_forced_refresh_after_the_interval);
     RUN_TEST(test_a_new_channel_publishes);
     RUN_TEST(test_reset_forces_the_next_publish);
+    RUN_TEST(test_publish_memory_guard);
     return UNITY_END();
 }

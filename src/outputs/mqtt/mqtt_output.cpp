@@ -36,8 +36,14 @@ espMqttClient g_client;
 ///
 /// Returns the same bool the one careful call site already wanted, so forgetDevice keeps its
 /// existing semantics.
+///
+/// The memory check in front of it is the library's own policy applied to the right pool --
+/// refusePublishForMemory() in the header carries the whole argument. Counted through the same
+/// path as a client refusal: to anything watching, both mean "this message never left", which
+/// is the question mqtt_publish_failure_total answers.
 bool MqttOutput::publishTracked(const char* topic, uint8_t qos, bool retain, const char* payload) {
-    if (g_client.publish(topic, qos, retain, payload) != 0) {
+    if (!refusePublishForMemory(ESP.getMaxAllocHeap()) &&
+        g_client.publish(topic, qos, retain, payload) != 0) {
         return true;
     }
     if (diagnostics_ != nullptr) {
@@ -184,11 +190,19 @@ MqttOutput::Channel& MqttOutput::channelFor(const DeviceView& view, const Bridge
     return channels_.back();
 }
 
-void MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
+bool MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
                                   const BridgeInfo& bridge) {
     if (!config_.discoveryEnabled) {
-        return;
+        // Matches the old behaviour byte for byte: discoveryPublished never becomes true via
+        // this path, so loop() calls onConnected() again next tick too. Not this pass's bug to
+        // fix; changing it would be an unrelated behaviour change smuggled into a review fix.
+        return false;
     }
+    // Every publish counted, same idiom forgetDevice() already uses below: a refusal must not
+    // read as delivered, or the caller marks this channel "discovery done" while some entities
+    // never reached Home Assistant, and nothing retries them short of a reconnect or a
+    // signature change (review, 2026-07-30).
+    bool ok = true;
     // Purely derived from measurements and capabilities. Nothing in here knows which device
     // it is talking to; a driver reporting a battery gets battery entities for free.
     // topics_ for availability, deliberately: it is the BRIDGE's liveness, and it is the only
@@ -196,7 +210,7 @@ void MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
     for (const auto& e : buildDiscoveryEntities(state, bridge, channel.topics,
                                                 topics_.availability(), config_.discoveryPrefix,
                                                 channel.uniqueBase)) {
-        publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str());
+        ok = publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str()) && ok;
     }
     // Bridge entities belong to the bridge and are announced once -- publishing them per
     // device would create N copies of the same RSSI sensor. Tied to the bridge-scoped channel
@@ -204,19 +218,25 @@ void MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
     if (channel.uniqueBase == bridge.bridgeId) {
         for (const auto& e :
              buildBridgeDiagnosticEntities(bridge, topics_, config_.discoveryPrefix)) {
-            publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str());
+            ok = publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str()) && ok;
         }
         // Relay switches -- or, when the feature is disabled on a relay board, empty retained
         // payloads that remove previously announced switches from Home Assistant.
         for (const auto& e : buildRelayEntities(bridge, topics_, config_.discoveryPrefix)) {
-            publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str());
+            ok = publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str()) && ok;
         }
     }
-    channel.discoveryPublished = true;
+    // discoveryPublished/discoveredSignature are the CALLER's to commit, and only when this
+    // returns true -- one seam decides "did discovery really land", instead of this function
+    // asserting it unconditionally the way it used to.
+    return ok;
 }
 
-void MqttOutput::onConnected(Channel& channel, const DeviceState& state,
+bool MqttOutput::onConnected(Channel& channel, const DeviceState& state,
                              const BridgeInfo& bridge) {
+    // Availability/identity/capabilities are not gated by discoveryPublished and never were --
+    // republishing retained state on a tick that only re-tries discovery is harmless. Only
+    // discovery's own success is reported up; see publishDiscovery and the caller in loop().
     publishTracked(topics_.availability().c_str(), 1, true, kPayloadOnline);
 
     std::string payload;
@@ -226,7 +246,7 @@ void MqttOutput::onConnected(Channel& channel, const DeviceState& state,
     if (json_util::buildCapabilitiesPayload(state.capabilities, payload, kMaxPayloadBytes)) {
         publishTracked(channel.topics.capabilities().c_str(), 1, true, payload.c_str());
     }
-    publishDiscovery(channel, state, bridge);
+    const bool discoveryOk = publishDiscovery(channel, state, bridge);
 
     // The relay command topic is the only subscription; inverter drivers stay read-only
     // and get no command topic -- that follows from the capabilities, not a decision here.
@@ -235,6 +255,7 @@ void MqttOutput::onConnected(Channel& channel, const DeviceState& state,
         g_client.subscribe(topics_.drmSet().c_str(), 1);
         relayStateForced_ = true;  // fresh session: ack the current states once
     }
+    return discoveryOk;
 }
 
 void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& bridge,
@@ -301,8 +322,16 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
 
         const auto signature = discoverySignature(state);
         if (!channel.discoveryPublished || signature != channel.discoveredSignature) {
-            onConnected(channel, state, bridge);
-            channel.discoveredSignature = signature;
+            // Commit only on success: a refused publish must not look delivered here either --
+            // the same rule forgetDevice() already applies below. Leaving both fields untouched
+            // on failure means the NEXT tick retries the whole announcement, not just whatever
+            // changed since. Before this (review, 2026-07-30) the commit was unconditional, so
+            // a refusal from the memory guard could drop a Home Assistant entity until the next
+            // reconnect or capability change -- which might be a long wait, or never.
+            if (onConnected(channel, state, bridge)) {
+                channel.discoveryPublished  = true;
+                channel.discoveredSignature = signature;
+            }
         }
 
         if (channel.throttle.shouldPublish(state, nowMs)) {
@@ -335,10 +364,18 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         }
         if (relayStateForced_ || relayAckRequested_.exchange(false) ||
             bridge.relayMask != lastRelayMask_) {
+            // Accumulated like forgetDevice()'s `ok` below: a refused ack must not be recorded
+            // as delivered, or a switch whose command could not actually reach the broker
+            // stays stuck mid-toggle in Home Assistant until something else happens to
+            // retrigger this block. Before this (review, 2026-07-30) the commit at the bottom
+            // was unconditional -- reachable on every variant once the memory guard existed,
+            // not only the one board with no PSRAM where the library's own guard could fire.
+            bool ok = true;
             for (uint8_t i = 0; i < bridge.relayCount; ++i) {
                 const bool on = (bridge.relayMask >> i) & 1;
-                publishTracked(topics_.relayState(i).c_str(), 1, true,
-                                 on ? "ON" : "OFF");
+                ok = publishTracked(topics_.relayState(i).c_str(), 1, true,
+                                     on ? "ON" : "OFF") &&
+                     ok;
             }
             // The DRM mode is derived state over the same mask; ack it in the same breath
             // so the HA select and the switches can never disagree for long.
@@ -346,10 +383,16 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
             roles.resize(bridge.relayCount, "none");
             if (!drm::optionsFor(roles).empty()) {
                 const std::string mode = drm::modeFrom(roles, bridge.relayMask);
-                publishTracked(topics_.drmState().c_str(), 1, true, mode.c_str());
+                ok = publishTracked(topics_.drmState().c_str(), 1, true, mode.c_str()) && ok;
             }
-            lastRelayMask_    = bridge.relayMask;
-            relayStateForced_ = false;
+            // Committed only on success. relayAckRequested_ was already consumed by the
+            // exchange() above regardless of what happens next -- that is fine: on failure,
+            // bridge.relayMask stays != lastRelayMask_ (or relayStateForced_ stays true), so
+            // this block re-enters on the very next tick without needing the flag again.
+            if (ok) {
+                lastRelayMask_    = bridge.relayMask;
+                relayStateForced_ = false;
+            }
         }
     }
 
@@ -433,8 +476,10 @@ void MqttOutput::loop(const std::vector<DeviceView>&, const BridgeInfo&,
 void MqttOutput::stop() { started_ = false; }
 bool MqttOutput::forgetDevice(const DeviceId&, const BridgeInfo&) { return false; }
 bool MqttOutput::connected() const { return false; }
-void MqttOutput::onConnected(Channel&, const DeviceState&, const BridgeInfo&) {}
-void MqttOutput::publishDiscovery(Channel&, const DeviceState&, const BridgeInfo&) {}
+bool MqttOutput::onConnected(Channel&, const DeviceState&, const BridgeInfo&) { return false; }
+bool MqttOutput::publishDiscovery(Channel&, const DeviceState&, const BridgeInfo&) {
+    return false;
+}
 MqttOutput::Channel& MqttOutput::channelFor(const DeviceView&, const BridgeInfo&) {
     static Channel unused{"", MqttTopics("", ""), "", PublishThrottle({}), false, 0};
     return unused;
