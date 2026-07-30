@@ -308,9 +308,30 @@ namespace {
 // board that boots at epoch zero is exactly as trustworthy as one with a real RTC. Absent
 // on a cold start (first boot, or power was lost -- indistinguishable, and both honestly
 // "cold"), because "it had been up 0 ms" would be a false statement, not a missing one.
+//
+// 0.24.3 closes out the same resource audit: one correction to something 0.24.2 got wrong,
+// and one real change to what a bridge does under memory pressure.
+//
+// MQTT PUBLISHES ARE NOW REFUSED, AND COUNTED, WHEN INTERNAL MEMORY IS LOW -- ON EVERY BOARD.
+// The MQTT library already refuses a publish below a memory floor, but the figure it checks
+// is the larger of internal heap and PSRAM, and a publish is always small enough to come from
+// internal heap regardless. On the two boards with 8 MB of mostly-idle PSRAM that check
+// compared kilobytes against megabytes and never fired; the one board with no PSRAM was the
+// only one it ever protected. A guard in this firmware now checks the pool a publish actually
+// draws from, on all three boards alike, and a refusal counts on mqtt_publish_failure_total
+// the same as any other. Nothing changes under normal operation -- this only acts under
+// genuine memory pressure, which is exactly when acting matters.
+//
+// CORRECTED: the previous release's own comment blamed "something in the platform" for reset
+// breadcrumbs not surviving a restart in an earlier design. It was not the platform. A default
+// value on a struct member (`= 0`) made that type require a constructor the compiler runs on
+// every boot, which is precisely what RTC-preserved memory exists to avoid -- proven both
+// directions on hardware, one character apart. The struct shipped in 0.24.2 was already
+// written without that mistake, so nothing about what a bridge reports changes here; a
+// compile-time check now exists so the mistake cannot return unnoticed.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 24
-#define HELIOGRAPH_VERSION_PATCH 2
+#define HELIOGRAPH_VERSION_PATCH 3
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
