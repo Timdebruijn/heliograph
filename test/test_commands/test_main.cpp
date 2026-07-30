@@ -23,6 +23,13 @@ static uint64_t clockFn() { return g_now; }
 void setUp() { g_now = 100000; }
 void tearDown() {}
 
+static JsonDocument parse(const std::string& json) {
+    JsonDocument doc;
+    const auto   err = deserializeJson(doc, json);
+    TEST_ASSERT_EQUAL_MESSAGE(DeserializationError::Ok, err.code(), "payload is not valid JSON");
+    return doc;
+}
+
 static InverterCommand cmd(InverterCommandType type, double value) {
     InverterCommand c;
     c.type         = type;
@@ -704,6 +711,48 @@ static void test_parse_command_request_leaves_request_id_empty_when_omitted() {
     TEST_ASSERT_TRUE(out.requestId.empty());
 }
 
+// --- shared command payload builders (json_util.h) ------------------------------------------
+//
+// The REST 202/GET-outcome bodies and MQTT's command_topic acks all go through these; one
+// definition instead of each transport formatting its own JSON by hand.
+
+static void test_build_command_accepted_payload() {
+    std::string json;
+    TEST_ASSERT_TRUE(json_util::buildCommandAcceptedPayload("req-7", json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_STRING("accepted", doc["status"]);
+    TEST_ASSERT_EQUAL_STRING("req-7", doc["request_id"]);
+}
+
+static void test_build_command_rejected_payload() {
+    std::string json;
+    TEST_ASSERT_TRUE(
+        json_util::buildCommandRejectedPayload("a command is already pending", json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_STRING("rejected", doc["status"]);
+    TEST_ASSERT_EQUAL_STRING("a command is already pending", doc["reason"]);
+}
+
+static void test_build_command_outcome_payload_without_a_request_id() {
+    std::string json;
+    TEST_ASSERT_TRUE(json_util::buildCommandOutcomePayload(
+        DispatchOutcome{CommandResult::OutOfRange, "value too high"}, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_STRING("out_of_range", doc["result"]);
+    TEST_ASSERT_EQUAL_STRING("value too high", doc["reason"]);
+    TEST_ASSERT_FALSE(doc["request_id"].is<const char*>());
+}
+
+static void test_build_command_outcome_payload_with_a_request_id() {
+    std::string json;
+    TEST_ASSERT_TRUE(json_util::buildCommandOutcomePayload(
+        "req-9", DispatchOutcome{CommandResult::Ok, "accepted"}, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_STRING("req-9", doc["request_id"]);
+    TEST_ASSERT_EQUAL_STRING("ok", doc["result"]);
+    TEST_ASSERT_EQUAL_STRING("accepted", doc["reason"]);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_read_only_mode_rejects_every_command_type);
@@ -755,5 +804,10 @@ int main(int, char**) {
     RUN_TEST(test_parse_command_request_needs_neither_field_for_start);
     RUN_TEST(test_parse_command_request_carries_a_supplied_request_id);
     RUN_TEST(test_parse_command_request_leaves_request_id_empty_when_omitted);
+
+    RUN_TEST(test_build_command_accepted_payload);
+    RUN_TEST(test_build_command_rejected_payload);
+    RUN_TEST(test_build_command_outcome_payload_without_a_request_id);
+    RUN_TEST(test_build_command_outcome_payload_with_a_request_id);
     return UNITY_END();
 }

@@ -908,6 +908,8 @@ void startOutputs() {
         // Same function REST submits through -- one counter, one queue, regardless of which
         // transport a command arrived on.
         g_mqtt->setCommandHandler(submitCommand);
+        g_mqtt->setCommandOutcomeProvider(
+            [](const std::string& requestId) { return g_commandQueue.outcomeFor(requestId); });
         if (g_relays.count() > 0) {
             g_mqtt->setRelayCommandHandler([](uint8_t index, bool on) {
                 std::lock_guard<std::mutex> lock(g_relayMutex);

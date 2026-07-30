@@ -384,4 +384,16 @@ inline bool buildCommandOutcomePayload(const DispatchOutcome& outcome, std::stri
     return finish(doc, out, 384);
 }
 
+/// Same shape plus `"request_id"` -- for a subscriber with no URL to carry the id in, unlike
+/// REST's GET route where it is already in the path. MQTT's async result republish uses this
+/// one; the REST outcome route uses the two-argument form above.
+inline bool buildCommandOutcomePayload(const std::string& requestId,
+                                       const DispatchOutcome& outcome, std::string& out) {
+    JsonDocument doc;
+    doc["request_id"] = requestId;
+    doc["result"]      = commandResultName(outcome.result);
+    doc["reason"]      = outcome.reason;
+    return finish(doc, out, 384);
+}
+
 }  // namespace heliograph::json_util

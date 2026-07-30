@@ -145,6 +145,9 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
                                                                 ack);
                     } else {
                         json_util::buildCommandAcceptedPayload(*requestId, ack);
+                        // loop() picks this up once rs485Task has actually run the command
+                        // and publishes the real result -- see the check there.
+                        channel.pendingCommandRequestId = *requestId;
                     }
                     publishTracked(channel.topics.commandResult().c_str(), 0, false,
                                    ack.c_str());
@@ -221,7 +224,8 @@ MqttOutput::Channel& MqttOutput::channelFor(const DeviceView& view, const Bridge
               deviceUniqueBase(view.primary, bridge.bridgeId, view.id),
               PublishThrottle(publishPolicy_),
               false,
-              0};
+              0,
+              {}};
     channels_.push_back(std::move(c));
     return channels_.back();
 }
@@ -361,6 +365,23 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         }
         const DeviceState& state   = *view.state;
         Channel&           channel = channelFor(view, bridge);
+
+        // The real outcome of a command THIS channel submitted, once rs485Task has actually
+        // run it -- accepted/rejected (published from onMessage, immediately) only ever says
+        // "queued", never "succeeded". Polled rather than pushed: nothing calls back into
+        // MqttOutput when CommandQueue::recordOutcome() runs on rs485Task, so this loop is
+        // what notices. Cleared either way once published, so a lookup that stays unresolved
+        // forever (it should not -- rs485Task always records SOMETHING for a taken request)
+        // cannot wedge this channel out of ever checking again.
+        if (!channel.pendingCommandRequestId.empty() && commandOutcomeProvider_) {
+            if (const auto outcome = commandOutcomeProvider_(channel.pendingCommandRequestId)) {
+                std::string ack;
+                json_util::buildCommandOutcomePayload(channel.pendingCommandRequestId, *outcome,
+                                                      ack);
+                publishTracked(channel.topics.commandResult().c_str(), 0, false, ack.c_str());
+                channel.pendingCommandRequestId.clear();
+            }
+        }
 
         const auto signature = discoverySignature(state);
         if (!channel.discoveryPublished || signature != channel.discoveredSignature) {
@@ -523,7 +544,7 @@ bool MqttOutput::publishDiscovery(Channel&, const DeviceState&, const BridgeInfo
     return false;
 }
 MqttOutput::Channel& MqttOutput::channelFor(const DeviceView&, const BridgeInfo&) {
-    static Channel unused{"", MqttTopics("", ""), "", PublishThrottle({}), false, 0};
+    static Channel unused{"", MqttTopics("", ""), "", PublishThrottle({}), false, 0, {}};
     return unused;
 }
 

@@ -5,7 +5,9 @@
 #include <ArduinoJson.h>
 
 #include <cctype>
+#include <cstdio>
 
+#include "device/command.h"
 #include "relays/drm.h"
 
 namespace heliograph::mqtt {
@@ -216,6 +218,28 @@ uint64_t discoverySignature(const DeviceState& state) {
         }
         sig = fnv1aAppend(sig, m.id);
     }
+    // Command entities (below) are derived from the write bitset and, for a numeric one, its
+    // published bounds. Folded in here for the same reason the measurement loop above is:
+    // every shipping driver has this bitset fixed for the life of the firmware today, so this
+    // never actually changes anything yet -- but the moment a profile-declared write row is
+    // marked verified for real hardware, a stale or missing command entity would otherwise sit
+    // there until the next reconnect, the same class of bug the relay-roles fingerprint exists
+    // to prevent.
+    for (size_t i = 0; i < kCommandTypeCount; ++i) {
+        const auto type       = static_cast<InverterCommandType>(i);
+        const auto capability = requiredCapability(type);
+        if (capability == InverterCapability::_Count ||
+            !state.capabilities.write.test(static_cast<size_t>(capability))) {
+            continue;
+        }
+        sig = fnv1aAppend(sig, commandTypeName(type));
+        if (commandTakesNumericValue(type)) {
+            const NumericCapability& cap = state.capabilities.numeric[i];
+            char                     buf[64];
+            snprintf(buf, sizeof(buf), "%.6g:%.6g:%.6g", cap.minimum, cap.maximum, cap.step);
+            sig = fnv1aAppend(sig, buf);
+        }
+    }
     return sig;
 }
 
@@ -329,11 +353,79 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         }
     }
 
-    // No control entities. Not an omission: the loop that would create them is gated on the
-    // write bitset, which is empty for every driver in this build.
-    if (!state.capabilities.isReadOnly()) {
-        // Deliberately not implemented yet -- the MVP has no writable driver, so writing this
-        // now would mean shipping untestable code that can move an inverter. Phase: future.
+    // Control entities: one per command type the active driver's capabilities.write bit
+    // actually grants -- the SAME bitset CommandDispatcher::dispatch's gate 2 checks, so an
+    // entity exists in Home Assistant exactly when the command behind it could reach a driver.
+    // On every driver shipping today the bit is never set, so this loop produces nothing, the
+    // same way the sensor loop above produces nothing for an unsupported measurement.
+    for (size_t i = 0; i < kCommandTypeCount; ++i) {
+        const auto type       = static_cast<InverterCommandType>(i);
+        const auto capability = requiredCapability(type);
+        if (capability == InverterCapability::_Count ||
+            !state.capabilities.write.test(static_cast<size_t>(capability))) {
+            continue;
+        }
+
+        // SetBatteryOperatingMode: skipped, not guessed at. A select needs an options list,
+        // and there is no EnumCapability yet to say what the valid selections even are --
+        // command_dispatcher.cpp's own gate-3 comment carries the same caveat. Revisit once a
+        // driver actually declares mode names.
+        if (commandTakesEnumValue(type)) {
+            continue;
+        }
+
+        const std::string name       = commandTypeName(type);
+        const std::string jsonPrefix = std::string("{\"type\":\"") + name + "\"";
+
+        JsonDocument doc;
+        JsonObject   e = doc.to<JsonObject>();
+        e["unique_id"] = uniqueBase + "_" + name;
+        e["object_id"] = uniqueBase + "_" + name;
+        e["name"]      = humanise(name);
+        e["command_topic"]         = topics.commandSet();
+        e["availability_topic"]    = availabilityTopic;
+        e["payload_available"]     = kPayloadOnline;
+        e["payload_not_available"] = kPayloadOffline;
+        addDeviceBlock(e, bridge, state.identity, /*isBridgeEntity=*/false, uniqueBase,
+                      state.label);
+
+        std::string domain;
+        if (commandTakesNumericValue(type)) {
+            const NumericCapability& cap = state.capabilities.numeric[i];
+            if (!cap.supported || !cap.writable) {
+                // The write bit is set but no range was published. CommandDispatcher itself
+                // refuses this at dispatch time -- see command.h's note on why a missing
+                // bound is a refusal rather than a bypass -- so no entity either: nothing
+                // that reached this driver could ever succeed.
+                continue;
+            }
+            domain                 = "number";
+            e["command_template"]  = jsonPrefix + ",\"value\":{{ value }}}";
+            e["min"]                = cap.minimum;
+            e["max"]                = cap.maximum;
+            e["step"]               = cap.step > 0.0 ? cap.step : 1.0;
+            const char* unit = unitSymbol(cap.unit);
+            if (unit[0] != '\0') {
+                e["unit_of_measurement"] = unit;
+            }
+            // Optimistic: unlike the relay switch, there is no readback topic for a setpoint --
+            // no shipping driver reports one back as a measurement, and command.h's own
+            // `execute()` doc note explains why the ack cannot arrive synchronously either.
+            e["optimistic"] = true;
+        } else {
+            // Neither numeric nor enum: Start, Stop, SynchronizeTime -- a bare press, no
+            // payload to configure beyond the fixed command type.
+            domain             = "button";
+            e["payload_press"] = jsonPrefix + "}";
+        }
+
+        DiscoveryEntity entity;
+        entity.uniqueId = e["unique_id"].as<std::string>();
+        entity.configTopic =
+            discoveryPrefix + "/" + domain + "/" + uniqueBase + "/" + name + "/config";
+        if (serialise(doc, entity.payload)) {
+            entities.push_back(std::move(entity));
+        }
     }
 
     return entities;

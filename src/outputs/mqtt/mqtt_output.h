@@ -24,6 +24,7 @@
 #include <functional>
 #include <optional>
 
+#include "commands/command_dispatcher.h"
 #include "device/bridge_info.h"
 #include "device/command.h"
 #include "device/device_state.h"
@@ -141,6 +142,16 @@ public:
                                                    InverterCommand   command)>;
     void setCommandHandler(CommandSubmitFn handler) { commandSubmit_ = std::move(handler); }
 
+    /// Looks up the real outcome of a request id once rs485Task has actually processed it. The
+    /// SAME function RestContext::commandOutcome reads from -- both transports observe the one
+    /// CommandQueue. loop() polls this for whichever channel is awaiting a result and, once it
+    /// resolves, publishes it to that channel's commandResult() topic (see loop()'s own note).
+    using CommandOutcomeFn =
+        std::function<std::optional<DispatchOutcome>(const std::string& requestId)>;
+    void setCommandOutcomeProvider(CommandOutcomeFn provider) {
+        commandOutcomeProvider_ = std::move(provider);
+    }
+
 private:
     /// Everything that is per-inverter rather than per-bridge, keyed by device id. Every
     /// channel is created in the first loop() pass -- the device list is fixed at boot -- but
@@ -152,6 +163,10 @@ private:
         PublishThrottle throttle;
         bool            discoveryPublished  = false;
         uint64_t        discoveredSignature = 0;
+        /// The request id THIS channel most recently submitted and is still awaiting the real
+        /// outcome for, or empty when nothing is outstanding. Set in onMessage on a successful
+        /// submitCommand(); cleared by loop() once commandOutcomeProvider_ resolves it.
+        std::string pendingCommandRequestId;
     };
 
     /// publish() whose refusals are counted. Every publish in this class goes through it --
@@ -205,7 +220,8 @@ private:
 
     RelayCommandFn relayCommand_;
     DrmCommandFn   drmCommand_;
-    CommandSubmitFn commandSubmit_;
+    CommandSubmitFn  commandSubmit_;
+    CommandOutcomeFn commandOutcomeProvider_;
     uint8_t        relayCount_ = 0;  ///< copied at begin() for topic parsing in the callback
     /// Set by onMessage (MQTT task) on EVERY received relay command, consumed by loop().
     /// Without it a refused or no-op command changes no state, nothing gets published, and
