@@ -197,6 +197,15 @@ Two remarks:
 |---|---|---|
 | 1 | 200 | ✔ |
 | 2 | 220 | ✔ *only with 2-string layout*, otherwise NaN |
+| 3 | 240 | — (NaN; no EverSolar model has a third string) |
+| 4 | 260 | — |
+| 5 | 280 | — |
+
+**Five slots, and that is the ceiling for schema version 1.** The battery block starts at 300, so
+a sixth string cannot be added without moving a published region — which would break every client
+that indexes by address. That is why the canonical vocabulary stops at `dc.mppt_5`. A device with
+more trackers still reports its real count at register 621; the strings beyond the fifth are
+simply not published, rather than being folded into another string's registers.
 
 ## Battery (300-399) and grid meter (400-499)
 

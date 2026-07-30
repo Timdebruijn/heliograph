@@ -70,8 +70,14 @@ inline constexpr uint16_t kPhaseCurrentOffset = 2;
 inline constexpr uint16_t kPhasePowerOffset   = 4;
 
 // --- DC / MPPT (200-299), 20 registers apart ---
+//
+// Five slots fit: 200, 220, 240, 260, 280, with the battery block starting at 300. That is the
+// hard ceiling on how many strings this schema version can publish, and it is why the canonical
+// vocabulary stops at dc.mppt_5 -- see measurement.h. A sixth tracker needs kSchemaVersion
+// bumped and the regions below it moved, which breaks every client that indexes by address.
 inline constexpr uint16_t kMpptBase   = 200;
 inline constexpr uint16_t kMpptStride = 20;
+inline constexpr uint16_t kMaxMpptSlots = 5;
 inline constexpr uint16_t kMpptVoltageOffset = 0;
 inline constexpr uint16_t kMpptCurrentOffset = 2;
 inline constexpr uint16_t kMpptPowerOffset   = 4;
@@ -178,6 +184,18 @@ enum class ValidityBit : uint8_t {
     BatteryDischargePower = 27,
     GridImportPower = 28,
     GridExportPower = 29,
+    // Appended, per the append-only rule above: strings 3-5 arrived after this ordering was
+    // published, so they take the next free bits rather than sitting next to Mppt2 where they
+    // would read better. The bitmap has 128 bits, so there is room to keep doing this.
+    DcMppt3Voltage = 30,
+    DcMppt3Current = 31,
+    DcMppt3Power   = 32,
+    DcMppt4Voltage = 33,
+    DcMppt4Current = 34,
+    DcMppt4Power   = 35,
+    DcMppt5Voltage = 36,
+    DcMppt5Current = 37,
+    DcMppt5Power   = 38,
     _Count
 };
 

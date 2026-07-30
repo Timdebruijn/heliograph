@@ -565,6 +565,49 @@ static void test_validity_bitmap_and_nan_always_agree() {
     }
 }
 
+// Strings 3 to 5 land in their own slots, and the fifth one stops short of the battery block.
+//
+// A profile has always been able to DECLARE up to eight trackers while only two had registers to
+// land in, so a four-string hybrid reported "4 MPPTs" and published two of them. The arithmetic
+// is what needs pinning rather than the plumbing: base + i * stride is easy to get right and
+// silent when wrong -- string 5 lands on 280, and one slot further would overwrite battery SoC
+// at 300 with a string voltage, which no client could tell from a real reading.
+static void test_strings_three_to_five_land_in_their_own_slots() {
+    StateStore  store;
+    Diagnostics diag;
+    RegisterMap map;
+    BridgeInfo  bridge;
+
+    DeviceState state;
+    state.measurements.declare(measurement_id::kDcMppt3Voltage, MeasurementType::Voltage,
+                               Unit::Volt, "MPPT 3 voltage");
+    state.measurements.set(measurement_id::kDcMppt3Voltage, 301.5, g_now);
+    state.measurements.declare(measurement_id::kDcMppt5Power, MeasurementType::Power, Unit::Watt,
+                               "MPPT 5 power");
+    state.measurements.set(measurement_id::kDcMppt5Power, 1234.0, g_now);
+    state.lastSuccessfulPollMs = g_now;
+    state.dataValid            = true;
+
+    map.update(state, bridge, diag.snapshot(), g_now);
+
+    const uint16_t mppt3 = reg::kMpptBase + 2 * reg::kMpptStride;  // 240
+    const uint16_t mppt5 = reg::kMpptBase + 4 * reg::kMpptStride;  // 280
+    TEST_ASSERT_EQUAL_UINT16(240, mppt3);
+    TEST_ASSERT_EQUAL_UINT16(280, mppt5);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 301.5f, decodeFloat(map, mppt3 + reg::kMpptVoltageOffset));
+    TEST_ASSERT_TRUE(map.validityBit(ValidityBit::DcMppt3Voltage));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1234.0f, decodeFloat(map, mppt5 + reg::kMpptPowerOffset));
+    TEST_ASSERT_TRUE(map.validityBit(ValidityBit::DcMppt5Power));
+
+    // Undeclared strings stay unknown rather than becoming zero, and the battery block below is
+    // untouched by the fifth string's 20-register slot.
+    const uint16_t mppt4 = reg::kMpptBase + 3 * reg::kMpptStride;
+    TEST_ASSERT_TRUE(std::isnan(decodeFloat(map, mppt4 + reg::kMpptVoltageOffset)));
+    TEST_ASSERT_FALSE(map.validityBit(ValidityBit::DcMppt4Voltage));
+    TEST_ASSERT_TRUE(std::isnan(decodeFloat(map, reg::kBatterySoc)));
+    TEST_ASSERT_TRUE(mppt5 + reg::kMpptStride <= reg::kBatterySoc);
+}
+
 static void test_validity_bits_fit_the_reserved_space() {
     // 8 registers = 128 bits at reg::kValidityBitmap.
     TEST_ASSERT_TRUE(static_cast<size_t>(ValidityBit::_Count) <= 128);
@@ -601,6 +644,7 @@ int main(int, char**) {
     RUN_TEST(test_a_fresh_map_claims_nothing_is_valid);
     RUN_TEST(test_a_fresh_map_asserts_nothing_it_has_not_measured);
     RUN_TEST(test_validity_bitmap_and_nan_always_agree);
+    RUN_TEST(test_strings_three_to_five_land_in_their_own_slots);
     RUN_TEST(test_validity_bits_fit_the_reserved_space);
     RUN_TEST(test_relay_registers_use_the_sentinel_without_hardware);
     RUN_TEST(test_firmware_version_registers_report_the_running_version);

@@ -95,6 +95,24 @@ inline constexpr const char* kDcMppt1Power   = "dc.mppt_1.power";
 inline constexpr const char* kDcMppt2Voltage = "dc.mppt_2.voltage";
 inline constexpr const char* kDcMppt2Current = "dc.mppt_2.current";
 inline constexpr const char* kDcMppt2Power   = "dc.mppt_2.power";
+/// Strings 3 to 5. A profile could always DECLARE up to eight trackers -- `mppts` has allowed
+/// 0-8 since the schema existed -- while only two of them had anywhere to be published, so a
+/// four-string hybrid reported its tracker count honestly and then dropped half its strings.
+///
+/// Five, not eight, and the ceiling is not arbitrary: the Modbus TCP map gives each tracker a
+/// 20-register slot in the region 200-299 and the battery block starts at 300. Going further
+/// means moving a published region, which is a schema break for every client reading it. Five
+/// covers residential and small-commercial hardware; a sixth string is a reason to bump that
+/// schema deliberately, not a reason to shuffle registers now.
+inline constexpr const char* kDcMppt3Voltage = "dc.mppt_3.voltage";
+inline constexpr const char* kDcMppt3Current = "dc.mppt_3.current";
+inline constexpr const char* kDcMppt3Power   = "dc.mppt_3.power";
+inline constexpr const char* kDcMppt4Voltage = "dc.mppt_4.voltage";
+inline constexpr const char* kDcMppt4Current = "dc.mppt_4.current";
+inline constexpr const char* kDcMppt4Power   = "dc.mppt_4.power";
+inline constexpr const char* kDcMppt5Voltage = "dc.mppt_5.voltage";
+inline constexpr const char* kDcMppt5Current = "dc.mppt_5.current";
+inline constexpr const char* kDcMppt5Power   = "dc.mppt_5.power";
 inline constexpr const char* kEnergyToday    = "energy.today";
 inline constexpr const char* kEnergyTotal    = "energy.total";
 inline constexpr const char* kTemperature    = "inverter.temperature";
@@ -141,7 +159,11 @@ inline constexpr const char* kAll[] = {
     kAcPowerTotal,   kAcFrequency,    kAcL1Voltage,    kAcL1Current,    kAcL1Power,
     kAcL2Voltage,    kAcL2Current,    kAcL2Power,      kAcL3Voltage,    kAcL3Current,
     kAcL3Power,      kDcPowerTotal,   kDcMppt1Voltage, kDcMppt1Current, kDcMppt1Power,
-    kDcMppt2Voltage, kDcMppt2Current, kDcMppt2Power,   kEnergyToday,    kEnergyTotal,
+    kDcMppt2Voltage, kDcMppt2Current, kDcMppt2Power,
+    kDcMppt3Voltage, kDcMppt3Current, kDcMppt3Power,
+    kDcMppt4Voltage, kDcMppt4Current, kDcMppt4Power,
+    kDcMppt5Voltage, kDcMppt5Current, kDcMppt5Power,
+    kEnergyToday,    kEnergyTotal,
     kTemperature,    kOperatingHours, kBatterySoc,     kBatteryPower,   kBatteryVoltage,
     kBatteryCurrent, kBatteryTemperature, kBatteryEnergyCharged, kBatteryEnergyDischarged,
     kBatteryChargePower, kBatteryDischargePower, kGridImportPower, kGridExportPower,

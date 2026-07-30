@@ -246,19 +246,30 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
     }
 
     // --- MPPT block ---
-    static const char* kMpptVoltage[] = {measurement_id::kDcMppt1Voltage,
-                                         measurement_id::kDcMppt2Voltage};
-    static const char* kMpptCurrent[] = {measurement_id::kDcMppt1Current,
-                                         measurement_id::kDcMppt2Current};
-    static const char* kMpptPower[]   = {measurement_id::kDcMppt1Power,
-                                         measurement_id::kDcMppt2Power};
-    static const ValidityBit kMpptVoltageBit[] = {ValidityBit::DcMppt1Voltage,
-                                                  ValidityBit::DcMppt2Voltage};
-    static const ValidityBit kMpptCurrentBit[] = {ValidityBit::DcMppt1Current,
-                                                  ValidityBit::DcMppt2Current};
-    static const ValidityBit kMpptPowerBit[]   = {ValidityBit::DcMppt1Power,
-                                                  ValidityBit::DcMppt2Power};
-    for (uint16_t i = 0; i < 2; ++i) {
+    static const char* kMpptVoltage[] = {
+        measurement_id::kDcMppt1Voltage, measurement_id::kDcMppt2Voltage,
+        measurement_id::kDcMppt3Voltage, measurement_id::kDcMppt4Voltage,
+        measurement_id::kDcMppt5Voltage};
+    static const char* kMpptCurrent[] = {
+        measurement_id::kDcMppt1Current, measurement_id::kDcMppt2Current,
+        measurement_id::kDcMppt3Current, measurement_id::kDcMppt4Current,
+        measurement_id::kDcMppt5Current};
+    static const char* kMpptPower[] = {
+        measurement_id::kDcMppt1Power, measurement_id::kDcMppt2Power, measurement_id::kDcMppt3Power,
+        measurement_id::kDcMppt4Power, measurement_id::kDcMppt5Power};
+    static const ValidityBit kMpptVoltageBit[] = {
+        ValidityBit::DcMppt1Voltage, ValidityBit::DcMppt2Voltage, ValidityBit::DcMppt3Voltage,
+        ValidityBit::DcMppt4Voltage, ValidityBit::DcMppt5Voltage};
+    static const ValidityBit kMpptCurrentBit[] = {
+        ValidityBit::DcMppt1Current, ValidityBit::DcMppt2Current, ValidityBit::DcMppt3Current,
+        ValidityBit::DcMppt4Current, ValidityBit::DcMppt5Current};
+    static const ValidityBit kMpptPowerBit[] = {
+        ValidityBit::DcMppt1Power, ValidityBit::DcMppt2Power, ValidityBit::DcMppt3Power,
+        ValidityBit::DcMppt4Power, ValidityBit::DcMppt5Power};
+    static_assert(sizeof(kMpptVoltage) / sizeof(kMpptVoltage[0]) == reg::kMaxMpptSlots,
+                  "one id per published MPPT slot: a shorter list silently drops a string, a "
+                  "longer one writes over the battery block at register 300");
+    for (uint16_t i = 0; i < reg::kMaxMpptSlots; ++i) {
         const uint16_t base = static_cast<uint16_t>(reg::kMpptBase + i * reg::kMpptStride);
         publishMeasurement(state, kMpptVoltage[i], base + reg::kMpptVoltageOffset,
                            kMpptVoltageBit[i]);
