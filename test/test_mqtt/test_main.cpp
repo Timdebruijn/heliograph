@@ -1162,6 +1162,14 @@ static void test_an_unchanged_line_up_forgets_nothing() {
 /// already but compares against max(internal, PSRAM), so on a board with 8 MB of idle PSRAM it
 /// never fires while the allocation itself comes from internal SRAM. This predicate is that
 /// same 16 KB intent, measured on the pool that actually pays.
+///
+/// This pins the PREDICATE, not the wiring around it. MqttOutput itself is ESP32-only (no
+/// fake espMqttClient exists to run its loop() on the host), so the rule added alongside this
+/// guard -- a refused publish must not be recorded as delivered, or a Home Assistant entity or
+/// a relay ack can go missing until an unrelated reconnect or signature change retriggers it,
+/// see loop()'s discovery/relay-ack commits in mqtt_output.cpp -- is verified by review and by
+/// the compile/layering/build checks, not by a test that can inject a refusal and observe the
+/// retry. Recorded here rather than left implicit (review, 2026-07-30).
 static void test_publish_memory_guard() {
     // Comfortable: the figure a healthy 6CH reports for this exact call -- 90 100 B, measured
     // 2026-07-30 via max_alloc_heap_bytes, which main.cpp fills from ESP.getMaxAllocHeap().

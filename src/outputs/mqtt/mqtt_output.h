@@ -144,8 +144,15 @@ private:
 
     Channel& channelFor(const DeviceView& view, const BridgeInfo& bridge);
 
-    void onConnected(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
-    void publishDiscovery(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
+    /// Both return whether every publish they attempted actually left -- discovery's entities
+    /// specifically, not availability/identity/capabilities, which loop() does not gate on.
+    /// A caller that ignores the return and commits its bookkeeping anyway is exactly the bug
+    /// a review caught here (2026-07-30): a refusal from the new memory guard looked identical
+    /// to a delivered announcement, so a channel could mark itself "discovery done" while Home
+    /// Assistant never got the entities -- and, since the signature would already match on the
+    /// next tick, nothing would ever retry short of an actual reconnect.
+    bool onConnected(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
+    bool publishDiscovery(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
 
     MqttConfig   config_;
     /// Bridge-scoped: availability, diagnostics, relay and DRM. Never a device's.
@@ -225,12 +232,32 @@ inline constexpr uint32_t kMinFreeBlockBytes = 16384;
 /// variant, without forking the dependency. Pure, and takes the figure as an argument, so the
 /// decision is host-tested; only the caller reaches for ESP.getMaxAllocHeap().
 ///
-/// The trade-off, stated because it is real: under transient pressure from something else -- a
-/// dashboard reload storm measured at a 93 KB dip on the 6CH -- publishes are refused rather
-/// than queued. Measurements self-heal, because every poll cycle republishes them. A one-shot
-/// discovery message does not, and waits for the next re-announce. Accepted: at this threshold
+/// The trade-off, stated because it is real: under transient pressure from something else --
+/// e.g. the dashboard reload storm the audit measured on the 6CH -- publishes are refused
+/// rather than queued. Measurements self-heal, because every poll cycle republishes them. A
+/// one-shot discovery message does not self-heal on its own, but loop() now retries the whole
+/// announcement on the next tick when a refusal happens (see onConnected/publishDiscovery) --
+/// that used to not be true, and a review caught it (2026-07-30). Accepted: at this threshold
 /// the alternative is risking the allocation that takes the device down, and a refusal is
 /// counted where an exhaustion is silent.
+///
+/// UNVERIFIED under real load, and worth being honest about: the audit's reload-storm figure
+/// (a 93 KB dip on the 6CH, docs/audit-2026-07-29.md) is ESP.getMinFreeHeap() -- total free
+/// heap's since-boot low-water mark -- not ESP.getMaxAllocHeap(), the largest CONTIGUOUS block
+/// this guard actually reads. The two diverge under fragmentation (the same report shows
+/// 78 744 B min-free next to a 102 388 B largest block in one snapshot), and nobody has
+/// captured the largest-block figure specifically during that storm on any variant. The 16 KB
+/// threshold is therefore validated against the resting figure (90 100 B measured, comfortably
+/// above it), not against a load transient in the metric that matters here.
+///
+/// Cost, asked about and not free: ESP.getMaxAllocHeap() -> heap_caps_get_largest_free_block()
+/// walks the internal heap's free-block bookkeeping under the heap lock, once per publish --
+/// dozens of times per loop() tick on a four-device board. Not cached across a tick on
+/// purpose: publishTracked() is also called from forgetDevice(), reached from the REST task
+/// rather than loop()'s, and a cache shared across tasks needs the same synchronisation care
+/// as every other cross-task field in this class (resyncRequested_, relayAckRequested_) for a
+/// saving nobody has shown matters yet. Per the project's own rule, that trade avoids adding
+/// complexity for a cost that is real but not demonstrated to be a problem.
 inline bool refusePublishForMemory(uint32_t largestFreeBlockBytes) {
     return largestFreeBlockBytes < kMinFreeBlockBytes;
 }
