@@ -1,22 +1,41 @@
-# Growatt MIC TL-X — Modbus RTU register map
+# Growatt MIC and MIN TL-X — Modbus RTU register map
 
-The MIC TL-X is Growatt's small single-phase string inverter: one MPPT tracker, one phase,
-600–3300 W depending on the model. It speaks Growatt's Modbus RTU **Protocol II** over its
-RS485 port.
+Growatt's single-phase string inverters, speaking Modbus RTU **Protocol II** over RS485:
 
-The profile lives in `profiles/growatt/mic_tl_x.toml`. Everything below explains how that
-file was arrived at and what still needs proving on hardware.
+- **MIC TL-X** — 600–3300 W, **one** MPPT tracker
+- **MIN TL-X** — 2.5–6 kW, **two** trackers (and three on the MIN 8000 TL-X2)
 
-## One profile for the whole range
+They share one register layout. They do **not** share a profile, and the reason is worth stating
+because it looks like duplication:
 
-A profile describes a **register layout**, not a model number. A MIC 600TL-X and a MIC
-3300TL-X differ only in power rating, and the rating appears nowhere in the register map.
-One `mic_tl_x` profile therefore covers the whole range, exactly as `sph` covers the whole
-SPH 3–6 kW range.
+| | Profile | `mppts` |
+|---|---|---|
+| MIC TL-X | `profiles/growatt/mic_tl_x.toml` | 1 |
+| MIN TL-X | `profiles/growatt/min_tl_x.toml` | 2 |
+
+Everything below explains how those files were arrived at and what still needs proving on
+hardware. Unless a section says otherwise, it applies to both.
+
+## Two profiles, one layout
+
+A profile describes a **register layout**, not a model number. A MIC 600TL-X and a MIC 3300TL-X
+differ only in power rating, and the rating appears nowhere in the register map — so one profile
+covers that whole range, exactly as `sph` covers the whole SPH 3–6 kW range.
+
+The MIN is the case where that stops being enough. It is the same protocol generation and the
+same layout — wills106/homeassistant-solax-modbus classifies MIC and MIN under one heading
+("MIC and MIN PV") and gives every one of them identical GEN4 | PV | X1 handling, keyed on
+serial-number prefix — but it has a **second PV string**, at registers 7–10.
+
+The tracker count is not cosmetic here. It appears in the map, and it appears in `mppts`, which a
+profile states once for every device using it. Widening `mic_tl_x` to map the second string would
+make every single-tracker MIC publish a permanent zero for a string it does not have: precisely
+the "never invent a reading" rule that same profile invokes when it declines to map those
+registers. So: one layout, two profiles, split by what the hardware actually has.
 
 Holding register **44** reports the actual tracker and phase count of the connected unit, so
-a variant that ever deviates from "1 tracker, 1 phase" is visible in the raw dump rather than
-being silently mis-decoded.
+choosing the wrong one of the two is visible in the raw dump rather than silently mis-decoded —
+check it first when a bring-up looks odd.
 
 ## The generation question is still open
 
@@ -69,7 +88,7 @@ The default scale in Protocol II is ÷10. Two rows deviate and are the easiest t
 | 3 | PV1 voltage | u16 | ÷10 V | `dc.mppt_1.voltage` |
 | 4 | PV1 current | u16 | ÷10 A | `dc.mppt_1.current` |
 | 5–6 | PV1 power | u32 | ÷10 W | `dc.mppt_1.power` |
-| 7–10 | PV2 | — | — | not mapped (single-tracker hardware) |
+| 7–10 | PV2 | u16/u32 | ÷10 | `dc.mppt_2.*` — **`min_tl_x` only** |
 | 35–36 | AC output power | u32 | ÷10 W | `ac.power.total` |
 | 37 | Grid frequency | u16 | **÷100** Hz | `ac.frequency` |
 | 38 | Grid voltage L1 | u16 | ÷10 V | `ac.phase_l1.voltage` |
@@ -87,8 +106,9 @@ The default scale in Protocol II is ÷10. Two rows deviate and are the easiest t
 Deliberate omissions, all for the same reason — a channel that might be wrong is worse than a
 channel that is absent:
 
-- **PV2 (7–10)** exists in the layout but not on this hardware. Mapping it would publish a
-  permanent zero, and this project does not publish unknowns as zero.
+- **PV2 (7–10)** is mapped by `min_tl_x` and deliberately not by `mic_tl_x`: the MIC has one
+  tracker, so mapping it there would publish a permanent zero, and this project does not publish
+  unknowns as zero. This is the whole reason the two profiles exist separately.
 - **Pac1 (40–41)** duplicates `ac.power.total` on a single-phase inverter, and neither source
   says whether it is real power (W) or apparent power (VA) — both just call it "output
   power". A second power entity that might silently be VA is a trap. On the bench it should

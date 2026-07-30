@@ -115,6 +115,10 @@ different reason:
 | Huawei | undocumented in the one source read |
 | *Sungrow* | *mapped* — the datasheet states the direction, so `scale = -1` corrects it |
 
+(The older `sph` profile also maps it, at register 1009, with its own comment recording that the
+sign convention is unconfirmed — so it is the exception that proves the rule rather than a
+counter-example.)
+
 Huawei's own interface document states the convention. Settle it there, or on the bench through a
 charge→discharge crossover.
 

@@ -82,6 +82,19 @@ else
     echo "SKIP: python3 not available"
 fi
 
+echo "==> 3b. The coverage matrix is in sync with the profiles"
+# Same rule as the fixtures above, for the same reason: a coverage table maintained by hand goes
+# wrong in the direction that matters, claiming a channel a profile stopped mapping.
+if command -v python3 >/dev/null 2>&1; then
+    if python3 tools/gen_coverage.py --check; then
+        :
+    else
+        status=1
+    fi
+else
+    echo "SKIP: python3 not available"
+fi
+
 echo "==> 4. Every REST payload builder is reachable from a route"
 # A builder with no route is dead code that unit tests happily cover. Three of them shipped
 # that way in Phase 7 -- buildDevicePayload, buildMeasurementsPayload and

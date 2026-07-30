@@ -109,6 +109,9 @@ This is the **fourth hybrid in a row** where battery power is held back:
 | GoodWe | undocumented in the one source read |
 | *Sungrow* | *mapped* — the datasheet states it, so `scale = -1` corrects it |
 
+The older `sph` profile maps it too, at register 1009, with a comment recording that its sign is
+unconfirmed — noted here so this table is not read as saying no other profile has the channel.
+
 **House consumption.** The source computes it from several registers rather than reading one, and
 a profile does no arithmetic. There is also no canonical id for a load channel yet.
 

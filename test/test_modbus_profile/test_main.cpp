@@ -1521,6 +1521,53 @@ static void test_the_goodwe_profile_holds_back_the_unsourced_channels() {
     TEST_ASSERT_NULL(m.find(measurement_id::kGridExportPower));
 }
 
+// The MIC and MIN TL-X share one register layout and differ only in tracker count. That is the
+// whole reason they are two profiles, so it is what this pins: the same frame decodes the same
+// way on both, and only the MIN publishes a second string.
+static void test_the_mic_and_min_profiles_share_a_layout_and_differ_in_strings() {
+    const DeviceProfile* mic = findProfile("mic_tl_x");
+    const DeviceProfile* min = findProfile("min_tl_x");
+    TEST_ASSERT_NOT_NULL(mic);
+    TEST_ASSERT_NOT_NULL(min);
+    TEST_ASSERT_EQUAL_UINT8(1, mic->mpptCount);
+    TEST_ASSERT_EQUAL_UINT8(2, min->mpptCount);
+
+    BlockData blocks[2];
+    blocks[0] = {RegSpace::Input, 0, 125, {}};
+    blocks[1] = {RegSpace::Holding, 0, 89, {}};
+
+    setReg(blocks[0], 3, 3105);    // PV1 V -> 310.5 V
+    setReg(blocks[0], 35, 0);
+    setReg(blocks[0], 36, 11880);  // AC    -> 1188.0 W
+    setReg(blocks[0], 7, 2980);    // PV2 V -> 298.0 V, only the MIN maps this
+    setReg(blocks[0], 9, 0);
+    setReg(blocks[0], 10, 9400);   // PV2 W -> 940.0 W
+
+    MeasurementSet asMic;
+    applyProfile(*mic, blocks, 2, asMic, 1000);
+    MeasurementSet asMin;
+    applyProfile(*min, blocks, 2, asMin, 1000);
+
+    // Shared rows decode identically -- same layout, same scaling.
+    TEST_ASSERT_EQUAL_DOUBLE(310.5, asMic.find(measurement_id::kDcMppt1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(310.5, asMin.find(measurement_id::kDcMppt1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(1188.0, asMic.find(measurement_id::kAcPowerTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(1188.0, asMin.find(measurement_id::kAcPowerTotal)->value);
+
+    // The second string is the difference. On the MIC it stays ABSENT rather than publishing the
+    // zero a one-tracker inverter would report there -- which is why widening the MIC profile
+    // instead of adding this one would have been wrong.
+    TEST_ASSERT_NULL(asMic.find(measurement_id::kDcMppt2Voltage));
+    TEST_ASSERT_NULL(asMic.find(measurement_id::kDcMppt2Power));
+    TEST_ASSERT_EQUAL_DOUBLE(298.0, asMin.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(940.0, asMin.find(measurement_id::kDcMppt2Power)->value);
+
+    // And the MIN carries the same dormant curtailment row, on its own flag.
+    TEST_ASSERT_EQUAL_UINT32(1, min->writeCount);
+    TEST_ASSERT_EQUAL_UINT16(3, min->writes[0].address);
+    TEST_ASSERT_FALSE(min->writes[0].verified);
+}
+
 static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     MockTransport transport;
     echoWrites(transport);
@@ -1842,6 +1889,7 @@ int main(int, char**) {
     RUN_TEST(test_the_goodwe_sentinels_leave_channels_absent);
     RUN_TEST(test_the_goodwe_profile_declares_no_setpoints);
     RUN_TEST(test_the_goodwe_profile_holds_back_the_unsourced_channels);
+    RUN_TEST(test_the_mic_and_min_profiles_share_a_layout_and_differ_in_strings);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);
