@@ -84,6 +84,11 @@ unit = "W"
 #   function  optional: write_single (FC06, 1 word) | write_multiple (FC16); default derived
 #   minimum/maximum/step  bounds in canonical units — REQUIRED, enforced centrally
 #   verified  leave false until the row is confirmed against the device on the bench
+#
+# A MODE setpoint (set_battery_operating_mode) declares `options` instead of bounds:
+#   options = [{ value = 0, label = "Self-consumption" }, { value = 2, label = "Forced" }]
+# Use the vendor's own numbering, gaps included. Read docs/device-profiles/write-path.md
+# first: what the write path cannot do is not visible from this template.
 # ------------------------------------------------------------------------------------------
 
 #[[write]]                     # source + how you verified it goes here

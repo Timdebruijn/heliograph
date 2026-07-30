@@ -714,18 +714,76 @@ static void test_start_and_stop_get_button_entities() {
                              stopDoc["payload_press"].as<std::string>().c_str());
 }
 
-static void test_an_enum_command_gets_no_entity_even_if_the_capability_is_granted() {
-    // No driver grants SetBatteryOperatingMode today (there is no EnumCapability yet to say
-    // what the valid selections would even be), so this state is hand-built rather than
-    // pulled from MockDriver -- it pins the "skip, don't guess" rule for the day one does.
+namespace {
+/// A mode setpoint with a gap in its numbering, which is what real EMS-mode registers look like.
+constexpr EnumOption kTestModes[] = {{0, "Self-consumption"}, {2, "Forced"}, {3, "External EMS"}};
+
+DeviceState modeState(const EnumOption* options, size_t count) {
     DeviceState state;
     state.capabilities.addWrite(InverterCapability::SetBatteryOperatingMode);
-    const auto bridge = makeBridge();
-    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    EnumCapability& e = state.capabilities
+                            .enums[static_cast<size_t>(InverterCommandType::SetBatteryOperatingMode)];
+    e.supported   = options != nullptr;
+    e.writable    = options != nullptr;
+    e.options     = options;
+    e.optionCount = count;
+    return state;
+}
+}  // namespace
+
+// A granted mode write with no modes publishes nothing. Same refusal as a numeric write with no
+// range: a select whose dropdown is empty is a control a user can open and not use.
+static void test_an_enum_command_without_options_gets_no_entity() {
+    const DeviceState state  = modeState(nullptr, 0);
+    const auto        bridge = makeBridge();
+    const MqttTopics  topics(kDefaultBaseTopic, bridge.bridgeId);
     const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
                                kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     TEST_ASSERT_NULL(findEntity(entities, "heliograph-a1b2c3_set_battery_operating_mode"));
+}
+
+// With modes declared it becomes a select, and the template translates the LABEL Home Assistant
+// sends into the mode number the device wants.
+static void test_a_mode_command_with_options_becomes_a_select() {
+    const DeviceState state  = modeState(kTestModes, 3);
+    const auto        bridge = makeBridge();
+    const MqttTopics  topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    const auto* entity = findEntity(entities, "heliograph-a1b2c3_set_battery_operating_mode");
+    TEST_ASSERT_NOT_NULL(entity);
+    TEST_ASSERT_TRUE(entity->configTopic.find("/select/") != std::string::npos);
+
+    JsonDocument doc;
+    TEST_ASSERT_EQUAL(DeserializationError::Ok, deserializeJson(doc, entity->payload).code());
+    TEST_ASSERT_EQUAL_UINT32(3, doc["options"].size());
+    TEST_ASSERT_EQUAL_STRING("Self-consumption", doc["options"][0].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("External EMS", doc["options"][2].as<const char*>());
+    TEST_ASSERT_TRUE(doc["optimistic"].as<bool>());
+
+    // The mapping must carry each label's OWN value. A template mapping labels to 0,1,2 would
+    // look right in the dropdown and select the wrong mode on the device.
+    const std::string tmpl = doc["command_template"].as<std::string>();
+    TEST_ASSERT_TRUE(tmpl.find("'Forced': 2") != std::string::npos);
+    TEST_ASSERT_TRUE(tmpl.find("'External EMS': 3") != std::string::npos);
+    TEST_ASSERT_TRUE(tmpl.find("\"enum_value\":{{ m[value] }}") != std::string::npos);
+}
+
+// Renaming or renumbering a mode has to re-announce: otherwise the old dropdown survives, and an
+// option a user picks now maps to a different register value than the one it was created for.
+static void test_discovery_signature_changes_when_a_mode_is_renumbered() {
+    static constexpr EnumOption kRenumbered[] = {
+        {0, "Self-consumption"}, {5, "Forced"}, {3, "External EMS"}};
+    static constexpr EnumOption kRenamed[] = {
+        {0, "Self-consumption"}, {2, "Compulsory"}, {3, "External EMS"}};
+
+    const uint32_t base = discoverySignature(modeState(kTestModes, 3));
+    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenumbered, 3)));
+    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenamed, 3)));
+    // And dropping one is a change too, not merely a shorter list that hashes the same.
+    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kTestModes, 2)));
 }
 
 static void test_discovery_signature_changes_when_a_writable_bound_changes() {
@@ -1355,7 +1413,9 @@ int main(int, char**) {
     RUN_TEST(test_config_topics_are_well_formed);
     RUN_TEST(test_a_writable_numeric_command_gets_a_number_entity);
     RUN_TEST(test_start_and_stop_get_button_entities);
-    RUN_TEST(test_an_enum_command_gets_no_entity_even_if_the_capability_is_granted);
+    RUN_TEST(test_an_enum_command_without_options_gets_no_entity);
+    RUN_TEST(test_a_mode_command_with_options_becomes_a_select);
+    RUN_TEST(test_discovery_signature_changes_when_a_mode_is_renumbered);
     RUN_TEST(test_discovery_signature_changes_when_a_writable_bound_changes);
     RUN_TEST(test_discovery_signature_changes_when_supported_flips_with_unchanged_bounds);
     RUN_TEST(test_discovery_signature_changes_when_writable_flips_with_unchanged_bounds);

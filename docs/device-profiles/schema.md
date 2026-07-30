@@ -148,13 +148,18 @@ be dispatched.
 | `function` | string | no (derived) | `"write_single"` (FC 06) or `"write_multiple"` (FC 16). Defaults to FC 06 for one word, FC 16 for two; set explicitly when a firmware demands FC 16 for single registers. |
 | `scale` | number | no (1.0) | Same semantics as read registers. |
 | `unit` | string | yes | Same set as read registers. |
-| `minimum` / `maximum` | number | **yes** | Bounds in canonical units. Mandatory — the dispatcher refuses unbounded writes, so the schema refuses unbounded rows. |
+| `minimum` / `maximum` | number | **yes** (numeric rows) | Bounds in canonical units. Mandatory — the dispatcher refuses unbounded writes, so the schema refuses unbounded rows. Refused on a mode row. |
+| `options` | array | **yes** (mode rows) | The selectable modes: `[{ value = 0, label = "Self-consumption" }, …]`, with the vendor's own numbering. Only for `set_battery_operating_mode`; refused on a numeric row, and required on a mode one. At most 16. |
 | `step` | number | no (1) | Setpoint granularity. |
 | `verified` | bool | no (**false**) | `true` only after the row is confirmed on real hardware. An unverified row is documentation, never a capability. |
 
-Non-numeric commands (`start`, `stop`, `synchronize_time`) cannot be expressed as a
-write row — "which value means start?" is driver semantics, not a register mapping. If a
-first device needs one, that is a schema extension to design then, not to guess now.
+Value-less commands (`start`, `stop`, `synchronize_time`) cannot be expressed as a write row —
+"which value means start?" is driver semantics, not a register mapping. If a first device needs
+one, that is a schema extension to design then, not to guess now.
+
+Mode setpoints (`set_battery_operating_mode`) **can** be expressed, by declaring `options`
+instead of bounds — see [write-path.md](write-path.md#mode-setpoints-supported-with-one-hard-limit),
+including the one thing they cannot do: a mode packed into part of a shared register.
 
 ## What a profile can NOT express
 

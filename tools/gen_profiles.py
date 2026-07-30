@@ -59,6 +59,9 @@ except NameError:
 MAX_BLOCKS = 8
 # Modbus read limit: at most 125 registers per transaction.
 MAX_BLOCK_COUNT = 125
+# Selectable modes per enum setpoint. Not a protocol limit -- a sanity bound, because the option
+# table is emitted into flash and a Home Assistant dropdown of forty modes is not a control.
+MAX_ENUM_OPTIONS = 16
 
 # Unit symbol -> (C++ Unit enumerator, C++ MeasurementType enumerator).
 # Must stay in sync with unitSymbol() in src/device/measurement.cpp. The measurement type
@@ -125,6 +128,28 @@ def load_vocabulary() -> dict[str, str]:
     return {mid: name for name, mid in pairs}
 
 
+def load_enum_command_names() -> set[str]:
+    """Command names that carry an enum rather than a number, parsed from
+    commandTakesEnumValue() in command.cpp.
+
+    Read from the source for the same reason the other two vocabularies are: a command that
+    changes shape in C++ and not here would be validated as the wrong kind of row -- accepted
+    with min/max bounds it cannot use, and then refused at runtime for want of a mode list.
+    """
+    text = COMMAND_CPP.read_text(encoding="utf-8")
+    body = re.search(
+        r"bool commandTakesEnumValue\(InverterCommandType type\) \{(.*?)\n\}",
+        text,
+        re.DOTALL,
+    )
+    if not body:
+        raise SystemExit(f"could not find commandTakesEnumValue in {COMMAND_CPP}")
+    enums = set(re.findall(r"InverterCommandType::(\w+)", body.group(1)))
+    if not enums:
+        raise SystemExit(f"no enum command types parsed from {COMMAND_CPP}")
+    return enums
+
+
 def load_command_vocabulary() -> dict[str, str]:
     """Canonical command name -> C++ InverterCommandType enumerator, parsed from
     commandTypeName() in command.cpp — the same single-source-of-truth trick as the
@@ -159,7 +184,10 @@ def _require(table: dict, key: str, kind: type, where: str):
 
 
 def parse_profile(
-    path: Path, vocabulary: dict[str, str], commands: dict[str, str]
+    path: Path,
+    vocabulary: dict[str, str],
+    commands: dict[str, str],
+    enum_command_names: set[str],
 ) -> dict:
     with path.open("rb") as f:
         data = tomllib.load(f)
@@ -405,42 +433,123 @@ def parse_profile(
                 f"{ww}: offset is not supported on a write row (read rows only) -- the write "
                 f"path does not invert it, so the register would receive the wrong value"
             )
-        unit = _require(wr, "unit", str, ww)
-        if unit not in UNITS:
-            raise ProfileError(f"{ww}: unknown unit '{unit}'; known: {sorted(UNITS)}")
-        minimum = wr.get("minimum")
-        maximum = wr.get("maximum")
-        for key, val in (("minimum", minimum), ("maximum", maximum)):
-            if val is None:
-                raise ProfileError(
-                    f"{ww}: '{key}' is required for a write register -- "
-                    f"the dispatcher refuses unbounded writes"
-                )
-            if isinstance(val, bool) or not isinstance(val, (int, float)):
-                raise ProfileError(f"{ww}: '{key}' must be a number")
-        if not minimum < maximum:
-            raise ProfileError(f"{ww}: minimum must be < maximum")
-        step = wr.get("step", 1.0)
-        if isinstance(step, bool) or not isinstance(step, (int, float)) or step <= 0:
-            raise ProfileError(f"{ww}: step must be a positive number")
+        # Part of a register is not something FC06 can set: it writes all sixteen bits, so a
+        # masked field would clear whatever shares the register with it. Several vendors do pack a
+        # mode in beside unrelated flags, so the key is recognised and refused by name rather than
+        # ignored -- an ignored `bitmask` would produce a row that looks masked and writes whole.
+        if "bitmask" in wr:
+            raise ProfileError(
+                f"{ww}: bitmask is not supported -- FC06 writes the whole register, so setting "
+                f"part of one needs read-modify-write, which the write path does not do. A "
+                f"masked field would clear its neighbours in the same register"
+            )
         verified = wr.get("verified", False)
         if not isinstance(verified, bool):
             raise ProfileError(f"{ww}: verified must be a boolean")
-        parsed_writes.append(
-            {
-                "command": cmd,
-                "display_name": name,
-                "address": address,
-                "type": rtype,
-                "function": function,
-                "scale": float(scale),
-                "unit": unit,
-                "minimum": float(minimum),
-                "maximum": float(maximum),
-                "step": float(step),
-                "verified": verified,
-            }
-        )
+
+        row = {
+            "command": cmd,
+            "display_name": name,
+            "address": address,
+            "type": rtype,
+            "function": function,
+            "scale": float(scale),
+            "verified": verified,
+        }
+
+        if cmd in enum_command_names:
+            # A mode setpoint. Bounds, a step and a unit describe a range, and this is a list --
+            # accepting them would mean publishing a range the device does not have.
+            for key in ("minimum", "maximum", "step", "unit"):
+                if key in wr:
+                    raise ProfileError(
+                        f"{ww}: '{key}' does not apply to '{cmd}', which selects from a list "
+                        f"rather than moving along a range -- declare `options` instead"
+                    )
+            if words != 1:
+                raise ProfileError(
+                    f"{ww}: a mode setpoint must be a single register (u16/s16); "
+                    f"'{rtype}' spans {words}"
+                )
+            options = wr.get("options")
+            if not isinstance(options, list) or not options:
+                raise ProfileError(
+                    f"{ww}: '{cmd}' needs a non-empty `options` list, e.g.\n"
+                    f'  options = [{{ value = 0, label = "Self-consumption" }}, '
+                    f'{{ value = 2, label = "Forced" }}]\n'
+                    f"  A mode write with no declared modes is refused at runtime: nothing can "
+                    f"range-check it and Home Assistant would show an empty dropdown"
+                )
+            if len(options) > MAX_ENUM_OPTIONS:
+                raise ProfileError(
+                    f"{ww}: {len(options)} options, at most {MAX_ENUM_OPTIONS} are supported"
+                )
+            parsed_options = []
+            seen_values: set[int] = set()
+            seen_labels: set[str] = set()
+            for j, opt in enumerate(options):
+                ow = f"{ww} options[{j}]"
+                if not isinstance(opt, dict):
+                    raise ProfileError(f"{ow}: each option must be a table with value + label")
+                value = _require(opt, "value", int, ow)
+                if not 0 <= value <= 0xFFFF:
+                    raise ProfileError(f"{ow}: value must be 0-65535")
+                if value in seen_values:
+                    raise ProfileError(f"{ow}: value {value} declared twice")
+                seen_values.add(value)
+                label = _require(opt, "label", str, ow)
+                if not label:
+                    raise ProfileError(f"{ow}: label must not be empty")
+                # Home Assistant identifies a select option BY its label, so two options sharing
+                # one would give the user a dropdown where one entry silently shadows the other.
+                if label in seen_labels:
+                    raise ProfileError(f"{ow}: label '{label}' declared twice")
+                seen_labels.add(label)
+                parsed_options.append({"value": value, "label": label})
+            row.update(
+                {
+                    "unit": None,
+                    "minimum": 0.0,
+                    "maximum": 0.0,
+                    "step": 0.0,
+                    "options": parsed_options,
+                }
+            )
+        else:
+            if "options" in wr:
+                raise ProfileError(
+                    f"{ww}: `options` applies only to a mode setpoint; '{cmd}' takes a number, "
+                    f"so declare minimum/maximum/step instead"
+                )
+            unit = _require(wr, "unit", str, ww)
+            if unit not in UNITS:
+                raise ProfileError(f"{ww}: unknown unit '{unit}'; known: {sorted(UNITS)}")
+            minimum = wr.get("minimum")
+            maximum = wr.get("maximum")
+            for key, val in (("minimum", minimum), ("maximum", maximum)):
+                if val is None:
+                    raise ProfileError(
+                        f"{ww}: '{key}' is required for a write register -- "
+                        f"the dispatcher refuses unbounded writes"
+                    )
+                if isinstance(val, bool) or not isinstance(val, (int, float)):
+                    raise ProfileError(f"{ww}: '{key}' must be a number")
+            if not minimum < maximum:
+                raise ProfileError(f"{ww}: minimum must be < maximum")
+            step = wr.get("step", 1.0)
+            if isinstance(step, bool) or not isinstance(step, (int, float)) or step <= 0:
+                raise ProfileError(f"{ww}: step must be a positive number")
+            row.update(
+                {
+                    "unit": unit,
+                    "minimum": float(minimum),
+                    "maximum": float(maximum),
+                    "step": float(step),
+                    "options": [],
+                }
+            )
+
+        parsed_writes.append(row)
 
     return {
         "path": where,
@@ -519,10 +628,21 @@ def generate(
             )
         w("};")
         if p["writes"]:
+            # Option tables first: each write row points at its own, and a table has to exist
+            # before the row that references it.
+            for wr in p["writes"]:
+                if not wr["options"]:
+                    continue
+                osym = f"k{sym}{cpp_symbol(wr['command'])}Options"
+                w(f"constexpr EnumOption {osym}[] = {{")
+                for opt in wr["options"]:
+                    w(f"    {{{opt['value']}, {cpp_string(opt['label'])}}},")
+                w("};")
             w(f"constexpr WriteMapping k{sym}Writes[] = {{")
             for wr in p["writes"]:
                 words, _signed = TYPES[wr["type"]]
-                unit_enum, _mtype = UNITS[wr["unit"]]
+                # A mode row has no unit: it selects from a list rather than measuring anything.
+                unit_enum = "None" if wr["unit"] is None else UNITS[wr["unit"]][0]
                 multiple = "true" if wr["function"] == "write_multiple" else "false"
                 w(
                     f"    {{InverterCommandType::{commands[wr['command']]}, "
@@ -532,11 +652,20 @@ def generate(
                     f"     RegSpace::Holding, {wr['address']}, {words}, {multiple}, "
                     f"{cpp_float(wr['scale'])},"
                 )
-                w(
-                    f"     {cpp_float(wr['minimum'])}, {cpp_float(wr['maximum'])}, "
-                    f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
-                    f"{'true' if wr['verified'] else 'false'}}},"
-                )
+                if wr["options"]:
+                    osym = f"k{sym}{cpp_symbol(wr['command'])}Options"
+                    w(
+                        f"     {cpp_float(wr['minimum'])}, {cpp_float(wr['maximum'])}, "
+                        f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
+                        f"{'true' if wr['verified'] else 'false'},"
+                    )
+                    w(f"     {osym}, sizeof({osym}) / sizeof({osym}[0])}},")
+                else:
+                    w(
+                        f"     {cpp_float(wr['minimum'])}, {cpp_float(wr['maximum'])}, "
+                        f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
+                        f"{'true' if wr['verified'] else 'false'}}},"
+                    )
             w("};")
     w("")
     w("constexpr DeviceProfile kProfiles[] = {")
@@ -606,6 +735,10 @@ def generate(
 def run(check_only: bool = False) -> int:
     vocabulary = load_vocabulary()
     commands = load_command_vocabulary()
+    # commandTakesEnumValue names C++ ENUMERATORS; a profile names commands. Translate through
+    # the command vocabulary rather than comparing the two spellings, which do not match.
+    enum_enumerators = load_enum_command_names()
+    enum_commands = {n for n, enum in commands.items() if enum in enum_enumerators}
     paths = sorted(
         p for p in PROFILES_DIR.rglob("*.toml") if not p.name.startswith("_")
     )
@@ -613,7 +746,7 @@ def run(check_only: bool = False) -> int:
     errors: list[str] = []
     for path in paths:
         try:
-            profiles.append(parse_profile(path, vocabulary, commands))
+            profiles.append(parse_profile(path, vocabulary, commands, enum_commands))
         except ProfileError as e:
             errors.append(str(e))
         except tomllib.TOMLDecodeError as e:

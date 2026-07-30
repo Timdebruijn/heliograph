@@ -59,24 +59,51 @@ Such a row is still worth declaring — it records the research — but it will 
 A device whose only export-limit register is 32-bit is therefore **readable but not
 controllable** today, and that is a deliberate stop, not an oversight.
 
-### Enum / mode commands
+### Mode setpoints: supported, with one hard limit
 
-`set_battery_operating_mode` is the one canonical command that carries an enum rather than a
-number — a battery work mode, an EMS mode, a self-use/time-of-use selector. It is the classic
-hybrid control, and it does **not** work as a `[[write]]` row:
+`set_battery_operating_mode` carries a selection rather than a number — a battery work mode, an
+EMS mode, a self-use/time-of-use selector. It works, as a `[[write]]` row that declares its
+options:
 
-- the profile validator accepts the row (it is not in the non-numeric exclusion list);
-- `execute()` requires a numeric value and returns `Rejected` without it;
-- Home Assistant discovery skips it, because no `EnumCapability` exists to say what the valid
-  selections are, and inventing a `select` with guessed options is worse than no entity.
+```toml
+[[write]]
+command = "set_battery_operating_mode"
+display_name = "EMS mode"
+space = "holding"
+address = 13049
+type = "u16"
+verified = false
+# Every value from the vendor protocol document, with the vendor's own numbering. Gaps are
+# normal -- retired modes leave holes -- and they are why the raw value is declared per option
+# rather than inferred from position.
+options = [
+  { value = 0, label = "Self-consumption" },
+  { value = 2, label = "Forced" },
+  { value = 3, label = "External EMS" },
+]
+```
 
-So a mode row is currently **accepted-but-dead**. Making it work needs an enum capability model,
-a `select` entity, and a schema that can express "value 2 means Time of Use" — a deliberate
-piece of work, not a row.
+- `minimum`, `maximum`, `step` and `unit` are **refused** on such a row: they describe a range,
+  and this is a list.
+- The option's own `value` is what reaches the register — never its position in the list. A
+  device numbering its modes 0, 2, 3 would otherwise be sent 1 for "Forced".
+- A row with no `options` is refused by the build, and a driver that somehow publishes an empty
+  list advertises nothing: an empty dropdown is not a control.
+- Home Assistant gets a `select`. It sends the label a user picked; the generated
+  `command_template` maps that label back to the mode number, so no automation has to know the
+  numbering.
+- The dispatcher checks **membership**, not range. A mode the device never declared is refused
+  before the driver is reached — there is no "close enough" for a mode number.
 
-Curtailment does not depend on it: on every device surveyed so far the export limit and the
-active-power limit are standalone numeric setpoints. Battery *charge scheduling* does depend on
-it.
+**The hard limit: whole registers only.** Several vendors pack a mode into *part* of a register
+alongside unrelated flags (`bitmask = 0x03` in some community maps). FC06 writes all sixteen bits,
+so setting a masked field needs read-modify-write, which this path does not do — it would clear
+whatever shares the register. The build rejects a `bitmask` key by name rather than ignoring it.
+On Deye/Sunsynk, for instance, "Load Limit" (register 244) is a whole-register selector and
+mappable; "Priority Load" and "Solar Export" are single bits inside a shared register and are not.
+
+Curtailment does not depend on any of this: on every device surveyed so far the export limit and
+the active-power limit are standalone numeric setpoints.
 
 ### `offset` and negative `scale`
 

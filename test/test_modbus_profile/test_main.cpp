@@ -788,6 +788,26 @@ void echoWrites(MockTransport& t) {
     });
 }
 
+/// A mode setpoint: selects from a list rather than moving along a range. The values are
+/// deliberately NOT 0,1,2 -- a real EMS-mode register numbers its modes with gaps where a mode was
+/// retired, and an implementation that sent the selection INDEX instead of the option's value
+/// would pass a test built on consecutive numbering and enter the wrong mode on hardware.
+const EnumOption kModeOptions[] = {
+    {0, "Self-consumption"},
+    {2, "Forced"},
+    {3, "External EMS"},
+};
+const WriteMapping kModeWrites[] = {
+    {InverterCommandType::SetBatteryOperatingMode, "EMS mode", RegSpace::Holding, 13049, 1, false,
+     1.0, 0.0, 0.0, 0.0, Unit::None, true, kModeOptions, 3},
+};
+
+/// The same row with no modes declared, which must never become a control surface.
+const WriteMapping kModeWritesNoOptions[] = {
+    {InverterCommandType::SetBatteryOperatingMode, "EMS mode", RegSpace::Holding, 13049, 1, false,
+     1.0, 0.0, 0.0, 0.0, Unit::None, true, nullptr, 0},
+};
+
 /// The same row with verified = false, which is how every shipped profile carries it.
 const WriteMapping kUnverifiedWrites[] = {
     {InverterCommandType::SetActivePowerLimitPercent, "Active Power Limit", RegSpace::Holding, 3,
@@ -870,6 +890,101 @@ static void test_a_verified_row_writes_the_register_it_names() {
     TEST_ASSERT_EQUAL_UINT8(0x06, f[1]);
     TEST_ASSERT_EQUAL_UINT16(3, (f[2] << 8) | f[3]);
     TEST_ASSERT_EQUAL_UINT16(60, (f[4] << 8) | f[5]);
+}
+
+// A mode row writes the option's OWN value, not the position it sits in.
+static void test_a_mode_row_writes_the_declared_value_not_the_selection_index() {
+    MockTransport transport;
+    echoWrites(transport);
+    DeviceProfile profile = profileWith(kModeWrites, 1);
+    ProfileOptions options;
+    options.unitId  = 1;
+    options.profile = &profile;
+    ModbusProfileDriver driver(transport, options);
+
+    // "External EMS" is option index 2 and value 3. Sending 2 would select "Forced" -- on a real
+    // device, the difference between following a house battery plan and handing control to
+    // something that is not there.
+    InverterCommand cmd;
+    cmd.type      = InverterCommandType::SetBatteryOperatingMode;
+    cmd.enumValue = 3;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, driver.execute(cmd));
+
+    TEST_ASSERT_EQUAL_UINT32(1, transport.writes.size());
+    const auto& f = transport.writes.back();
+    TEST_ASSERT_EQUAL_UINT8(0x06, f[1]);
+    TEST_ASSERT_EQUAL_UINT16(13049, (f[2] << 8) | f[3]);
+    TEST_ASSERT_EQUAL_UINT16(3, (f[4] << 8) | f[5]);
+}
+
+static void test_a_mode_row_advertises_its_options_as_a_capability() {
+    MockTransport transport;
+    DeviceProfile profile = profileWith(kModeWrites, 1);
+    ProfileOptions options;
+    options.profile = &profile;
+    ModbusProfileDriver driver(transport, options);
+
+    const InverterCapabilities caps = driver.capabilities();
+    TEST_ASSERT_TRUE(caps.canWrite(InverterCapability::SetBatteryOperatingMode));
+
+    const EnumCapability& ec =
+        caps.enums[static_cast<size_t>(InverterCommandType::SetBatteryOperatingMode)];
+    TEST_ASSERT_TRUE(ec.supported);
+    TEST_ASSERT_TRUE(ec.writable);
+    TEST_ASSERT_EQUAL_UINT32(3, ec.optionCount);
+    TEST_ASSERT_EQUAL_STRING("Self-consumption", ec.options[0].label);
+    TEST_ASSERT_TRUE(ec.accepts(0));
+    TEST_ASSERT_TRUE(ec.accepts(3));
+    // The gaps are not modes. 1 sits between two declared values and is exactly the number an
+    // off-by-one would produce.
+    TEST_ASSERT_FALSE(ec.accepts(1));
+    TEST_ASSERT_FALSE(ec.accepts(4));
+
+    // A mode row publishes no numeric range -- there is nothing to interpolate -- so nothing
+    // should read it as an unbounded numeric setpoint.
+    TEST_ASSERT_FALSE(
+        caps.numeric[static_cast<size_t>(InverterCommandType::SetBatteryOperatingMode)].writable);
+}
+
+static void test_a_mode_the_device_never_declared_never_reaches_the_bus() {
+    MockTransport transport;
+    echoWrites(transport);
+    DeviceProfile profile = profileWith(kModeWrites, 1);
+    ProfileOptions options;
+    options.profile = &profile;
+    ModbusProfileDriver driver(transport, options);
+
+    InverterCommand cmd;
+    cmd.type      = InverterCommandType::SetBatteryOperatingMode;
+    cmd.enumValue = 1;  // between two declared values
+    TEST_ASSERT_EQUAL(CommandResult::OutOfRange, driver.execute(cmd));
+    TEST_ASSERT_TRUE(transport.writes.empty());
+
+    // And a mode command with no selection at all is rejected rather than defaulted to the first
+    // option, which would silently switch a battery to whatever happens to be listed first.
+    InverterCommand empty;
+    empty.type = InverterCommandType::SetBatteryOperatingMode;
+    TEST_ASSERT_EQUAL(CommandResult::Rejected, driver.execute(empty));
+    TEST_ASSERT_TRUE(transport.writes.empty());
+}
+
+// A mode row with no modes is documentation, not a control surface -- an empty dropdown in Home
+// Assistant and a register nothing can range-check.
+static void test_a_mode_row_without_options_is_not_a_control_surface() {
+    MockTransport transport;
+    echoWrites(transport);
+    DeviceProfile profile = profileWith(kModeWritesNoOptions, 1);
+    ProfileOptions options;
+    options.profile = &profile;
+    ModbusProfileDriver driver(transport, options);
+
+    TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetBatteryOperatingMode));
+
+    InverterCommand cmd;
+    cmd.type      = InverterCommandType::SetBatteryOperatingMode;
+    cmd.enumValue = 0;
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, driver.execute(cmd));
+    TEST_ASSERT_TRUE(transport.writes.empty());
 }
 
 static void test_a_value_outside_the_row_bounds_never_reaches_the_bus() {
@@ -1007,6 +1122,10 @@ int main(int, char**) {
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);
+    RUN_TEST(test_a_mode_row_writes_the_declared_value_not_the_selection_index);
+    RUN_TEST(test_a_mode_row_advertises_its_options_as_a_capability);
+    RUN_TEST(test_a_mode_the_device_never_declared_never_reaches_the_bus);
+    RUN_TEST(test_a_mode_row_without_options_is_not_a_control_surface);
     RUN_TEST(test_a_value_outside_the_row_bounds_never_reaches_the_bus);
     RUN_TEST(test_a_row_needing_write_multiple_is_refused_not_faked);
     RUN_TEST(test_a_device_that_refuses_is_rejected_not_reported_as_a_fault);

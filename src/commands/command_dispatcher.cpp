@@ -115,11 +115,25 @@ DispatchOutcome CommandDispatcher::dispatch(const InverterCommand& command,
             return {CommandResult::OutOfRange,
                     "value for '" + cname + "' is not a multiple of the step size"};
         }
-    } else if (commandTakesEnumValue(command.type) && !command.enumValue.has_value()) {
-        // There is no EnumCapability to range-check against yet, so this only pins presence.
-        // The first driver implementing a mode write has to bring its own validation, and this
-        // is the reminder that the dispatcher is not doing it for it.
-        return {CommandResult::OutOfRange, "'" + cname + "' requires a mode selection"};
+    } else if (commandTakesEnumValue(command.type)) {
+        // Membership, not range. An enum setpoint has no interpolation between valid values: a
+        // mode number the device does not implement is not a near miss, it is a register set to
+        // something nobody has tested. So the same rule the numeric branch arrived at applies --
+        // a driver that declares the write and publishes no options is refused rather than
+        // trusted, because it is claiming it can change a mode without saying which modes exist.
+        const EnumCapability& ec = caps.enums[static_cast<size_t>(command.type)];
+        if (!ec.supported || !ec.writable) {
+            return {CommandResult::Unsupported,
+                    "the active driver declares '" + cname +
+                        "' writable but publishes no modes for it"};
+        }
+        if (!command.enumValue.has_value()) {
+            return {CommandResult::OutOfRange, "'" + cname + "' requires a mode selection"};
+        }
+        if (!ec.accepts(*command.enumValue)) {
+            return {CommandResult::OutOfRange,
+                    "mode for '" + cname + "' is not one this device declares"};
+        }
     }
 
     // 4. Rate limit, last: a rejected command should not consume the allowance. Run/stop

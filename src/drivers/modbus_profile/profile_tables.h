@@ -80,6 +80,17 @@ struct WriteMapping {
     double              step;
     Unit                unit;
     bool                verified;     ///< confirmed on hardware; unverified rows stay dormant
+    /// The selectable modes, for a row whose command carries an enum rather than a number
+    /// (a battery work mode, an EMS mode). Null and zero for a numeric setpoint, which is
+    /// every row that existed before this field. Points at compile-time data in
+    /// profiles_generated.cpp, so handing the pointer out through EnumCapability is safe.
+    ///
+    /// Whole registers only. Several vendors pack a mode into part of a register alongside
+    /// unrelated flags, and setting that needs read-modify-write: FC06 writes all sixteen bits,
+    /// so a masked field would silently clear its neighbours. The generator rejects such a row
+    /// rather than emitting one that damages settings nobody asked it to touch.
+    const EnumOption* options     = nullptr;
+    size_t            optionCount = 0;
 };
 
 struct DeviceProfile {

@@ -313,6 +313,12 @@ const WriteMapping* ModbusProfileDriver::writeFor(InverterCommandType type) cons
         if (w.words != 1 || w.useWriteMultiple) {
             return nullptr;
         }
+        // A mode row with no modes is not a control surface. The generator will not emit one, so
+        // this guards a hand-written table -- and it keeps capabilities() from advertising a
+        // select with nothing in it, which Home Assistant would render as an empty dropdown.
+        if (commandTakesEnumValue(w.command) && w.optionCount == 0) {
+            return nullptr;
+        }
         return &w;
     }
     return nullptr;
@@ -332,6 +338,17 @@ InverterCapabilities ModbusProfileDriver::capabilities() const {
             continue;
         }
         caps.addWrite(requiredCapability(w->command));
+        // A row is one or the other, decided by the command type rather than by what the row
+        // happens to carry -- the same rule parseCommandRequest and the dispatcher use, so all
+        // three agree about which shape a command has.
+        if (commandTakesEnumValue(w->command)) {
+            EnumCapability& e = caps.enums[static_cast<size_t>(w->command)];
+            e.supported       = true;
+            e.writable        = true;
+            e.options         = w->options;
+            e.optionCount     = w->optionCount;
+            continue;
+        }
         NumericCapability& n = caps.numeric[static_cast<size_t>(w->command)];
         n.supported          = true;
         n.writable           = true;
@@ -351,23 +368,49 @@ CommandResult ModbusProfileDriver::execute(const InverterCommand& command) {
     if (w == nullptr) {
         return CommandResult::Unsupported;
     }
-    if (!command.numericValue.has_value()) {
-        return CommandResult::Rejected;
-    }
-    // Bounds are checked HERE as well as in the dispatcher. The dispatcher enforces what
-    // capabilities() advertised; this enforces what the register actually accepts, and the two
-    // are the same number today only because both read it from the same row.
-    const double value = *command.numericValue;
-    if (value < w->minimum || value > w->maximum) {
-        return CommandResult::OutOfRange;
-    }
-    const double raw = value / w->scale;
-    if (raw < 0.0 || raw > 65535.0) {
-        return CommandResult::OutOfRange;
+    // What lands in the register, decided by the command's shape rather than by which fields the
+    // caller filled in. Both branches re-check independently of the dispatcher: the dispatcher
+    // enforces what capabilities() ADVERTISED, this enforces what the register accepts, and they
+    // agree today only because both read the same row.
+    uint16_t raw = 0;
+    if (commandTakesEnumValue(command.type)) {
+        if (!command.enumValue.has_value()) {
+            return CommandResult::Rejected;
+        }
+        // Membership, and the option's own raw value -- never the selection index. A device that
+        // numbers its modes 0, 2, 3, 4 (as several do, with gaps where a mode was retired) would
+        // otherwise be sent 1 for "Forced" and quietly enter whatever mode 1 is.
+        const EnumOption* chosen = nullptr;
+        for (size_t i = 0; i < w->optionCount; ++i) {
+            if (w->options[i].value == *command.enumValue) {
+                chosen = &w->options[i];
+                break;
+            }
+        }
+        if (chosen == nullptr) {
+            return CommandResult::OutOfRange;
+        }
+        if (chosen->value < 0 || chosen->value > 0xFFFF) {
+            return CommandResult::OutOfRange;
+        }
+        raw = static_cast<uint16_t>(chosen->value);
+    } else {
+        if (!command.numericValue.has_value()) {
+            return CommandResult::Rejected;
+        }
+        const double value = *command.numericValue;
+        if (value < w->minimum || value > w->maximum) {
+            return CommandResult::OutOfRange;
+        }
+        const double scaled = value / w->scale;
+        if (scaled < 0.0 || scaled > 65535.0) {
+            return CommandResult::OutOfRange;
+        }
+        raw = static_cast<uint16_t>(scaled + 0.5);
     }
 
     const modbus::TransactionOutcome outcome = modbus::writeSingleRegister(
-        *transport_, options_.unitId, w->address, static_cast<uint16_t>(raw + 0.5),
+        *transport_, options_.unitId, w->address, raw,
         modbus::ReadTiming{kTransactionDeadlineMs, kResponseTimeoutMs});
     switch (outcome.status) {
         case modbus::TransactionStatus::Ok:
