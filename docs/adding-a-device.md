@@ -309,7 +309,12 @@ forum post. So the schema treats writes as *research to record*, not behavior to
   [schema.md](device-profiles/schema.md)) documents a writable setpoint register with
   mandatory min/max bounds — include them in your PR when your protocol PDF documents
   them, marked `verified = false`.
-- Nothing acts on such a row until it is `verified = true` (confirmed against the real
-  device, on a bench, by someone watching the inverter respond) **and** the driver has
-  grown a write path in C++. Both gates are deliberate; a data file that could make an
-  unreviewed device writable is not a feature but a liability.
+- Nothing acts on such a row until it is `verified = true` — confirmed against the real
+  device, on a bench, by someone watching the inverter respond. A data file that could make
+  an unreviewed device writable is not a feature but a liability, which is why this gate is
+  in the data and not only in the code.
+- The driver's write path itself exists (one holding register, FC06, echo verified). What it
+  deliberately **cannot** do — 32-bit setpoints, FC16, enum modes such as a battery work mode
+  — is in [write-path.md](device-profiles/write-path.md). Read it before writing a row: some
+  perfectly valid-looking rows can never be dispatched, and it is better to know that before
+  you go looking for the register.

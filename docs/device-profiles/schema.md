@@ -126,12 +126,17 @@ value.
 
 ## `[[write]]` — optional: writable setpoint registers
 
-**Read-only is the default.** A register is writable only when declared here — and even
-then it is *dormant*: two independent gates stand between a `[[write]]` row and a byte on
-the bus. The row must carry `verified = true` (confirmed against the real device), and
-the driver must implement a write path (none does today; `execute()` returns
-Unsupported). The section exists so write-register research can be recorded, reviewed
-and bounds-checked long before writing is ever enabled.
+**Read-only is the default.** A register is writable only when declared here — and even then
+it is *dormant* until the row carries `verified = true`, meaning somebody wrote it on real
+hardware, read it back, and confirmed the device acted on it. No row in this repository sets
+that today. The section exists so write-register research can be recorded, reviewed and
+bounds-checked long before anything acts on it.
+
+The driver's write path itself is implemented (FC06, one holding register, echo verified).
+**What it cannot do — 32-bit setpoints, FC16, enum modes like a battery work mode — is in
+[write-path.md](write-path.md), and a row it cannot serve is refused rather than approximated.**
+Read that before adding a `[[write]]` row, or you may write a row that validates and can never
+be dispatched.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|

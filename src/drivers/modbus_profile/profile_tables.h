@@ -60,11 +60,13 @@ struct RegBlock {
 
 /// A writable numeric setpoint register, declared in a profile's [[write]] section.
 ///
-/// Schema-level support only. Two independent gates stand between a row here and a byte on
-/// the bus: `verified` must be true (hardware-confirmed on a real device, per row), and the
-/// driver must actually implement a write path (none does today — execute() returns
-/// Unsupported). A profile row alone must never make a device writable; the table exists so
-/// register research can be recorded and reviewed long before writing is enabled.
+/// A profile row alone must never make a device writable. `verified` must also be true --
+/// hardware-confirmed on a real device, per row -- so the table can hold register research that
+/// has been recorded and reviewed but not yet proven. No profile in the tree sets it today.
+///
+/// The driver's write path itself exists: execute() writes one holding register over FC06 and
+/// checks the device's echo. What it deliberately cannot do (32-bit setpoints, FC16, enum modes)
+/// is in docs/device-profiles/write-path.md, together with why.
 struct WriteMapping {
     InverterCommandType command;      ///< canonical numeric setpoint this register implements
     const char*         displayName;
