@@ -1,0 +1,304 @@
+# SPDX-License-Identifier: MIT
+#
+# GoodWe ET / EH / BT / BH hybrid — Modbus RTU register profile.
+#
+# STATUS: read-only, single-sourced, and NOT confirmed against a physical inverter by this
+# project. See docs/goodwe-et-protocol.md.
+#
+# SOURCE:
+#   marcelblijleven/goodwe, goodwe/et.py and goodwe/sensor.py -- a mature Python library with
+#   real users, and the basis of several Home Assistant setups.
+#
+# ONE SOURCE, and unlike Sungrow it could not be checked against the vendor document. GoodWe's
+# "Modbus Protocol Hybrid ET/EH/BT/BH" PDF was obtained, but its text is entirely in subset fonts:
+# extraction yields glyph indices, not a single readable word. (The Sungrow document worked
+# because it mixed fonts and left the register tables in a plain one.) So this map has the same
+# standing as the Huawei one -- one careful transcription, not two agreeing sources.
+#
+# NO WRITABLE ROWS, and that is a sourcing decision rather than an oversight: the publicly
+# circulating GoodWe hybrid protocol document is titled "Read Only". Nothing here documents a
+# write target, and an undocumented write target is disqualifying. See the note at the bottom.
+#
+# UNIT ID: GoodWe ships this family at Modbus address **247**, not 1. The driver's `unit_id`
+# option defaults to 1, so it must be set explicitly or the inverter will simply never answer --
+# which looks exactly like a wiring fault.
+#
+# SCALING NOTE: the source library encodes scaling in its sensor CLASSES rather than per row --
+# Voltage and Current divide by 10, Frequency by 100, Energy4 by 10, Temp by 10. Those divisors
+# appear below as multipliers.
+#
+# REGISTER SPACE: holding registers (function 03).
+
+[profile]
+driver = "modbus_profile"
+id = "goodwe_et_hybrid"
+display_name = "GoodWe ET/EH/BT/BH hybrid"
+manufacturer = "GoodWe"
+default = false        # sph.toml holds the driver default
+phases = 1
+mppts = 2
+battery = true
+transports = ["rtu"]
+
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# ------------------------------------------------------------------------------------------
+# Read blocks. Two, and both deliberately match the ranges the source library itself reads
+# (35100 + 125 registers, and 37000 + 24) rather than being trimmed to the mapped rows. On a
+# family whose polling behaviour nobody here has observed, issuing the same two transactions a
+# working implementation issues is the safer starting point -- and the wide first block means the
+# TRACE dump covers every register this map draws from plus the ones it deliberately leaves out.
+# ------------------------------------------------------------------------------------------
+
+[[block]]
+space = "holding"
+start = 35100
+count = 125     # 35100-35224: PV, grid, inverter power, temperature, battery, energy totals
+
+[[block]]
+space = "holding"
+start = 37000
+count = 24      # 37000-37023: BMS block -- battery temperature and state of charge
+
+# ------------------------------------------------------------------------------------------
+# SENTINELS. GoodWe uses the same convention Huawei does: an unavailable reading comes back as a
+# fixed pattern rather than an exception. The source library maps 0xFFFF, 0xFFFFFFFF and 0x7FFF
+# to "no value", and every row below that can go unavailable carries the sentinel for its width.
+# Without that, a hybrid map pointed at an inverter with no battery publishes a phantom one.
+# ------------------------------------------------------------------------------------------
+
+# --- DC / PV side -------------------------------------------------------------------------
+
+[[register]]
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 Voltage"
+space = "holding"
+address = 35103
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "V"
+
+[[register]]
+measurement = "dc.mppt_1.current"
+display_name = "PV1 Current"
+space = "holding"
+address = 35104
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "A"
+
+[[register]]
+measurement = "dc.mppt_1.power"
+display_name = "PV1 Power"
+space = "holding"
+address = 35105
+type = "u32"
+scale = 1.0
+invalid = 0xFFFFFFFF
+unit = "W"
+
+[[register]]
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 Voltage"
+space = "holding"
+address = 35107
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "V"
+
+[[register]]
+measurement = "dc.mppt_2.current"
+display_name = "PV2 Current"
+space = "holding"
+address = 35108
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "A"
+
+[[register]]
+measurement = "dc.mppt_2.power"
+display_name = "PV2 Power"
+space = "holding"
+address = 35109
+type = "u32"
+scale = 1.0
+invalid = 0xFFFFFFFF
+unit = "W"
+
+# --- AC side ------------------------------------------------------------------------------
+
+# The INVERTER's own output. The source library tags this Kind.AC, and tags the neighbouring
+# register at 35140 Kind.GRID -- the two are different quantities on a hybrid, and that tag is
+# what distinguishes them. Signed: a hybrid drawing from the grid to charge pushes it negative.
+[[register]]
+measurement = "ac.power.total"
+display_name = "Total Power"
+space = "holding"
+address = 35138
+type = "s16"
+scale = 1.0
+unit = "W"
+
+[[register]]
+measurement = "ac.phase_l1.voltage"
+display_name = "On-grid L1 Voltage"
+space = "holding"
+address = 35121
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "V"
+
+[[register]]
+measurement = "ac.phase_l1.current"
+display_name = "On-grid L1 Current"
+space = "holding"
+address = 35122
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "A"
+
+# Signed in the source library, which is worth keeping: its frequency helper reads this one as
+# signed while reading voltage and current unsigned, so the choice looks deliberate.
+[[register]]
+measurement = "ac.frequency"
+display_name = "On-grid L1 Frequency"
+space = "holding"
+address = 35123
+type = "s16"
+scale = 0.01
+unit = "Hz"
+
+# --- Temperature --------------------------------------------------------------------------
+
+# The radiator temperature. Note the LIMITATION recorded in the gap list below: the source treats
+# BOTH 0x7FFF and 0xFFFF (-1) as "no value", and this schema declares one sentinel per row. The
+# dangerous one is declared -- 0x7FFF would otherwise publish 3276.7 °C -- while 0xFFFF decodes
+# as -0.1 °C, wrong but harmless-looking rather than alarming.
+[[register]]
+measurement = "inverter.temperature"
+display_name = "Inverter Temperature"
+space = "holding"
+address = 35176
+type = "s16"
+scale = 0.1
+invalid = 0x7FFF
+unit = "°C"
+
+# --- Energy -------------------------------------------------------------------------------
+
+[[register]]
+measurement = "energy.total"
+display_name = "Total PV Generation"
+space = "holding"
+address = 35191
+type = "u32"
+scale = 0.1
+invalid = 0xFFFFFFFF
+unit = "kWh"
+
+[[register]]
+measurement = "energy.today"
+display_name = "Today's PV Generation"
+space = "holding"
+address = 35193
+type = "u32"
+scale = 0.1
+invalid = 0xFFFFFFFF
+unit = "kWh"
+
+# --- Battery ------------------------------------------------------------------------------
+
+[[register]]
+measurement = "battery.voltage"
+display_name = "Battery Voltage"
+space = "holding"
+address = 35180
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "V"
+
+[[register]]
+measurement = "battery.energy_charged"
+display_name = "Total Battery Charge"
+space = "holding"
+address = 35206
+type = "u32"
+scale = 0.1
+invalid = 0xFFFFFFFF
+unit = "kWh"
+
+[[register]]
+measurement = "battery.energy_discharged"
+display_name = "Total Battery Discharge"
+space = "holding"
+address = 35209
+type = "u32"
+scale = 0.1
+invalid = 0xFFFFFFFF
+unit = "kWh"
+
+# From the BMS block, not the inverter block.
+[[register]]
+measurement = "battery.soc"
+display_name = "Battery State of Charge"
+space = "holding"
+address = 37007
+type = "u16"
+scale = 1.0
+invalid = 0xFFFF
+unit = "%"
+
+[[register]]
+measurement = "battery.temperature"
+display_name = "Battery Temperature"
+space = "holding"
+address = 37003
+type = "s16"
+scale = 0.1
+invalid = 0x7FFF
+unit = "°C"
+
+# ==============================================================================================
+# DELIBERATELY NOT MAPPED
+# ==============================================================================================
+#
+# battery.power (35182, signed 32-bit) and battery.current (35181, signed 16-bit). Signed in the
+# source, and the source does not say which direction positive means -- it passes both straight
+# through. This is the FOURTH hybrid in a row where battery power is held back, and Sungrow
+# remains the only one where a source stated the convention. Settle it on a bench through a
+# charge-to-discharge crossover, then a negative `scale` corrects it here if needed.
+#
+# Grid power (35140). Tagged Kind.GRID by the source: a single signed bidirectional value, where
+# our canonical grid channels are two separate unsigned rails. Splitting one into two needs
+# arithmetic a profile cannot do.
+#
+# House consumption. The source computes it from several other registers rather than reading one,
+# and a profile does no arithmetic. There is also no canonical id for a load channel yet.
+#
+# The SECOND temperature sentinel. The source treats 0xFFFF as well as 0x7FFF as "no value" on
+# temperature registers, and a row here declares one `invalid`. Adding multi-sentinel support for
+# a case whose worst outcome is a plausible -0.1 °C did not seem worth the schema surface; if a
+# bench session shows 0xFFFF appearing in practice, that is the moment to reconsider.
+
+# ------------------------------------------------------------------------------------------
+# NO [[write]] ROWS.
+#
+# Not an omission. The publicly circulating GoodWe hybrid protocol document is titled
+# "Read Only", and the source library exposes no write targets for this family that this profile
+# could point at. The project rule is that an undocumented write target is disqualifying rather
+# than something to try, so nothing is declared -- not even dormant.
+#
+# What would change that: a vendor write-capable protocol document, or a second implementation
+# that writes to this family on real hardware. Either turns this from "no source" into research
+# worth recording.
+# ------------------------------------------------------------------------------------------

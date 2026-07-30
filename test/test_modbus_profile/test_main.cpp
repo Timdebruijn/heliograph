@@ -1418,6 +1418,109 @@ static void test_the_huawei_setpoint_is_declared_and_dormant() {
     TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
 }
 
+// --- the GoodWe ET hybrid profile -----------------------------------------------------------
+
+namespace {
+void makeGoodweBlocks(BlockData blocks[2]) {
+    blocks[0] = {RegSpace::Holding, 35100, 125, {}};
+    blocks[1] = {RegSpace::Holding, 37000, 24, {}};
+}
+}  // namespace
+
+static void test_the_goodwe_profile_decodes_a_realistic_frame() {
+    BlockData blocks[2];
+    makeGoodweBlocks(blocks);
+
+    setReg(blocks[0], 35103, 3120);   // PV1 V  -> 312.0 V
+    setReg(blocks[0], 35104, 55);     // PV1 I  -> 5.5 A
+    setReg(blocks[0], 35105, 0);
+    setReg(blocks[0], 35106, 1716);   // PV1 W  -> 1716 W
+    setReg(blocks[0], 35107, 2980);   // PV2 V  -> 298.0 V
+    setReg(blocks[0], 35121, 2295);   // grid V -> 229.5 V
+    setReg(blocks[0], 35122, 121);    // grid I -> 12.1 A
+    setReg(blocks[0], 35123, 4999);   // freq   -> 49.99 Hz
+    setReg(blocks[0], 35138, 2810);   // AC W   -> 2810 W
+    setReg(blocks[0], 35176, 402);    // temp   -> 40.2 °C
+    setReg(blocks[0], 35180, 3520);   // batt V -> 352.0 V
+    setReg(blocks[0], 35191, 0);
+    setReg(blocks[0], 35192, 52340);  // E-tot  -> 5234.0 kWh
+    setReg(blocks[0], 35193, 0);
+    setReg(blocks[0], 35194, 168);    // E-day  -> 16.8 kWh
+    setReg(blocks[1], 37003, 254);    // batt T -> 25.4 °C
+    setReg(blocks[1], 37007, 68);     // SoC    -> 68 %
+
+    MeasurementSet m;
+    applyProfile(*findProfile("goodwe_et_hybrid"), blocks, 2, m, 1000);
+
+    TEST_ASSERT_EQUAL_DOUBLE(312.0, m.find(measurement_id::kDcMppt1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(5.5, m.find(measurement_id::kDcMppt1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(1716.0, m.find(measurement_id::kDcMppt1Power)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(298.0, m.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(229.5, m.find(measurement_id::kAcL1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(12.1, m.find(measurement_id::kAcL1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(49.99, m.find(measurement_id::kAcFrequency)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(2810.0, m.find(measurement_id::kAcPowerTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(40.2, m.find(measurement_id::kTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(352.0, m.find(measurement_id::kBatteryVoltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(5234.0, m.find(measurement_id::kEnergyTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(16.8, m.find(measurement_id::kEnergyToday)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(25.4, m.find(measurement_id::kBatteryTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(68.0, m.find(measurement_id::kBatterySoc)->value);
+}
+
+// The same sentinel convention as Huawei, on a different vendor -- which is the point of having
+// put it in the schema rather than in one profile's driver.
+static void test_the_goodwe_sentinels_leave_channels_absent() {
+    BlockData blocks[2];
+    makeGoodweBlocks(blocks);
+    setReg(blocks[0], 35103, 0xFFFF);  // PV1 voltage
+    setReg(blocks[0], 35176, 0x7FFF);  // radiator temperature
+    setReg(blocks[0], 35191, 0xFFFF);  // lifetime energy, u32
+    setReg(blocks[0], 35192, 0xFFFF);
+    setReg(blocks[1], 37007, 0xFFFF);  // SoC on an inverter with no battery
+
+    MeasurementSet m;
+    applyProfile(*findProfile("goodwe_et_hybrid"), blocks, 2, m, 1000);
+
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcMppt1Voltage));
+    TEST_ASSERT_NULL(m.find(measurement_id::kTemperature));
+    TEST_ASSERT_NULL(m.find(measurement_id::kEnergyTotal));
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatterySoc));
+}
+
+// Read-only by sourcing, not by oversight: the public protocol document is titled "Read Only",
+// so nothing is declared -- not even a dormant row.
+static void test_the_goodwe_profile_declares_no_setpoints() {
+    const DeviceProfile* p = findProfile("goodwe_et_hybrid");
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_EQUAL_STRING("GoodWe", p->manufacturer);
+    TEST_ASSERT_EQUAL_UINT32(0, p->writeCount);
+
+    MockTransport  transport;
+    ProfileOptions options;
+    options.profile = p;
+    ModbusProfileDriver driver(transport, options);
+    TEST_ASSERT_TRUE(driver.capabilities().isReadOnly());
+}
+
+// Battery power and grid power are both held back, for reasons recorded in the profile.
+static void test_the_goodwe_profile_holds_back_the_unsourced_channels() {
+    BlockData blocks[2];
+    makeGoodweBlocks(blocks);
+    setReg(blocks[0], 35181, 90);    // battery current, signed, direction unstated
+    setReg(blocks[0], 35182, 0);
+    setReg(blocks[0], 35183, 3100);  // battery power, same
+    setReg(blocks[0], 35140, 500);   // grid power: one signed bidirectional value
+
+    MeasurementSet m;
+    applyProfile(*findProfile("goodwe_et_hybrid"), blocks, 2, m, 1000);
+
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryCurrent));
+    TEST_ASSERT_NULL(m.find(measurement_id::kGridImportPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kGridExportPower));
+}
+
 static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     MockTransport transport;
     echoWrites(transport);
@@ -1735,6 +1838,10 @@ int main(int, char**) {
     RUN_TEST(test_the_huawei_sentinel_does_not_swallow_its_neighbour);
     RUN_TEST(test_the_huawei_profile_holds_back_battery_power);
     RUN_TEST(test_the_huawei_setpoint_is_declared_and_dormant);
+    RUN_TEST(test_the_goodwe_profile_decodes_a_realistic_frame);
+    RUN_TEST(test_the_goodwe_sentinels_leave_channels_absent);
+    RUN_TEST(test_the_goodwe_profile_declares_no_setpoints);
+    RUN_TEST(test_the_goodwe_profile_holds_back_the_unsourced_channels);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);
