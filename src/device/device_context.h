@@ -47,6 +47,11 @@ public:
     /// True when pollOnce() should be called again.
     bool due(uint64_t nowMs) const;
 
+    /// The driver this context polls. Exposed so rs485Task can resolve a queued command to the
+    /// right driver: dispatching, like pollOnce(), only ever happens on the task that owns the
+    /// bus, so this cannot race pollOnce() -- one task, one bus, one operation per iteration.
+    InverterDriver& driver() { return driver_; }
+
     // Deliberately no workingState() accessor and no setBridgeOnline(): both were unused traps
     // (review, 2026-07-21). A raw reference into the rs485Task-mutated state_ invited a data
     // race from any other task; readers must go through StateStore::snapshot(). And a

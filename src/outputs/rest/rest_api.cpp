@@ -470,6 +470,28 @@ bool RestApi::begin() {
         } else if (sub == "capabilities") {
             ok = json_util::buildCapabilitiesPayload(snapshot->capabilities, body,
                                                      kMaxResponseBytes);
+        } else if (sub.rfind("commands/", 0) == 0) {
+            // The read side of the POST above: whether a previously-submitted request has
+            // finished, and what happened. Not gated on the device existing having submitted
+            // it -- the queue tracks by request id alone -- but nested under the device's own
+            // path anyway, to match how it was submitted.
+            const std::string requestId = sub.substr(std::strlen("commands/"));
+            if (requestId.empty()) {
+                sendError(request, {404, "not_found", "no such endpoint"});
+                return;
+            }
+            if (!context_.commandOutcome) {
+                sendError(request,
+                          {404, "no_command_path", "no write path is wired for commands yet"});
+                return;
+            }
+            const auto outcome = context_.commandOutcome(requestId);
+            if (!outcome.has_value()) {
+                sendError(request, {404, "unknown_request",
+                                    "no completed command with this request id"});
+                return;
+            }
+            ok = json_util::buildCommandOutcomePayload(*outcome, body);
         } else {
             sendError(request, {404, "not_found", "no such endpoint"});
             return;
@@ -861,6 +883,71 @@ bool RestApi::begin() {
         }
         request->send(202, kJson, "{\"status\":\"accepted\"}");
     });
+
+    // A write command for one device: `{"type": "...", "value": <number>}` (or "enum_value"
+    // for a mode, or neither for start/stop). Prefix matching for the same reason
+    // /api/v1/devices/<id> already needs it above: the device id is a variable path segment.
+    //
+    // This can only ever accept the command FOR THE QUEUE, same as /actions/poll: the RS485
+    // task owns the bus and runs the actual transaction on its next cycle. No shipping driver
+    // accepts a command yet (every one returns Unsupported), so today this always ends in that
+    // result -- but the plumbing does not know that, and should not have to.
+    g_server->on(
+        AsyncURIMatcher::prefix("/api/v1/devices/"), HTTP_POST,
+        [this, authorised, rateLimited](AsyncWebServerRequest* request) {
+            if (!authorised(request) || rateLimited(request)) {
+                releaseBody();
+                return;
+            }
+            std::string path = request->url().c_str();
+            path.erase(0, std::strlen("/api/v1/devices/"));
+            const size_t slash = path.find('/');
+            if (slash == std::string::npos || path.substr(slash) != "/commands") {
+                releaseBody();
+                sendError(request, {404, "not_found", "no such endpoint"});
+                return;
+            }
+            const std::string deviceId = path.substr(0, slash);
+
+            if (bodyMissing(request, "a JSON body is required")) {
+                return;
+            }
+            InverterCommand     command;
+            json_util::CommandRequestError parseError;
+            const bool parsed = json_util::parseCommandRequest(bodyBuffer_, command, parseError);
+            releaseBody();
+            if (!parsed) {
+                sendError(request,
+                          {400, "invalid_command", parseError.field + ": " + parseError.message});
+                return;
+            }
+            if (!context_.devices->contains(deviceId)) {
+                sendError(request,
+                          {404, "device_not_found", "no device with id '" + deviceId + "'"});
+                return;
+            }
+            if (!context_.submitCommand) {
+                sendError(request,
+                          {404, "no_command_path", "no write path is wired for commands yet"});
+                return;
+            }
+            command.source      = CommandSource::Rest;
+            command.createdAtMs = context_.clock();
+            const auto requestId = context_.submitCommand(deviceId, command);
+            if (!requestId.has_value()) {
+                sendError(request, {409, "busy", "a command is already pending"});
+                return;
+            }
+            std::string body;
+            json_util::buildCommandAcceptedPayload(*requestId, body);
+            request->send(202, kJson, body.c_str());
+        },
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index,
+               size_t total) {
+            std::string* body = nullptr;
+            collectBody(request, data, len, index, total, body);
+        });
 
     // Bridge relay control (DRM contacts). One explicit route per possible index (max 8)
     // rather than a regex route: ESPAsyncWebServer only matches regex paths when built

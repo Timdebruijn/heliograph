@@ -46,6 +46,11 @@ enum class CommandResult : uint8_t {
 const char* commandResultName(CommandResult result);
 const char* commandTypeName(InverterCommandType type);
 
+/// The reverse of commandTypeName: the type whose name is `name`, or false if none matches.
+/// Reuses commandTypeName's own table by comparing against it, so the two directions cannot
+/// drift apart the way two independent switches could.
+bool commandTypeFromName(const std::string& name, InverterCommandType& out);
+
 /// The capability a command type requires. Used by the dispatcher to check a command
 /// against the active driver's capabilities without knowing which driver it is.
 InverterCapability requiredCapability(InverterCommandType type);

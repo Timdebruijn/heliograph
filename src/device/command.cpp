@@ -94,4 +94,15 @@ bool commandTakesEnumValue(InverterCommandType type) {
     return type == InverterCommandType::SetBatteryOperatingMode;
 }
 
+bool commandTypeFromName(const std::string& name, InverterCommandType& out) {
+    for (size_t i = 0; i < kCommandTypeCount; ++i) {
+        const auto candidate = static_cast<InverterCommandType>(i);
+        if (name == commandTypeName(candidate)) {
+            out = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace heliograph

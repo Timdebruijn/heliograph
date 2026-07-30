@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: MIT
 //
-// Shared JSON serialisation helpers for the output adapters. Both the MQTT and REST payload
-// builders had a byte-for-byte copy of these; one definition now.
+// Shared JSON helpers for the output adapters: serialisation, and the one request format REST
+// and MQTT both parse. Both used to carry their own byte-for-byte copies; one definition now.
+//
+// ArduinoJson is why this lives here and not in device/command.*: device/ is the host-testable
+// core check_layering.sh holds to no Arduino-family includes (rule 2), and ArduinoJson.h trips
+// that rule's pattern even though the library itself is plain C++. The wire FORMAT of a command
+// is an output-adapter concern the same way a measurement's JSON shape is; device/command.h
+// keeps only the type itself and the name tables, same split as everywhere else in this file.
 
 #pragma once
 
@@ -12,6 +18,7 @@
 
 #include "json_limits.h"
 
+#include "commands/command_dispatcher.h"
 #include "device/bridge_info.h"
 #include "device/capability.h"
 #include "device/command.h"
@@ -288,6 +295,93 @@ inline bool buildCapabilitiesPayload(const InverterCapabilities& capabilities, s
         entry["unit"]     = unitSymbol(cap.unit);
     }
     return finish(doc, out, maxBytes);
+}
+
+/// What was wrong with a wire-format command request (a REST body or an MQTT payload).
+struct CommandRequestError {
+    std::string field;
+    std::string message;
+};
+
+/// Parses `{"type": "<name>", "value": <number>}` (or `"enum_value": <int>` for a mode command,
+/// or neither for start/stop) into an InverterCommand. An optional `"request_id"` is carried
+/// through unchanged, for a caller that wants to pick its own.
+///
+/// Shared by REST and MQTT, which take the exact same wire shape: one parser instead of two
+/// copies of "which commands need a value vs an enum" that could disagree.
+///
+/// Does not set `source` or `createdAtMs` -- this function knows neither which transport is
+/// calling nor the time. Both are the caller's to fill in on the returned command.
+inline bool parseCommandRequest(const std::string& json, InverterCommand& out,
+                                CommandRequestError& error) {
+    JsonDocument doc;
+    if (deserializeJson(doc, json) != DeserializationError::Ok) {
+        error = {"body", "not valid JSON"};
+        return false;
+    }
+    if (!doc["type"].is<const char*>()) {
+        error = {"type", "required and must be a string"};
+        return false;
+    }
+    InverterCommandType type{};
+    if (!commandTypeFromName(doc["type"].as<const char*>(), type)) {
+        error = {"type", "not a known command type"};
+        return false;
+    }
+
+    InverterCommand parsed;
+    parsed.type = type;
+    // Which field a command needs comes from the type, same rule the dispatcher's range check
+    // uses -- see commandTakesNumericValue's own comment on why that lives on the type rather
+    // than on whatever a driver happened to declare.
+    if (commandTakesNumericValue(type)) {
+        if (!doc["value"].is<double>()) {
+            error = {"value", "required and must be a number for this command type"};
+            return false;
+        }
+        parsed.numericValue = doc["value"].as<double>();
+    } else if (commandTakesEnumValue(type)) {
+        if (!doc["enum_value"].is<int>()) {
+            error = {"enum_value", "required and must be an integer for this command type"};
+            return false;
+        }
+        parsed.enumValue = doc["enum_value"].as<int>();
+    }
+    if (doc["request_id"].is<const char*>()) {
+        parsed.requestId = doc["request_id"].as<const char*>();
+    }
+
+    out = parsed;
+    return true;
+}
+
+/// `{"status":"accepted","request_id":"..."}` -- the same shape the REST 202 body and the MQTT
+/// command-result ack both return, so a caller correlating the two entry points sees one
+/// contract rather than two that happen to agree today.
+inline bool buildCommandAcceptedPayload(const std::string& requestId, std::string& out) {
+    JsonDocument doc;
+    doc["status"]     = "accepted";
+    doc["request_id"] = requestId;
+    return finish(doc, out, 128);
+}
+
+/// `{"status":"rejected","reason":"..."}` -- refused before it ever reached the queue (a
+/// command was already pending, or no write path is wired for this build).
+inline bool buildCommandRejectedPayload(const std::string& reason, std::string& out) {
+    JsonDocument doc;
+    doc["status"] = "rejected";
+    doc["reason"] = reason;
+    return finish(doc, out, 256);
+}
+
+/// `{"result":"...","reason":"..."}` -- CommandDispatcher::dispatch()'s outcome, once rs485Task
+/// has actually run it. commandResultName() is the same table every other CommandResult in
+/// these payloads already goes through.
+inline bool buildCommandOutcomePayload(const DispatchOutcome& outcome, std::string& out) {
+    JsonDocument doc;
+    doc["result"] = commandResultName(outcome.result);
+    doc["reason"] = outcome.reason;
+    return finish(doc, out, 384);
 }
 
 }  // namespace heliograph::json_util

@@ -6,11 +6,15 @@
 #include <cmath>
 
 #include "commands/command_dispatcher.h"
+#include "commands/command_queue.h"
 #include "drivers/eversolar_legacy/eversolar_driver.h"
 #include "drivers/mock/mock_driver.h"
+#include "outputs/json_util.h"
 #include "support/mock_transport.h"
 
 using namespace heliograph;
+using heliograph::json_util::CommandRequestError;
+using heliograph::json_util::parseCommandRequest;
 using test::MockTransport;
 
 static uint64_t g_now = 0;
@@ -520,6 +524,186 @@ static void test_a_backwards_clock_does_not_refill_the_allowance() {
                                  driver).result);
 }
 
+// --- CommandQueue ---------------------------------------------------------------------------
+//
+// The request/consume slot a future write path drains from rs485Task, generalising
+// g_manualPollRequested's shape (one outstanding request, request-only) to carry an actual
+// command instead of a bare flag.
+
+static CommandQueue::Request queuedRequest(const std::string& deviceId,
+                                            const std::string& requestId) {
+    CommandQueue::Request r;
+    r.deviceId          = deviceId;
+    r.command           = cmd(InverterCommandType::SetActivePowerLimitPercent, 50.0);
+    r.command.requestId = requestId;
+    return r;
+}
+
+static void test_a_submitted_request_is_taken_exactly_once() {
+    CommandQueue q;
+    TEST_ASSERT_TRUE(q.submit(queuedRequest("inv-1", "r1")));
+
+    auto taken = q.take();
+    TEST_ASSERT_TRUE(taken.has_value());
+    TEST_ASSERT_EQUAL_STRING("inv-1", taken->deviceId.c_str());
+    TEST_ASSERT_EQUAL_STRING("r1", taken->command.requestId.c_str());
+
+    // The slot is empty again: a second take() finds nothing left to consume.
+    TEST_ASSERT_FALSE(q.take().has_value());
+}
+
+static void test_take_on_an_empty_queue_returns_nothing() {
+    CommandQueue q;
+    TEST_ASSERT_FALSE(q.take().has_value());
+}
+
+// Mirrors the one-in-flight rule g_manualPollRequested already applies: a second submission
+// while one is pending must not silently replace or reorder the first.
+static void test_a_second_submission_is_refused_while_one_is_pending() {
+    CommandQueue q;
+    TEST_ASSERT_TRUE(q.submit(queuedRequest("inv-1", "first")));
+    TEST_ASSERT_FALSE(q.submit(queuedRequest("inv-1", "second")));
+
+    // The ORIGINAL request is still the one waiting -- the refused second submission left no
+    // trace.
+    auto taken = q.take();
+    TEST_ASSERT_TRUE(taken.has_value());
+    TEST_ASSERT_EQUAL_STRING("first", taken->command.requestId.c_str());
+}
+
+static void test_a_taken_slot_accepts_a_new_submission() {
+    CommandQueue q;
+    TEST_ASSERT_TRUE(q.submit(queuedRequest("inv-1", "first")));
+    q.take();
+    TEST_ASSERT_TRUE(q.submit(queuedRequest("inv-1", "second")));
+}
+
+static void test_outcome_is_unknown_before_it_is_recorded() {
+    CommandQueue q;
+    TEST_ASSERT_FALSE(q.outcomeFor("r1").has_value());
+}
+
+static void test_a_recorded_outcome_is_readable_by_its_request_id() {
+    CommandQueue q;
+    q.recordOutcome("r1", DispatchOutcome{CommandResult::Ok, "accepted"});
+
+    auto outcome = q.outcomeFor("r1");
+    TEST_ASSERT_TRUE(outcome.has_value());
+    TEST_ASSERT_EQUAL(CommandResult::Ok, outcome->result);
+    TEST_ASSERT_EQUAL_STRING("accepted", outcome->reason.c_str());
+}
+
+// Only one outcome is remembered at a time, matching submit()'s one-slot rule: a caller asking
+// about a request that has since been superseded gets "unknown", not a stale answer.
+static void test_a_later_outcome_supersedes_an_earlier_one() {
+    CommandQueue q;
+    q.recordOutcome("first", DispatchOutcome{CommandResult::Ok, "accepted"});
+    q.recordOutcome("second", DispatchOutcome{CommandResult::RateLimited, "too many commands"});
+
+    TEST_ASSERT_FALSE(q.outcomeFor("first").has_value());
+    TEST_ASSERT_TRUE(q.outcomeFor("second").has_value());
+}
+
+// --- commandTypeFromName / parseCommandRequest ----------------------------------------------
+//
+// The shared REST/MQTT wire parser: one rule for "which commands need a value vs an enum vs
+// neither", read by both entry points instead of duplicated.
+
+static void test_command_type_from_name_round_trips_every_type() {
+    for (size_t i = 0; i < kCommandTypeCount; ++i) {
+        const auto          type = static_cast<InverterCommandType>(i);
+        InverterCommandType parsed{};
+        TEST_ASSERT_TRUE(commandTypeFromName(commandTypeName(type), parsed));
+        TEST_ASSERT_EQUAL(static_cast<int>(type), static_cast<int>(parsed));
+    }
+}
+
+static void test_command_type_from_name_rejects_an_unknown_name() {
+    InverterCommandType parsed{};
+    TEST_ASSERT_FALSE(commandTypeFromName("not_a_real_command", parsed));
+}
+
+static void test_parse_command_request_rejects_invalid_json() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_FALSE(parseCommandRequest("{not json", out, error));
+    TEST_ASSERT_EQUAL_STRING("body", error.field.c_str());
+}
+
+static void test_parse_command_request_rejects_a_missing_type() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_FALSE(parseCommandRequest("{}", out, error));
+    TEST_ASSERT_EQUAL_STRING("type", error.field.c_str());
+}
+
+static void test_parse_command_request_rejects_an_unknown_type() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_FALSE(
+        parseCommandRequest(R"({"type":"not_a_real_command"})", out, error));
+    TEST_ASSERT_EQUAL_STRING("type", error.field.c_str());
+}
+
+static void test_parse_command_request_reads_a_numeric_command() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_TRUE(parseCommandRequest(
+        R"({"type":"set_active_power_limit_percent","value":42.5})", out, error));
+    TEST_ASSERT_EQUAL(static_cast<int>(InverterCommandType::SetActivePowerLimitPercent),
+                      static_cast<int>(out.type));
+    TEST_ASSERT_TRUE(out.numericValue.has_value());
+    TEST_ASSERT_EQUAL_DOUBLE(42.5, *out.numericValue);
+}
+
+static void test_parse_command_request_rejects_a_numeric_command_without_a_value() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_FALSE(
+        parseCommandRequest(R"({"type":"set_active_power_limit_percent"})", out, error));
+    TEST_ASSERT_EQUAL_STRING("value", error.field.c_str());
+}
+
+static void test_parse_command_request_reads_an_enum_command() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_TRUE(parseCommandRequest(
+        R"({"type":"set_battery_operating_mode","enum_value":2})", out, error));
+    TEST_ASSERT_TRUE(out.enumValue.has_value());
+    TEST_ASSERT_EQUAL(2, *out.enumValue);
+}
+
+static void test_parse_command_request_rejects_an_enum_command_without_a_selection() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_FALSE(
+        parseCommandRequest(R"({"type":"set_battery_operating_mode"})", out, error));
+    TEST_ASSERT_EQUAL_STRING("enum_value", error.field.c_str());
+}
+
+static void test_parse_command_request_needs_neither_field_for_start() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_TRUE(parseCommandRequest(R"({"type":"start"})", out, error));
+    TEST_ASSERT_EQUAL(static_cast<int>(InverterCommandType::Start),
+                      static_cast<int>(out.type));
+}
+
+static void test_parse_command_request_carries_a_supplied_request_id() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_TRUE(
+        parseCommandRequest(R"({"type":"start","request_id":"caller-123"})", out, error));
+    TEST_ASSERT_EQUAL_STRING("caller-123", out.requestId.c_str());
+}
+
+static void test_parse_command_request_leaves_request_id_empty_when_omitted() {
+    InverterCommand     out;
+    CommandRequestError error;
+    TEST_ASSERT_TRUE(parseCommandRequest(R"({"type":"start"})", out, error));
+    TEST_ASSERT_TRUE(out.requestId.empty());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_read_only_mode_rejects_every_command_type);
@@ -550,5 +734,26 @@ int main(int, char**) {
     RUN_TEST(test_run_state_commands_are_spaced_but_never_starved);
     RUN_TEST(test_stop_is_not_starved_by_restricting_traffic);
     RUN_TEST(test_a_backwards_clock_does_not_refill_the_allowance);
+
+    RUN_TEST(test_a_submitted_request_is_taken_exactly_once);
+    RUN_TEST(test_take_on_an_empty_queue_returns_nothing);
+    RUN_TEST(test_a_second_submission_is_refused_while_one_is_pending);
+    RUN_TEST(test_a_taken_slot_accepts_a_new_submission);
+    RUN_TEST(test_outcome_is_unknown_before_it_is_recorded);
+    RUN_TEST(test_a_recorded_outcome_is_readable_by_its_request_id);
+    RUN_TEST(test_a_later_outcome_supersedes_an_earlier_one);
+
+    RUN_TEST(test_command_type_from_name_round_trips_every_type);
+    RUN_TEST(test_command_type_from_name_rejects_an_unknown_name);
+    RUN_TEST(test_parse_command_request_rejects_invalid_json);
+    RUN_TEST(test_parse_command_request_rejects_a_missing_type);
+    RUN_TEST(test_parse_command_request_rejects_an_unknown_type);
+    RUN_TEST(test_parse_command_request_reads_a_numeric_command);
+    RUN_TEST(test_parse_command_request_rejects_a_numeric_command_without_a_value);
+    RUN_TEST(test_parse_command_request_reads_an_enum_command);
+    RUN_TEST(test_parse_command_request_rejects_an_enum_command_without_a_selection);
+    RUN_TEST(test_parse_command_request_needs_neither_field_for_start);
+    RUN_TEST(test_parse_command_request_carries_a_supplied_request_id);
+    RUN_TEST(test_parse_command_request_leaves_request_id_empty_when_omitted);
     return UNITY_END();
 }

@@ -103,11 +103,12 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
     });
 
     relayCount_ = bridge.relayCount;
-    if (relayCount_ > 0) {
-        // The one message handler this firmware has. Topic and payload are attacker-
-        // influenced data from anyone who can publish on the broker; parse defensively and
-        // let the RelayController's gates decide. Runs on the MQTT task -- the handler
-        // installed by main serialises against REST with a mutex.
+    if (relayCount_ > 0 || commandSubmit_ != nullptr) {
+        // The message handler this firmware has. Topic and payload are attacker-influenced
+        // data from anyone who can publish on the broker; parse defensively and let the
+        // RelayController's gates (or, for a command, CommandDispatcher's) decide. Runs on
+        // the MQTT task -- the relay handler installed by main serialises against REST with
+        // a mutex; commandSubmit_ needs none, because CommandQueue is its own lock.
         g_client.onMessage([this](const espMqttClientTypes::MessageProperties&,
                                   const char* topic, const uint8_t* payload, size_t len,
                                   size_t index, size_t total) {
@@ -115,6 +116,41 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
                 return;  // fragmented messages are never valid for these short payloads
             }
             const std::string t(topic);
+            if (commandSubmit_ != nullptr) {
+                // Checked against every device's own topic, not just one: commandSet() is
+                // built from a per-device MqttTopics, so a bridge polling several inverters
+                // has one of these per device, and only the channel loop knows all of them.
+                for (auto& channel : channels_) {
+                    if (t != channel.topics.commandSet()) {
+                        continue;
+                    }
+                    if (len == 0) {
+                        return;
+                    }
+                    const std::string   body(reinterpret_cast<const char*>(payload), len);
+                    InverterCommand     command;
+                    json_util::CommandRequestError parseError;
+                    std::string                    ack;
+                    if (!json_util::parseCommandRequest(body, command, parseError)) {
+                        json_util::buildCommandRejectedPayload(
+                            parseError.field + ": " + parseError.message, ack);
+                        publishTracked(channel.topics.commandResult().c_str(), 0, false,
+                                       ack.c_str());
+                        return;
+                    }
+                    command.source        = CommandSource::Mqtt;
+                    const auto requestId  = commandSubmit_(channel.id, command);
+                    if (!requestId.has_value()) {
+                        json_util::buildCommandRejectedPayload("a command is already pending",
+                                                                ack);
+                    } else {
+                        json_util::buildCommandAcceptedPayload(*requestId, ack);
+                    }
+                    publishTracked(channel.topics.commandResult().c_str(), 0, false,
+                                   ack.c_str());
+                    return;
+                }
+            }
             if (t == topics_.drmSet()) {
                 if (drmCommand_ == nullptr || len == 0 || len > 16) {
                     return;  // mode names are short; anything longer is not one
@@ -248,12 +284,18 @@ bool MqttOutput::onConnected(Channel& channel, const DeviceState& state,
     }
     const bool discoveryOk = publishDiscovery(channel, state, bridge);
 
-    // The relay command topic is the only subscription; inverter drivers stay read-only
-    // and get no command topic -- that follows from the capabilities, not a decision here.
     if (relayCount_ > 0) {
         g_client.subscribe(topics_.relaySetWildcard().c_str(), 1);
         g_client.subscribe(topics_.drmSet().c_str(), 1);
         relayStateForced_ = true;  // fresh session: ack the current states once
+    }
+    // This channel's OWN command topic -- commandSet() differs per device (primary vs
+    // device-scoped prefix), unlike the relay/DRM topics above, which belong to the bridge and
+    // are subscribed once from `topics_`. Whether commanding does anything is a capabilities
+    // question the driver and CommandDispatcher answer, not this subscription: a read-only
+    // driver still receives the message, and still answers Unsupported.
+    if (commandSubmit_ != nullptr) {
+        g_client.subscribe(channel.topics.commandSet().c_str(), 1);
     }
     return discoveryOk;
 }

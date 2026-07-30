@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <functional>
+#include <optional>
 
 #include "device/bridge_info.h"
 #include "device/command.h"
@@ -125,6 +126,21 @@ public:
     using DrmCommandFn = std::function<bool(const std::string& mode)>;
     void setDrmCommandHandler(DrmCommandFn handler) { drmCommand_ = std::move(handler); }
 
+    /// Handles a write command arriving on a device's <prefix>/command/set. The SAME function
+    /// RestContext::submitCommand is built from in main.cpp, so REST and MQTT enqueue through
+    /// one counter and one CommandQueue rather than two independent paths that could disagree
+    /// about what "one in flight" means. Returns the request id used on success (a JSON ack is
+    /// published to that device's commandResult() topic), or nullopt when one was already
+    /// pending.
+    ///
+    /// Like the relay handler, this runs on the MQTT task and only ever *enqueues* -- it must
+    /// never itself run the RS485 transaction. Unlike the relay handler it needs no mutex here:
+    /// CommandQueue is its own lock, not something this class and REST share directly.
+    using CommandSubmitFn =
+        std::function<std::optional<std::string>(const std::string& deviceId,
+                                                   InverterCommand   command)>;
+    void setCommandHandler(CommandSubmitFn handler) { commandSubmit_ = std::move(handler); }
+
 private:
     /// Everything that is per-inverter rather than per-bridge, keyed by device id. Every
     /// channel is created in the first loop() pass -- the device list is fixed at boot -- but
@@ -189,6 +205,7 @@ private:
 
     RelayCommandFn relayCommand_;
     DrmCommandFn   drmCommand_;
+    CommandSubmitFn commandSubmit_;
     uint8_t        relayCount_ = 0;  ///< copied at begin() for topic parsing in the callback
     /// Set by onMessage (MQTT task) on EVERY received relay command, consumed by loop().
     /// Without it a refused or no-op command changes no state, nothing gets published, and

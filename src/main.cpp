@@ -23,12 +23,15 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include "app/capture_runner.h"
 #include "app/device_plan.h"
 #include "app/discovery_runner.h"
 #include "boards/board.h"
+#include "commands/command_dispatcher.h"
+#include "commands/command_queue.h"
 #include "config/configuration.h"
 #include "config/configuration_store.h"
 #include "config/nvs_backend.h"
@@ -448,6 +451,31 @@ diag::CoredumpSummary g_coredump;
 /// state reads in bridgeInfo(). The controller itself stays lock-free and host-testable.
 RelayController g_relays{nowMs};
 std::mutex      g_relayMutex;
+
+/// The write path's gate and its request slot -- wired ahead of any driver that can accept a
+/// command (every shipping driver returns CommandResult::Unsupported). readOnlyMode() follows
+/// g_config.security.readOnlyMode on exactly the same two sites as g_relays' does, so the one
+/// kill switch covers both. REST and MQTT both submit here (submitCommand below); rs485Task
+/// drains it alongside discovery and capture, the same "request only, the bus owner runs it"
+/// shape as everywhere else on this bus.
+CommandDispatcher     g_commandDispatcher{nowMs};
+CommandQueue          g_commandQueue;
+std::atomic<uint32_t> g_commandRequestCounter{0};
+
+/// Assigns a request id when the caller supplied none, then enqueues. The ONE function both
+/// ctx.submitCommand (REST, AsyncTCP task) and MqttOutput::setCommandHandler (MQTT task) are
+/// wired to, so both transports share one counter and one queue instead of two independent
+/// paths that could each think they alone hold "the" pending slot.
+std::optional<std::string> submitCommand(const std::string& deviceId, InverterCommand command) {
+    if (command.requestId.empty()) {
+        command.requestId = "req-" + std::to_string(g_commandRequestCounter.fetch_add(1) + 1);
+    }
+    const std::string requestId = command.requestId;
+    if (!g_commandQueue.submit({deviceId, std::move(command)})) {
+        return std::nullopt;
+    }
+    return requestId;
+}
 
 /// BOOT-hold factory reset and the status LED, on boards that carry them (board::kHasBootButton
 /// / kHasStatusLed). Both are sampled from loop() only, so no locking: g_bootPressed and
@@ -877,6 +905,9 @@ void startOutputs() {
         cfg.qos              = configSnapshot.mqtt.qos;
         g_mqtt               = std::make_unique<mqtt::MqttOutput>(cfg);
         g_mqtt->setDiagnostics(&g_diagnostics);
+        // Same function REST submits through -- one counter, one queue, regardless of which
+        // transport a command arrived on.
+        g_mqtt->setCommandHandler(submitCommand);
         if (g_relays.count() > 0) {
             g_mqtt->setRelayCommandHandler([](uint8_t index, bool on) {
                 std::lock_guard<std::mutex> lock(g_relayMutex);
@@ -926,6 +957,7 @@ void startRestApi() {
                 g_relays.allOff();
             }
         }
+        g_commandDispatcher.setReadOnlyMode(c.security.readOnlyMode);
     };
     ctx.bridgeInfo  = bridgeInfo;
     ctx.clock       = nowMs;
@@ -1011,6 +1043,12 @@ void startRestApi() {
     };
     ctx.portalActive        = [] { return g_wifi.portalActive(); };
     ctx.scanNetworks        = scanNetworksJson;
+    // Unconditional, unlike the relay handlers below: commands target inverters, not relays,
+    // so they exist regardless of board. The same function MQTT's command topic is wired to.
+    ctx.submitCommand  = submitCommand;
+    ctx.commandOutcome = [](const std::string& requestId) {
+        return g_commandQueue.outcomeFor(requestId);
+    };
     if (g_relays.count() > 0) {
         // Behind the same mutex as the MQTT path: REST commands arrive on the AsyncTCP
         // task, MQTT commands on the MQTT task.
@@ -1175,6 +1213,33 @@ void rs485Task(void* /*arg*/) {
                 restoreDriverLine();
             }
             vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+        // A queued write command, on the same terms as discovery and capture above: instead of
+        // this cycle's poll, not alongside it. dispatch() may run a real RS485 transaction
+        // (execute() on a writable driver), so it gets the same exclusive slot a poll would --
+        // there must never be an iteration that both polls a device and dispatches a command,
+        // for the same bus-ownership reason discovery and capture cannot overlap a poll either.
+        //
+        // Nothing submits to g_commandQueue today (no shipping driver accepts a command, and no
+        // REST route or MQTT topic exists to reach it) -- this drains whatever a future caller
+        // puts there, following exactly the request/consume shape already established above.
+        if (auto request = g_commandQueue.take()) {
+            DeviceContext* target = nullptr;
+            for (size_t i = 0; i < g_deviceIds.size(); ++i) {
+                if (g_deviceIds[i] == request->deviceId) {
+                    target = g_contexts[i].get();
+                    break;
+                }
+            }
+            const DispatchOutcome outcome =
+                target != nullptr
+                    ? g_commandDispatcher.dispatch(request->command, target->driver())
+                    : DispatchOutcome{CommandResult::Rejected,
+                                      "unknown device id '" + request->deviceId + "'"};
+            log::info("command %s on %s: %s", commandTypeName(request->command.type),
+                      request->deviceId.c_str(), outcome.reason.c_str());
+            g_commandQueue.recordOutcome(request->command.requestId, outcome);
             continue;
         }
         // At most ONE device per iteration, round-robin. Not a loop over all of them: the
@@ -1403,6 +1468,7 @@ void setup() {
 #endif
     g_relays.setReadOnlyMode(g_config.security.readOnlyMode);
     g_relays.setEnabled(g_config.relays.enabled);
+    g_commandDispatcher.setReadOnlyMode(g_config.security.readOnlyMode);
 
     // BOOT button, status LED and buzzer on boards that have them (6CH). No-op elsewhere.
     initOnboardIndicators();
