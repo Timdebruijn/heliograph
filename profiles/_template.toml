@@ -65,6 +65,9 @@ count = 125
 #   word_order    optional, 32-bit values only: "high_first" (default) or "low_first"
 #                 when the device puts the LOW half at the lower address. Check a source
 #                 that states it -- guessing costs a factor of 65536.
+#   invalid       optional raw value meaning "not available" (e.g. 0x7FFF). The reading is
+#                 then left ABSENT instead of published. Some vendors report a sentinel
+#                 rather than an exception, and 3276.7 °C looks like data.
 #   unit          W V A Hz °C kWh h % dBm s — must match the measurement's physics
 # ------------------------------------------------------------------------------------------
 

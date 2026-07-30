@@ -51,6 +51,19 @@ struct RegisterMapping {
     /// at. Getting this wrong is not a rounding error: a 2 kW reading decodes as roughly 34
     /// megawatts, and the reverse decodes as zero.
     bool lowWordFirst = false;
+    /// A raw value that means "this reading is not available", or absent when the device has no
+    /// such convention. Compared against the assembled raw BEFORE sign extension, so a profile
+    /// writes the bit pattern its documentation gives (0xFFFF, 0x7FFF, 0xFFFFFFFF...).
+    ///
+    /// Some vendors do not answer an unavailable channel with an exception or a zero -- they
+    /// answer with a sentinel. Without this the sentinel decodes as a reading: an inverter asleep
+    /// at night publishes 3276.7 °C, and a hybrid map pointed at a device with no battery
+    /// publishes 6553.5 % state of charge. Both look like data.
+    ///
+    /// A matching register is left UNDECLARED, exactly as an unread block is -- the project's
+    /// "missing is not zero" rule, applied to a device that says "missing" in numbers.
+    bool     hasInvalid = false;
+    uint32_t invalidRaw = 0;
 };
 
 /// A contiguous register range to read in one Modbus transaction. Kept small and explicit so a

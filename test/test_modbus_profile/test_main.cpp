@@ -1286,6 +1286,138 @@ static void test_the_sungrow_setpoints_are_declared_and_dormant() {
     TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetBatteryOperatingMode));
 }
 
+// --- the Huawei SUN2000 profile, and the sentinel that makes it honest ----------------------
+
+namespace {
+void makeHuaweiBlocks(BlockData blocks[4]) {
+    blocks[0] = {RegSpace::Holding, 32016, 4, {}};
+    blocks[1] = {RegSpace::Holding, 32064, 24, {}};
+    blocks[2] = {RegSpace::Holding, 32106, 10, {}};
+    blocks[3] = {RegSpace::Holding, 37760, 24, {}};
+}
+}  // namespace
+
+static void test_the_huawei_profile_decodes_a_realistic_frame() {
+    BlockData blocks[4];
+    makeHuaweiBlocks(blocks);
+
+    setReg(blocks[0], 32016, 3600);   // PV1 V   -> 360.0 V   (gain 10)
+    setReg(blocks[0], 32017, 640);    // PV1 I   -> 6.40 A    (gain 100)
+    setReg(blocks[0], 32018, 3480);   // PV2 V   -> 348.0 V
+    setReg(blocks[1], 32064, 0);
+    setReg(blocks[1], 32065, 4400);   // input   -> 4400 W
+    setReg(blocks[1], 32069, 2331);   // Phase A -> 233.1 V
+    setReg(blocks[1], 32072, 0);
+    setReg(blocks[1], 32073, 18600);  // current -> 18.6 A    (gain 1000)
+    setReg(blocks[1], 32080, 0);
+    setReg(blocks[1], 32081, 4280);   // active  -> 4280 W
+    setReg(blocks[1], 32085, 5001);   // freq    -> 50.01 Hz  (gain 100)
+    setReg(blocks[1], 32087, 386);    // temp    -> 38.6 °C
+    setReg(blocks[2], 32106, 0);
+    setReg(blocks[2], 32107, 61200);  // total   -> 612.00 kWh (gain 100)
+    setReg(blocks[2], 32114, 0);
+    setReg(blocks[2], 32115, 2140);   // today   -> 21.40 kWh
+    setReg(blocks[3], 37760, 763);    // SoC     -> 76.3 %    (gain 10)
+    setReg(blocks[3], 37763, 3580);   // batt V  -> 358.0 V
+
+    MeasurementSet m;
+    applyProfile(*findProfile("huawei_sun2000"), blocks, 4, m, 1000);
+
+    TEST_ASSERT_EQUAL_DOUBLE(360.0, m.find(measurement_id::kDcMppt1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(6.4, m.find(measurement_id::kDcMppt1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(348.0, m.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(4400.0, m.find(measurement_id::kDcPowerTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(233.1, m.find(measurement_id::kAcL1Voltage)->value);
+    // Milliamp resolution: read with the 0.01 that fits most vendors, this would be 0.186 A.
+    TEST_ASSERT_EQUAL_DOUBLE(18.6, m.find(measurement_id::kAcL1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(4280.0, m.find(measurement_id::kAcPowerTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(50.01, m.find(measurement_id::kAcFrequency)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(38.6, m.find(measurement_id::kTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(612.0, m.find(measurement_id::kEnergyTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(21.4, m.find(measurement_id::kEnergyToday)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(76.3, m.find(measurement_id::kBatterySoc)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(358.0, m.find(measurement_id::kBatteryVoltage)->value);
+}
+
+// A sleeping inverter with no battery. Every one of these registers holds its width's sentinel,
+// and every one must come out ABSENT rather than as a number -- 3276.7 °C and a 6553.5 % battery
+// are both the shape of a real reading, which is what makes them dangerous.
+static void test_the_huawei_sentinels_leave_channels_absent_not_absurd() {
+    BlockData blocks[4];
+    makeHuaweiBlocks(blocks);
+
+    setReg(blocks[0], 32016, 0x7FFF);  // PV1 voltage, s16
+    setReg(blocks[0], 32017, 0x7FFF);
+    setReg(blocks[1], 32087, 0x7FFF);  // temperature, s16
+    setReg(blocks[1], 32069, 0xFFFF);  // phase voltage, u16
+    setReg(blocks[1], 32085, 0xFFFF);  // frequency, u16
+    setReg(blocks[1], 32064, 0x7FFF);  // input power, s32
+    setReg(blocks[1], 32065, 0xFFFF);
+    setReg(blocks[2], 32106, 0xFFFF);  // lifetime yield, u32
+    setReg(blocks[2], 32107, 0xFFFF);
+    setReg(blocks[3], 37760, 0xFFFF);  // battery SoC on an inverter with no battery
+    setReg(blocks[3], 37763, 0xFFFF);
+
+    MeasurementSet m;
+    applyProfile(*findProfile("huawei_sun2000"), blocks, 4, m, 1000);
+
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcMppt1Voltage));
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcMppt1Current));
+    TEST_ASSERT_NULL(m.find(measurement_id::kTemperature));
+    TEST_ASSERT_NULL(m.find(measurement_id::kAcL1Voltage));
+    TEST_ASSERT_NULL(m.find(measurement_id::kAcFrequency));
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcPowerTotal));
+    TEST_ASSERT_NULL(m.find(measurement_id::kEnergyTotal));
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatterySoc));
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryVoltage));
+}
+
+// The sentinel must not swallow a legitimate reading that happens to sit next to it. 0x7FFE is
+// one below the s16 sentinel and decodes normally; a guard written as ">=" would eat it.
+static void test_the_huawei_sentinel_does_not_swallow_its_neighbour() {
+    BlockData blocks[4];
+    makeHuaweiBlocks(blocks);
+    setReg(blocks[1], 32087, 0x7FFE);  // 32766 raw -> 3276.6 °C
+
+    MeasurementSet m;
+    applyProfile(*findProfile("huawei_sun2000"), blocks, 4, m, 1000);
+    const auto* t = m.find(measurement_id::kTemperature);
+    TEST_ASSERT_NOT_NULL(t);
+    TEST_ASSERT_EQUAL_DOUBLE(3276.6, t->value);
+}
+
+// Battery power is held back here too, and for a third distinct reason -- see the profile.
+static void test_the_huawei_profile_holds_back_battery_power() {
+    BlockData blocks[4];
+    makeHuaweiBlocks(blocks);
+    setReg(blocks[3], 37765, 0);
+    setReg(blocks[3], 37766, 2500);
+
+    MeasurementSet m;
+    applyProfile(*findProfile("huawei_sun2000"), blocks, 4, m, 1000);
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPower));
+}
+
+static void test_the_huawei_setpoint_is_declared_and_dormant() {
+    const DeviceProfile* p = findProfile("huawei_sun2000");
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_EQUAL_STRING("Huawei", p->manufacturer);
+    TEST_ASSERT_EQUAL_UINT32(1, p->writeCount);
+
+    const WriteMapping& w = p->writes[0];
+    TEST_ASSERT_EQUAL(InverterCommandType::SetActivePowerLimitPercent, w.command);
+    TEST_ASSERT_EQUAL_UINT16(40125, w.address);
+    TEST_ASSERT_EQUAL_UINT8(1, w.words);  // FC06 can serve it, once verified
+    TEST_ASSERT_EQUAL_DOUBLE(0.1, w.scale);
+    TEST_ASSERT_FALSE(w.verified);
+
+    MockTransport  transport;
+    ProfileOptions options;
+    options.profile = p;
+    ModbusProfileDriver driver(transport, options);
+    TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
+}
+
 static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     MockTransport transport;
     echoWrites(transport);
@@ -1598,6 +1730,11 @@ int main(int, char**) {
     RUN_TEST(test_the_sungrow_profile_decodes_a_realistic_frame);
     RUN_TEST(test_the_sungrow_battery_power_is_reordered_and_reoriented);
     RUN_TEST(test_the_sungrow_setpoints_are_declared_and_dormant);
+    RUN_TEST(test_the_huawei_profile_decodes_a_realistic_frame);
+    RUN_TEST(test_the_huawei_sentinels_leave_channels_absent_not_absurd);
+    RUN_TEST(test_the_huawei_sentinel_does_not_swallow_its_neighbour);
+    RUN_TEST(test_the_huawei_profile_holds_back_battery_power);
+    RUN_TEST(test_the_huawei_setpoint_is_declared_and_dormant);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);

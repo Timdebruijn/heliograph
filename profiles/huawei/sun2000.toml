@@ -1,0 +1,312 @@
+# SPDX-License-Identifier: MIT
+#
+# Huawei SUN2000 (residential, with optional LUNA2000 battery) — Modbus RTU register profile.
+#
+# STATUS: transcribed from the register definitions of a mature, widely deployed library that
+# implements Huawei's published Modbus interface. NOT confirmed against a physical inverter by
+# this project. See docs/huawei-sun2000-protocol.md.
+#
+# SOURCE:
+#   wlcrs/huawei-solar-lib, src/huawei_solar/register_definitions.py and registers.py -- the
+#   library behind the wlcrs/huawei_solar Home Assistant integration. Its register table is a
+#   transcription of Huawei's "Solar Inverter Modbus Interface Definitions".
+#
+# ONE SOURCE, and that is a deliberate, recorded limitation. Huawei's own document exists and is
+# the natural second (it is what the library transcribes), but no machine-readable copy was
+# obtained for this profile the way Sungrow's was. So unlike the Sungrow map, nothing here has
+# been checked against the vendor's own numbering. Treat every row as one careful transcription
+# rather than two agreeing ones, and check the bring-up dump against the inverter's display
+# before trusting any of it.
+#
+# SCALING NOTE: the library expresses scaling as a GAIN it divides by (gain 10 -> value = raw/10).
+# This schema multiplies, so every gain appears below as its reciprocal: gain 10 is scale 0.1,
+# gain 100 is scale 0.01, gain 1000 is scale 0.001. Getting that backwards is a factor of 100 on
+# a current reading, which is exactly the kind of wrong that looks plausible on a dashboard.
+#
+# REGISTER SPACE: holding registers (function 03) throughout. Huawei has no input-register map.
+
+[profile]
+driver = "modbus_profile"
+id = "huawei_sun2000"
+display_name = "Huawei SUN2000 (residential)"
+manufacturer = "Huawei"
+default = false        # sph.toml holds the driver default
+phases = 1
+mppts = 2
+battery = true
+transports = ["rtu"]
+
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# ------------------------------------------------------------------------------------------
+# Read blocks. Four narrow ones rather than two wide sweeps, because this family is unusually
+# particular about being polled: the documented behaviour is one request at a time with a pause
+# between them, and a SUN2000 that is asked for too much too fast simply stops answering for a
+# while. Narrow blocks also keep the battery range out of the way on an inverter with no battery.
+# ------------------------------------------------------------------------------------------
+
+[[block]]
+space = "holding"
+start = 32016
+count = 4       # 32016-32019: PV1 and PV2 voltage/current
+
+[[block]]
+space = "holding"
+start = 32064
+count = 24      # 32064-32087: input power, phase A, active power, frequency, temperature
+
+[[block]]
+space = "holding"
+start = 32106
+count = 10      # 32106-32115: lifetime and daily yield
+
+[[block]]
+space = "holding"
+start = 37760
+count = 24      # 37760-37783: LUNA2000 battery. Absent on an inverter without one -- see below
+
+# ------------------------------------------------------------------------------------------
+# THE SENTINEL, and the reason `invalid` exists in this schema.
+#
+# Huawei does not answer an unavailable reading with an exception or a zero. It answers with a
+# fixed pattern per width -- 0xFFFF for U16, 0x7FFF for I16, 0xFFFFFFFF for U32, 0x7FFFFFFF for
+# I32 -- and the source library turns exactly those into "no value".
+#
+# Decoded as numbers instead, they are not obviously wrong. An inverter asleep at night publishes
+# 3276.7 °C. A SUN2000 with no LUNA2000 attached publishes 6553.5 % state of charge, all night,
+# every night. Both are the shape of a real reading.
+#
+# So every row below that can go unavailable carries its width's sentinel, and a match leaves the
+# measurement UNDECLARED -- the same thing that happens to a register whose block was never read.
+# ------------------------------------------------------------------------------------------
+
+# --- DC / PV side -------------------------------------------------------------------------
+
+[[register]]                    # gain 10 -> scale 0.1
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 Voltage"
+space = "holding"
+address = 32016
+type = "s16"
+scale = 0.1
+invalid = 0x7FFF
+unit = "V"
+
+[[register]]                    # gain 100 -> scale 0.01
+measurement = "dc.mppt_1.current"
+display_name = "PV1 Current"
+space = "holding"
+address = 32017
+type = "s16"
+scale = 0.01
+invalid = 0x7FFF
+unit = "A"
+
+[[register]]
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 Voltage"
+space = "holding"
+address = 32018
+type = "s16"
+scale = 0.1
+invalid = 0x7FFF
+unit = "V"
+
+[[register]]
+measurement = "dc.mppt_2.current"
+display_name = "PV2 Current"
+space = "holding"
+address = 32019
+type = "s16"
+scale = 0.01
+invalid = 0x7FFF
+unit = "A"
+
+# The library calls this "input power": the total DC the array is delivering.
+[[register]]
+measurement = "dc.power.total"
+display_name = "Input Power"
+space = "holding"
+address = 32064
+type = "s32"
+scale = 1.0
+invalid = 0x7FFFFFFF
+unit = "W"
+
+# --- AC side ------------------------------------------------------------------------------
+
+[[register]]
+measurement = "ac.power.total"
+display_name = "Active Power"
+space = "holding"
+address = 32080
+type = "s32"
+scale = 1.0
+invalid = 0x7FFFFFFF
+unit = "W"
+
+# Phase A. Three-phase SUN2000 models exist and report B and C alongside; `phases = 1` describes
+# what this profile maps, and a three-phase unit shows the other two in the raw dump.
+[[register]]                    # gain 10 -> scale 0.1
+measurement = "ac.phase_l1.voltage"
+display_name = "Phase A Voltage"
+space = "holding"
+address = 32069
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "V"
+
+# gain 1000 -> scale 0.001. A milliamp resolution current register, which is worth noticing: read
+# with the 0.01 factor that fits most other vendors, a 6 A string reads as 0.06 A.
+[[register]]
+measurement = "ac.phase_l1.current"
+display_name = "Phase A Current"
+space = "holding"
+address = 32072
+type = "s32"
+scale = 0.001
+invalid = 0x7FFFFFFF
+unit = "A"
+
+[[register]]                    # gain 100 -> scale 0.01
+measurement = "ac.frequency"
+display_name = "Grid Frequency"
+space = "holding"
+address = 32085
+type = "u16"
+scale = 0.01
+invalid = 0xFFFF
+unit = "Hz"
+
+# --- Temperature --------------------------------------------------------------------------
+
+# The row that makes the sentinel non-negotiable: an inverter that has shut down for the night
+# reports 0x7FFF here, which without `invalid` publishes as 3276.7 °C every night.
+[[register]]                    # gain 10 -> scale 0.1
+measurement = "inverter.temperature"
+display_name = "Internal Temperature"
+space = "holding"
+address = 32087
+type = "s16"
+scale = 0.1
+invalid = 0x7FFF
+unit = "°C"
+
+# --- Energy -------------------------------------------------------------------------------
+
+[[register]]                    # gain 100 -> scale 0.01
+measurement = "energy.total"
+display_name = "Accumulated Yield"
+space = "holding"
+address = 32106
+type = "u32"
+scale = 0.01
+invalid = 0xFFFFFFFF
+unit = "kWh"
+
+[[register]]
+measurement = "energy.today"
+display_name = "Daily Yield"
+space = "holding"
+address = 32114
+type = "u32"
+scale = 0.01
+invalid = 0xFFFFFFFF
+unit = "kWh"
+
+# --- Battery (LUNA2000) ---------------------------------------------------------------------
+#
+# Every row here is sentinel-guarded, and on this family that is not a corner case: a SUN2000
+# without a LUNA2000 answers this whole range with sentinels rather than refusing it. Without the
+# guard, every string inverter using this profile would publish a permanent phantom battery.
+
+[[register]]                    # gain 10 -> scale 0.1
+measurement = "battery.soc"
+display_name = "Battery SoC"
+space = "holding"
+address = 37760
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "%"
+
+[[register]]                    # gain 10 -> scale 0.1
+measurement = "battery.voltage"
+display_name = "Battery Bus Voltage"
+space = "holding"
+address = 37763
+type = "u16"
+scale = 0.1
+invalid = 0xFFFF
+unit = "V"
+
+[[register]]                    # gain 100 -> scale 0.01
+measurement = "battery.energy_charged"
+display_name = "Total Battery Charge"
+space = "holding"
+address = 37780
+type = "u32"
+scale = 0.01
+invalid = 0xFFFFFFFF
+unit = "kWh"
+
+[[register]]
+measurement = "battery.energy_discharged"
+display_name = "Total Battery Discharge"
+space = "holding"
+address = 37782
+type = "u32"
+scale = 0.01
+invalid = 0xFFFFFFFF
+unit = "kWh"
+
+# ==============================================================================================
+# DELIBERATELY NOT MAPPED
+# ==============================================================================================
+#
+# battery.power (37765, I32, watts). The register is there, it is signed, and NEITHER the library
+# nor the Home Assistant integration built on it states which direction positive means -- both
+# pass the signed value straight through. Our canonical convention is positive while charging, and
+# a battery graph that is confidently inverted is worse than an absent one. This is the third
+# hybrid in a row where battery power is held back, and the third distinct reason: Deye's sources
+# are silent, Solis puts the direction in a separate register, and here it is simply undocumented
+# in what was read. Huawei's own interface document states it; settle it there or on the bench.
+#
+# The fixed-watt export limit (40126, U32). Writable, and a natural companion to the percentage
+# limit below -- but 32 bits means two registers, and this firmware's write path is FC06
+# single-register only. Declaring it would produce a row that validates and can never dispatch.
+#
+# Meter registers (37113 onward) and the built-in/external energy-meter blocks. They exist, but
+# our canonical grid channels are two unsigned rails and these are single signed bidirectional
+# values, which needs arithmetic a profile cannot do.
+
+# ------------------------------------------------------------------------------------------
+# Writable setpoint — DECLARED AND DORMANT.
+#
+# Active power derating as a percentage of rated output: the standard curtailment control on this
+# family, and a single 16-bit register, which is the one shape this firmware's write path can
+# serve. The library marks it writeable and applies gain 10, so 50.0 % is raw 500.
+#
+# Dormant until `verified = true`. Two things to establish on the bench before that flag moves:
+# whether the inverter accepts FC06 for it, and whether a separate control-mode register
+# (the library exposes one at 47415) has to select percentage derating first. A limit written
+# while the mode says otherwise is a stored number that changes nothing -- which looks exactly
+# like a failed write.
+# ------------------------------------------------------------------------------------------
+
+[[write]]
+command = "set_active_power_limit_percent"
+display_name = "Active Power Limit"
+space = "holding"
+address = 40125
+type = "s16"
+scale = 0.1
+unit = "%"
+minimum = 0
+maximum = 100
+step = 0.1
+verified = false

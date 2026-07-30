@@ -367,6 +367,18 @@ def parse_profile(
         if isinstance(offset, bool) or not isinstance(offset, (int, float)):
             raise ProfileError(f"{rw}: offset must be a number")
         check_finite(float(offset), rw, "offset")
+        # A raw value meaning "not available". Some vendors answer an unavailable channel with a
+        # sentinel rather than an exception, and decoding that as a number publishes a sleeping
+        # inverter at 3276.7 degrees.
+        invalid = r.get("invalid")
+        if invalid is not None:
+            if isinstance(invalid, bool) or not isinstance(invalid, int):
+                raise ProfileError(f"{rw}: invalid must be an integer raw value")
+            limit = 0xFFFF if words == 1 else 0xFFFFFFFF
+            if not 0 <= invalid <= limit:
+                raise ProfileError(
+                    f"{rw}: invalid must fit the register width (0-{limit} for '{rtype}')"
+                )
         word_order = r.get("word_order", "high_first")
         if word_order not in WORD_ORDERS:
             raise ProfileError(f"{rw}: word_order must be one of {sorted(WORD_ORDERS)}")
@@ -387,6 +399,7 @@ def parse_profile(
                 "scale": float(scale),
                 "offset": float(offset),
                 "word_order": word_order,
+                "invalid": invalid,
                 "unit": unit,
             }
         )
@@ -460,6 +473,11 @@ def parse_profile(
             raise ProfileError(
                 f"{ww}: word_order is not supported on a write row -- the write path sends a "
                 f"single 16-bit register (FC06), so there is no word order to choose"
+            )
+        if "invalid" in wr:
+            raise ProfileError(
+                f"{ww}: invalid is a READ concept -- it marks a value the device reports as "
+                f"unavailable, and there is nothing to skip when writing"
             )
         # Part of a register is not something FC06 can set: it writes all sixteen bits, so a
         # masked field would clear whatever shares the register with it. Several vendors do pack a
@@ -685,7 +703,9 @@ def generate(
             w(
                 f"     RegSpace::{SPACES[r['space']]}, {r['address']}, {words}, "
                 f"{cpp_float(r['scale'])}, {'true' if signed else 'false'}, "
-                f"{cpp_float(r['offset'])}, {WORD_ORDERS[r['word_order']]}}},"
+                f"{cpp_float(r['offset'])}, {WORD_ORDERS[r['word_order']]}, "
+                f"{'true' if r['invalid'] is not None else 'false'}, "
+                f"{r['invalid'] if r['invalid'] is not None else 0}}},"
             )
         w("};")
         w(f"constexpr RegBlock k{sym}Blocks[] = {{")

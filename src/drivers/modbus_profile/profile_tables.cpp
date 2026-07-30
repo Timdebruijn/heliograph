@@ -42,6 +42,12 @@ void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t 
             raw = (static_cast<int64_t>(high) << 16) | low;
         }
 
+        // Before sign extension: the sentinel is a bit pattern the vendor documents, not a
+        // number, so it is compared as one.
+        if (mp.hasInvalid && static_cast<uint32_t>(raw) == mp.invalidRaw) {
+            continue;  // undeclared, like a block that was never read
+        }
+
         if (mp.isSigned) {
             const int64_t bits = mp.words == 2 ? 32 : 16;
             const int64_t signBit = int64_t{1} << (bits - 1);

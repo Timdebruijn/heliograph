@@ -105,7 +105,23 @@ Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`.
 | `scale` | number | no (1.0) | Multiplier for the raw integer. A device reporting tenths uses `0.1`. Must not be 0. **May be negative** — see below. |
 | `offset` | number | no (0.0) | Added after scaling. For registers that store a *biased* value so it never goes negative on the wire: several vendors report `1000` for 0 °C, which is `scale = 0.1, offset = -100`. |
 | `word_order` | string | no (`"high_first"`) | 32-bit values only. `"low_first"` when the device stores the LOW half at the lower address. Refused on a 16-bit row and on write rows. |
+| `invalid` | int | no | A raw value the device uses to mean "not available" (e.g. `0x7FFF`, `0xFFFF`). A matching register is left **undeclared** rather than published. Compared before sign extension; must fit the register width. Refused on write rows. |
 | `unit` | string | yes | One of `W` `V` `A` `Hz` `°C` (or `C`) `kWh` `h` `%` `dBm` `s`. The measurement *type* (Power, Voltage, …) is derived from the unit, so you never touch internal enums. |
+
+### Sentinels: when a device says "unknown" in numbers
+
+Some vendors do not answer an unavailable reading with an exception or a zero — they answer with
+a fixed pattern, one per register width. Decoded as a number that is not obviously wrong: an
+inverter asleep for the night reports 3276.7 °C, and a hybrid map pointed at an inverter with no
+battery reports 6553.5 % state of charge, all night, every night.
+
+`invalid` names that pattern. A register holding it is left undeclared — the same outcome as a
+register whose block was never read, and the same rule as everywhere else here: **missing is not
+zero**, and a channel we cannot read is absent rather than invented.
+
+Take the value from documentation, not from a hunch about what looks like a sentinel. A real
+reading can sit right next to one (`0x7FFE` is a perfectly good temperature), and the comparison
+is exact for that reason.
 
 ### Correcting a sign convention
 
