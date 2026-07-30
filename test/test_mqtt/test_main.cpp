@@ -653,6 +653,124 @@ static void test_config_topics_are_well_formed() {
     }
 }
 
+static DeviceState pollWritableMockState() {
+    mock::MockOptions o;
+    o.writable = true;
+    mock::MockDriver driver(clockFn, o);
+    StateStore    store;
+    Diagnostics   diag;
+    DeviceContext ctx(driver, store, diag, clockFn);
+    ctx.pollOnce();
+    return *store.snapshot();
+}
+
+static void test_a_writable_numeric_command_gets_a_number_entity() {
+    const auto state  = pollWritableMockState();
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    const auto* e = findEntity(entities, "heliograph-a1b2c3_set_active_power_limit_percent");
+    TEST_ASSERT_NOT_NULL(e);
+    TEST_ASSERT_TRUE(e->configTopic.find("/number/") != std::string::npos);
+
+    auto doc = parse(e->payload);
+    TEST_ASSERT_EQUAL_STRING(topics.commandSet().c_str(),
+                             doc["command_topic"].as<std::string>().c_str());
+    const std::string tmpl = doc["command_template"].as<std::string>();
+    TEST_ASSERT_TRUE(tmpl.find("\"type\":\"set_active_power_limit_percent\"") !=
+                     std::string::npos);
+    TEST_ASSERT_TRUE(tmpl.find("{{ value }}") != std::string::npos);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, doc["min"].as<double>());
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, doc["max"].as<double>());
+    TEST_ASSERT_EQUAL_DOUBLE(1.0, doc["step"].as<double>());
+    TEST_ASSERT_EQUAL_STRING("%", doc["unit_of_measurement"]);
+    // No readback exists for a setpoint -- no shipping driver reports one as a measurement --
+    // so this can only ever be optimistic, unlike the relay switch.
+    TEST_ASSERT_TRUE(doc["optimistic"].as<bool>());
+}
+
+static void test_start_and_stop_get_button_entities() {
+    const auto state  = pollWritableMockState();
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    const auto* start = findEntity(entities, "heliograph-a1b2c3_start");
+    TEST_ASSERT_NOT_NULL(start);
+    TEST_ASSERT_TRUE(start->configTopic.find("/button/") != std::string::npos);
+    auto startDoc = parse(start->payload);
+    TEST_ASSERT_EQUAL_STRING(topics.commandSet().c_str(),
+                             startDoc["command_topic"].as<std::string>().c_str());
+    TEST_ASSERT_EQUAL_STRING("{\"type\":\"start\"}",
+                             startDoc["payload_press"].as<std::string>().c_str());
+
+    const auto* stop = findEntity(entities, "heliograph-a1b2c3_stop");
+    TEST_ASSERT_NOT_NULL(stop);
+    auto stopDoc = parse(stop->payload);
+    TEST_ASSERT_EQUAL_STRING("{\"type\":\"stop\"}",
+                             stopDoc["payload_press"].as<std::string>().c_str());
+}
+
+static void test_an_enum_command_gets_no_entity_even_if_the_capability_is_granted() {
+    // No driver grants SetBatteryOperatingMode today (there is no EnumCapability yet to say
+    // what the valid selections would even be), so this state is hand-built rather than
+    // pulled from MockDriver -- it pins the "skip, don't guess" rule for the day one does.
+    DeviceState state;
+    state.capabilities.addWrite(InverterCapability::SetBatteryOperatingMode);
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    TEST_ASSERT_NULL(findEntity(entities, "heliograph-a1b2c3_set_battery_operating_mode"));
+}
+
+static void test_discovery_signature_changes_when_a_writable_bound_changes() {
+    DeviceState a = pollWritableMockState();
+    DeviceState b = a;
+    b.capabilities.numeric[static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent)]
+        .maximum = 50.0;
+
+    TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
+}
+
+// The exact scenario a review caught the signature missing (2026-07-30): a NumericCapability
+// can be pre-populated with real bounds ahead of hardware verification, with `supported` still
+// false -- buildDiscoveryEntities correctly builds no entity for that. The day `supported`
+// flips true with the SAME bounds (the verification event itself), the entity set changes from
+// "none" to "one number entity", and the signature must change too, or MqttOutput never
+// notices there is now something new to announce.
+static void test_discovery_signature_changes_when_supported_flips_with_unchanged_bounds() {
+    DeviceState a = pollWritableMockState();
+    const size_t idx =
+        static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent);
+    a.capabilities.numeric[idx].supported = false;
+
+    DeviceState b = a;
+    b.capabilities.numeric[idx].supported = true;
+    // Bounds deliberately IDENTICAL to a's -- only `supported` differs.
+
+    TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
+}
+
+// The mirror image: writable=false must behave the same way, and a command with no numeric
+// value at all (start/stop) must still be able to change the signature via just the write
+// bitset, independent of the numeric-specific gate above.
+static void test_discovery_signature_changes_when_writable_flips_with_unchanged_bounds() {
+    DeviceState a = pollWritableMockState();
+    const size_t idx =
+        static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent);
+    a.capabilities.numeric[idx].writable = false;
+
+    DeviceState b = a;
+    b.capabilities.numeric[idx].writable = true;
+
+    TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
+}
+
 static void test_the_mock_hybrid_gets_battery_and_phase_entities_for_free() {
     // The architectural claim, on the discovery side: no code here knows about batteries or
     // three-phase devices, yet both appear.
@@ -1235,6 +1353,12 @@ int main(int, char**) {
     RUN_TEST(test_every_entity_on_a_device_has_a_distinct_display_name);
     RUN_TEST(test_no_control_entities_for_a_read_only_driver);
     RUN_TEST(test_config_topics_are_well_formed);
+    RUN_TEST(test_a_writable_numeric_command_gets_a_number_entity);
+    RUN_TEST(test_start_and_stop_get_button_entities);
+    RUN_TEST(test_an_enum_command_gets_no_entity_even_if_the_capability_is_granted);
+    RUN_TEST(test_discovery_signature_changes_when_a_writable_bound_changes);
+    RUN_TEST(test_discovery_signature_changes_when_supported_flips_with_unchanged_bounds);
+    RUN_TEST(test_discovery_signature_changes_when_writable_flips_with_unchanged_bounds);
     RUN_TEST(test_the_mock_hybrid_gets_battery_and_phase_entities_for_free);
     RUN_TEST(test_bridge_diagnostic_entities);
     RUN_TEST(test_relay_entities_follow_count_and_enabled);

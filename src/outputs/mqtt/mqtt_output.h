@@ -22,7 +22,10 @@
 
 #include <atomic>
 #include <functional>
+#include <mutex>
+#include <optional>
 
+#include "commands/command_dispatcher.h"
 #include "device/bridge_info.h"
 #include "device/command.h"
 #include "device/device_state.h"
@@ -125,6 +128,31 @@ public:
     using DrmCommandFn = std::function<bool(const std::string& mode)>;
     void setDrmCommandHandler(DrmCommandFn handler) { drmCommand_ = std::move(handler); }
 
+    /// Handles a write command arriving on a device's <prefix>/command/set. The SAME function
+    /// RestContext::submitCommand is built from in main.cpp, so REST and MQTT enqueue through
+    /// one counter and one CommandQueue rather than two independent paths that could disagree
+    /// about what "one in flight" means. Returns the request id used on success (a JSON ack is
+    /// published to that device's commandResult() topic), or nullopt when one was already
+    /// pending.
+    ///
+    /// Like the relay handler, this runs on the MQTT task and only ever *enqueues* -- it must
+    /// never itself run the RS485 transaction. Unlike the relay handler it needs no mutex here:
+    /// CommandQueue is its own lock, not something this class and REST share directly.
+    using CommandSubmitFn =
+        std::function<std::optional<std::string>(const std::string& deviceId,
+                                                   InverterCommand   command)>;
+    void setCommandHandler(CommandSubmitFn handler) { commandSubmit_ = std::move(handler); }
+
+    /// Looks up the real outcome of a request id once rs485Task has actually processed it. The
+    /// SAME function RestContext::commandOutcome reads from -- both transports observe the one
+    /// CommandQueue. loop() polls this for whichever channel is awaiting a result and, once it
+    /// resolves, publishes it to that channel's commandResult() topic (see loop()'s own note).
+    using CommandOutcomeFn =
+        std::function<std::optional<DispatchOutcome>(const std::string& requestId)>;
+    void setCommandOutcomeProvider(CommandOutcomeFn provider) {
+        commandOutcomeProvider_ = std::move(provider);
+    }
+
 private:
     /// Everything that is per-inverter rather than per-bridge, keyed by device id. Every
     /// channel is created in the first loop() pass -- the device list is fixed at boot -- but
@@ -136,6 +164,10 @@ private:
         PublishThrottle throttle;
         bool            discoveryPublished  = false;
         uint64_t        discoveredSignature = 0;
+        /// The request id THIS channel most recently submitted and is still awaiting the real
+        /// outcome for, or empty when nothing is outstanding. Set in onMessage on a successful
+        /// submitCommand(); cleared by loop() once commandOutcomeProvider_ resolves it.
+        std::string pendingCommandRequestId;
     };
 
     /// publish() whose refusals are counted. Every publish in this class goes through it --
@@ -160,6 +192,15 @@ private:
     Diagnostics* diagnostics_ = nullptr;
 
     std::vector<Channel> channels_;
+    /// Guards channels_'s STRUCTURE (channelFor()'s push_back can reallocate it) and each
+    /// Channel's pendingCommandRequestId. Both are touched from two tasks: loop() and
+    /// channelFor() run on whatever task calls loop() (rs485Task), onMessage's new command
+    /// handling runs on espMqttClient's own task -- the same task boundary resyncRequested_
+    /// and relayAckRequested_ already guard against, but those are lone bools; a vector and a
+    /// string need a mutex, not an atomic. Every OTHER Channel field (topics, uniqueBase,
+    /// throttle, discoveryPublished, discoveredSignature) stays single-task (only loop()/
+    /// channelFor() ever touch them), so nothing else needs to take this lock.
+    std::mutex channelsMutex_;
     PublishPolicy        publishPolicy_;
 
     // espMqttClient's setClientId/setWill/setServer/setCredentials store the POINTER, not a
@@ -189,6 +230,8 @@ private:
 
     RelayCommandFn relayCommand_;
     DrmCommandFn   drmCommand_;
+    CommandSubmitFn  commandSubmit_;
+    CommandOutcomeFn commandOutcomeProvider_;
     uint8_t        relayCount_ = 0;  ///< copied at begin() for topic parsing in the callback
     /// Set by onMessage (MQTT task) on EVERY received relay command, consumed by loop().
     /// Without it a refused or no-op command changes no state, nothing gets published, and

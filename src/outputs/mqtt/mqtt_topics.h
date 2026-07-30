@@ -52,6 +52,14 @@ public:
     std::string drmSet() const { return prefix_ + "/drm/set"; }
     std::string drmState() const { return prefix_ + "/drm/state"; }
 
+    /// A write command for THIS device -- unlike the relay/DRM topics above, this is built
+    /// from a per-device MqttTopics (bridge-scoped for the primary device, device-scoped for
+    /// every other one), so each device gets its own topic rather than sharing the bridge's.
+    /// Command in on commandSet, a one-shot accepted/rejected ack out on commandResult -- never
+    /// retained, unlike relayState: there is no steady state to reflect, only an event.
+    std::string commandSet() const { return prefix_ + "/command/set"; }
+    std::string commandResult() const { return prefix_ + "/command/result"; }
+
     const std::string& prefix() const { return prefix_; }
 
 private:

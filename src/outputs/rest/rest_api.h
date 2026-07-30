@@ -23,10 +23,12 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 class AsyncWebServerRequest;
 
+#include "commands/command_dispatcher.h"
 #include "config/configuration.h"
 #include "device/bridge_info.h"
 #include "device/command.h"
@@ -112,6 +114,22 @@ struct RestContext {
     /// everything else released, atomically behind the relay mutex. Returns the gate
     /// verdict; OutOfRange doubles as "not a valid mode for the configured roles".
     std::function<CommandResult(const std::string& mode)> setDrmMode;
+    /// Queues a write command for `deviceId` to run on the bus. Returns the request id
+    /// actually used (server-generated if the caller supplied none) on success, or nullopt
+    /// when one is already pending -- the same one-in-flight rule manual poll, discovery and
+    /// capture already apply.
+    ///
+    /// This can only ever say "accepted for the queue", never "succeeded": a real driver's
+    /// execute() is a multi-second RS485 transaction, and running it from this handler would
+    /// repeat the exact Phase-3 bus race requestPoll's comment documents finding live. See
+    /// commandOutcome for how the caller learns what actually happened.
+    std::function<std::optional<std::string>(const std::string& deviceId, InverterCommand command)>
+        submitCommand;
+    /// The outcome of the most recently completed command with this request id. Empty while
+    /// it is still pending, was never submitted, or has since been superseded by a later
+    /// request -- only one outcome is remembered at a time, matching submitCommand's
+    /// one-in-flight rule.
+    std::function<std::optional<DispatchOutcome>(const std::string& requestId)> commandOutcome;
 };
 
 class RestApi {

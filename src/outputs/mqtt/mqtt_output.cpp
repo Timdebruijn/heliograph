@@ -103,11 +103,12 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
     });
 
     relayCount_ = bridge.relayCount;
-    if (relayCount_ > 0) {
-        // The one message handler this firmware has. Topic and payload are attacker-
-        // influenced data from anyone who can publish on the broker; parse defensively and
-        // let the RelayController's gates decide. Runs on the MQTT task -- the handler
-        // installed by main serialises against REST with a mutex.
+    if (relayCount_ > 0 || commandSubmit_ != nullptr) {
+        // The message handler this firmware has. Topic and payload are attacker-influenced
+        // data from anyone who can publish on the broker; parse defensively and let the
+        // RelayController's gates (or, for a command, CommandDispatcher's) decide. Runs on
+        // the MQTT task -- the relay handler installed by main serialises against REST with
+        // a mutex; commandSubmit_ needs none, because CommandQueue is its own lock.
         g_client.onMessage([this](const espMqttClientTypes::MessageProperties&,
                                   const char* topic, const uint8_t* payload, size_t len,
                                   size_t index, size_t total) {
@@ -115,6 +116,71 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
                 return;  // fragmented messages are never valid for these short payloads
             }
             const std::string t(topic);
+            if (commandSubmit_ != nullptr) {
+                // Locked: channels_ can be grown (reallocated) by channelFor() on the OTHER
+                // task at any moment, and this loop both walks the vector's structure and
+                // writes a Channel's pendingCommandRequestId, which loop() also reads and
+                // clears -- see channelsMutex_'s own comment.
+                std::lock_guard<std::mutex> lock(channelsMutex_);
+                // Checked against every device's own topic, not just one: commandSet() is
+                // built from a per-device MqttTopics, so a bridge polling several inverters
+                // has one of these per device, and only the channel loop knows all of them.
+                for (auto& channel : channels_) {
+                    if (t != channel.topics.commandSet()) {
+                        continue;
+                    }
+                    // Unlike REST, nothing upstream of this callback bounds a publisher's
+                    // message size -- any client that can publish to the broker can reach
+                    // this topic. A real command body fits in well under 200 bytes; reject
+                    // rather than parse anything grossly larger.
+                    if (len == 0 || len > kMaxCommandPayloadBytes) {
+                        return;
+                    }
+                    const std::string   body(reinterpret_cast<const char*>(payload), len);
+                    InverterCommand     command;
+                    json_util::CommandRequestError parseError;
+                    std::string                    ack;
+                    if (!json_util::parseCommandRequest(body, command, parseError)) {
+                        if (json_util::buildCommandRejectedPayload(
+                                parseError.field + ": " + parseError.message, ack)) {
+                            publishTracked(channel.topics.commandResult().c_str(), 0, false,
+                                           ack.c_str());
+                        } else {
+                            log::warn("command ack for %s: rejection payload too large",
+                                      channel.id.c_str());
+                        }
+                        return;
+                    }
+                    command.source       = CommandSource::Mqtt;
+                    const auto requestId = commandSubmit_(channel.id, command);
+                    bool       ackOk;
+                    if (!requestId.has_value()) {
+                        ackOk =
+                            json_util::buildCommandRejectedPayload("a command is already pending",
+                                                                   ack);
+                    } else {
+                        ackOk = json_util::buildCommandAcceptedPayload(*requestId, ack);
+                        // Only recorded as pending if the ack actually serialised: otherwise
+                        // the caller never learns this request id, so there is no one who
+                        // could ever be waiting on loop() to republish its outcome.
+                        if (ackOk) {
+                            channel.pendingCommandRequestId = *requestId;
+                        }
+                    }
+                    if (ackOk) {
+                        publishTracked(channel.topics.commandResult().c_str(), 0, false,
+                                       ack.c_str());
+                    } else {
+                        // The command is genuinely enqueued (commandSubmit_ already returned
+                        // a real id) -- only the ack failed to serialise. Logged rather than
+                        // silently dropped; request_id is capped at kMaxRequestIdLength, so
+                        // this should not actually be reachable, only defended against.
+                        log::warn("command ack for %s: accept payload too large",
+                                  channel.id.c_str());
+                    }
+                    return;
+                }
+            }
             if (t == topics_.drmSet()) {
                 if (drmCommand_ == nullptr || len == 0 || len > 16) {
                     return;  // mode names are short; anything longer is not one
@@ -171,6 +237,13 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
 bool MqttOutput::connected() const { return started_ && g_client.connected(); }
 
 MqttOutput::Channel& MqttOutput::channelFor(const DeviceView& view, const BridgeInfo& bridge) {
+    // Locked for the search-and-possibly-grow below: push_back can reallocate channels_'s
+    // backing storage, and onMessage's command handling walks the same vector from a different
+    // task (see channelsMutex_'s own comment). Released before returning -- the reference
+    // handed back is then only ever used from THIS task (only loop() calls channelFor(), and
+    // it does so sequentially), so nothing needs the lock held across the caller's later use
+    // of it.
+    std::lock_guard<std::mutex> lock(channelsMutex_);
     for (auto& c : channels_) {
         if (c.id == view.id) {
             return c;
@@ -185,7 +258,8 @@ MqttOutput::Channel& MqttOutput::channelFor(const DeviceView& view, const Bridge
               deviceUniqueBase(view.primary, bridge.bridgeId, view.id),
               PublishThrottle(publishPolicy_),
               false,
-              0};
+              0,
+              {}};
     channels_.push_back(std::move(c));
     return channels_.back();
 }
@@ -248,12 +322,18 @@ bool MqttOutput::onConnected(Channel& channel, const DeviceState& state,
     }
     const bool discoveryOk = publishDiscovery(channel, state, bridge);
 
-    // The relay command topic is the only subscription; inverter drivers stay read-only
-    // and get no command topic -- that follows from the capabilities, not a decision here.
     if (relayCount_ > 0) {
         g_client.subscribe(topics_.relaySetWildcard().c_str(), 1);
         g_client.subscribe(topics_.drmSet().c_str(), 1);
         relayStateForced_ = true;  // fresh session: ack the current states once
+    }
+    // This channel's OWN command topic -- commandSet() differs per device (primary vs
+    // device-scoped prefix), unlike the relay/DRM topics above, which belong to the bridge and
+    // are subscribed once from `topics_`. Whether commanding does anything is a capabilities
+    // question the driver and CommandDispatcher answer, not this subscription: a read-only
+    // driver still receives the message, and still answers Unsupported.
+    if (commandSubmit_ != nullptr) {
+        g_client.subscribe(channel.topics.commandSet().c_str(), 1);
     }
     return discoveryOk;
 }
@@ -319,6 +399,49 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         }
         const DeviceState& state   = *view.state;
         Channel&           channel = channelFor(view, bridge);
+
+        // The real outcome of a command THIS channel submitted, once rs485Task has actually
+        // run it -- accepted/rejected (published from onMessage, immediately) only ever says
+        // "queued", never "succeeded". Polled rather than pushed: nothing calls back into
+        // MqttOutput when CommandQueue::recordOutcome() runs on rs485Task, so this loop is
+        // what notices. Cleared either way once published, so a lookup that stays unresolved
+        // forever (it should not -- rs485Task always records SOMETHING for a taken request)
+        // cannot wedge this channel out of ever checking again.
+        if (commandOutcomeProvider_) {
+            // Locked: pendingCommandRequestId is the same field onMessage writes on the other
+            // task (see channelsMutex_'s own comment). Copied out and cleared under the lock;
+            // the outcome lookup and publish themselves need no lock (a different mutex guards
+            // CommandQueue, and publishTracked is non-blocking), so they run outside it.
+            std::string pending;
+            {
+                std::lock_guard<std::mutex> lock(channelsMutex_);
+                pending = channel.pendingCommandRequestId;
+            }
+            if (!pending.empty()) {
+                if (const auto outcome = commandOutcomeProvider_(pending)) {
+                    std::string ack;
+                    if (json_util::buildCommandOutcomePayload(pending, *outcome, ack)) {
+                        publishTracked(channel.topics.commandResult().c_str(), 0, false,
+                                       ack.c_str());
+                    } else {
+                        // Nothing about retrying next tick would change the outcome's own
+                        // reason string, so this is logged and dropped rather than left
+                        // pending forever for a serialisation that can only fail the same
+                        // way again.
+                        log::warn("command outcome for %s: payload too large",
+                                  channel.id.c_str());
+                    }
+                    std::lock_guard<std::mutex> lock(channelsMutex_);
+                    // Only clear if it still matches: onMessage may have started a NEW
+                    // request on this channel while the lookup/publish above ran unlocked,
+                    // and that request must not have its own pending id wiped out from under
+                    // it by this now-stale copy.
+                    if (channel.pendingCommandRequestId == pending) {
+                        channel.pendingCommandRequestId.clear();
+                    }
+                }
+            }
+        }
 
         const auto signature = discoverySignature(state);
         if (!channel.discoveryPublished || signature != channel.discoveredSignature) {
@@ -481,7 +604,7 @@ bool MqttOutput::publishDiscovery(Channel&, const DeviceState&, const BridgeInfo
     return false;
 }
 MqttOutput::Channel& MqttOutput::channelFor(const DeviceView&, const BridgeInfo&) {
-    static Channel unused{"", MqttTopics("", ""), "", PublishThrottle({}), false, 0};
+    static Channel unused{"", MqttTopics("", ""), "", PublishThrottle({}), false, 0, {}};
     return unused;
 }
 
