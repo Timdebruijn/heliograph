@@ -10,8 +10,8 @@
 #if ENABLE_DRIVER_EVERSOLAR
 #include "eversolar_legacy/eversolar_driver.h"
 #endif
-#if ENABLE_DRIVER_GROWATT
-#include "growatt_modbus/growatt_driver.h"
+#if ENABLE_DRIVER_MODBUS_PROFILE
+#include "modbus_profile/modbus_profile_driver.h"
 #endif
 #if ENABLE_DRIVER_SOLAX
 #include "solax_x1/solax_driver.h"
@@ -171,8 +171,8 @@ void registerBuiltinDrivers(DriverRegistry& registry) {
 #if ENABLE_DRIVER_EVERSOLAR
     registry.registerDriver(eversolar::descriptor(), eversolar::factory);
 #endif
-#if ENABLE_DRIVER_GROWATT
-    registry.registerDriver(growatt::descriptor(), growatt::factory);
+#if ENABLE_DRIVER_MODBUS_PROFILE
+    registry.registerDriver(profile::descriptor(), profile::factory);
 #endif
 #if ENABLE_DRIVER_SOLAX
     registry.registerDriver(solax::descriptor(), solax::factory);

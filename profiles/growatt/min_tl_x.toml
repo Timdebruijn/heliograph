@@ -1,0 +1,256 @@
+# SPDX-License-Identifier: MIT
+#
+# Growatt MIN TL-X (2.5-6 kW, single phase) — Modbus RTU register profile.
+#
+# STATUS: same register layout as profiles/growatt/mic_tl_x.toml, with a second PV string. NOT
+# confirmed against real hardware by this project. See docs/growatt-mic-tl-x-protocol.md, which
+# covers both profiles.
+#
+# WHY THIS IS A SEPARATE FILE rather than a widened MIC profile.
+#
+# The MIC and MIN TL-X are the same protocol generation, and the register LAYOUT is identical --
+# wills106/homeassistant-solax-modbus classifies both under one heading ("MIC and MIN PV") and
+# gives every one of them the same GEN4 | PV | X1 handling, keyed on serial-number prefix.
+#
+# What differs is the number of MPPT trackers, and that is not a cosmetic difference here:
+#
+#   MIC 2000/3300 TL-X   1 tracker
+#   MIN 2500/5000 TL-X   2 trackers
+#   MIN 8000 TL-X2       3 trackers
+#
+# The tracker count appears in the map (registers 7-10 are the second string) and in `mppts`,
+# which a profile states once for every device using it. Widening mic_tl_x to map the second
+# string would make every single-tracker MIC publish a permanent zero for a string it does not
+# have -- the exact "never invent a reading" rule the MIC profile's own comment invokes when it
+# declines to map these very registers.
+#
+# So: one layout, two profiles, distinguished by what the hardware actually has. Register 44
+# reports the real tracker and phase count, and both profiles read it, so a bring-up dump says
+# immediately whether the right one was chosen.
+#
+# SOURCES: as mic_tl_x.toml -- WouterTuinstra/Homeassistant-Growatt-Local-Modbus's
+# INPUT_REGISTERS_120 table (the protocol-1.20 plain-inverter map), corroborated for registers
+# 0-10 by the vendor's machine-readable register CSV. The rows below are the MIC profile's rows
+# plus the second string at 7/8/9, which that same table carries.
+
+[profile]
+driver = "modbus_profile"
+id = "min_tl_x"
+display_name = "Growatt MIN TL-X (2.5-6 kW)"
+manufacturer = "Growatt"
+
+# How far this MAP is proven -- its own property, never inherited from the driver.
+# Same lineage as the MIC map, same lack of a device.
+status = "experimental"
+default = false        # sph.toml holds the driver default
+phases = 1
+mppts = 2
+battery = false
+transports = ["rtu"]
+
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# Blocks as the MIC profile, and for the same reasons: the whole first group is read so the raw
+# TRACE dump can correct the map in one bring-up pass; the holding block covers the identity area
+# plus the output power limit; and the 3000 range is probed because the vendor CSV marks that
+# range "Use for TL-X and TL-XH", leaving open which range this firmware actually populates.
+
+[[block]]
+space = "input"
+start = 0
+count = 125
+
+[[block]]
+space = "holding"
+start = 0
+count = 89
+
+[[block]]
+space = "input"
+start = 3000
+count = 40
+probe = true
+
+# --- DC / PV side -------------------------------------------------------------------------
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.power.total"
+display_name = "PV Power"
+space = "input"
+address = 1
+type = "u32"
+scale = 0.1
+unit = "W"
+
+[[register]]                    # high confidence
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 Voltage"
+space = "input"
+address = 3
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence
+measurement = "dc.mppt_1.current"
+display_name = "PV1 Current"
+space = "input"
+address = 4
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # high confidence
+measurement = "dc.mppt_1.power"
+display_name = "PV1 Power"
+space = "input"
+address = 5
+type = "u32"
+scale = 0.1
+unit = "W"
+
+# The second string: the only thing that distinguishes this profile from mic_tl_x. Same source
+# table, same scaling as the first string, and the registers the MIC profile deliberately leaves
+# unmapped because that hardware has no second tracker.
+[[register]]                    # high confidence — same table as string 1
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 Voltage"
+space = "input"
+address = 7
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence
+measurement = "dc.mppt_2.current"
+display_name = "PV2 Current"
+space = "input"
+address = 8
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # high confidence
+measurement = "dc.mppt_2.power"
+display_name = "PV2 Power"
+space = "input"
+address = 9
+type = "u32"
+scale = 0.1
+unit = "W"
+
+# A THIRD string exists on the MIN 8000 TL-X2, which the source classifies with an explicit
+# 3-tracker marker. Its registers are not mapped here: this profile declares two, and a
+# three-tracker unit needs its own profile for the same reason MIC and MIN need separate ones.
+
+# --- AC side ------------------------------------------------------------------------------
+
+[[register]]                    # high confidence
+measurement = "ac.power.total"
+display_name = "AC Power"
+space = "input"
+address = 35
+type = "u32"
+scale = 0.1
+unit = "W"
+
+[[register]]                    # high confidence — note the /100 scale, unlike everything else
+measurement = "ac.frequency"
+display_name = "Grid Frequency"
+space = "input"
+address = 37
+type = "u16"
+scale = 0.01
+unit = "Hz"
+
+[[register]]                    # high confidence
+measurement = "ac.phase_l1.voltage"
+display_name = "Grid Voltage"
+space = "input"
+address = 38
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence
+measurement = "ac.phase_l1.current"
+display_name = "Grid Current"
+space = "input"
+address = 39
+type = "u16"
+scale = 0.1
+unit = "A"
+
+# --- Energy and runtime -------------------------------------------------------------------
+
+[[register]]                    # high confidence
+measurement = "energy.today"
+display_name = "Energy Today"
+space = "input"
+address = 53
+type = "u32"
+scale = 0.1
+unit = "kWh"
+
+[[register]]                    # high confidence
+measurement = "energy.total"
+display_name = "Energy Total"
+space = "input"
+address = 55
+type = "u32"
+scale = 0.1
+unit = "kWh"
+
+# Work time total counts in half-seconds, so hours = raw / 7200.
+[[register]]                    # high confidence
+measurement = "inverter.operating_hours"
+display_name = "Operating Hours"
+space = "input"
+address = 57
+type = "u32"
+scale = 0.00013888888888888889
+unit = "h"
+
+# --- Temperature --------------------------------------------------------------------------
+
+# Signed for the same reason the MIC profile gives: neither source states the signedness, the two
+# decode identically for every physically possible reading, and s16 survives a sub-zero morning
+# on an outdoor unit instead of reporting 6553 °C.
+[[register]]                    # high confidence
+measurement = "inverter.temperature"
+display_name = "Inverter Temperature"
+space = "input"
+address = 93
+type = "s16"
+scale = 0.1
+unit = "°C"
+
+# ------------------------------------------------------------------------------------------
+# Writable setpoint — the same holding register 3 the MIC profile declares, and dormant for the
+# same reason. Reversible by writing 100, touches no grid-protection setting, and the natural way
+# to curtail from Home Assistant when prices go negative.
+#
+# `verified = false` until a bench session writes a limit, reads register 3 back, and confirms
+# against the inverter's own reported output that it took effect. Note that verifying it on a MIC
+# does NOT verify it here: same register, different hardware, and the flag is per profile.
+#
+# The bound stops at 100 rather than allowing 255, because some protocol revisions read 255 as
+# "limit disabled" and a percentage that silently means "off" is a footgun.
+# ------------------------------------------------------------------------------------------
+
+[[write]]
+command = "set_active_power_limit_percent"
+display_name = "Active Power Limit"
+space = "holding"
+address = 3
+type = "u16"
+function = "write_single"
+scale = 1.0
+unit = "%"
+minimum = 0
+maximum = 100
+step = 1
+verified = false

@@ -1,9 +1,9 @@
 # Device profile schema
 
-A device profile is one TOML file in `profiles/<family>/` describing how to read one
+A device profile is one TOML file in `profiles/<vendor>/` describing how to read one
 device family over a register-map protocol. At build time `tools/gen_profiles.py`
 validates every profile and generates the C++ tables the driver polls from
-(`src/drivers/growatt_modbus/profiles_generated.cpp` — generated, git-ignored, never
+(`src/drivers/modbus_profile/profiles_generated.cpp` — generated, git-ignored, never
 edited). A broken profile fails the **build** with a validation message; nothing invalid
 can reach a running device.
 
@@ -24,14 +24,48 @@ Files whose name starts with `_` (like the template) are skipped.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `driver` | string | yes | The C++ driver that consumes this profile. Only `"growatt_modbus"` is table-driven today; see [Scope](#scope) for what qualifies. |
+| `driver` | string | yes | The C++ driver that consumes this profile. Only `"modbus_profile"` is table-driven today; see [Scope](#scope) for what qualifies. |
 | `id` | string | yes | Stable lowercase identifier (`[a-z][a-z0-9_]*`), unique across all profiles. Users select it with the driver's `profile` option; treat it as API, never rename it. |
 | `display_name` | string | yes | Human-readable model name, e.g. `"Growatt SPH (3-6 kW)"`. Becomes the reported model identity. |
+| `manufacturer` | string | yes | The vendor, e.g. `"Growatt"`. One driver serves every brand, so the profile is the only thing that knows this; it is what Home Assistant shows as the device's maker. |
+| `status` | string | no (`"experimental"`) | How far **this map** has been proven: `experimental`, `beta`, `stable` or `deprecated`. See [Status](#status). |
 | `default` | bool | no (false) | Profile used when the `profile` option is unset. Exactly **one** profile per driver must set this. |
 | `phases` | int | yes | AC phases, 1–3. |
 | `mppts` | int | yes | MPPT/string inputs, 0–8. |
 | `battery` | bool | yes | `true` for hybrids with an attached battery; drives the `ReadBatteryState` capability and battery discovery entities. |
 | `transports` | array | no (`["rtu"]`) | Which transports the device family supports: `"rtu"` and/or `"tcp"`. Declaring `"tcp"` is schema-forward: the bridge has no Modbus TCP *client* transport yet, so a TCP-only profile cannot be polled today. |
+
+## Status
+
+The rungs mirror the driver support levels, because "how much should I trust this" has one
+answer shape whether it is asked about code or about a table:
+
+| | |
+|---|---|
+| `experimental` | Transcribed from a vendor document or a mature open-source map. Has never met the device. |
+| `beta` | Confirmed against real hardware, not yet run long enough to trust unattended. |
+| `stable` | Validated and soak-tested. |
+| `deprecated` | Superseded or known wrong. Kept so a stored configuration still resolves to something instead of silently falling back to another family's map. |
+
+**This is the profile's own property and is never inherited from the driver.** One driver reads
+every table here, so its `DriverSupportLevel` can only ever describe the least-proven profile in
+the build. Without a per-profile answer, the first map confirmed on hardware would promote the
+driver and carry every unconfirmed map up with it — a Huawei table that has never met a Huawei,
+wearing the same badge as one somebody watched all day. A test asserts that relationship rather
+than today's values, so it keeps holding after a promotion.
+
+The default is the **lowest** rung on purpose: a profile that forgets to declare a status must
+understate what we know, never overstate it. Declare it anyway — a default nobody reads is a
+default nobody revisits.
+
+What promotes a profile is a **register-by-register comparison against the device's own display,
+at the same moment**, reported on the issue tracker. Agreement between two written sources is
+not confirmation from a device; the word-order defect that cost six Sungrow rows a factor of
+65536 sat behind two agreeing sources.
+
+The status reaches the user: it is shown in the profile dropdown next to the model name, emitted
+as `allowed_labels` on the driver's `profile` option in `GET /api/v1/drivers`, and carried in
+the Status column of [the coverage matrix](../drivers/coverage.md).
 
 ## `[serial]` — optional
 
@@ -92,26 +126,70 @@ map, not about the wire. See [prometheus.md](../prometheus.md).
 ## `[[register]]` — 1 or more per file
 
 One canonical measurement fed by one register (or register pair).
-Decoded as `value = raw * scale`, after sign extension for `s16`/`s32`.
+Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
 | `measurement` | string | yes | Canonical id from [canonical-measurements.md](canonical-measurements.md). Each id may be mapped at most once per profile. |
 | `display_name` | string | yes | Human name for dashboards/Home Assistant. |
 | `space` | string | yes | `"input"` or `"holding"`. |
-| `address` | int | yes | First register. A 32-bit type also reads `address + 1`; the **high word comes first** (the convention Growatt and most Modbus inverters use — see word order caveat in [adding-a-device.md](../adding-a-device.md)). |
+| `address` | int | yes | First register. A 32-bit type also reads `address + 1`; the **high word comes first** by default (what nearly every Modbus inverter does). Set `word_order` when a source says otherwise. |
 | `type` | string | yes | `u16`, `s16`, `u32`, `s32`. `s*` is two's-complement signed — use it for anything that can be negative (power that can flow both ways, temperatures). |
-| `scale` | number | no (1.0) | Multiplier for the raw integer. A device reporting tenths uses `0.1`. Must not be 0. |
+| `scale` | number | no (1.0) | Multiplier for the raw integer. A device reporting tenths uses `0.1`. Must not be 0. **May be negative** — see below. |
+| `offset` | number | no (0.0) | Added after scaling. For registers that store a *biased* value so it never goes negative on the wire: several vendors report `1000` for 0 °C, which is `scale = 0.1, offset = -100`. |
+| `word_order` | string | no (`"high_first"`) | 32-bit values only. `"low_first"` when the device stores the LOW half at the lower address. Refused on a 16-bit row and on write rows. |
+| `invalid` | int | no | A raw value the device uses to mean "not available" (e.g. `0x7FFF`, `0xFFFF`). A matching register is left **undeclared** rather than published. Compared before sign extension; must fit the register width. Refused on write rows. |
 | `unit` | string | yes | One of `W` `V` `A` `Hz` `°C` (or `C`) `kWh` `h` `%` `dBm` `s`. The measurement *type* (Power, Voltage, …) is derived from the unit, so you never touch internal enums. |
+
+### Sentinels: when a device says "unknown" in numbers
+
+Some vendors do not answer an unavailable reading with an exception or a zero — they answer with
+a fixed pattern, one per register width. Decoded as a number that is not obviously wrong: an
+inverter asleep for the night reports 3276.7 °C, and a hybrid map pointed at an inverter with no
+battery reports 6553.5 % state of charge, all night, every night.
+
+`invalid` names that pattern. A register holding it is skipped — exactly as a register whose
+block was never read is skipped, and with the same consequences: a channel that has never been
+seen stays undeclared, and one that WAS read successfully on an earlier poll keeps its last value
+until the normal staleness window expires, after which every output publishes null. The rule is
+the one that applies everywhere here: **missing is not zero**, and a channel we cannot read is
+absent rather than invented.
+
+Take the value from documentation, not from a hunch about what looks like a sentinel. A real
+reading can sit right next to one (`0x7FFE` is a perfectly good temperature), and the comparison
+is exact for that reason.
+
+### Correcting a sign convention
+
+A **negative `scale`** negates the reading, which is how a device that reports the opposite sign
+convention to ours gets corrected in the profile. The canonical convention is
+`battery.power` positive while *charging* (see
+[canonical-measurements.md](canonical-measurements.md)); a device reporting positive while
+discharging maps with `scale = -1`.
+
+Only do this when a source *states* the direction. If the register is documented merely as
+"battery power" with no sign convention given, leave the row out and settle it on the bench —
+getting it backwards produces a dashboard that is confidently inverted, which is worse than a
+missing channel.
+
+Neither `offset` nor a negative `scale` is accepted on a `[[write]]` row: the write path computes
+`raw = value / scale`, refuses a negative raw, and does not invert an offset. The build rejects
+both rather than emitting a row that passes review and then silently refuses or mis-writes every
+value.
 
 ## `[[write]]` — optional: writable setpoint registers
 
-**Read-only is the default.** A register is writable only when declared here — and even
-then it is *dormant*: two independent gates stand between a `[[write]]` row and a byte on
-the bus. The row must carry `verified = true` (confirmed against the real device), and
-the driver must implement a write path (none does today; `execute()` returns
-Unsupported). The section exists so write-register research can be recorded, reviewed
-and bounds-checked long before writing is ever enabled.
+**Read-only is the default.** A register is writable only when declared here — and even then
+it is *dormant* until the row carries `verified = true`, meaning somebody wrote it on real
+hardware, read it back, and confirmed the device acted on it. No row in this repository sets
+that today. The section exists so write-register research can be recorded, reviewed and
+bounds-checked long before anything acts on it.
+
+The driver's write path itself is implemented (FC06, one holding register, echo verified).
+**What it cannot do — 32-bit setpoints, FC16, enum modes like a battery work mode — is in
+[write-path.md](write-path.md), and a row it cannot serve is refused rather than approximated.**
+Read that before adding a `[[write]]` row, or you may write a row that validates and can never
+be dispatched.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
@@ -120,16 +198,21 @@ and bounds-checked long before writing is ever enabled.
 | `space` | string | yes | Must be `"holding"` — Modbus writes target holding registers; input registers are read-only by definition. |
 | `address` | int | yes | First register. Does *not* need to be inside a read `[[block]]` (write-only registers exist). |
 | `type` | string | yes | `u16`, `s16`, `u32`, `s32`. Raw value = `value / scale`. |
-| `function` | string | no (derived) | `"write_single"` (FC 06) or `"write_multiple"` (FC 16). Defaults to FC 06 for one word, FC 16 for two; set explicitly when a firmware demands FC 16 for single registers. |
+| `function` | string | no (derived) | `"write_single"` (FC 06) or `"write_multiple"` (FC 16). Defaults to FC 06 for one word, FC 16 for two. **The driver serves FC 06 only**: a row set to `"write_multiple"` validates and is then refused at dispatch, so setting it is a way to *record* that a firmware demands FC 16 — deliberately dormant, not a way to enable it. See [write-path.md](write-path.md). |
 | `scale` | number | no (1.0) | Same semantics as read registers. |
-| `unit` | string | yes | Same set as read registers. |
-| `minimum` / `maximum` | number | **yes** | Bounds in canonical units. Mandatory — the dispatcher refuses unbounded writes, so the schema refuses unbounded rows. |
-| `step` | number | no (1) | Setpoint granularity. |
+| `unit` | string | yes (numeric rows) | Same set as read registers. Refused on a mode row — a selection has no unit. |
+| `minimum` / `maximum` | number | **yes** (numeric rows) | Bounds in canonical units. Mandatory — the dispatcher refuses unbounded writes, so the schema refuses unbounded rows. Refused on a mode row. |
+| `options` | array | **yes** (mode rows) | The selectable modes: `[{ value = 0, label = "Self-consumption" }, …]`, with the vendor's own numbering. Only for `set_battery_operating_mode`; refused on a numeric row, and required on a mode one. At most 16. |
+| `step` | number | no (1) | Setpoint granularity. Refused on a mode row, like `minimum`/`maximum`/`unit`: all four describe a range, and a mode row is a list. |
 | `verified` | bool | no (**false**) | `true` only after the row is confirmed on real hardware. An unverified row is documentation, never a capability. |
 
-Non-numeric commands (`start`, `stop`, `synchronize_time`) cannot be expressed as a
-write row — "which value means start?" is driver semantics, not a register mapping. If a
-first device needs one, that is a schema extension to design then, not to guess now.
+Value-less commands (`start`, `stop`, `synchronize_time`) cannot be expressed as a write row —
+"which value means start?" is driver semantics, not a register mapping. If a first device needs
+one, that is a schema extension to design then, not to guess now.
+
+Mode setpoints (`set_battery_operating_mode`) **can** be expressed, by declaring `options`
+instead of bounds — see [write-path.md](write-path.md#mode-setpoints-supported-with-one-hard-limit),
+including the one thing they cannot do: a mode packed into part of a shared register.
 
 ## What a profile can NOT express
 
@@ -144,12 +227,19 @@ By design. Being honest about the boundary saves contributors wasted effort:
 - **Acting on writes.** A `[[write]]` row *records* a writable register; it cannot
   *enable* writing. That requires `verified = true` plus a driver write path — see the
   `[[write]]` section above.
-- **Word-order variants.** 32-bit values are high-word-first. A device that is
-  low-word-first needs decoder support first — open an issue rather than mapping it
-  wrong.
+- ~~**Word-order variants.**~~ Supported since a vendor datasheet turned up specifying
+  low-word-first for a register that same datasheet recommends using — see `word_order`
+  above. High-word-first remains the default and is what nearly every device does. Getting
+  this wrong is not subtle in one direction and invisible in the other: 2 kW read the wrong
+  way round is about 34 MW, while a large value read the wrong way round can land near zero.
 
 ## Scope
 
-`driver = "growatt_modbus"` today. The Growatt driver is the generic consumer for
-Modbus-RTU register-map devices; a genuinely different register-map protocol family
+`driver = "modbus_profile"` today. That driver is the generic consumer for Modbus-RTU
+register-map devices, whatever the badge on the front: the brand lives in the profile's
+`manufacturer` field, not in the driver. A genuinely different register-map protocol family
 would get its own table-driven driver and reuse this same profile pipeline.
+
+The id was `growatt_modbus` up to config version 1, when every profile it served was one
+vendor's map. Stored configurations are migrated on load
+(`src/config/configuration_store.cpp`); profile ids themselves never changed.

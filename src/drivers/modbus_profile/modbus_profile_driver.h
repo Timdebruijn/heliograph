@@ -1,42 +1,44 @@
 // SPDX-License-Identifier: MIT
 //
-// Growatt hybrid/string inverter driver, Modbus RTU master.
+// Profile-driven inverter driver, Modbus RTU master.
 //
-// Read-only and Experimental until validated on an SPH6000. The register map lives in
-// growatt_registers.{h,cpp}; this file does the Modbus IO and orchestration only. Uses the
-// shared src/protocols/modbus codec -- no brand-specific framing.
+// One driver for every device whose register map fits in a table: the map lives in
+// profile_tables.{h,cpp}, generated from profiles/<vendor>/*.toml, and this file does the
+// Modbus IO and orchestration only. Uses the shared src/protocols/modbus codec -- no
+// vendor-specific framing anywhere.
 //
-// See docs/growatt-sph-protocol.md. Battery *control* is deliberately not implemented yet:
-// writing holding registers on a hybrid with an unvalidated map could move real energy. Reads
-// are non-destructive and immediately checkable against the inverter display, so they come
-// first; writes follow only after the map is confirmed.
+// Writing is possible but doubly gated: a profile must declare a [[write]] row AND that row
+// must be marked verified against real hardware. Writing holding registers on a hybrid with an
+// unvalidated map moves real energy, so reads -- non-destructive and immediately checkable
+// against the inverter's own display -- always come first. See
+// docs/device-profiles/write-path.md.
 
 #pragma once
 
 #include <memory>
 
-#include "drivers/growatt_modbus/growatt_registers.h"
+#include "drivers/modbus_profile/profile_tables.h"
 #include "drivers/inverter_driver.h"
 #include "drivers/modbus_bus_tally.h"
 
-namespace heliograph::growatt {
+namespace heliograph::profile {
 
 const DriverDescriptor& descriptor();
 std::unique_ptr<InverterDriver> factory(Transport& transport, const DriverOptions& options);
 
-struct GrowattOptions {
-    /// Modbus slave/unit id. Growatt default is 1.
+struct ProfileOptions {
+    /// Modbus slave/unit id. Most vendors ship 1; the profile's notes say when a family differs.
     uint8_t unitId = 1;
-    /// Which register-map profile to use. Profiles are data (profiles/growatt/*.toml), not
-    /// code paths, so MIN TL-XH / MOD / MIC slot in as new TOML files.
-    const GrowattProfile* profile = &defaultProfile();
+    /// Which register-map profile to use. Profiles are data (profiles/<vendor>/*.toml), not code
+    /// paths, so a new family or a new brand slots in as a new TOML file.
+    const DeviceProfile* profile = &defaultProfile();
 };
 
-GrowattOptions optionsFrom(const heliograph::DriverOptions& values);
+ProfileOptions optionsFrom(const heliograph::DriverOptions& values);
 
-class GrowattDriver : public InverterDriver {
+class ModbusProfileDriver : public InverterDriver {
 public:
-    explicit GrowattDriver(Transport& transport, GrowattOptions options = {});
+    explicit ModbusProfileDriver(Transport& transport, ProfileOptions options = {});
 
     const DriverDescriptor& descriptor() const override;
     bool                    begin(Transport& transport) override;
@@ -45,8 +47,11 @@ public:
     DeviceIdentity          identity() const override;
     InverterCapabilities    capabilities() const override;
 
-    /// Always Unsupported for now: this driver is read-only until the register map is confirmed
-    /// on hardware. Battery control is a deliberate later step, not an oversight.
+    /// Writes the holding register the profile names for this command, over FC06.
+    ///
+    /// Unsupported unless writeFor() finds a row it can actually serve: no [[write]] row for
+    /// this command, a row still marked unverified, or a row needing more than one register.
+    /// That is the normal answer today -- no profile in the tree has a verified row yet.
     CommandResult execute(const InverterCommand& command) override;
 
     BusErrorCounts busErrors() const override { return busErrors_; }
@@ -70,7 +75,7 @@ private:
                          bool probe = false);
 
     Transport*     transport_ = nullptr;
-    GrowattOptions options_;
+    ProfileOptions options_;
     uint8_t        lastException_ = 0;
     BusErrorCounts busErrors_{};
 
@@ -89,4 +94,4 @@ private:
     BlockData blocks_[kMaxBlocks]{};
 };
 
-}  // namespace heliograph::growatt
+}  // namespace heliograph::profile

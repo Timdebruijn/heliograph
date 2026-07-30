@@ -67,7 +67,7 @@ transport skips RTS configuration entirely in that case
 None on this point. The failure mode the question asks about — a software toggle racing the last
 stop bit, which gets worse as the baud rate rises — cannot occur here: the peripheral flips
 direction on the bit boundary. This matters concretely, because the Growatt descriptor offers
-115200 as a discovery profile ([`growatt_modbus/descriptor.cpp:43`](../src/drivers/growatt_modbus/descriptor.cpp#L43)),
+115200 as a discovery profile (`src/drivers/modbus_profile/descriptor.cpp` (named `growatt_modbus/` at the time of the audit)),
 which is exactly where a software toggle would start truncating frames.
 
 ### Recommendation

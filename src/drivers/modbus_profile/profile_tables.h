@@ -1,0 +1,213 @@
+// SPDX-License-Identifier: MIT
+//
+// Register-map tables — the vendor knowledge, held as data so a new inverter family is a new
+// table rather than a new driver.
+//
+// Platform independent: no Arduino/ESP-IDF, so the register→canonical mapping is host-tested.
+// The IO (Modbus transactions) lives in modbus_profile_driver.cpp; this file only says how a
+// raw register word becomes a canonical measurement.
+//
+// The tables themselves are NOT hand-written: they are generated at build time from the TOML
+// device profiles in profiles/<vendor>/ (tools/gen_profiles.py → profiles_generated.cpp).
+// Adding a model is a TOML file, not C++ — see docs/adding-a-device.md.
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+
+#include "device/capability.h"
+#include "device/measurement.h"
+#include "transport/serial_profile.h"
+
+namespace heliograph::profile {
+
+enum class RegSpace : uint8_t { Input, Holding };
+
+/// How far a register map has been proven. Deliberately the same rungs as DriverSupportLevel:
+/// "how much should I trust this" has one answer shape, whether it is asked about code or about
+/// a table. Kept a separate type because a profile is not a driver -- conflating them is exactly
+/// the mistake this field exists to prevent.
+enum class ProfileStatus : uint8_t {
+    /// Transcribed from a vendor document or a mature open-source map. Never met the device.
+    Experimental,
+    /// Confirmed against real hardware, not yet run long enough to trust unattended.
+    Beta,
+    /// Validated and soak-tested.
+    Stable,
+    /// Superseded or known wrong. Kept so a stored configuration still resolves to something
+    /// rather than silently falling back to another family's map.
+    Deprecated,
+};
+
+/// "experimental" / "beta" / "stable" / "deprecated". Stable strings: they reach REST clients.
+const char* profileStatusName(ProfileStatus status);
+
+/// One register (or register pair) and the canonical measurement it feeds.
+struct RegisterMapping {
+    const char*     measurementId;
+    MeasurementType type;
+    Unit            unit;
+    const char*     displayName;
+    RegSpace        space;
+    uint16_t        address;     ///< first register
+    uint8_t         words;       ///< 1 = 16-bit, 2 = 32-bit (high word first)
+    double          scale;       ///< raw * scale + offset = value
+    bool            isSigned;    ///< interpret the raw integer as two's-complement
+    /// Added to the scaled value. Zero for almost every register, and not zero for the ones that
+    /// matter: several vendors store temperature biased so it never goes negative on the wire,
+    /// reporting 1000 for 0 °C. Without this the only options were publishing 100 °C or not
+    /// publishing temperature at all, and temperature is not an optional channel.
+    ///
+    /// Defaulted so it can be appended here without touching hand-written aggregate initialisers.
+    double offset = 0.0;
+    /// True when a 32-bit value stores its LOW word at the lower address. Ignored for `words == 1`.
+    ///
+    /// Nearly every Modbus inverter is high-word-first, which is why that is the default and was
+    /// the only option for a long time. But at least one vendor datasheet specifies the other
+    /// order for a register it also recommends over the alternative -- so "open an issue rather
+    /// than mapping it wrong" meant declining to read the register the manufacturer points you
+    /// at. Getting this wrong is not a rounding error: a 2 kW reading decodes as roughly 34
+    /// megawatts, and the reverse decodes as zero.
+    bool lowWordFirst = false;
+    /// A raw value that means "this reading is not available", or absent when the device has no
+    /// such convention. Compared against the assembled raw BEFORE sign extension, so a profile
+    /// writes the bit pattern its documentation gives (0xFFFF, 0x7FFF, 0xFFFFFFFF...).
+    ///
+    /// Some vendors do not answer an unavailable channel with an exception or a zero -- they
+    /// answer with a sentinel. Without this the sentinel decodes as a reading: an inverter asleep
+    /// at night publishes 3276.7 °C, and a hybrid map pointed at a device with no battery
+    /// publishes 6553.5 % state of charge. Both look like data.
+    ///
+    /// A matching register is left UNDECLARED, exactly as an unread block is -- the project's
+    /// "missing is not zero" rule, applied to a device that says "missing" in numbers.
+    bool     hasInvalid = false;
+    uint32_t invalidRaw = 0;
+};
+
+/// A contiguous register range to read in one Modbus transaction. Kept small and explicit so a
+/// profile never asks for more than the 125-register limit or reads registers it does not use.
+struct RegBlock {
+    RegSpace space;
+    uint16_t start;
+    uint16_t count;
+    /// A block read only to answer a bring-up question, mapping nothing. Its silence is a fact
+    /// about the register map, not about the wire, so it must not move the RS485 bus counters:
+    /// otherwise a profile probing a range this model does not implement would put a permanent
+    /// slope on the timeout metric of a perfectly wired installation -- ~360 an hour at the
+    /// default poll interval, forever, on hardware with nothing wrong with it.
+    bool probe = false;
+};
+
+/// A writable numeric setpoint register, declared in a profile's [[write]] section.
+///
+/// A profile row alone must never make a device writable. `verified` must also be true --
+/// hardware-confirmed on a real device, per row -- so the table can hold register research that
+/// has been recorded and reviewed but not yet proven. No profile in the tree sets it today.
+///
+/// The driver's write path itself exists: execute() writes one holding register over FC06 and
+/// checks the device's echo. What it deliberately cannot do (32-bit setpoints, FC16, enum modes)
+/// is in docs/device-profiles/write-path.md, together with why.
+struct WriteMapping {
+    InverterCommandType command;      ///< canonical numeric setpoint this register implements
+    const char*         displayName;
+    RegSpace            space;        ///< always Holding (validated; input regs are read-only)
+    uint16_t            address;      ///< first register
+    uint8_t             words;        ///< 1 = 16-bit, 2 = 32-bit (high word first)
+    bool                useWriteMultiple;  ///< FC 0x10 even for one word (some firmwares demand it)
+    double              scale;        ///< raw = value / scale
+    double              minimum;      ///< bounds in canonical units, enforced by the dispatcher
+    double              maximum;
+    double              step;
+    Unit                unit;
+    bool                verified;     ///< confirmed on hardware; unverified rows stay dormant
+    /// The selectable modes, for a row whose command carries an enum rather than a number
+    /// (a battery work mode, an EMS mode). Null and zero for a numeric setpoint, which is
+    /// every row that existed before this field. Points at compile-time data in
+    /// profiles_generated.cpp, so handing the pointer out through EnumCapability is safe.
+    ///
+    /// Whole registers only. Several vendors pack a mode into part of a register alongside
+    /// unrelated flags, and setting that needs read-modify-write: FC06 writes all sixteen bits,
+    /// so a masked field would silently clear its neighbours. The generator rejects such a row
+    /// rather than emitting one that damages settings nobody asked it to touch.
+    const EnumOption* options     = nullptr;
+    size_t            optionCount = 0;
+};
+
+struct DeviceProfile {
+    const char* id;           ///< stable, e.g. "sph"
+    const char* displayName;  ///< e.g. "SPH (3-6 kW)"
+    /// The vendor this map belongs to, declared per profile rather than per driver: one driver
+    /// serves many brands, so this is the only place that can honestly answer "what is it".
+    /// Reported as the device identity, which is what Home Assistant shows.
+    const char* manufacturer;
+    bool        hasBattery;
+    uint8_t     phaseCount;
+    uint8_t     mpptCount;
+
+    const RegBlock*        blocks;
+    size_t                 blockCount;
+    const RegisterMapping* mappings;
+    size_t                 mappingCount;
+
+    // Schema v2 additions (defaulted so older aggregate initializers stay valid).
+    const WriteMapping* writes     = nullptr;  ///< dormant until verified + driver write path
+    size_t              writeCount = 0;
+    bool                supportsRtu = true;
+    bool                supportsTcp = false;  ///< declared for future TCP transport; no consumer yet
+    uint16_t            tcpPort     = 0;
+    /// Line settings this family actually ships with, when the profile declares them.
+    /// Overrides the driver descriptor's generic candidates once discovery consumes it.
+    bool          hasSerial = false;
+    SerialProfile serial{};
+
+    /// How far THIS MAP has been proven, which is not the same question as how far the driver
+    /// has been proven. One driver reads every table here, so its DriverSupportLevel can only
+    /// ever describe the least-proven profile in the build. Without a per-profile answer, the
+    /// first map confirmed on hardware would promote the driver and silently carry every
+    /// unconfirmed map up with it -- a Huawei table that has never met a Huawei, wearing the
+    /// same "beta" badge as one somebody actually watched all day.
+    ///
+    /// Defaults to Experimental, the lowest rung, so a profile that forgets to declare it
+    /// understates what we know rather than overstating it.
+    ProfileStatus status = ProfileStatus::Experimental;
+};
+
+/// Looks up a profile by its stable id (e.g. "sph"). Returns nullptr when unknown, so a
+/// config typo is a loud warning with a fallback rather than a silent wrong map.
+/// Implemented in profiles_generated.cpp (build-time generated from profiles/growatt/).
+const DeviceProfile* findProfile(const char* id);
+
+/// The profile marked `default = true` in its TOML file — used when the `profile` driver
+/// option is not set. Implemented in profiles_generated.cpp.
+const DeviceProfile& defaultProfile();
+
+/// Enumerates the compiled-in profiles, so the descriptor can offer them as the option's
+/// allowed values instead of accepting free-form text. With more than one profile in the
+/// build, a typo that falls back to the default silently applies ANOTHER family's register
+/// map — readings that look plausible and are wrong. Rejecting the value at configuration
+/// time is the only point where that is still visible to the user.
+/// Both implemented in profiles_generated.cpp.
+size_t                profileCount();
+const DeviceProfile& profileAt(size_t index);
+
+/// Raw register data read back from the device, one entry per block.
+struct BlockData {
+    RegSpace space;
+    uint16_t start;
+    uint16_t count;
+    uint16_t values[125];  ///< max registers per Modbus read
+};
+
+/// Looks up a single raw register across the read blocks. False when no block covers it, so a
+/// mapping that points outside the declared blocks is caught rather than reading zero.
+bool findRegister(const BlockData* blocks, size_t blockCount, RegSpace space, uint16_t address,
+                  uint16_t& out);
+
+/// Fills `measurements` from the raw blocks according to `profile`. Pure and host-tested: a
+/// register whose block was not read is left undeclared, never published as zero. `ts` is the
+/// poll timestamp stamped on each reading.
+void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t blockCount,
+                  MeasurementSet& measurements, uint64_t ts);
+
+}  // namespace heliograph::profile

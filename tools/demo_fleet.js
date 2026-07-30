@@ -41,10 +41,10 @@
       {id:'eversolar_legacy-EU00T112345678',label:'Schuur',online:true,data_valid:true,
        data_stale:false,last_successful_poll_seconds_ago:3,ac_power_w:197,energy_today_kwh:8.16,
        ac_voltage_v:229.8,temperature_c:34.4,battery_soc_pct:null,battery_power_w:null},
-      {id:'growatt_modbus-GW2400ABC',label:'Garage',online:true,data_valid:true,data_stale:false,
+      {id:'modbus_profile-GW2400ABC',label:'Garage',online:true,data_valid:true,data_stale:false,
        last_successful_poll_seconds_ago:11,ac_power_w:1840,energy_today_kwh:11.4,
        ac_voltage_v:231.2,temperature_c:41.2,battery_soc_pct:batt.soc,battery_power_w:batt.power},
-      {id:'growatt_modbus-GW3300XYZ',label:'Dak achter',online:false,data_valid:false,
+      {id:'modbus_profile-GW3300XYZ',label:'Dak achter',online:false,data_valid:false,
        data_stale:true,last_successful_poll_seconds_ago:null,ac_power_w:null,
        energy_today_kwh:null,ac_voltage_v:null,temperature_c:null,battery_soc_pct:null,
        battery_power_w:null}],
@@ -54,7 +54,7 @@
   };
   const measFor = {
     'eversolar_legacy-EU00T112345678':status.measurements,
-    'growatt_modbus-GW2400ABC':{
+    'modbus_profile-GW2400ABC':{
       'ac.power.total':{value:1840,unit:'W'},'energy.today':{value:11.4,unit:'kWh'},
       'energy.total':{value:18420.6,unit:'kWh'},'battery.soc':{value:batt.soc,unit:'%'},
       'ac.phase_l1.voltage':{value:231.2,unit:'V'},'ac.phase_l2.voltage':{value:229.6,unit:'V'},
@@ -72,7 +72,7 @@
       'battery.energy_discharged':{value:4.19,unit:'kWh'},'grid.import_power':{value:0,unit:'W'},
       'grid.export_power':{value:410,unit:'W'},'inverter.temperature':{value:41.2,unit:'°C'},
       'inverter.operating_hours':{value:9214,unit:'h'}},
-    'growatt_modbus-GW3300XYZ':{}
+    'modbus_profile-GW3300XYZ':{}
   };
   const devFor = {
     'eversolar_legacy-EU00T112345678':{id:'eversolar_legacy-EU00T112345678',label:'Schuur',config_slot:0,
@@ -82,16 +82,16 @@
         support_level:'beta',supports_write:false},
       online:true,data_valid:true,data_stale:false,last_successful_poll_seconds_ago:3,
       consecutive_poll_failures:0},
-    'growatt_modbus-GW2400ABC':{id:'growatt_modbus-GW2400ABC',label:'Garage',config_slot:1,
+    'modbus_profile-GW2400ABC':{id:'modbus_profile-GW2400ABC',label:'Garage',config_slot:1,
       identity:{manufacturer:'Growatt',model:'SPH 6000TL BL-UP',serial_number:'GW2400ABC',
-        driver_id:'growatt_modbus',protocol_name:'Modbus RTU'},
-      driver:{id:'growatt_modbus',display_name:'Growatt SPH hybrid',
+        driver_id:'modbus_profile',protocol_name:'Modbus RTU'},
+      driver:{id:'modbus_profile',display_name:'Growatt SPH hybrid',
         support_level:'experimental',supports_write:false},
       online:true,data_valid:true,data_stale:false,last_successful_poll_seconds_ago:11,
       consecutive_poll_failures:0},
-    'growatt_modbus-GW3300XYZ':{id:'growatt_modbus-GW3300XYZ',label:'Dak achter',config_slot:2,
-      identity:{driver_id:'growatt_modbus'},
-      driver:{id:'growatt_modbus',display_name:'Growatt MIC TL-X',
+    'modbus_profile-GW3300XYZ':{id:'modbus_profile-GW3300XYZ',label:'Dak achter',config_slot:2,
+      identity:{driver_id:'modbus_profile'},
+      driver:{id:'modbus_profile',display_name:'Growatt MIC TL-X',
         support_level:'experimental',supports_write:false},
       online:false,data_valid:false,data_stale:true,last_successful_poll_seconds_ago:null,
       consecutive_poll_failures:37}
@@ -99,9 +99,9 @@
   const capsFor = {
     'eversolar_legacy-EU00T112345678':{read_only:true,phase_count:1,mppt_count:1,has_battery:false,
       read:['ac.power.total','energy.today','energy.total'],write:[]},
-    'growatt_modbus-GW2400ABC':{read_only:true,phase_count:3,mppt_count:2,has_battery:true,
+    'modbus_profile-GW2400ABC':{read_only:true,phase_count:3,mppt_count:2,has_battery:true,
       read:['ac.power.total','battery.soc'],write:[]},
-    'growatt_modbus-GW3300XYZ':{read_only:true,phase_count:1,mppt_count:1,has_battery:false,
+    'modbus_profile-GW3300XYZ':{read_only:true,phase_count:1,mppt_count:1,has_battery:false,
       read:['ac.power.total'],write:[]}
   };
   const config = {
@@ -120,8 +120,8 @@
     // nothing taken, and handed the new row the address the primary was already using.
     driver:{id:'eversolar_legacy',label:'Schuur',options:{}},
     additional_devices:[
-      {driver_id:'growatt_modbus',label:'Garage',options:{profile:'sph_3_6kw',unit_id:'2'}},
-      {driver_id:'growatt_modbus',label:'Dak achter',options:{profile:'mic_tl_x',unit_id:'3'}}],
+      {driver_id:'modbus_profile',label:'Garage',options:{profile:'sph_3_6kw',unit_id:'2'}},
+      {driver_id:'modbus_profile',label:'Dak achter',options:{profile:'mic_tl_x',unit_id:'3'}}],
     ntp:{enabled:true,use_dhcp:true,server:'pool.ntp.org',
       timezone:'CET-1CEST,M3.5.0,M10.5.0/3',timezone_name:'Europe/Amsterdam'},
     security:{password_set:true,read_only_mode:true},
@@ -139,7 +139,7 @@
         {key:'address',display_name:'Assigned bus address',default_value:'16',
          min_value:16,max_value:254,
          description:'Address this bridge hands its inverter at registration. Leave at 16 unless more than one shares the loop.'}]},
-    {id:'growatt_modbus',supports_multiple_devices:true,display_name:'Growatt (Modbus)',support_level:'experimental',
+    {id:'modbus_profile',supports_multiple_devices:true,display_name:'Modbus RTU (profile-driven)',support_level:'experimental',
       description:'Modbus RTU. The register map is a data file, so one driver serves several models.',
       serial_profiles:[{baud_rate:9600,parity:'none',data_bits:8,stop_bits:1}],
       options:[

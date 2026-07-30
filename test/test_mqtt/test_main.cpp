@@ -714,18 +714,80 @@ static void test_start_and_stop_get_button_entities() {
                              stopDoc["payload_press"].as<std::string>().c_str());
 }
 
-static void test_an_enum_command_gets_no_entity_even_if_the_capability_is_granted() {
-    // No driver grants SetBatteryOperatingMode today (there is no EnumCapability yet to say
-    // what the valid selections would even be), so this state is hand-built rather than
-    // pulled from MockDriver -- it pins the "skip, don't guess" rule for the day one does.
+namespace {
+/// A mode setpoint with a gap in its numbering, which is what real EMS-mode registers look like.
+constexpr EnumOption kTestModes[] = {{0, "Self-consumption"}, {2, "Forced"}, {3, "External EMS"}};
+
+DeviceState modeState(const EnumOption* options, size_t count) {
     DeviceState state;
     state.capabilities.addWrite(InverterCapability::SetBatteryOperatingMode);
-    const auto bridge = makeBridge();
-    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    EnumCapability& e = state.capabilities
+                            .enums[static_cast<size_t>(InverterCommandType::SetBatteryOperatingMode)];
+    e.supported   = options != nullptr;
+    e.writable    = options != nullptr;
+    e.options     = options;
+    e.optionCount = count;
+    return state;
+}
+}  // namespace
+
+// A granted mode write with no modes publishes nothing. Same refusal as a numeric write with no
+// range: a select whose dropdown is empty is a control a user can open and not use.
+static void test_an_enum_command_without_options_gets_no_entity() {
+    const DeviceState state  = modeState(nullptr, 0);
+    const auto        bridge = makeBridge();
+    const MqttTopics  topics(kDefaultBaseTopic, bridge.bridgeId);
     const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
                                kDefaultDiscoveryPrefix, bridge.bridgeId);
 
     TEST_ASSERT_NULL(findEntity(entities, "heliograph-a1b2c3_set_battery_operating_mode"));
+}
+
+// With modes declared it becomes a select, and the template translates the LABEL Home Assistant
+// sends into the mode number the device wants.
+static void test_a_mode_command_with_options_becomes_a_select() {
+    const DeviceState state  = modeState(kTestModes, 3);
+    const auto        bridge = makeBridge();
+    const MqttTopics  topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    const auto* entity = findEntity(entities, "heliograph-a1b2c3_set_battery_operating_mode");
+    TEST_ASSERT_NOT_NULL(entity);
+    TEST_ASSERT_TRUE(entity->configTopic.find("/select/") != std::string::npos);
+
+    JsonDocument doc;
+    TEST_ASSERT_EQUAL(DeserializationError::Ok, deserializeJson(doc, entity->payload).code());
+    TEST_ASSERT_EQUAL_UINT32(3, doc["options"].size());
+    TEST_ASSERT_EQUAL_STRING("Self-consumption", doc["options"][0].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("External EMS", doc["options"][2].as<const char*>());
+    TEST_ASSERT_TRUE(doc["optimistic"].as<bool>());
+
+    // The mapping must carry each label's OWN value. A template mapping labels to 0,1,2 would
+    // look right in the dropdown and select the wrong mode on the device.
+    const std::string tmpl = doc["command_template"].as<std::string>();
+    TEST_ASSERT_TRUE(tmpl.find("'Forced': 2") != std::string::npos);
+    TEST_ASSERT_TRUE(tmpl.find("'External EMS': 3") != std::string::npos);
+    TEST_ASSERT_TRUE(tmpl.find("\"enum_value\":{{ m[value] }}") != std::string::npos);
+}
+
+// Renaming or renumbering a mode has to re-announce: otherwise the old dropdown survives, and an
+// option a user picks now maps to a different register value than the one it was created for.
+static void test_discovery_signature_changes_when_a_mode_is_renumbered() {
+    static constexpr EnumOption kRenumbered[] = {
+        {0, "Self-consumption"}, {5, "Forced"}, {3, "External EMS"}};
+    static constexpr EnumOption kRenamed[] = {
+        {0, "Self-consumption"}, {2, "Compulsory"}, {3, "External EMS"}};
+
+    // uint64_t, matching what discoverySignature returns. Narrowing this to uint32_t threw away
+    // the top half of the hash and then compared it against full 64-bit values, so the
+    // assertions below were true whatever the signature did -- a test that could not fail,
+    // guarding the one invariant most worth guarding.
+    const uint64_t base = discoverySignature(modeState(kTestModes, 3));
+    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenumbered, 3)));
+    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenamed, 3)));
+    // And dropping one is a change too, not merely a shorter list that hashes the same.
+    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kTestModes, 2)));
 }
 
 static void test_discovery_signature_changes_when_a_writable_bound_changes() {
@@ -1025,16 +1087,16 @@ static void test_the_primary_device_keeps_the_bridge_scoped_identity() {
 // wrong branch would swap.
 static void test_a_non_primary_device_gets_its_own_identity() {
     const std::string bridgeId = "heliograph-a1b2c3";
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", deviceTopicKey(false, "growatt_modbus-2").c_str());
-    TEST_ASSERT_EQUAL_STRING("heliograph-a1b2c3_growatt_modbus-2",
-                             deviceUniqueBase(false, bridgeId, "growatt_modbus-2").c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile-2", deviceTopicKey(false, "modbus_profile-2").c_str());
+    TEST_ASSERT_EQUAL_STRING("heliograph-a1b2c3_modbus_profile-2",
+                             deviceUniqueBase(false, bridgeId, "modbus_profile-2").c_str());
 }
 
 static void test_further_devices_get_their_own_subtree() {
-    const MqttTopics second(kDefaultBaseTopic, "heliograph-a1b2c3", "growatt_modbus-2");
-    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/device/growatt_modbus-2/state",
+    const MqttTopics second(kDefaultBaseTopic, "heliograph-a1b2c3", "modbus_profile-2");
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/device/modbus_profile-2/state",
                              second.state().c_str());
-    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/device/growatt_modbus-2/identity",
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/device/modbus_profile-2/identity",
                              second.identity().c_str());
 }
 
@@ -1051,10 +1113,10 @@ static void test_every_device_tracks_the_bridge_availability_topic() {
     const BridgeInfo  bridge = makeBridge();
 
     const MqttTopics primary(kDefaultBaseTopic, bridge.bridgeId);
-    const MqttTopics second(kDefaultBaseTopic, bridge.bridgeId, "growatt_modbus-2");
+    const MqttTopics second(kDefaultBaseTopic, bridge.bridgeId, "modbus_profile-2");
     const auto entities = buildDiscoveryEntities(state, bridge, second, primary.availability(),
                                                  kDefaultDiscoveryPrefix,
-                                                 bridge.bridgeId + "_growatt_modbus-2");
+                                                 bridge.bridgeId + "_modbus_profile-2");
     TEST_ASSERT_TRUE(!entities.empty());
     for (const auto& e : entities) {
         JsonDocument doc;
@@ -1063,7 +1125,7 @@ static void test_every_device_tracks_the_bridge_availability_topic() {
                                  doc["availability_topic"]);
         // ...while the state it reads still comes from its OWN subtree.
         if (!doc["state_topic"].isNull()) {
-            TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/device/growatt_modbus-2/state",
+            TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/device/modbus_profile-2/state",
                                      doc["state_topic"]);
         }
     }
@@ -1078,12 +1140,12 @@ static void test_devices_beyond_the_first_carry_their_address_in_the_name() {
     const BridgeInfo bridge    = makeBridge();
 
     const MqttTopics t1(kDefaultBaseTopic, bridge.bridgeId);
-    const MqttTopics t2(kDefaultBaseTopic, bridge.bridgeId, "growatt_modbus-2");
+    const MqttTopics t2(kDefaultBaseTopic, bridge.bridgeId, "modbus_profile-2");
     const auto first  = buildDiscoveryEntities(state, bridge, t1, t1.availability(),
                                                kDefaultDiscoveryPrefix, bridge.bridgeId);
     const auto second = buildDiscoveryEntities(state, bridge, t2, t1.availability(),
                                                kDefaultDiscoveryPrefix,
-                                               bridge.bridgeId + "_growatt_modbus-2");
+                                               bridge.bridgeId + "_modbus_profile-2");
 
     JsonDocument a;
     JsonDocument b;
@@ -1145,11 +1207,11 @@ static void test_a_label_replaces_the_address_suffix_rather_than_carrying_it() {
     state.identity.instanceKey = "2";
     state.label                = "Balkon";
     const BridgeInfo bridge    = makeBridge();
-    const MqttTopics t(kDefaultBaseTopic, bridge.bridgeId, "growatt_modbus-2");
+    const MqttTopics t(kDefaultBaseTopic, bridge.bridgeId, "modbus_profile-2");
 
     const auto entities = buildDiscoveryEntities(state, bridge, t, t.availability(),
                                                  kDefaultDiscoveryPrefix,
-                                                 bridge.bridgeId + "_growatt_modbus-2");
+                                                 bridge.bridgeId + "_modbus_profile-2");
     JsonDocument doc;
     deserializeJson(doc, entities.front().payload);
     TEST_ASSERT_EQUAL_STRING("Balkon", doc["device"]["name"]);
@@ -1161,12 +1223,12 @@ static void test_two_devices_produce_distinct_unique_ids_and_ha_devices() {
     const BridgeInfo  bridge = makeBridge();
 
     const MqttTopics t1(kDefaultBaseTopic, bridge.bridgeId);
-    const MqttTopics t2(kDefaultBaseTopic, bridge.bridgeId, "growatt_modbus-2");
+    const MqttTopics t2(kDefaultBaseTopic, bridge.bridgeId, "modbus_profile-2");
     const auto       first  = buildDiscoveryEntities(state, bridge, t1, t1.availability(),
                                                      kDefaultDiscoveryPrefix, bridge.bridgeId);
     const auto       second = buildDiscoveryEntities(state, bridge, t2, t1.availability(),
                                                      kDefaultDiscoveryPrefix,
-                                                     bridge.bridgeId + "_growatt_modbus-2");
+                                                     bridge.bridgeId + "_modbus_profile-2");
 
     TEST_ASSERT_TRUE(!first.empty() && first.size() == second.size());
     for (const auto& e : first) {
@@ -1229,36 +1291,36 @@ static void test_every_announceable_measurement_is_clearable() {
 // variable that could never hold a removed device's id -- was dead code no test could reach.
 
 static void test_a_removed_device_is_forgotten() {
-    const auto gone = devicesToForget({{"eversolar-1", true}, {"growatt_modbus-2", false}},
+    const auto gone = devicesToForget({{"eversolar-1", true}, {"modbus_profile-2", false}},
                                       {"eversolar-1"}, "eversolar-1");
     TEST_ASSERT_EQUAL_UINT32(1, gone.size());
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", gone[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile-2", gone[0].c_str());
 }
 
 static void test_a_re_addressed_device_is_forgotten_under_its_old_id() {
     // Bring-up reality: unit 3 turns out to sit at address 4. The address is part of the id.
-    const auto gone = devicesToForget({{"growatt_modbus-1", true}, {"growatt_modbus-3", false}},
-                                      {"growatt_modbus-1", "growatt_modbus-4"},
-                                      "growatt_modbus-1");
+    const auto gone = devicesToForget({{"modbus_profile-1", true}, {"modbus_profile-3", false}},
+                                      {"modbus_profile-1", "modbus_profile-4"},
+                                      "modbus_profile-1");
     TEST_ASSERT_EQUAL_UINT32(1, gone.size());
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus-3", gone[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile-3", gone[0].c_str());
 }
 
 static void test_a_promoted_device_gives_up_its_device_scoped_tree() {
     // Device 1 deleted, device 2 moved into the `driver` slot. Its id never changed, so nothing
     // ever saw it as removed -- and its whole per-device entity set stayed in Home Assistant.
-    const auto gone = devicesToForget({{"eversolar-1", true}, {"growatt_modbus-2", false}},
-                                      {"growatt_modbus-2"}, "growatt_modbus-2");
+    const auto gone = devicesToForget({{"eversolar-1", true}, {"modbus_profile-2", false}},
+                                      {"modbus_profile-2"}, "modbus_profile-2");
     TEST_ASSERT_EQUAL_UINT32(1, gone.size());
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", gone[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile-2", gone[0].c_str());
 }
 
 static void test_the_bridge_scoped_tree_is_never_cleared() {
     // The old primary is gone and a different device owns the bridge-scoped tree now. Clearing
     // what the old one published would delete the live primary's entities and their history --
     // handing them over is the back-compat contract, not a leak to be plugged.
-    const auto gone = devicesToForget({{"eversolar-1", true}}, {"growatt_modbus-1"},
-                                      "growatt_modbus-1");
+    const auto gone = devicesToForget({{"eversolar-1", true}}, {"modbus_profile-1"},
+                                      "modbus_profile-1");
     TEST_ASSERT_TRUE(gone.empty());
 
     // Same when nothing is primary this boot: still not ours to delete.
@@ -1266,13 +1328,13 @@ static void test_the_bridge_scoped_tree_is_never_cleared() {
 }
 
 static void test_an_unchanged_line_up_forgets_nothing() {
-    const std::vector<AnnouncedDevice> announced{{"growatt_modbus-1", true},
-                                                 {"growatt_modbus-2", false},
-                                                 {"growatt_modbus-3", false}};
-    const std::vector<std::string>     current{"growatt_modbus-1", "growatt_modbus-2",
-                                               "growatt_modbus-3"};
-    TEST_ASSERT_TRUE(devicesToForget(announced, current, "growatt_modbus-1").empty());
-    TEST_ASSERT_TRUE(devicesToForget({}, current, "growatt_modbus-1").empty());
+    const std::vector<AnnouncedDevice> announced{{"modbus_profile-1", true},
+                                                 {"modbus_profile-2", false},
+                                                 {"modbus_profile-3", false}};
+    const std::vector<std::string>     current{"modbus_profile-1", "modbus_profile-2",
+                                               "modbus_profile-3"};
+    TEST_ASSERT_TRUE(devicesToForget(announced, current, "modbus_profile-1").empty());
+    TEST_ASSERT_TRUE(devicesToForget({}, current, "modbus_profile-1").empty());
 }
 
 
@@ -1355,7 +1417,9 @@ int main(int, char**) {
     RUN_TEST(test_config_topics_are_well_formed);
     RUN_TEST(test_a_writable_numeric_command_gets_a_number_entity);
     RUN_TEST(test_start_and_stop_get_button_entities);
-    RUN_TEST(test_an_enum_command_gets_no_entity_even_if_the_capability_is_granted);
+    RUN_TEST(test_an_enum_command_without_options_gets_no_entity);
+    RUN_TEST(test_a_mode_command_with_options_becomes_a_select);
+    RUN_TEST(test_discovery_signature_changes_when_a_mode_is_renumbered);
     RUN_TEST(test_discovery_signature_changes_when_a_writable_bound_changes);
     RUN_TEST(test_discovery_signature_changes_when_supported_flips_with_unchanged_bounds);
     RUN_TEST(test_discovery_signature_changes_when_writable_flips_with_unchanged_bounds);

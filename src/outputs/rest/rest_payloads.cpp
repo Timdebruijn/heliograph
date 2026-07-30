@@ -581,6 +581,16 @@ bool buildDriversPayload(const std::vector<DriverDescriptor>& drivers, std::stri
             for (const auto& v : o.allowedValues) {
                 allowed.add(v);
             }
+            // Only when every value has one. A short list would pair labels with the wrong
+            // values from the first gap onward, and the failure looks like working software:
+            // the page renders, the names read plausibly, and the map somebody picked is not
+            // the map they were shown. Absent labels just fall back to the raw ids.
+            if (o.allowedLabels.size() == o.allowedValues.size() && !o.allowedLabels.empty()) {
+                JsonArray labels = oo["allowed_labels"].to<JsonArray>();
+                for (const auto& l : o.allowedLabels) {
+                    labels.add(l);
+                }
+            }
         }
     }
     return finish(doc, out, maxBytes);

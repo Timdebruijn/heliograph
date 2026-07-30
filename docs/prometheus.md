@@ -53,13 +53,13 @@ control to do it for you. See [security.md](security.md).
 ## Several inverters: the `device` label
 
 Every inverter series carries a **`device`** label holding the device id — the same string
-`/api/v1/devices` serves, e.g. `growatt_modbus-2`. So one bus of three inverters is three series
+`/api/v1/devices` serves, e.g. `modbus_profile-2`. So one bus of three inverters is three series
 per metric:
 
 ```
-heliograph_inverter_ac_power_watts{device="growatt_modbus-1"} 1240.000
-heliograph_inverter_ac_power_watts{device="growatt_modbus-2"} 980.500
-heliograph_inverter_ac_power_watts{device="growatt_modbus-3"} 1105.000
+heliograph_inverter_ac_power_watts{device="modbus_profile-1"} 1240.000
+heliograph_inverter_ac_power_watts{device="modbus_profile-2"} 980.500
+heliograph_inverter_ac_power_watts{device="modbus_profile-3"} 1105.000
 ```
 
 **Bridge-wide series carry no `device` label** — uptime, heap, WiFi, the RS485 and poll

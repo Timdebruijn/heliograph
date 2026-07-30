@@ -374,15 +374,70 @@ static void test_a_value_less_command_on_a_boundless_driver_is_also_refused() {
 // mock does not, so it stops at gate 2. An earlier version of this test used the mock and
 // accepted either result, which meant it passed with the enum branch deleted entirely.
 namespace {
+/// Declares the mode write AND the modes it accepts, which is what a real profile-driven device
+/// publishes. Values 0/2/3 with a gap, deliberately: a driver whose modes are numbered
+/// consecutively cannot catch an index-for-value mix-up.
+constexpr EnumOption kModes[] = {{0, "Self-consumption"}, {2, "Forced"}, {3, "External EMS"}};
+
 class ModeDriver : public BoundlessDriver {
 public:
     InverterCapabilities capabilities() const override {
         InverterCapabilities c;
         c.addWrite(InverterCapability::SetBatteryOperatingMode);
+        EnumCapability& e =
+            c.enums[static_cast<size_t>(InverterCommandType::SetBatteryOperatingMode)];
+        e.supported   = true;
+        e.writable    = true;
+        e.options     = kModes;
+        e.optionCount = 3;
+        return c;
+    }
+};
+
+/// Declares the mode write and no modes -- the enum twin of BoundlessDriver.
+class BoundlessModeDriver : public BoundlessDriver {
+public:
+    InverterCapabilities capabilities() const override {
+        InverterCapabilities c;
+        c.addWrite(InverterCapability::SetBatteryOperatingMode);  // ...and no enums[] entry
         return c;
     }
 };
 }  // namespace
+
+// The enum half of the lesson the numeric branch already learned: a driver that sets the write bit
+// without publishing what it accepts is refused, not trusted. Before the EnumCapability existed
+// this case passed the value through unvalidated, so any mode number reached the register --
+// including one the device does not implement, which is a setting nobody has ever tested rather
+// than a value slightly too large.
+static void test_a_declared_mode_write_without_published_modes_is_refused() {
+    BoundlessModeDriver driver;
+    CommandDispatcher   d(clockFn);
+    d.setReadOnlyMode(false);
+
+    InverterCommand c;
+    c.type      = InverterCommandType::SetBatteryOperatingMode;
+    c.enumValue = 2;
+    const auto out = d.dispatch(c, driver);
+
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, out.result);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.executed);
+}
+
+// A mode the device never declared is refused by the dispatcher, before the driver is asked.
+static void test_an_undeclared_mode_is_refused_by_the_gate() {
+    ModeDriver        driver;
+    CommandDispatcher d(clockFn);
+    d.setReadOnlyMode(false);
+
+    InverterCommand c;
+    c.type      = InverterCommandType::SetBatteryOperatingMode;
+    c.enumValue = 1;  // sits in the gap between two declared modes
+    const auto out = d.dispatch(c, driver);
+
+    TEST_ASSERT_EQUAL(CommandResult::OutOfRange, out.result);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.executed);
+}
 
 static void test_a_mode_command_without_a_selection_is_refused() {
     ModeDriver        driver;
@@ -407,9 +462,8 @@ static void test_a_mode_command_with_a_selection_reaches_the_driver() {
     c.enumValue = 2;
     TEST_ASSERT_EQUAL(CommandResult::Ok, d.dispatch(c, driver).result);
     TEST_ASSERT_EQUAL_UINT32(1, driver.executed);
-    // No EnumCapability exists to range-check against, so the value is passed through
-    // unvalidated. The first driver implementing a mode write brings its own validation --
-    // this pins that the dispatcher is not silently pretending to do it.
+    // The selection reaches the driver unchanged. It is the DEVICE's mode number, not an index
+    // into the option list, and the dispatcher must not renumber it on the way through.
     TEST_ASSERT_EQUAL_INT32(2, *driver.last.enumValue);
 }
 
@@ -814,6 +868,8 @@ int main(int, char**) {
     RUN_TEST(test_every_rejection_explains_itself);
     RUN_TEST(test_a_declared_write_without_published_bounds_is_refused_not_waved_through);
     RUN_TEST(test_a_value_less_command_on_a_boundless_driver_is_also_refused);
+    RUN_TEST(test_a_declared_mode_write_without_published_modes_is_refused);
+    RUN_TEST(test_an_undeclared_mode_is_refused_by_the_gate);
     RUN_TEST(test_a_mode_command_without_a_selection_is_refused);
     RUN_TEST(test_a_mode_command_with_a_selection_reaches_the_driver);
 

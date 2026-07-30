@@ -76,7 +76,7 @@ Two rules worth knowing:
   Home Assistant's Modbus integration defaults to 0. Answering them means a configuration copied
   from a single-inverter example works rather than returning an exception.
 
-**Which unit is which inverter** is in the boot log (`modbus: unit 2 -> growatt_modbus-2`, one
+**Which unit is which inverter** is in the boot log (`modbus: unit 2 -> modbus_profile-2`, one
 line per device) and in `/api/v1/status`, where every entry of the `devices` array carries
 `modbus_unit_id`. Do not count positions in the device list: that list omits devices that did
 not start, and the unit ids do not.
@@ -117,7 +117,7 @@ the registers in question. Both mechanisms are always consistent.
 | 100-199 | AC phases |
 | 200-299 | DC/MPPT channels |
 | 300-399 | Battery (empty for EverSolar) |
-| 400-499 | Grid meter (empty for EverSolar) |
+| 400-499 | House flows: grid import/export, load (empty for EverSolar) |
 | 500-599 | Status and errors |
 | 600-699 | Capabilities + validity bitmap |
 | 700-799 | Identity strings |
@@ -197,11 +197,35 @@ Two remarks:
 |---|---|---|
 | 1 | 200 | ✔ |
 | 2 | 220 | ✔ *only with 2-string layout*, otherwise NaN |
+| 3 | 240 | — (NaN; no EverSolar model has a third string) |
+| 4 | 260 | — |
+| 5 | 280 | — |
 
-## Battery (300-399) and grid meter (400-499)
+**Five slots, and that is the ceiling for schema version 1.** The battery block starts at 300, so
+a sixth string cannot be added without moving a published region — which would break every client
+that indexes by address. That is why the canonical vocabulary stops at `dc.mppt_5`. A device with
+more trackers still reports its real count at register 621; the strings beyond the fifth are
+simply not published, rather than being folded into another string's registers.
 
-Fully reserved. For EverSolar everything is NaN / bitmap bit 0. Populated once a driver with
-battery or meter support is added — without changing the map.
+## Battery (300-399) and house flows (400-499)
+
+Mostly reserved. For EverSolar everything here is NaN with its validity bit clear; a
+profile-driven hybrid populates whichever of these its register map declares.
+
+| Raw | Regs | Type | Meaning |
+|---|---|---|---|
+| 300 | 2 | float32 | `battery.soc` |
+| 302 | 2 | float32 | `battery.voltage` |
+| 304 | 2 | float32 | `battery.charge_power` |
+| 306 | 2 | float32 | `battery.discharge_power` |
+| 400 | 2 | float32 | `grid.import_power` |
+| 402 | 2 | float32 | `grid.export_power` |
+| 404 | 2 | float32 | `load.power` — what the house is drawing, positive = consuming |
+
+`load.power` sits here rather than in a region of its own: it is a house-level flow like the two
+grid rails above, and it is appended after them so no published address moves. It is **not**
+derivable from grid flow on a hybrid, where the house can be fed by PV, by the battery, by the
+grid, or by any mix.
 
 ## Status and errors (500-599)
 
@@ -393,6 +417,11 @@ these **must not** change; only append at the end.
 | 12 | error code | 27 | `battery.discharge_power` |
 | 13 | `ac.phase_l1.power` | 28 | `grid.import_power` |
 | 14 | `ac.phase_l2.voltage` | 29 | `grid.export_power` |
+| 30 | `dc.mppt_3.voltage` | 35 | `dc.mppt_4.power` |
+| 31 | `dc.mppt_3.current` | 36 | `dc.mppt_5.voltage` |
+| 32 | `dc.mppt_3.power` | 37 | `dc.mppt_5.current` |
+| 33 | `dc.mppt_4.voltage` | 38 | `dc.mppt_5.power` |
+| 34 | `dc.mppt_4.current` | 39 | `load.power` |
 
 Bit `n` is in register `610 + n/16`, at bit position `n % 16`.
 

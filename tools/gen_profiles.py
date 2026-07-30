@@ -3,9 +3,9 @@
 """Generate C++ driver profile tables from TOML device profiles.
 
 Device profiles live in profiles/<family>/*.toml. Each file describes one register-map
-profile for a table-driven driver (today: growatt_modbus). This script validates them
+profile for a table-driven driver (today: modbus_profile). This script validates them
 against the canonical measurement vocabulary in src/device/measurement.h and emits
-src/drivers/growatt_modbus/profiles_generated.cpp — constexpr tables, zero runtime
+src/drivers/modbus_profile/profiles_generated.cpp — constexpr tables, zero runtime
 parsing on the ESP32.
 
 Runs in two modes:
@@ -46,7 +46,7 @@ def set_root(root: Path) -> None:
     MEASUREMENT_H = ROOT / "src" / "device" / "measurement.h"
     COMMAND_CPP = ROOT / "src" / "device" / "command.cpp"
     PROFILES_DIR = ROOT / "profiles"
-    OUTPUT = ROOT / "src" / "drivers" / "growatt_modbus" / "profiles_generated.cpp"
+    OUTPUT = ROOT / "src" / "drivers" / "modbus_profile" / "profiles_generated.cpp"
 
 
 try:
@@ -54,11 +54,14 @@ try:
 except NameError:
     set_root(Path.cwd())  # provisional; the PlatformIO branch below overrides this
 
-# Mirrors GrowattDriver::kMaxBlocks (growatt_driver.h). The driver's scratch buffer holds
+# Mirrors ModbusProfileDriver::kMaxBlocks (modbus_profile_driver.h). The driver's scratch buffer holds
 # this many blocks; a profile asking for more would silently drop reads.
 MAX_BLOCKS = 8
 # Modbus read limit: at most 125 registers per transaction.
 MAX_BLOCK_COUNT = 125
+# Selectable modes per enum setpoint. Not a protocol limit -- a sanity bound, because the option
+# table is emitted into flash and a Home Assistant dropdown of forty modes is not a control.
+MAX_ENUM_OPTIONS = 16
 
 # Unit symbol -> (C++ Unit enumerator, C++ MeasurementType enumerator).
 # Must stay in sync with unitSymbol() in src/device/measurement.cpp. The measurement type
@@ -77,8 +80,8 @@ UNITS: dict[str, tuple[str, str]] = {
     "s": ("Second", "Duration"),
 }
 
-# Register data type -> (words, signed). 32-bit values are high word first (the Modbus
-# convention Growatt uses); a device with swapped word order needs decoder support first.
+# Register data type -> (words, signed). 32-bit values are high word first (what nearly every
+# Modbus inverter does); a device with swapped word order needs decoder support first.
 TYPES: dict[str, tuple[int, bool]] = {
     "u16": (1, False),
     "s16": (1, True),
@@ -88,7 +91,27 @@ TYPES: dict[str, tuple[int, bool]] = {
 
 SPACES = {"input": "Input", "holding": "Holding"}
 
+# 32-bit word order. High-word-first is what nearly every Modbus inverter does and stays the
+# default; "low_first" exists because at least one vendor datasheet specifies it for a register
+# that same datasheet recommends using.
+WORD_ORDERS = {"high_first": "false", "low_first": "true"}
+
 PARITIES = {"none": "None", "even": "Even", "odd": "Odd"}
+
+# How far a register MAP has been proven, mapping to ProfileStatus in profile_tables.h. The
+# rungs deliberately mirror DriverSupportLevel: the question "how much should I trust this"
+# has one answer shape, whether it is asked about code or about a table.
+#
+#   experimental  transcribed from documentation or a community map; never met the device
+#   beta          confirmed against real hardware, not yet run long enough to trust unattended
+#   stable        validated and soak-tested
+#   deprecated    superseded or known wrong; kept so stored configs still resolve
+PROFILE_STATUSES = {
+    "experimental": "Experimental",
+    "beta": "Beta",
+    "stable": "Stable",
+    "deprecated": "Deprecated",
+}
 
 # Commands that are not numeric setpoints (no value, no min/max) and therefore cannot be
 # expressed as a [[write]] register row. They need driver-level semantics (what value means
@@ -125,6 +148,28 @@ def load_vocabulary() -> dict[str, str]:
     return {mid: name for name, mid in pairs}
 
 
+def load_enum_command_names() -> set[str]:
+    """Command names that carry an enum rather than a number, parsed from
+    commandTakesEnumValue() in command.cpp.
+
+    Read from the source for the same reason the other two vocabularies are: a command that
+    changes shape in C++ and not here would be validated as the wrong kind of row -- accepted
+    with min/max bounds it cannot use, and then refused at runtime for want of a mode list.
+    """
+    text = COMMAND_CPP.read_text(encoding="utf-8")
+    body = re.search(
+        r"bool commandTakesEnumValue\(InverterCommandType type\) \{(.*?)\n\}",
+        text,
+        re.DOTALL,
+    )
+    if not body:
+        raise SystemExit(f"could not find commandTakesEnumValue in {COMMAND_CPP}")
+    enums = set(re.findall(r"InverterCommandType::(\w+)", body.group(1)))
+    if not enums:
+        raise SystemExit(f"no enum command types parsed from {COMMAND_CPP}")
+    return enums
+
+
 def load_command_vocabulary() -> dict[str, str]:
     """Canonical command name -> C++ InverterCommandType enumerator, parsed from
     commandTypeName() in command.cpp — the same single-source-of-truth trick as the
@@ -159,7 +204,10 @@ def _require(table: dict, key: str, kind: type, where: str):
 
 
 def parse_profile(
-    path: Path, vocabulary: dict[str, str], commands: dict[str, str]
+    path: Path,
+    vocabulary: dict[str, str],
+    commands: dict[str, str],
+    enum_command_names: set[str],
 ) -> dict:
     with path.open("rb") as f:
         data = tomllib.load(f)
@@ -167,10 +215,10 @@ def parse_profile(
 
     meta = _require(data, "profile", dict, f"{where}")
     driver = _require(meta, "driver", str, f"{where} [profile]")
-    if driver != "growatt_modbus":
+    if driver != "modbus_profile":
         raise ProfileError(
             f"{where}: unknown driver '{driver}' "
-            f"(only 'growatt_modbus' is table-driven today)"
+            f"(only 'modbus_profile' is table-driven today)"
         )
 
     pid = _require(meta, "id", str, f"{where} [profile]")
@@ -179,6 +227,14 @@ def parse_profile(
     display = _require(meta, "display_name", str, f"{where} [profile]")
     if not display:
         raise ProfileError(f"{where}: display_name must not be empty")
+    check_text(display, f"{where} [profile]", "display_name")
+    # Required, not optional-with-a-default. One driver now serves several vendors, so the
+    # profile is the only thing that knows the brand -- and an empty manufacturer would show up
+    # in Home Assistant as a device with no maker, which reads as a bug in the bridge.
+    manufacturer = _require(meta, "manufacturer", str, f"{where} [profile]")
+    if not manufacturer:
+        raise ProfileError(f"{where}: manufacturer must not be empty")
+    check_text(manufacturer, f"{where} [profile]", "manufacturer")
     phases = _require(meta, "phases", int, f"{where} [profile]")
     if not 1 <= phases <= 3:
         raise ProfileError(f"{where}: phases must be 1-3, got {phases}")
@@ -187,6 +243,20 @@ def parse_profile(
         raise ProfileError(f"{where}: mppts must be 0-8, got {mppts}")
     battery = _require(meta, "battery", bool, f"{where} [profile]")
     default = bool(meta.get("default", False))
+
+    # How far this MAP has been proven -- a property of the register table, not of the driver
+    # that reads it. The driver is one piece of code serving every vendor here, so its own
+    # support level can only ever describe the least-proven profile in the build. Left that way,
+    # the first profile confirmed on hardware would promote the driver and carry every
+    # unconfirmed map up with it: a Huawei table that has never met a Huawei, labelled beta.
+    #
+    # Optional, defaulting to the LOWEST rung on purpose. A forgotten field must understate what
+    # we know, never overstate it.
+    status = meta.get("status", "experimental")
+    if status not in PROFILE_STATUSES:
+        raise ProfileError(
+            f"{where}: status must be one of {sorted(PROFILE_STATUSES)}, got {status!r}"
+        )
 
     transports = meta.get("transports", ["rtu"])
     if (
@@ -287,6 +357,7 @@ def parse_profile(
         name = _require(r, "display_name", str, rw)
         if not name:
             raise ProfileError(f"{rw}: display_name must not be empty")
+        check_text(name, rw, "display_name")
         space = _require(r, "space", str, rw)
         if space not in SPACES:
             raise ProfileError(f"{rw}: space must be one of {sorted(SPACES)}")
@@ -315,9 +386,47 @@ def parse_profile(
             raise ProfileError(f"{rw}: scale must be a number")
         if scale == 0:
             raise ProfileError(f"{rw}: scale must not be 0 (every reading would be 0)")
+        check_finite(float(scale), rw, "scale")
         unit = _require(r, "unit", str, rw)
         if unit not in UNITS:
             raise ProfileError(f"{rw}: unknown unit '{unit}'; known: {sorted(UNITS)}")
+        # value = raw * scale + offset. Zero for almost every register; not zero for the ones
+        # that store a biased temperature so it never goes negative on the wire.
+        offset = r.get("offset", 0.0)
+        if isinstance(offset, bool) or not isinstance(offset, (int, float)):
+            raise ProfileError(f"{rw}: offset must be a number")
+        check_finite(float(offset), rw, "offset")
+        # A raw value meaning "not available". Some vendors answer an unavailable channel with a
+        # sentinel rather than an exception, and decoding that as a number publishes a sleeping
+        # inverter at 3276.7 degrees.
+        invalid = r.get("invalid")
+        if invalid is not None:
+            if isinstance(invalid, bool) or not isinstance(invalid, int):
+                raise ProfileError(f"{rw}: invalid must be an integer raw value")
+            # Zero is refused outright. It is a legitimate reading almost everywhere in this
+            # domain -- AC power at night, battery current at rest, a string in the dark -- so a
+            # sentinel of 0 would permanently and silently suppress real zeroes, which is the one
+            # value this project is most careful never to fabricate OR discard.
+            if invalid == 0:
+                raise ProfileError(
+                    f"{rw}: invalid must not be 0 -- zero is a real reading on almost every "
+                    f"channel, and a sentinel of 0 would suppress it forever"
+                )
+            limit = 0xFFFF if words == 1 else 0xFFFFFFFF
+            if not 0 <= invalid <= limit:
+                raise ProfileError(
+                    f"{rw}: invalid must fit the register width (0-{limit} for '{rtype}')"
+                )
+        word_order = r.get("word_order", "high_first")
+        if word_order not in WORD_ORDERS:
+            raise ProfileError(f"{rw}: word_order must be one of {sorted(WORD_ORDERS)}")
+        # Refused rather than ignored on a 16-bit row: a word order on a single register is a
+        # sign the author believes the value spans two, and silently accepting it would leave
+        # that misunderstanding in the file looking honoured.
+        if word_order != "high_first" and words != 2:
+            raise ProfileError(
+                f"{rw}: word_order applies to 32-bit values only; '{rtype}' is one register"
+            )
         parsed_regs.append(
             {
                 "measurement": mid,
@@ -326,12 +435,15 @@ def parse_profile(
                 "address": address,
                 "type": rtype,
                 "scale": float(scale),
+                "offset": float(offset),
+                "word_order": word_order,
+                "invalid": invalid,
                 "unit": unit,
             }
         )
 
     # [[write]] rows: read-only is the default — a register is writable only when declared
-    # here, and even then it stays dormant (see WriteMapping in growatt_registers.h).
+    # here, and even then it stays dormant (see WriteMapping in profile_tables.h).
     writes = data.get("write", [])
     seen_commands: set[str] = set()
     parsed_writes = []
@@ -349,6 +461,7 @@ def parse_profile(
         name = _require(wr, "display_name", str, ww)
         if not name:
             raise ProfileError(f"{ww}: display_name must not be empty")
+        check_text(name, ww, "display_name")
         space = _require(wr, "space", str, ww)
         if space != "holding":
             raise ProfileError(
@@ -375,47 +488,170 @@ def parse_profile(
         scale = wr.get("scale", 1.0)
         if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale == 0:
             raise ProfileError(f"{ww}: scale must be a non-zero number")
-        unit = _require(wr, "unit", str, ww)
-        if unit not in UNITS:
-            raise ProfileError(f"{ww}: unknown unit '{unit}'; known: {sorted(UNITS)}")
-        minimum = wr.get("minimum")
-        maximum = wr.get("maximum")
-        for key, val in (("minimum", minimum), ("maximum", maximum)):
-            if val is None:
-                raise ProfileError(
-                    f"{ww}: '{key}' is required for a write register -- "
-                    f"the dispatcher refuses unbounded writes"
-                )
-            if isinstance(val, bool) or not isinstance(val, (int, float)):
-                raise ProfileError(f"{ww}: '{key}' must be a number")
-        if not minimum < maximum:
-            raise ProfileError(f"{ww}: minimum must be < maximum")
-        step = wr.get("step", 1.0)
-        if isinstance(step, bool) or not isinstance(step, (int, float)) or step <= 0:
-            raise ProfileError(f"{ww}: step must be a positive number")
+        check_finite(float(scale), ww, "scale")
+        # Read rows may carry a negative scale -- that is how a device reporting the opposite sign
+        # convention to ours gets corrected. A WRITE row may not: execute() computes
+        # raw = value / scale and refuses anything below zero as out of range, so a negative scale
+        # here produces a row that passes every check and then rejects every value sent to it.
+        if scale < 0:
+            raise ProfileError(
+                f"{ww}: scale must be positive on a write row -- the write path computes "
+                f"raw = value / scale and refuses a negative raw, so a negative scale makes "
+                f"the row silently undispatchable (negative scale IS allowed on read rows)"
+            )
+        # Same reason, one step further: the inverse of raw * scale + offset is
+        # (value - offset) / scale, which the write path does not implement. Accepting the key
+        # here would write a value the device reads back as something else.
+        if "offset" in wr:
+            raise ProfileError(
+                f"{ww}: offset is not supported on a write row (read rows only) -- the write "
+                f"path does not invert it, so the register would receive the wrong value"
+            )
+        if "word_order" in wr:
+            raise ProfileError(
+                f"{ww}: word_order is not supported on a write row -- the write path sends a "
+                f"single 16-bit register (FC06), so there is no word order to choose"
+            )
+        if "invalid" in wr:
+            raise ProfileError(
+                f"{ww}: invalid is a READ concept -- it marks a value the device reports as "
+                f"unavailable, and there is nothing to skip when writing"
+            )
+        # Part of a register is not something FC06 can set: it writes all sixteen bits, so a
+        # masked field would clear whatever shares the register with it. Several vendors do pack a
+        # mode in beside unrelated flags, so the key is recognised and refused by name rather than
+        # ignored -- an ignored `bitmask` would produce a row that looks masked and writes whole.
+        if "bitmask" in wr:
+            raise ProfileError(
+                f"{ww}: bitmask is not supported -- FC06 writes the whole register, so setting "
+                f"part of one needs read-modify-write, which the write path does not do. A "
+                f"masked field would clear its neighbours in the same register"
+            )
         verified = wr.get("verified", False)
         if not isinstance(verified, bool):
             raise ProfileError(f"{ww}: verified must be a boolean")
-        parsed_writes.append(
-            {
-                "command": cmd,
-                "display_name": name,
-                "address": address,
-                "type": rtype,
-                "function": function,
-                "scale": float(scale),
-                "unit": unit,
-                "minimum": float(minimum),
-                "maximum": float(maximum),
-                "step": float(step),
-                "verified": verified,
-            }
-        )
+
+        row = {
+            "command": cmd,
+            "display_name": name,
+            "address": address,
+            "type": rtype,
+            "function": function,
+            "scale": float(scale),
+            "verified": verified,
+        }
+
+        if cmd in enum_command_names:
+            # A mode setpoint. Bounds, a step and a unit describe a range, and this is a list --
+            # accepting them would mean publishing a range the device does not have.
+            for key in ("minimum", "maximum", "step", "unit"):
+                if key in wr:
+                    raise ProfileError(
+                        f"{ww}: '{key}' does not apply to '{cmd}', which selects from a list "
+                        f"rather than moving along a range -- declare `options` instead"
+                    )
+            if words != 1:
+                raise ProfileError(
+                    f"{ww}: a mode setpoint must be a single register (u16/s16); "
+                    f"'{rtype}' spans {words}"
+                )
+            options = wr.get("options")
+            if not isinstance(options, list) or not options:
+                raise ProfileError(
+                    f"{ww}: '{cmd}' needs a non-empty `options` list, e.g.\n"
+                    f'  options = [{{ value = 0, label = "Self-consumption" }}, '
+                    f'{{ value = 2, label = "Forced" }}]\n'
+                    f"  A mode write with no declared modes is refused at runtime: nothing can "
+                    f"range-check it and Home Assistant would show an empty dropdown"
+                )
+            if len(options) > MAX_ENUM_OPTIONS:
+                raise ProfileError(
+                    f"{ww}: {len(options)} options, at most {MAX_ENUM_OPTIONS} are supported"
+                )
+            parsed_options = []
+            seen_values: set[int] = set()
+            seen_labels: set[str] = set()
+            for j, opt in enumerate(options):
+                ow = f"{ww} options[{j}]"
+                if not isinstance(opt, dict):
+                    raise ProfileError(
+                        f"{ow}: each option must be a table with value + label"
+                    )
+                value = _require(opt, "value", int, ow)
+                if not 0 <= value <= 0xFFFF:
+                    raise ProfileError(f"{ow}: value must be 0-65535")
+                if value in seen_values:
+                    raise ProfileError(f"{ow}: value {value} declared twice")
+                seen_values.add(value)
+                label = _require(opt, "label", str, ow)
+                if not label:
+                    raise ProfileError(f"{ow}: label must not be empty")
+                check_text(label, ow, "label")
+                # Home Assistant identifies a select option BY its label, so two options sharing
+                # one would give the user a dropdown where one entry silently shadows the other.
+                if label in seen_labels:
+                    raise ProfileError(f"{ow}: label '{label}' declared twice")
+                seen_labels.add(label)
+                parsed_options.append({"value": value, "label": label})
+            row.update(
+                {
+                    "unit": None,
+                    "minimum": 0.0,
+                    "maximum": 0.0,
+                    "step": 0.0,
+                    "options": parsed_options,
+                }
+            )
+        else:
+            if "options" in wr:
+                raise ProfileError(
+                    f"{ww}: `options` applies only to a mode setpoint; '{cmd}' takes a number, "
+                    f"so declare minimum/maximum/step instead"
+                )
+            unit = _require(wr, "unit", str, ww)
+            if unit not in UNITS:
+                raise ProfileError(
+                    f"{ww}: unknown unit '{unit}'; known: {sorted(UNITS)}"
+                )
+            minimum = wr.get("minimum")
+            maximum = wr.get("maximum")
+            for key, val in (("minimum", minimum), ("maximum", maximum)):
+                if val is None:
+                    raise ProfileError(
+                        f"{ww}: '{key}' is required for a write register -- "
+                        f"the dispatcher refuses unbounded writes"
+                    )
+                if isinstance(val, bool) or not isinstance(val, (int, float)):
+                    raise ProfileError(f"{ww}: '{key}' must be a number")
+                check_finite(float(val), ww, key)
+            if not minimum < maximum:
+                raise ProfileError(f"{ww}: minimum must be < maximum")
+            step = wr.get("step", 1.0)
+            if (
+                isinstance(step, bool)
+                or not isinstance(step, (int, float))
+                or step <= 0
+            ):
+                raise ProfileError(f"{ww}: step must be a positive number")
+            check_finite(float(step), ww, "step")
+            row.update(
+                {
+                    "unit": unit,
+                    "minimum": float(minimum),
+                    "maximum": float(maximum),
+                    "step": float(step),
+                    "options": [],
+                }
+            )
+
+        parsed_writes.append(row)
 
     return {
         "path": where,
         "id": pid,
         "display_name": display,
+        "manufacturer": manufacturer,
+        "status": status,
         "default": default,
         "phases": phases,
         "mppts": mppts,
@@ -431,6 +667,36 @@ def parse_profile(
 
 def cpp_symbol(pid: str) -> str:
     return "".join(part.capitalize() for part in pid.split("_"))
+
+
+def check_text(value: str, where: str, key: str) -> str:
+    """Refuse text that cannot survive the trip into a C++ string literal.
+
+    TOML basic strings decode escapes, so `display_name = "Roof\\nArray"` arrives here holding a
+    real newline -- which inside a "..." literal is an unterminated string and a compiler error
+    two steps removed from the file that caused it. A NUL is worse: it compiles, and then
+    truncates the label at runtime with nothing to show for it.
+
+    Rejected rather than escaped. A control character in a human-readable name is a typo every
+    time, and the error belongs here, where the file and the key can be named.
+    """
+    for ch in value:
+        if ord(ch) < 0x20 or ord(ch) == 0x7F:
+            raise ProfileError(
+                f"{where}: '{key}' contains a control character (0x{ord(ch):02X}); "
+                f"names are single-line text"
+            )
+    return value
+
+
+def check_finite(value: float, where: str, key: str) -> float:
+    """TOML has `nan`, `inf` and `-inf` as legal float literals, and tomllib hands them straight
+    over. They pass every bound check written as a comparison -- nan compares false against
+    everything -- and then cpp_float() emits `nan.0` or a bare `inf`, neither of which is a C++
+    float literal. The build fails somewhere unrecognisable instead of here."""
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ProfileError(f"{where}: '{key}' must be a finite number")
+    return value
 
 
 def cpp_string(s: str) -> str:
@@ -450,15 +716,15 @@ def generate(
     w("// SPDX-License-Identifier: MIT")
     w("//")
     w("// GENERATED FILE -- DO NOT EDIT.")
-    w("// Emitted by tools/gen_profiles.py from profiles/growatt/*.toml. To change a")
+    w("// Emitted by tools/gen_profiles.py from profiles/*/*.toml. To change a")
     w("// register map, edit the TOML and rebuild; this file is regenerated pre-build")
     w("// and is not committed. See docs/adding-a-device.md.")
     w("")
     w("#include <cstring>")
     w("")
-    w('#include "drivers/growatt_modbus/growatt_registers.h"')
+    w('#include "drivers/modbus_profile/profile_tables.h"')
     w("")
-    w("namespace heliograph::growatt {")
+    w("namespace heliograph::profile {")
     w("namespace {")
     for p in profiles:
         sym = cpp_symbol(p["id"])
@@ -475,7 +741,10 @@ def generate(
             )
             w(
                 f"     RegSpace::{SPACES[r['space']]}, {r['address']}, {words}, "
-                f"{cpp_float(r['scale'])}, {'true' if signed else 'false'}}},"
+                f"{cpp_float(r['scale'])}, {'true' if signed else 'false'}, "
+                f"{cpp_float(r['offset'])}, {WORD_ORDERS[r['word_order']]}, "
+                f"{'true' if r['invalid'] is not None else 'false'}, "
+                f"{r['invalid'] if r['invalid'] is not None else 0}}},"
             )
         w("};")
         w(f"constexpr RegBlock k{sym}Blocks[] = {{")
@@ -487,10 +756,21 @@ def generate(
             )
         w("};")
         if p["writes"]:
+            # Option tables first: each write row points at its own, and a table has to exist
+            # before the row that references it.
+            for wr in p["writes"]:
+                if not wr["options"]:
+                    continue
+                osym = f"k{sym}{cpp_symbol(wr['command'])}Options"
+                w(f"constexpr EnumOption {osym}[] = {{")
+                for opt in wr["options"]:
+                    w(f"    {{{opt['value']}, {cpp_string(opt['label'])}}},")
+                w("};")
             w(f"constexpr WriteMapping k{sym}Writes[] = {{")
             for wr in p["writes"]:
                 words, _signed = TYPES[wr["type"]]
-                unit_enum, _mtype = UNITS[wr["unit"]]
+                # A mode row has no unit: it selects from a list rather than measuring anything.
+                unit_enum = "None" if wr["unit"] is None else UNITS[wr["unit"]][0]
                 multiple = "true" if wr["function"] == "write_multiple" else "false"
                 w(
                     f"    {{InverterCommandType::{commands[wr['command']]}, "
@@ -500,20 +780,30 @@ def generate(
                     f"     RegSpace::Holding, {wr['address']}, {words}, {multiple}, "
                     f"{cpp_float(wr['scale'])},"
                 )
-                w(
-                    f"     {cpp_float(wr['minimum'])}, {cpp_float(wr['maximum'])}, "
-                    f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
-                    f"{'true' if wr['verified'] else 'false'}}},"
-                )
+                if wr["options"]:
+                    osym = f"k{sym}{cpp_symbol(wr['command'])}Options"
+                    w(
+                        f"     {cpp_float(wr['minimum'])}, {cpp_float(wr['maximum'])}, "
+                        f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
+                        f"{'true' if wr['verified'] else 'false'},"
+                    )
+                    w(f"     {osym}, sizeof({osym}) / sizeof({osym}[0])}},")
+                else:
+                    w(
+                        f"     {cpp_float(wr['minimum'])}, {cpp_float(wr['maximum'])}, "
+                        f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
+                        f"{'true' if wr['verified'] else 'false'}}},"
+                    )
             w("};")
     w("")
-    w("constexpr GrowattProfile kProfiles[] = {")
+    w("constexpr DeviceProfile kProfiles[] = {")
     for p in profiles:
         sym = cpp_symbol(p["id"])
         w(
             f"    {{{cpp_string(p['id'])}, {cpp_string(p['display_name'])}, "
-            f"{'true' if p['battery'] else 'false'}, {p['phases']}, {p['mppts']},"
+            f"{cpp_string(p['manufacturer'])},"
         )
+        w(f"     {'true' if p['battery'] else 'false'}, {p['phases']}, {p['mppts']},")
         w(f"     k{sym}Blocks, sizeof(k{sym}Blocks) / sizeof(k{sym}Blocks[0]),")
         w(f"     k{sym}Mappings, sizeof(k{sym}Mappings) / sizeof(k{sym}Mappings[0]),")
         if p["writes"]:
@@ -526,24 +816,26 @@ def generate(
             f"     /*supportsRtu=*/{rtu}, /*supportsTcp=*/{tcp}, "
             f"/*tcpPort=*/{p['tcp_port']},"
         )
+        status = f"ProfileStatus::{PROFILE_STATUSES[p['status']]}"
         if p["serial"]:
             s = p["serial"]
             w("     /*hasSerial=*/true,")
             w(
                 f"     SerialProfile{{{s['baud']}, SerialParity::{PARITIES[s['parity']]}, "
-                f"8, {s['stop_bits']}, 1000, 3}}}},"
+                f"8, {s['stop_bits']}, 1000, 3}},"
             )
         else:
-            w("     /*hasSerial=*/false, SerialProfile{}},")
+            w("     /*hasSerial=*/false, SerialProfile{},")
+        w(f"     {status}}},")
     w("};")
     w("")
     w("}  // namespace")
     w("")
-    w("const GrowattProfile* findProfile(const char* id) {")
+    w("const DeviceProfile* findProfile(const char* id) {")
     w("    if (id == nullptr) {")
     w("        return nullptr;")
     w("    }")
-    w("    for (const GrowattProfile& p : kProfiles) {")
+    w("    for (const DeviceProfile& p : kProfiles) {")
     w("        if (std::strcmp(p.id, id) == 0) {")
     w("            return &p;")
     w("        }")
@@ -553,17 +845,15 @@ def generate(
     w("")
     default_index = next(i for i, p in enumerate(profiles) if p["default"])
     w(f"// [profile] default = true in {profiles[default_index]['path']}.")
-    w(
-        f"const GrowattProfile& defaultProfile() {{ return kProfiles[{default_index}]; }}"
-    )
+    w(f"const DeviceProfile& defaultProfile() {{ return kProfiles[{default_index}]; }}")
     w("")
     w("size_t profileCount() { return sizeof(kProfiles) / sizeof(kProfiles[0]); }")
     w("")
-    w("const GrowattProfile& profileAt(size_t index) {")
+    w("const DeviceProfile& profileAt(size_t index) {")
     w("    return kProfiles[index < profileCount() ? index : 0];")
     w("}")
     w("")
-    w("}  // namespace heliograph::growatt")
+    w("}  // namespace heliograph::profile")
     w("")
     return "\n".join(lines)
 
@@ -571,6 +861,10 @@ def generate(
 def run(check_only: bool = False) -> int:
     vocabulary = load_vocabulary()
     commands = load_command_vocabulary()
+    # commandTakesEnumValue names C++ ENUMERATORS; a profile names commands. Translate through
+    # the command vocabulary rather than comparing the two spellings, which do not match.
+    enum_enumerators = load_enum_command_names()
+    enum_commands = {n for n, enum in commands.items() if enum in enum_enumerators}
     paths = sorted(
         p for p in PROFILES_DIR.rglob("*.toml") if not p.name.startswith("_")
     )
@@ -578,7 +872,7 @@ def run(check_only: bool = False) -> int:
     errors: list[str] = []
     for path in paths:
         try:
-            profiles.append(parse_profile(path, vocabulary, commands))
+            profiles.append(parse_profile(path, vocabulary, commands, enum_commands))
         except ProfileError as e:
             errors.append(str(e))
         except tomllib.TOMLDecodeError as e:
@@ -588,11 +882,25 @@ def run(check_only: bool = False) -> int:
         ids = [p["id"] for p in profiles]
         for dup in {i for i in ids if ids.count(i) > 1}:
             errors.append(f"profile id '{dup}' is defined in more than one file")
+        # Two DIFFERENT ids can still collapse to one C++ identifier: cpp_symbol() splits on
+        # underscores and capitalises, so `a_b` and `a__b` both become `AB`. The check above
+        # compares the ids as written and sees no duplicate, and the collision then surfaces as a
+        # redefinition error deep in a generated file -- which is exactly the sort of failure this
+        # script exists to turn into a sentence naming the file that caused it.
+        symbols: dict[str, str] = {}
+        for p in profiles:
+            sym = cpp_symbol(p["id"])
+            if sym in symbols and symbols[sym] != p["id"]:
+                errors.append(
+                    f"profile ids '{symbols[sym]}' and '{p['id']}' both generate the C++ "
+                    f"symbol '{sym}'; give one of them a distinct id"
+                )
+            symbols[sym] = p["id"]
         defaults = [p for p in profiles if p["default"]]
         if not profiles:
             errors.append(
                 f"no profiles found under {PROFILES_DIR.relative_to(ROOT)}/ "
-                f"-- the growatt driver needs at least one"
+                f"-- the profile-driven driver needs at least one"
             )
         elif len(defaults) != 1:
             errors.append(

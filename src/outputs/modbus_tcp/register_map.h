@@ -70,8 +70,14 @@ inline constexpr uint16_t kPhaseCurrentOffset = 2;
 inline constexpr uint16_t kPhasePowerOffset   = 4;
 
 // --- DC / MPPT (200-299), 20 registers apart ---
+//
+// Five slots fit: 200, 220, 240, 260, 280, with the battery block starting at 300. That is the
+// hard ceiling on how many strings this schema version can publish, and it is why the canonical
+// vocabulary stops at dc.mppt_5 -- see measurement.h. A sixth tracker needs kSchemaVersion
+// bumped and the regions below it moved, which breaks every client that indexes by address.
 inline constexpr uint16_t kMpptBase   = 200;
 inline constexpr uint16_t kMpptStride = 20;
+inline constexpr uint16_t kMaxMpptSlots = 5;
 inline constexpr uint16_t kMpptVoltageOffset = 0;
 inline constexpr uint16_t kMpptCurrentOffset = 2;
 inline constexpr uint16_t kMpptPowerOffset   = 4;
@@ -85,6 +91,9 @@ inline constexpr uint16_t kBatteryDischargePower = 306; // float32
 // --- grid meter (400-499) ---
 inline constexpr uint16_t kGridImportPower = 400;  // float32
 inline constexpr uint16_t kGridExportPower = 402;  // float32
+/// House load. In this region rather than a new one: it is a house-level flow like the two
+/// above, and 400-499 has room. Appended at the end of the used range so nothing moves.
+inline constexpr uint16_t kLoadPower       = 404;  // float32
 
 // --- status (500-599) ---
 inline constexpr uint16_t kStatusCodeMirror   = 500;  // uint16
@@ -178,6 +187,19 @@ enum class ValidityBit : uint8_t {
     BatteryDischargePower = 27,
     GridImportPower = 28,
     GridExportPower = 29,
+    // Appended, per the append-only rule above: strings 3-5 arrived after this ordering was
+    // published, so they take the next free bits rather than sitting next to Mppt2 where they
+    // would read better. The bitmap has 128 bits, so there is room to keep doing this.
+    DcMppt3Voltage = 30,
+    DcMppt3Current = 31,
+    DcMppt3Power   = 32,
+    DcMppt4Voltage = 33,
+    DcMppt4Current = 34,
+    DcMppt4Power   = 35,
+    DcMppt5Voltage = 36,
+    DcMppt5Current = 37,
+    DcMppt5Power   = 38,
+    LoadPower      = 39,
     _Count
 };
 

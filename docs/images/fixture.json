@@ -379,7 +379,7 @@
         ]
       },
       {
-        "id": "growatt_modbus",
+        "id": "modbus_profile",
         "display_name": "Growatt (Modbus RTU)",
         "manufacturer": "Growatt",
         "protocol": "Modbus RTU",

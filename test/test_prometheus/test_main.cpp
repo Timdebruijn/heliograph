@@ -61,7 +61,7 @@ DeviceState singlePhase() {
 /// Three phases and a battery: everything the single-phase case does not have.
 DeviceState hybrid() {
     DeviceState s = singlePhase();
-    s.identity.driverId = "growatt_modbus";
+    s.identity.driverId = "modbus_profile";
     report(s, measurement_id::kAcL2Voltage, MeasurementType::Voltage, Unit::Volt, "V L2", 238.1);
     report(s, measurement_id::kAcL3Voltage, MeasurementType::Voltage, Unit::Volt, "V L3", 239.9);
     report(s, measurement_id::kBatterySoc, MeasurementType::Ratio, Unit::Percent, "SOC", 64);

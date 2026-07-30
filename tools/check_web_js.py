@@ -266,7 +266,7 @@ def check_address_collision(script, scratch):
 
     There is ONE RS485 bus. The check keyed on driver+address, so it only ever noticed a
     collision between two units of the same make -- while this firmware ships two Modbus
-    drivers (growatt_modbus and sunspec) whose units share the numbering. The most likely real
+    drivers (modbus_profile and sunspec) whose units share the numbering. The most likely real
     collision walked straight past the card built to report it.
 
     Both directions matter. A protocol that does not address this way -- AA55 finds a device by
@@ -286,10 +286,10 @@ def check_address_collision(script, scratch):
     body = "\n".join(parts)
     harness = (
         """
-// Only what addressProblem reads. `sunspec` and `growatt_modbus` both declare unit_id;
+// Only what addressProblem reads. `sunspec` and `modbus_profile` both declare unit_id;
 // `eversolar_legacy` declares none, which is what makes it the false-positive case.
 const drivers = {drivers:[
-  {id:'growatt_modbus', options:[{key:'unit_id', display_name:'Modbus unit id', default_value:'1'}]},
+  {id:'modbus_profile', options:[{key:'unit_id', display_name:'Modbus unit id', default_value:'1'}]},
   {id:'sunspec',        options:[{key:'unit_id', display_name:'Modbus unit id', default_value:'1'}]},
   // Declares an address with a default of 16, exactly as the real descriptor does. An empty
   // options list here would have made the fallback untestable.
@@ -317,33 +317,33 @@ const check = (label, body, wantCollision) => {
 // which is how a bridge configured through the wizard looks. Typing that number into an extra by
 // hand was accepted, and the two then collided on the bus.
 check('primary at its default + extra typed to match', {
-  driver:{id:'growatt_modbus', options:{}},
-  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'1'}}]}, true);
+  driver:{id:'modbus_profile', options:{}},
+  additional_devices:[{driver_id:'modbus_profile', options:{unit_id:'1'}}]}, true);
 
 // And across two drivers, since the bus does not care which one is polling.
-check('eversolar primary at default 16 + growatt@16', {
+check('eversolar primary at default 16 + modbus@16', {
   driver:{id:'eversolar_legacy', options:{}},
-  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'16'}}]}, true);
+  additional_devices:[{driver_id:'modbus_profile', options:{unit_id:'16'}}]}, true);
 
 // Two different Modbus drivers, one bus, one address.
-check('growatt@2 + sunspec@2', {
-  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+check('modbus@2 + sunspec@2', {
+  driver:{id:'modbus_profile', options:{unit_id:'2'}},
   additional_devices:[{driver_id:'sunspec', options:{unit_id:'2'}}]}, true);
 
 // Same make, same address -- caught before this change too.
-check('growatt@2 + growatt@2', {
-  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
-  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'2'}}]}, true);
+check('modbus@2 + modbus@2', {
+  driver:{id:'modbus_profile', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'modbus_profile', options:{unit_id:'2'}}]}, true);
 
 // Distinct addresses are fine, across drivers and within one.
-check('growatt@2 + sunspec@3', {
-  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+check('modbus@2 + sunspec@3', {
+  driver:{id:'modbus_profile', options:{unit_id:'2'}},
   additional_devices:[{driver_id:'sunspec', options:{unit_id:'3'}}]}, false);
 
 // A driver with no address option cannot collide with one that has an address.
-check('eversolar + growatt@2', {
+check('eversolar + modbus@2', {
   driver:{id:'eversolar_legacy', options:{}},
-  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'2'}}]}, false);
+  additional_devices:[{driver_id:'modbus_profile', options:{unit_id:'2'}}]}, false);
 
 // Two of them, neither storing an address -- so BOTH answer at the declared default of 16, and
 // that is a real collision on a real bus. This case expected "no collision" until the check
@@ -356,12 +356,12 @@ check('eversolar + eversolar, both at the default', {
 // blanks are two devices on the SAME default. Also flipped by resolving defaults, and for the
 // better -- leaving both blank is a bus where nothing answers, which is worth being told.
 check('two blank addresses fall back to the same default', {
-  driver:{id:'growatt_modbus', options:{unit_id:''}},
+  driver:{id:'modbus_profile', options:{unit_id:''}},
   additional_devices:[{driver_id:'sunspec', options:{unit_id:''}}]}, true);
 
 // Whitespace is not a different address.
-check('growatt@2 + sunspec@" 2 "', {
-  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
+check('modbus@2 + sunspec@" 2 "', {
+  driver:{id:'modbus_profile', options:{unit_id:'2'}},
   additional_devices:[{driver_id:'sunspec', options:{unit_id:' 2 '}}]}, true);
 
 // A driver that polls one device per bridge. Distinct addresses do not save it: planDevices()
@@ -382,9 +382,9 @@ excl('two solax rows on different addresses', {
 excl('one solax row', {
   driver:{id:'solax_x1', options:{address:'10'}}, additional_devices:[]}, false);
 // And it must not spill onto drivers that can share.
-excl('two growatt rows', {
-  driver:{id:'growatt_modbus', options:{unit_id:'2'}},
-  additional_devices:[{driver_id:'growatt_modbus', options:{unit_id:'3'}}]}, false);
+excl('two modbus_profile rows', {
+  driver:{id:'modbus_profile', options:{unit_id:'2'}},
+  additional_devices:[{driver_id:'modbus_profile', options:{unit_id:'3'}}]}, false);
 // A driver that omits the field -- an older bridge, or any driver added before it existed.
 // The benefit of the doubt is the documented default.
 excl('a driver that says nothing either way', {

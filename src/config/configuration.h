@@ -20,7 +20,13 @@
 namespace heliograph {
 
 /// Bumped when the stored layout changes. ConfigurationStore migrates on load.
-inline constexpr uint16_t kConfigVersion = 1;
+///
+/// 2: the table-driven Modbus driver's id became `modbus_profile`. It used to name a single
+///    vendor, which was accurate while every profile it served was that vendor's map; once
+///    profiles for other vendors arrived, a stored id naming one brand would have pointed at a
+///    driver that no longer existed, and the device would have come up with no inverter at all.
+///    The rename itself lives in configuration_store.cpp's migration chain.
+inline constexpr uint16_t kConfigVersion = 2;
 
 enum class LogLevel : uint8_t { Error, Warn, Info, Debug, Trace };
 const char* logLevelName(LogLevel level);

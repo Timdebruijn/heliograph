@@ -141,14 +141,32 @@ constexpr GaugeSpec kInverterGauges[] = {
      "DC voltage of one MPPT string", "string", "1"},
     {measurement_id::kDcMppt2Voltage, "heliograph_inverter_mppt_voltage_volts",
      "DC voltage of one MPPT string", "string", "2"},
+    {measurement_id::kDcMppt3Voltage, "heliograph_inverter_mppt_voltage_volts",
+     "DC voltage of one MPPT string", "string", "3"},
+    {measurement_id::kDcMppt4Voltage, "heliograph_inverter_mppt_voltage_volts",
+     "DC voltage of one MPPT string", "string", "4"},
+    {measurement_id::kDcMppt5Voltage, "heliograph_inverter_mppt_voltage_volts",
+     "DC voltage of one MPPT string", "string", "5"},
     {measurement_id::kDcMppt1Current, "heliograph_inverter_mppt_current_amperes",
      "DC current of one MPPT string", "string", "1"},
     {measurement_id::kDcMppt2Current, "heliograph_inverter_mppt_current_amperes",
      "DC current of one MPPT string", "string", "2"},
+    {measurement_id::kDcMppt3Current, "heliograph_inverter_mppt_current_amperes",
+     "DC current of one MPPT string", "string", "3"},
+    {measurement_id::kDcMppt4Current, "heliograph_inverter_mppt_current_amperes",
+     "DC current of one MPPT string", "string", "4"},
+    {measurement_id::kDcMppt5Current, "heliograph_inverter_mppt_current_amperes",
+     "DC current of one MPPT string", "string", "5"},
     {measurement_id::kDcMppt1Power, "heliograph_inverter_mppt_power_watts",
      "DC input power of one MPPT string", "string", "1"},
     {measurement_id::kDcMppt2Power, "heliograph_inverter_mppt_power_watts",
      "DC input power of one MPPT string", "string", "2"},
+    {measurement_id::kDcMppt3Power, "heliograph_inverter_mppt_power_watts",
+     "DC input power of one MPPT string", "string", "3"},
+    {measurement_id::kDcMppt4Power, "heliograph_inverter_mppt_power_watts",
+     "DC input power of one MPPT string", "string", "4"},
+    {measurement_id::kDcMppt5Power, "heliograph_inverter_mppt_power_watts",
+     "DC input power of one MPPT string", "string", "5"},
 
     // --- Energy and runtime ---------------------------------------------------------------
     // kWh rather than the joules Prometheus would prefer: these two names shipped in 0.5.0 and
@@ -189,6 +207,8 @@ constexpr GaugeSpec kInverterGauges[] = {
      "Power drawn from the grid"},
     {measurement_id::kGridExportPower, "heliograph_grid_export_power_watts",
      "Power delivered to the grid"},
+    {measurement_id::kLoadPower, "heliograph_load_power_watts",
+     "Power the house is drawing, as the inverter measures it"},
 };
 
 }  // namespace

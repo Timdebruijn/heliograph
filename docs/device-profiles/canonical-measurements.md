@@ -34,6 +34,7 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `dc.mppt_2.voltage` | V | MPPT/string 2 voltage |
 | `dc.mppt_2.current` | A | MPPT/string 2 current |
 | `dc.mppt_2.power` | W | MPPT/string 2 power |
+| `dc.mppt_3.*` … `dc.mppt_5.*` | V / A / W | Strings 3 to 5, same three quantities each |
 | `energy.today` | kWh | Energy produced today |
 | `energy.total` | kWh | Lifetime energy produced |
 | `inverter.temperature` | °C | Inverter internal temperature |
@@ -49,6 +50,7 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `battery.discharge_power` | W | Discharge rail, ditto |
 | `grid.import_power` | W | Power drawn from the grid, for a hybrid with a meter |
 | `grid.export_power` | W | Power fed back to the grid |
+| `load.power` | W | What the house is drawing, as the inverter measures it — **positive = consuming** |
 
 ## Conventions
 

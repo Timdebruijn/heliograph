@@ -81,6 +81,25 @@ int displayPrecisionFor(MeasurementType type) {
 }
 
 /// Turns "ac.phase_l1.voltage" into "AC Phase L1 Voltage" when the driver gave no name.
+/// Escapes a label for embedding in a single-quoted Jinja string literal.
+///
+/// The labels come from our own profile TOMLs rather than from user input, so this is not a
+/// security boundary -- it is a correctness one. A label containing an apostrophe ("Grid & Gen's
+/// mode") would terminate the literal early, and Home Assistant would accept the resulting
+/// template, render an entity, and silently send nothing when it was used. A quietly inert
+/// control is worse than a rejected one.
+std::string escapeSingleQuotes(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (const char c : in) {
+        if (c == '\\' || c == '\'') {
+            out.push_back('\\');
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
 std::string humanise(const std::string& id) {
     std::string out;
     bool        upper = true;
@@ -243,8 +262,24 @@ uint64_t discoverySignature(const DeviceState& state) {
             continue;
         }
         if (commandTakesEnumValue(type)) {
-            // buildDiscoveryEntities never builds an entity for these either -- nothing to
-            // fingerprint.
+            const EnumCapability& cap = state.capabilities.enums[i];
+            if (!cap.supported || !cap.writable || cap.optionCount == 0) {
+                continue;  // no entity built, so no trace here -- same rule as the numeric case
+            }
+            sig = fnv1aAppend(sig, commandTypeName(type));
+            // The LABELS and their values, not just how many there are. A profile that renames a
+            // mode or renumbers one produces a different select in Home Assistant, and a
+            // fingerprint blind to that would leave the old dropdown in place -- offering an
+            // option that now maps to a different register value, which is the worst shape of
+            // this bug because it still appears to work.
+            for (size_t o = 0; o < cap.optionCount; ++o) {
+                if (cap.options[o].label != nullptr) {
+                    sig = fnv1aAppend(sig, cap.options[o].label);
+                }
+                char buf[16];
+                snprintf(buf, sizeof(buf), "=%d", cap.options[o].value);
+                sig = fnv1aAppend(sig, buf);
+            }
             continue;
         }
         if (commandTakesNumericValue(type)) {
@@ -388,14 +423,6 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
             continue;
         }
 
-        // SetBatteryOperatingMode: skipped, not guessed at. A select needs an options list,
-        // and there is no EnumCapability yet to say what the valid selections even are --
-        // command_dispatcher.cpp's own gate-3 comment carries the same caveat. Revisit once a
-        // driver actually declares mode names.
-        if (commandTakesEnumValue(type)) {
-            continue;
-        }
-
         const std::string name       = commandTypeName(type);
         const std::string jsonPrefix = std::string("{\"type\":\"") + name + "\"";
 
@@ -433,6 +460,42 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
             // Optimistic: unlike the relay switch, there is no readback topic for a setpoint --
             // no shipping driver reports one back as a measurement, and command.h's own
             // `execute()` doc note explains why the ack cannot arrive synchronously either.
+            e["optimistic"] = true;
+        } else if (commandTakesEnumValue(type)) {
+            const EnumCapability& cap = state.capabilities.enums[i];
+            if (!cap.supported || !cap.writable || cap.optionCount == 0) {
+                // The write bit is set but no modes were published. Same refusal as the missing
+                // numeric range above, and for a sharper reason: a select with no options is a
+                // dropdown a user can open and not choose anything from.
+                continue;
+            }
+            domain = "select";
+
+            // Home Assistant sends the LABEL a user picked; the device wants its own mode
+            // number. The template carries the mapping, so the translation happens once here
+            // rather than in every automation the user writes. Built as a Jinja dict literal:
+            //   {% set m = {'Forced': 2} %}{"type":"...","enum_value":{{ m[value] }}}
+            std::string mapping = "{% set m = {";
+            JsonArray   options = e["options"].to<JsonArray>();
+            for (size_t o = 0; o < cap.optionCount; ++o) {
+                const char* label = cap.options[o].label;
+                if (label == nullptr) {
+                    continue;
+                }
+                options.add(label);
+                if (o > 0) {
+                    mapping += ", ";
+                }
+                // Labels come from a profile TOML, so they are ours rather than user input --
+                // but a stray apostrophe would still break the template silently, and the
+                // resulting entity would look fine and do nothing. Escaped rather than trusted.
+                mapping += "'" + escapeSingleQuotes(label) + "': " +
+                           std::to_string(cap.options[o].value);
+            }
+            mapping += "} %}";
+            e["command_template"] = mapping + jsonPrefix + ",\"enum_value\":{{ m[value] }}}";
+            // Optimistic for the same reason the number entity is: no driver reports the active
+            // mode back as a measurement yet, so there is no state topic to follow.
             e["optimistic"] = true;
         } else {
             // Neither numeric nor enum: Start, Stop, SynchronizeTime -- a bare press, no

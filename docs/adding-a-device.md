@@ -88,8 +88,10 @@ registers against the **inverter's own display or app**:
 - **32-bit values** occupy two consecutive registers, almost always **high word
   first**: `value = reg[n] * 65536 + reg[n+1]`. If a power reading looks absurdly huge
   or jumps wildly, you are probably reading one half of a pair, or the word order is
-  swapped (the profile format currently supports high-word-first only — if your device
-  is genuinely low-word-first, open an issue).
+  swapped. A genuinely low-word-first register maps with `word_order = "low_first"` —
+  but only on the word of a source that states it, because the two orders differ by a
+  factor of 65536 and one direction of that mistake lands near zero rather than looking
+  absurd.
 - **Signed values:** anything that can flow both ways (battery power, grid
   import/export) or go below zero (temperature). A raw value near 65535 that "should"
   be small and negative is a signed 16-bit (`65535` = −1). Use `s16`/`s32`.
@@ -158,7 +160,7 @@ exactly like an inverter that does not report it.
 ## 3. Writing the profile
 
 1. Copy [`profiles/_template.toml`](../profiles/_template.toml) to
-   `profiles/<family>/<your_device>.toml`. Field reference:
+   `profiles/<vendor>/<your_device>.toml`. Field reference:
    [device-profiles/schema.md](device-profiles/schema.md); allowed measurement ids:
    [device-profiles/canonical-measurements.md](device-profiles/canonical-measurements.md).
 2. Declare **wide read blocks** during bring-up (e.g. the whole 0–124 base range), not
@@ -185,14 +187,17 @@ exactly like an inverter that does not report it.
    drivers), or OTA-upload the `.bin` if a bridge is already installed.
 2. Select the driver and, if not the default, your profile in the bridge web UI
    (driver option `profile = <your id>`).
-3. Set log level to `trace` and watch `/api/v1/logs`: the `GROWATT in <addr>: ...`
+3. Set log level to `trace` and watch `/api/v1/logs`: the `MODBUS unit <n> in <addr>: ...`
    lines are the raw register dump. Verify each mapped register against the device
    display **at that moment**.
 4. Check the published values: `/api/v1/status`, MQTT, Home Assistant. Watch a full
    day if you can — sunrise, full sun, and (for hybrids) charge→discharge crossover,
    where sign conventions reveal themselves. `battery.power` must be **positive while
-   charging** (our convention; negate-on-map is not supported yet, so if your device
-   reports it inverted, note it and open an issue).
+   charging** (our convention). A device that reports it inverted is corrected in the
+   profile with a negative `scale` — see
+   [schema.md](device-profiles/schema.md#correcting-a-sign-convention). Only do that once
+   you have *seen* which way it points: a confidently inverted battery graph is worse than
+   no battery graph.
 
 ### Before opening the PR
 
@@ -205,6 +210,11 @@ exactly like an inverter that does not report it.
 - [ ] `docs/` protocol notes updated if you learned something structural (register
       generations, quirks) — see `docs/growatt-sph-protocol.md` for the level of detail
       that has paid off.
+- [ ] `status` says what you actually did. A map you transcribed but never watched on a
+      device stays `experimental`, however good its sources are — two written sources
+      agreeing is not a device confirming, and the profile you are copying the format from
+      may be `experimental` for exactly that reason. Raise it to `beta` in the same PR only
+      when you checked the readings against the device's own display and can say so here.
 
 ## 5. Handshake protocols (codecs)
 
@@ -306,7 +316,12 @@ forum post. So the schema treats writes as *research to record*, not behavior to
   [schema.md](device-profiles/schema.md)) documents a writable setpoint register with
   mandatory min/max bounds — include them in your PR when your protocol PDF documents
   them, marked `verified = false`.
-- Nothing acts on such a row until it is `verified = true` (confirmed against the real
-  device, on a bench, by someone watching the inverter respond) **and** the driver has
-  grown a write path in C++. Both gates are deliberate; a data file that could make an
-  unreviewed device writable is not a feature but a liability.
+- Nothing acts on such a row until it is `verified = true` — confirmed against the real
+  device, on a bench, by someone watching the inverter respond. A data file that could make
+  an unreviewed device writable is not a feature but a liability, which is why this gate is
+  in the data and not only in the code.
+- The driver's write path itself exists (one holding register, FC06, echo verified). What it
+  deliberately **cannot** do — 32-bit setpoints, FC16, enum modes such as a battery work mode
+  — is in [write-path.md](device-profiles/write-path.md). Read it before writing a row: some
+  perfectly valid-looking rows can never be dispatched, and it is better to know that before
+  you go looking for the register.

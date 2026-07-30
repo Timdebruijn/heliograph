@@ -111,6 +111,12 @@ picture:
 | EverSolar / Zeversolar legacy (TL series) | RS485 | **Stable** — the only driver at this level. Running in production and validated over **eight consecutive unassisted sunrises**, the transition where its one known bug lived. Several inverters on one loop are supported but **not yet confirmed on hardware** — read [the pitfalls](docs/eversolar-protocol.md#several-inverters-on-one-bus) first, and report what happens on [#82](https://github.com/Timdebruijn/heliograph/issues/82) |
 | Growatt SPH hybrid (3–6 kW) | Modbus RTU over RS485 | **Experimental** — register map transcribed from documentation, not yet confirmed against real hardware |
 | Growatt MIC TL-X (0.6–3.3 kW, single phase) | Modbus RTU over RS485 | **Experimental** — map cross-checked against two independent sources that agree, not yet confirmed against real hardware; see [docs/growatt-mic-tl-x-protocol.md](docs/growatt-mic-tl-x-protocol.md) |
+| Growatt MIN TL-X (2.5–6 kW, single phase) | Modbus RTU over RS485 | **Experimental** — same register layout as the MIC, with a second PV string; separate profile because the tracker count differs. Not yet confirmed against real hardware; see [docs/growatt-mic-tl-x-protocol.md](docs/growatt-mic-tl-x-protocol.md) |
+| Deye / Sunsynk SUN-xK-SG hybrid (single phase) | Modbus RTU over RS485 | **Experimental** — every mapped row corroborated by two independent implementations that agree, not yet confirmed against real hardware. Battery power, grid frequency and inverter temperature are deliberately **not** published until a bench session settles them; see [docs/deye-sun-xk-sg-protocol.md](docs/deye-sun-xk-sg-protocol.md) |
+| Solis / Ginlong RHI hybrid (3–6 kW, single phase) | Modbus RTU over RS485 | **Experimental** — every mapped row corroborated by two independent implementations that agree, not yet confirmed against real hardware. Battery power needs a direction register this schema cannot combine, and the two sources disagree on meter power by a factor of 1000, so neither is published; see [docs/solis-rhi-protocol.md](docs/solis-rhi-protocol.md) |
+| Sungrow SH residential hybrid | Modbus RTU over RS485 | **Experimental**, and the best-sourced map here — rows come from Sungrow's own protocol specification, cross-checked register by register against a widely deployed integration. Not yet confirmed against real hardware; see [docs/sungrow-sh-protocol.md](docs/sungrow-sh-protocol.md) |
+| Huawei SUN2000 (residential, ± LUNA2000) | Modbus RTU over RS485 | **Experimental, single-sourced** — transcribed from one mature library implementing Huawei's published interface, *not* cross-checked against the vendor document itself. Not SunSpec. See [docs/huawei-sun2000-protocol.md](docs/huawei-sun2000-protocol.md) |
+| GoodWe ET / EH / BT / BH hybrid | Modbus RTU over RS485 | **Experimental, single-sourced, read-only** — the public vendor protocol document is titled "Read Only", so no setpoints are declared at all. **Set `unit_id` to 247**: GoodWe ships this family at 247, not 1, and a wrong address looks exactly like a wiring fault. See [docs/goodwe-et-protocol.md](docs/goodwe-et-protocol.md) |
 | SolaX X1 series (X1 Mini G1/G2/G3) | RS485 | **Experimental** — the first attempt on real hardware (an X1-Mini-G1) returned no data at all. Read [docs/solax-x1-protocol.md](docs/solax-x1-protocol.md) before you buy or wire anything |
 | Any inverter implementing **SunSpec** | Modbus RTU over RS485 | **Experimental** — one generic driver for the published standard, so no per-vendor file is needed. Not yet confirmed against any physical device; see [docs/sunspec.md](docs/sunspec.md) for which vendors are worth trying |
 
@@ -194,7 +200,7 @@ own address before you connect them together.
 > ```
 > curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
 >   -H 'Content-Type: application/json' \
->   -d '{"additional_devices":[{"driver_id":"growatt_modbus","options":{"unit_id":"2"}}]}'
+>   -d '{"additional_devices":[{"driver_id":"modbus_profile","options":{"unit_id":"2"}}]}'
 > ```
 >
 > **Extended discovery sweeps addresses 1–8**, so the wizard reports one candidate per inverter

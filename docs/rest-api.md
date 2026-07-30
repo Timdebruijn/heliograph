@@ -87,7 +87,7 @@ once a driver has write capabilities.
     "modbus_clients": 2,
     "max_devices": 8,
     "devices_configured": 3,
-    "device_problems": ["'growatt_modbus' shares the address of a device already added (growatt_modbus-2); give them different addresses"]
+    "device_problems": ["'modbus_profile' shares the address of a device already added (modbus_profile-2); give them different addresses"]
   },
   "device": {
     "id": "eversolar_legacy-XH300060115506193600V610",
@@ -104,9 +104,9 @@ once a driver has write capabilities.
     "ac.power.total": { "value": 1842.0, "unit": "W", "valid": true, "stale": false }
   },
   "devices": [
-    { "id": "growatt_modbus-1", "label": "Schuur", "online": true, "data_valid": true,
+    { "id": "modbus_profile-1", "label": "Schuur", "online": true, "data_valid": true,
       "data_stale": false, "last_successful_poll_seconds_ago": 3, "ac_power_w": 1240.0 },
-    { "id": "growatt_modbus-2", "online": false, "data_valid": false, "data_stale": false,
+    { "id": "modbus_profile-2", "online": false, "data_valid": false, "data_stale": false,
       "last_successful_poll_seconds_ago": null, "ac_power_w": null }
   ],
   "totals": {
@@ -268,7 +268,7 @@ to describe hid the explanation behind a "cannot reach the bridge" error.
 single-inverter install.
 
 ```json
-{ "additional_devices": [ { "driver_id": "growatt_modbus", "options": { "unit_id": "2" } } ] }
+{ "additional_devices": [ { "driver_id": "modbus_profile", "options": { "unit_id": "2" } } ] }
 ```
 
 The mock driver takes the same `unit_id`, so a fleet can be simulated without hardware — each

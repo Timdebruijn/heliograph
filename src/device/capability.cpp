@@ -37,4 +37,17 @@ const char* capabilityName(InverterCapability capability) {
     return "unknown";
 }
 
+bool EnumCapability::accepts(int value) const {
+    // Nothing declared means nothing accepted -- not "anything goes". A driver that sets the
+    // write bit and leaves its option list empty is telling us it can change a mode without
+    // telling us which modes exist, and the numeric path already learned that lesson: a declared
+    // write with no published bounds is a refusal, not an unchecked pass-through.
+    for (size_t i = 0; i < optionCount; ++i) {
+        if (options != nullptr && options[i].value == value) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace heliograph

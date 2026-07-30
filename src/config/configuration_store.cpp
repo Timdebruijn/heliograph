@@ -12,15 +12,50 @@
 namespace heliograph {
 namespace {
 
+/// The driver id rename in config version 2. Kept next to the migration that applies it so the
+/// pair cannot drift: the OLD id is a string that exists nowhere else in the firmware any more.
+///
+/// The legacy value contains a vendor name, which tools/check_layering.sh rule 1 otherwise
+/// forbids outside src/drivers/ -- hence the marker below, which that check looks for. The
+/// exemption is deliberate and narrow: this is not brand KNOWLEDGE (no register, no framing, no
+/// protocol quirk), it is a dead identifier that has to be recognised once, on load, forever.
+/// Spelling it any other way -- concatenation, a hash -- would hide it from exactly the grep
+/// that is supposed to find brand names.
+constexpr const char* kLegacyProfileDriverId = "growatt_modbus";  // LEGACY-CONFIG-ID
+constexpr const char* kProfileDriverId       = "modbus_profile";
+
+/// Rewrites one driver id in place when it is the renamed one. Returns whether it changed, so
+/// the caller can log that something was migrated rather than guessing.
+bool renameDriverId(JsonVariant slot) {
+    if (!slot.is<const char*>()) {
+        return false;
+    }
+    if (std::strcmp(slot.as<const char*>(), kLegacyProfileDriverId) != 0) {
+        return false;
+    }
+    slot.set(kProfileDriverId);
+    return true;
+}
+
 /// Applies migrations in sequence. Each step upgrades exactly one version, so the chain works
 /// for a device that skipped several firmware releases.
-///
-/// There is only one version so far, so this is a scaffold -- but a tested one. Writing it at
-/// v1 costs nothing; writing it at v3, after two silent config wipes, costs a lot.
 bool migrate(JsonDocument& doc, uint16_t from) {
     uint16_t version = from;
 
-    // while (version == 1) { ...move fields...; version = 2; }
+    if (version == 1) {
+        // The table-driven driver's id stopped naming a single vendor. Both places a driver id
+        // can be stored have to move: the primary driver, and every additional device row.
+        // Missing the second would leave a multi-inverter bus with its first unit migrated and
+        // the rest silently dropped at startup -- the worst shape of this bug, because the
+        // dashboard still shows an inverter.
+        renameDriverId(doc["driver"]["id"]);
+        if (JsonArray extra = doc["additional_devices"].as<JsonArray>(); !extra.isNull()) {
+            for (JsonVariant device : extra) {
+                renameDriverId(device["driver_id"]);
+            }
+        }
+        version = 2;
+    }
 
     if (version != kConfigVersion) {
         return false;

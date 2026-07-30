@@ -1,0 +1,372 @@
+# SPDX-License-Identifier: MIT
+#
+# Sungrow SH residential hybrid — Modbus RTU register profile.
+#
+# STATUS: the best-sourced profile in this tree. Rows come from Sungrow's OWN protocol
+# specification, cross-checked register by register against a widely deployed implementation.
+# Still NOT confirmed against a physical inverter by this project.
+# See docs/sungrow-sh-protocol.md for the extraction, the address-numbering trap, and the
+# bring-up checklist.
+#
+# SOURCES:
+#   A. Sungrow, "Communication Protocol of Residential Hybrid Inverter" V1.1.9 (PDF).
+#      A vendor specification -- the top of the trust order in docs/adding-a-device.md.
+#   B. mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant, modbus_sungrow.yaml.
+#      Large user base, and every entry carries BOTH the protocol address and the document's own
+#      register number in a comment, which is what made the cross-check mechanical.
+#
+# ------------------------------------------------------------------------------------------
+# THE NUMBERING TRAP, and it applies to every row in this file.
+#
+# The vendor document numbers registers from 1. The Modbus PDU addresses them from 0. So:
+#
+#     PDU address = document register number - 1
+#
+# The document's "Total DC power 5017~5018" is PDU 5016. Source B writes exactly that
+# (`address: 5016 # reg 5017`), and the relationship was verified mechanically across all 88 of
+# its addressed entries: the offset is 1 in every single one, with no exceptions.
+#
+# Every address below is a PDU address. Off by one here reads a neighbouring register that is
+# usually also a valid number, which is the kind of wrong that survives a casual bench check.
+#
+# THE SECOND TRAP, and it applies to every 32-bit row here: this family stores double-word values
+# LOW WORD FIRST. Source B declares `swap: word` on all 21 of its 32-bit sensors -- checked
+# mechanically, no exceptions -- and the vendor document says the same in its type definitions.
+#
+# So every u32/s32 row below carries `word_order = "low_first"`. An earlier version of this file
+# had it on the battery-power row alone, with a comment asserting that row was "the opposite of
+# every other 32-bit value in this file". That was simply false, and it cost six rows a factor of
+# 65536 each: 4 kW of PV would have published as roughly 262 megawatts. Caught in review, by
+# checking the source mechanically rather than believing the comment.
+# ------------------------------------------------------------------------------------------
+
+[profile]
+driver = "modbus_profile"
+id = "sungrow_sh_hybrid"
+display_name = "Sungrow SH residential hybrid"
+manufacturer = "Sungrow"
+
+# How far this MAP is proven -- its own property, never inherited from the driver.
+# Best-sourced map in the tree (vendor PDF + a widely deployed map) and still unproven --
+# the word-order defect found in review lived in exactly this profile.
+status = "experimental"
+default = false        # sph.toml holds the driver default
+phases = 1
+mppts = 2
+battery = true
+transports = ["rtu"]
+
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# ------------------------------------------------------------------------------------------
+# Read blocks. The map is spread over three widely separated ranges, so this is four blocks
+# rather than one sweep: the inverter's common block around 5000, the battery-power register the
+# datasheet points at (5213), and the hybrid/storage block at 13000.
+# ------------------------------------------------------------------------------------------
+
+[[block]]
+space = "input"
+start = 5000
+count = 40      # 5000-5039: identity, daily/total yield, temperature, MPPT 1-3, DC power, phases
+
+[[block]]
+space = "input"
+start = 5213
+count = 32      # 5213-5244: battery power (5213-5214) and the 0.01 Hz grid frequency at 5241
+
+[[block]]
+space = "input"
+start = 13000
+count = 50      # 13000-13049: hybrid block -- PV yield, load, battery, total active power
+
+# --- DC / PV side -------------------------------------------------------------------------
+
+[[register]]                    # vendor doc row 29/30 + source B, identical
+measurement = "dc.mppt_1.voltage"
+display_name = "MPPT1 Voltage"
+space = "input"
+address = 5010
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # vendor doc + source B, identical
+measurement = "dc.mppt_1.current"
+display_name = "MPPT1 Current"
+space = "input"
+address = 5011
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # vendor doc + source B, identical
+measurement = "dc.mppt_2.voltage"
+display_name = "MPPT2 Voltage"
+space = "input"
+address = 5012
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # vendor doc + source B, identical
+measurement = "dc.mppt_2.current"
+display_name = "MPPT2 Current"
+space = "input"
+address = 5013
+type = "u16"
+scale = 0.1
+unit = "A"
+
+# MPPT 3 (5014/5015) and MPPT 4 (5114/5115) are in both sources and are real on the larger
+# models. `mppts = 2` describes what is mapped; a three-tracker unit shows its third string in
+# the raw dump and gains two rows here once somebody confirms the model has it.
+
+[[register]]                    # vendor doc row 21 (5017~5018, U32, 1W) + source B
+measurement = "dc.power.total"
+display_name = "Total DC Power"
+space = "input"
+address = 5016
+type = "u32"
+scale = 1.0
+word_order = "low_first"
+unit = "W"
+
+# --- AC side ------------------------------------------------------------------------------
+
+# The hybrid's own total active power, from the storage block rather than the string-inverter
+# block. Signed: a hybrid importing to charge pushes this negative.
+[[register]]                    # vendor doc (13034, S32, 1W) + source B, identical
+measurement = "ac.power.total"
+display_name = "Total Active Power"
+space = "input"
+address = 13033
+type = "s32"
+scale = 1.0
+word_order = "low_first"
+unit = "W"
+
+[[register]]                    # vendor doc row 22 (5019, U16, 0.1V) + source B
+measurement = "ac.phase_l1.voltage"
+display_name = "Phase A Voltage"
+space = "input"
+address = 5018
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # vendor doc (13031, S16, 0.1A) + source B, both signed
+measurement = "ac.phase_l1.current"
+display_name = "Phase A Current"
+space = "input"
+address = 13030
+type = "s16"
+scale = 0.1
+unit = "A"
+
+# TWO frequency registers exist and both are in the document: 5036 at 0.1 Hz and 5242 at 0.01 Hz.
+# The finer one is mapped, which is also the one source B chose. 0.1 Hz resolution is too coarse
+# to see the grid excursions this channel is worth watching for.
+[[register]]                    # vendor doc row 32 (5242, U16, 0.01Hz) + source B
+measurement = "ac.frequency"
+display_name = "Grid Frequency"
+space = "input"
+address = 5241
+type = "u16"
+scale = 0.01
+unit = "Hz"
+
+# --- Temperature --------------------------------------------------------------------------
+
+[[register]]                    # vendor doc (5008, S16, 0.1) + source B, both signed
+measurement = "inverter.temperature"
+display_name = "Inverter Temperature"
+space = "input"
+address = 5007
+type = "s16"
+scale = 0.1
+unit = "°C"
+
+# --- Energy -------------------------------------------------------------------------------
+
+# From the HYBRID block, not the 5003/5004 pair. On a storage inverter the common-block counters
+# are named "PV generation & battery discharge" by both sources -- they include energy that came
+# out of the battery, so feeding them to an energy dashboard counts stored solar twice. The
+# 13002/13003 pair is PV generation alone.
+[[register]]                    # vendor doc (13002, U16, 0.1kWh) + source B
+measurement = "energy.today"
+display_name = "Daily PV Generation"
+space = "input"
+address = 13001
+type = "u16"
+scale = 0.1
+unit = "kWh"
+
+[[register]]                    # vendor doc (13003~13004, U32, 0.1kWh) + source B
+measurement = "energy.total"
+display_name = "Total PV Generation"
+space = "input"
+address = 13002
+type = "u32"
+scale = 0.1
+word_order = "low_first"
+unit = "kWh"
+
+# --- Battery ------------------------------------------------------------------------------
+
+# THE REGISTER THAT NEEDED TWO SCHEMA FEATURES AT ONCE, and the reason both exist.
+#
+# Source B's comment records the vendor's own guidance: the datasheet recommends this register
+# over the alternative at 13022, it is a signed 32-bit value in watts, and -- stated outright --
+# NEGATIVE MEANS CHARGING, positive means discharging. The document's own table row confirms the
+# address, width and unit (5214-5215, S32, 1W); the row's NAME sits in a subset font that did not
+# survive text extraction, which is why source B carries the naming here and the document carries
+# the shape.
+#
+# Two things follow, and neither could be expressed before this profile existed:
+#
+#   1. word_order = "low_first" -- like EVERY 32-bit value in this family, see the note at the
+#      top of this file. Read the default way round, 2 kW decodes as about 34 megawatts.
+#   2. scale = -1. Our convention is positive = charging (the SunSpec storage convention); this
+#      device states the opposite, so the sign is flipped here in data rather than in C++.
+#
+# Both are corrections a source STATES. That is the whole difference between this row and the
+# battery-power rows left out of the Deye and Solis profiles, where the direction was unstated or
+# needed a second register to resolve.
+[[register]]                    # vendor doc row 31 + source B, including the sign convention
+measurement = "battery.power"
+display_name = "Battery Power"
+space = "input"
+address = 5213
+type = "s32"
+scale = -1.0
+word_order = "low_first"
+unit = "W"
+
+# Tenths of a percent, not whole percent -- in both sources. A profile that assumed integer
+# percent would publish a full battery as 1000%.
+[[register]]                    # vendor doc (13023, U16, 0.1%) + source B, identical
+measurement = "battery.soc"
+display_name = "Battery Level"
+space = "input"
+address = 13022
+type = "u16"
+scale = 0.1
+unit = "%"
+
+[[register]]                    # vendor doc (13020, U16, 0.1V) + source B, identical
+measurement = "battery.voltage"
+display_name = "Battery Voltage"
+space = "input"
+address = 13019
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # vendor doc (13025, S16, 0.1) + source B, both signed
+measurement = "battery.temperature"
+display_name = "Battery Temperature"
+space = "input"
+address = 13024
+type = "s16"
+scale = 0.1
+unit = "°C"
+
+[[register]]                    # vendor doc (13041, U32, 0.1kWh) + source B
+measurement = "battery.energy_charged"
+display_name = "Total Battery Charge"
+space = "input"
+address = 13040
+type = "u32"
+scale = 0.1
+word_order = "low_first"
+unit = "kWh"
+
+[[register]]                    # vendor doc (13027, U32, 0.1kWh) + source B
+measurement = "battery.energy_discharged"
+display_name = "Total Battery Discharge"
+space = "input"
+address = 13026
+type = "u32"
+scale = 0.1
+word_order = "low_first"
+unit = "kWh"
+
+# --- House load ----------------------------------------------------------------------------
+
+# Vendor document row (13008, S32, 1W) plus source B, which names it "Load power". Signed in
+# both; a house that exports more than it draws is not a thing, but the sources declare it signed
+# and reading a signed register as unsigned is the failure that turns a small negative into
+# 4.29 gigawatts.
+#
+# Left out of the first version of this profile only because the vocabulary had no load id.
+[[register]]                    # vendor doc + source B, identical
+measurement = "load.power"
+display_name = "Load Power"
+space = "input"
+address = 13007
+type = "s32"
+scale = 1.0
+word_order = "low_first"
+unit = "W"
+
+# ==============================================================================================
+# DELIBERATELY NOT MAPPED
+# ==============================================================================================
+#
+# Export power (13010, S32, 1W). Both sources carry it and agree. It is signed and
+# bidirectional, and our grid channels are two separate unsigned rails, so splitting it needs
+# arithmetic a profile cannot do. (Load power, its neighbour at 13008, IS mapped -- see above.)
+#
+# Daily/total imported and exported energy (13036/13037, 13045/13046). Agreed by both sources,
+# but our grid.* channels are instantaneous power rather than energy.
+#
+# Battery current (5630) and the alternative battery power at 13021. The latter is the register
+# the datasheet steers AWAY from, and it is unsigned -- direction would have to come from the
+# running-state word. There is no reason to prefer it over 5213 above.
+
+# ------------------------------------------------------------------------------------------
+# Writable setpoints — DECLARED AND DORMANT.
+#
+# Both are corroborated by both sources, which is better standing than the single-sourced rows in
+# the Deye and Solis profiles. They stay dormant anyway: `verified = false` until somebody writes
+# one on real hardware, reads it back, and watches the inverter act on it.
+#
+# One caution that belongs with the export limit specifically: on this family the limit is
+# governed by a separate ENABLE register (13086 in source B's numbering, "export power limit
+# mode"). Writing a limit while that switch is off changes a stored number and nothing else --
+# which during a bench test looks exactly like a write that did not work. Check the mode register
+# first.
+# ------------------------------------------------------------------------------------------
+
+[[write]]
+command = "set_export_limit_watts"
+display_name = "Export Power Limit"
+space = "holding"
+address = 13073
+type = "u16"
+scale = 1.0
+unit = "W"
+minimum = 0
+maximum = 65000
+step = 10
+verified = false
+
+# EMS mode. Values from source B's own select mapping; the datasheet describes the same modes.
+# 1 is deliberately absent -- neither source lists it, and filling the gap by assuming the
+# numbering is contiguous is exactly the guess that puts a hybrid in an untested state.
+[[write]]
+command = "set_battery_operating_mode"
+display_name = "EMS Mode"
+space = "holding"
+address = 13049
+type = "u16"
+verified = false
+options = [
+  { value = 0, label = "Self-consumption" },
+  { value = 2, label = "Forced mode" },
+  { value = 3, label = "External EMS" },
+  { value = 4, label = "VPP" },
+]

@@ -343,6 +343,15 @@ const MEAS=[
   ['dc.mppt_2.voltage','MPPT 2 voltage','DC / MPPT',1],
   ['dc.mppt_2.current','MPPT 2 current','DC / MPPT',1],
   ['dc.mppt_2.power','MPPT 2 power','DC / MPPT',0],
+  ['dc.mppt_3.voltage','MPPT 3 voltage','DC / MPPT',1],
+  ['dc.mppt_3.current','MPPT 3 current','DC / MPPT',1],
+  ['dc.mppt_3.power','MPPT 3 power','DC / MPPT',0],
+  ['dc.mppt_4.voltage','MPPT 4 voltage','DC / MPPT',1],
+  ['dc.mppt_4.current','MPPT 4 current','DC / MPPT',1],
+  ['dc.mppt_4.power','MPPT 4 power','DC / MPPT',0],
+  ['dc.mppt_5.voltage','MPPT 5 voltage','DC / MPPT',1],
+  ['dc.mppt_5.current','MPPT 5 current','DC / MPPT',1],
+  ['dc.mppt_5.power','MPPT 5 power','DC / MPPT',0],
   ['dc.power.total','DC power total','DC / MPPT',0],
   ['battery.power','Power','Battery',0],
   ['battery.charge_power','Charging','Battery',0],
@@ -354,6 +363,7 @@ const MEAS=[
   ['battery.energy_discharged','Energy discharged','Battery',2],
   ['grid.import_power','Importing','Grid',0],
   ['grid.export_power','Exporting','Grid',0],
+  ['load.power','House load','Grid',0],
   ['inverter.temperature','Temperature','Device',1],
   ['inverter.operating_hours','Operating hours','Device',0],
 ];
@@ -868,7 +878,7 @@ function optionFields(drv,stored,prefix){
       return `<label for="${prefix}${esc(o.key)}">${esc(o.display_name)}</label>
         <select id="${prefix}${esc(o.key)}" data-opt="${esc(o.key)}" ${hasBlank?'data-mustpick="1"':''} onchange="gateForms()">
         ${(known?'':`<option value="${esc(cur)}" selected>${esc(cur)} — not recognised</option>`)}
-        ${o.allowed_values.map(v=>`<option value="${esc(v)}" ${v===cur&&!needs?'selected':''}>${v===''?'— choose —':esc(v)}</option>`).join('')}
+        ${o.allowed_values.map((v,i)=>`<option value="${esc(v)}" ${v===cur&&!needs?'selected':''}>${v===''?'— choose —':esc((o.allowed_labels&&o.allowed_labels[i])||v)}</option>`).join('')}
         </select>${hint}`;
     }
     const num=o.min_value!==undefined?` type="number" min="${esc(o.min_value)}" max="${esc(o.max_value)}"`:'';

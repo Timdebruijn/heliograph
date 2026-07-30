@@ -27,7 +27,7 @@ DriverRegistry makeRegistry() {
     DriverRegistry registry;
 
     DriverDescriptor shareable;
-    shareable.id                     = "growatt_modbus";
+    shareable.id                     = "modbus_profile";
     shareable.supportsMultipleDevices = true;
     registry.registerDriver(shareable, [](Transport&, const DriverOptions&) { return nullptr; });
 
@@ -57,8 +57,8 @@ Configuration configWith(const std::string& first, const std::vector<std::string
 
 static void test_a_driver_that_shares_the_bus_may_appear_many_times() {
     const auto registry = makeRegistry();
-    const auto config   = configWith("growatt_modbus", {"growatt_modbus", "growatt_modbus"});
-    const auto plan     = app::planDevices(config, "growatt_modbus",
+    const auto config   = configWith("modbus_profile", {"modbus_profile", "modbus_profile"});
+    const auto plan     = app::planDevices(config, "modbus_profile",
         registry);
 
     // Three MIC TL-X on one bus is the case this bridge was extended for. Refusing any of them
@@ -127,7 +127,7 @@ static void test_an_unknown_driver_is_planned_and_left_to_fail_later() {
 
 static void test_two_different_exclusive_drivers_do_not_collide() {
     const auto registry = makeRegistry();
-    const auto config   = configWith("eversolar_legacy", {"growatt_modbus"});
+    const auto config   = configWith("eversolar_legacy", {"modbus_profile"});
     const auto plan     = app::planDevices(config,
                                            "eversolar_legacy", registry);
 
@@ -138,20 +138,20 @@ static void test_two_different_exclusive_drivers_do_not_collide() {
 
 static void test_an_empty_driver_id_leaves_it_out_of_the_plan() {
     const auto registry = makeRegistry();
-    const auto config   = configWith("", {"growatt_modbus"});
+    const auto config   = configWith("", {"modbus_profile"});
     const auto plan     = app::planDevices(config, "", registry);
 
     // Nothing configured and nothing compiled in: the additional device is device 1, not
     // device 2 with a hole where the first should be.
     TEST_ASSERT_EQUAL_UINT32(1, plan.size());
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus", plan[0].id.c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile", plan[0].id.c_str());
     TEST_ASSERT_EQUAL_UINT32(1, plan[0].row);
 }
 
 static void test_rows_are_numbered_as_the_settings_page_shows_them() {
     const auto registry = makeRegistry();
-    const auto config   = configWith("growatt_modbus", {"growatt_modbus", "growatt_modbus"});
-    const auto plan     = app::planDevices(config, "growatt_modbus",
+    const auto config   = configWith("modbus_profile", {"modbus_profile", "modbus_profile"});
+    const auto plan     = app::planDevices(config, "modbus_profile",
         registry);
 
     TEST_ASSERT_EQUAL_UINT32(1, plan[0].row);
@@ -167,14 +167,14 @@ static void test_rows_are_numbered_as_the_settings_page_shows_them() {
 static void test_the_options_pointer_reaches_the_configured_options() {
     const auto registry = makeRegistry();
     Configuration config;
-    config.driver.id                       = "growatt_modbus";
+    config.driver.id                       = "modbus_profile";
     config.driver.options["unit_id"] = "7";
     DriverSettings second;
-    second.id                       = "growatt_modbus";
+    second.id                       = "modbus_profile";
     second.options["unit_id"] = "9";
     config.additionalDevices.push_back(second);
 
-    const auto plan = app::planDevices(config, "growatt_modbus", registry);
+    const auto plan = app::planDevices(config, "modbus_profile", registry);
 
     TEST_ASSERT_EQUAL_UINT32(2, plan.size());
     TEST_ASSERT_NOT_NULL(plan[0].options);

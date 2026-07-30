@@ -246,7 +246,7 @@ static void test_a_patch_that_sets_both_keeps_the_line_it_asked_for() {
     ConfigError e;
 
     TEST_ASSERT_TRUE(applyConfigPatch(
-        R"({"driver":{"id":"growatt_modbus"},"serial":{"override":true,"baud_rate":115200}})", c,
+        R"({"driver":{"id":"modbus_profile"},"serial":{"override":true,"baud_rate":115200}})", c,
         e));
     TEST_ASSERT_TRUE(c.serial.enabled);
     TEST_ASSERT_EQUAL_UINT32(115200, c.serial.profile.baudRate);
@@ -256,7 +256,7 @@ static void test_a_patch_that_sets_both_keeps_the_line_it_asked_for() {
 // undo a working line override.
 static void test_an_unrelated_save_leaves_the_line_override_alone() {
     Configuration c;
-    c.driver.id      = "growatt_modbus";
+    c.driver.id      = "modbus_profile";
     c.serial.enabled = true;
     ConfigError e;
 
@@ -292,10 +292,10 @@ static void test_additional_devices_round_trip_through_a_patch() {
     TEST_ASSERT_TRUE(c.additionalDevices.empty());  // invisible on a single-inverter install
 
     TEST_ASSERT_TRUE(applyConfigPatch(
-        R"({"additional_devices":[{"driver_id":"growatt_modbus","options":{"unit_id":"2"}},)"
-        R"({"driver_id":"growatt_modbus","options":{"unit_id":"3"}}]})", c, e));
+        R"({"additional_devices":[{"driver_id":"modbus_profile","options":{"unit_id":"2"}},)"
+        R"({"driver_id":"modbus_profile","options":{"unit_id":"3"}}]})", c, e));
     TEST_ASSERT_EQUAL_UINT32(2, c.additionalDevices.size());
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus", c.additionalDevices[1].id.c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile", c.additionalDevices[1].id.c_str());
     TEST_ASSERT_EQUAL_STRING("3", c.additionalDevices[1].options["unit_id"].c_str());
 
     std::string json;
@@ -336,11 +336,11 @@ static void test_the_device_count_is_bounded() {
     Configuration c;
     ConfigError   e;
     for (size_t i = 0; i < kMaxDevices - 1; ++i) {
-        c.additionalDevices.push_back(test::configuredDevice("growatt_modbus"));
+        c.additionalDevices.push_back(test::configuredDevice("modbus_profile"));
     }
     TEST_ASSERT_TRUE(validate(c, e));  // driver + kMaxDevices-1 == the cap
 
-    c.additionalDevices.push_back(test::configuredDevice("growatt_modbus"));
+    c.additionalDevices.push_back(test::configuredDevice("modbus_profile"));
     TEST_ASSERT_FALSE(validate(c, e));
     TEST_ASSERT_EQUAL_STRING("additional_devices", e.field.c_str());
 }
@@ -366,12 +366,12 @@ static void test_adding_a_device_requires_a_reboot() {
 // overwrote each other into one set of Home Assistant entities.
 static void test_devices_on_one_bus_get_distinct_ids_without_a_serial() {
     DeviceIdentity a;
-    a.driverId    = "growatt_modbus";
+    a.driverId    = "modbus_profile";
     a.instanceKey = "1";
     DeviceIdentity b = a;
     b.instanceKey    = "2";
 
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus-1", a.deviceId().c_str());
+    TEST_ASSERT_EQUAL_STRING("modbus_profile-1", a.deviceId().c_str());
     TEST_ASSERT_TRUE(a.deviceId() != b.deviceId());
 }
 
@@ -399,12 +399,12 @@ static void test_a_lone_device_without_either_keeps_the_bare_driver_id() {
 // depends on; an earlier version treated a null return as the collision signal and it never came.
 static void test_re_adding_an_id_returns_the_same_store_rather_than_failing() {
     DeviceManager devices;
-    StateStore*   first = devices.add("growatt_modbus-1");
+    StateStore*   first = devices.add("modbus_profile-1");
     TEST_ASSERT_NOT_NULL(first);
-    TEST_ASSERT_EQUAL_PTR(first, devices.add("growatt_modbus-1"));
+    TEST_ASSERT_EQUAL_PTR(first, devices.add("modbus_profile-1"));
     TEST_ASSERT_EQUAL_UINT32(1, devices.size());
-    TEST_ASSERT_TRUE(devices.contains("growatt_modbus-1"));
-    TEST_ASSERT_FALSE(devices.contains("growatt_modbus-2"));
+    TEST_ASSERT_TRUE(devices.contains("modbus_profile-1"));
+    TEST_ASSERT_FALSE(devices.contains("modbus_profile-2"));
 }
 
 static void test_the_device_manager_refuses_past_its_cap() {
@@ -562,13 +562,13 @@ static void test_an_empty_fleet_reports_no_readings_rather_than_zero() {
 
 static void test_the_status_payload_totals_every_polled_device() {
     const auto a = rest::summariseDevice(fakeDevice(true, true, false, 1200.0, 5.0, g_now - 2000),
-                                         "growatt_modbus-1", g_now);
+                                         "modbus_profile-1", g_now);
     const auto b = rest::summariseDevice(fakeDevice(true, true, false, 800.0, 3.5, g_now - 1000),
-                                         "growatt_modbus-2", g_now);
+                                         "modbus_profile-2", g_now);
     const auto doc = statusOf({a, b});
 
     TEST_ASSERT_EQUAL_UINT32(2, doc["devices"].size());
-    TEST_ASSERT_EQUAL_STRING("growatt_modbus-2", doc["devices"][1]["id"]);
+    TEST_ASSERT_EQUAL_STRING("modbus_profile-2", doc["devices"][1]["id"]);
     TEST_ASSERT_EQUAL_DOUBLE(2000.0, doc["totals"]["ac_power_w"].as<double>());
     TEST_ASSERT_EQUAL_DOUBLE(8.5, doc["totals"]["energy_today_kwh"].as<double>());
     TEST_ASSERT_EQUAL_UINT32(2, doc["totals"]["devices_answering"].as<uint32_t>());
@@ -581,10 +581,10 @@ static void test_the_status_payload_totals_every_polled_device() {
 // indistinguishable from a sum over three that had a bad afternoon.
 static void test_a_device_that_reports_nothing_does_not_count_towards_a_total() {
     const auto live = rest::summariseDevice(
-        fakeDevice(true, true, false, 1200.0, 5.0, g_now - 2000), "growatt_modbus-1", g_now);
+        fakeDevice(true, true, false, 1200.0, 5.0, g_now - 2000), "modbus_profile-1", g_now);
     // Started, never returned a byte: every channel declared, none valid.
     const auto dead = rest::summariseDevice(fakeDevice(false, false, false, 0.0, 0.0, 0),
-                                            "growatt_modbus-2", g_now);
+                                            "modbus_profile-2", g_now);
     const auto doc = statusOf({live, dead});
 
     // 1200, not 1200 + a fabricated 0.
@@ -605,7 +605,7 @@ static void test_a_device_that_reports_nothing_does_not_count_towards_a_total() 
 // in the same neutral grey as a healthy afternoon.
 static void test_a_stale_reading_leaves_the_total_and_the_device_is_not_answering() {
     const auto stale = rest::summariseDevice(
-        fakeDevice(true, true, true, 900.0, 4.0, g_now - 60000), "growatt_modbus-1", g_now);
+        fakeDevice(true, true, true, 900.0, 4.0, g_now - 60000), "modbus_profile-1", g_now);
     const auto doc = statusOf({stale});
 
     TEST_ASSERT_TRUE(doc["totals"]["ac_power_w"].isNull());
@@ -637,7 +637,7 @@ static void test_the_night_state_reports_no_production() {
     const Measurement* m = s.measurements.find(measurement_id::kAcPowerTotal);
     TEST_ASSERT_TRUE(m != nullptr && m->valid && m->stale);
 
-    const auto doc = statusOf({rest::summariseDevice(s, "growatt_modbus-1", g_now + 120000)});
+    const auto doc = statusOf({rest::summariseDevice(s, "modbus_profile-1", g_now + 120000)});
     TEST_ASSERT_TRUE(doc["totals"]["ac_power_w"].isNull());
     TEST_ASSERT_EQUAL_UINT32(0, doc["totals"]["ac_power_devices"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(0, doc["totals"]["devices_answering"].as<uint32_t>());
@@ -661,12 +661,12 @@ static void test_a_full_bus_of_summaries_still_fits() {
     for (size_t i = 0; i < kMaxDevices; ++i) {
         fleet.push_back(rest::summariseDevice(
             fakeDevice(true, true, false, 1234.5, 6.78, g_now - 1000),
-            "growatt_modbus-" + std::to_string(i + 1), g_now));
+            "modbus_profile-" + std::to_string(i + 1), g_now));
     }
     Rig         r;
     const auto  state = r.poll();
     std::string json;
-    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "growatt_modbus-1", makeBridge(),
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "modbus_profile-1", makeBridge(),
                                               r.diagnostics.snapshot(),
                                               &eversolar::descriptor(), g_now, fleet, json));
     // LESS_THAN, not TRUE(<): on failure Unity prints both numbers, so the report says how
@@ -684,7 +684,7 @@ static void test_the_status_payload_reports_devices_that_did_not_start() {
     BridgeInfo bridge = makeBridge();
     bridge.devicesConfigured = 3;
     bridge.devicesStarted    = 2;
-    bridge.deviceProblems    = {"device 3 ('growatt_modbus') resolves to growatt_modbus-2, "
+    bridge.deviceProblems    = {"device 3 ('modbus_profile') resolves to modbus_profile-2, "
                                 "which another configured device already uses"};
 
     std::string json;
@@ -696,7 +696,7 @@ static void test_the_status_payload_reports_devices_that_did_not_start() {
     TEST_ASSERT_EQUAL_UINT32(2, doc["bridge"]["devices_started"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(1, doc["bridge"]["device_problems"].size());
     // The string has to name the configuration ROW, not just the driver: three inverters on
-    // one bus share a driver id, so "'growatt_modbus' could not be started" identifies none
+    // one bus share a driver id, so "'modbus_profile' could not be started" identifies none
     // of them. This asserts the shape the boot loop produces.
     TEST_ASSERT_TRUE(std::string(doc["bridge"]["device_problems"][0]).find("device 3") !=
                      std::string::npos);
@@ -724,7 +724,7 @@ static void test_a_device_payload_says_when_it_last_answered() {
     const auto state = r.poll();
 
     std::string json;
-    TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "growatt_modbus-2",
+    TEST_ASSERT_TRUE(rest::buildDevicePayload(state, "modbus_profile-2",
                                               &eversolar::descriptor(), 1, g_now + 45000, json));
     auto doc = parse(json);
     TEST_ASSERT_EQUAL_UINT32(45, doc["last_successful_poll_seconds_ago"].as<uint32_t>());
@@ -733,14 +733,14 @@ static void test_a_device_payload_says_when_it_last_answered() {
     // Never answered is its own state, not "0 seconds ago" -- that is a bus fault, and it must
     // not read as a device that replied a moment ago.
     DeviceState fresh;
-    TEST_ASSERT_TRUE(rest::buildDevicePayload(fresh, "growatt_modbus-3", nullptr, -1, g_now, json));
+    TEST_ASSERT_TRUE(rest::buildDevicePayload(fresh, "modbus_profile-3", nullptr, -1, g_now, json));
     TEST_ASSERT_TRUE(parse(json)["last_successful_poll_seconds_ago"].isNull());
 }
 
 static const DriverDescriptor& boundedUnitIdDescriptor() {
     static const DriverDescriptor d = [] {
         DriverDescriptor x;
-        x.id      = "growatt_modbus";
+        x.id      = "modbus_profile";
         x.options = {DriverOption{"unit_id", "Modbus unit id", "", "1", {}, 1, 247}};
         return x;
     }();
@@ -754,14 +754,14 @@ static const DriverDescriptor& boundedUnitIdDescriptor() {
 // shapes: only a value this request did NOT assert.
 static void test_a_stored_out_of_range_option_is_healed_not_fatal() {
     Configuration c;
-    c.driver.id                  = "growatt_modbus";
+    c.driver.id                  = "modbus_profile";
     c.driver.options["unit_id"]  = "300";  // legal before the bounds existed
     ConfigError e;
 
     // A locally declared descriptor rather than a real driver's: this suite runs on env:native,
     // where the drivers are compiled out, and the behaviour under test is the config layer's.
     const auto lookup = [](const std::string& id) -> const DriverDescriptor* {
-        return id == "growatt_modbus" ? &boundedUnitIdDescriptor() : nullptr;
+        return id == "modbus_profile" ? &boundedUnitIdDescriptor() : nullptr;
     };
     // A patch that touches nothing driver-related must still go through.
     TEST_ASSERT_TRUE(applyConfigPatch(R"({"logging":{"level":"debug"}})", c, e, lookup));
@@ -772,10 +772,10 @@ static void test_a_stored_out_of_range_option_is_healed_not_fatal() {
 // it would tell someone their typo had been accepted.
 static void test_an_asserted_out_of_range_option_is_left_for_the_caller() {
     Configuration c;
-    c.driver.id = "growatt_modbus";
+    c.driver.id = "modbus_profile";
     ConfigError e;
     const auto  lookup = [](const std::string& id) -> const DriverDescriptor* {
-        return id == "growatt_modbus" ? &boundedUnitIdDescriptor() : nullptr;
+        return id == "modbus_profile" ? &boundedUnitIdDescriptor() : nullptr;
     };
     TEST_ASSERT_TRUE(applyConfigPatch(R"({"driver":{"options":{"unit_id":"300"}}})", c, e, lookup));
     TEST_ASSERT_EQUAL_STRING("300", c.driver.options["unit_id"].c_str());
@@ -788,11 +788,11 @@ static void test_an_asserted_out_of_range_option_is_left_for_the_caller() {
 // made the whole configuration unsaveable with nothing naming the row.
 static void test_a_stored_out_of_range_extra_device_option_is_healed() {
     Configuration c;
-    c.driver.id = "growatt_modbus";
-    c.additionalDevices.push_back(test::configuredDevice("growatt_modbus", {{"unit_id", "300"}}));
+    c.driver.id = "modbus_profile";
+    c.additionalDevices.push_back(test::configuredDevice("modbus_profile", {{"unit_id", "300"}}));
     ConfigError e;
     const auto  lookup = [](const std::string& id) -> const DriverDescriptor* {
-        return id == "growatt_modbus" ? &boundedUnitIdDescriptor() : nullptr;
+        return id == "modbus_profile" ? &boundedUnitIdDescriptor() : nullptr;
     };
     TEST_ASSERT_TRUE(applyConfigPatch(R"({"logging":{"level":"debug"}})", c, e, lookup));
     TEST_ASSERT_EQUAL_STRING("1", c.additionalDevices[0].options["unit_id"].c_str());
@@ -1217,7 +1217,7 @@ static void test_a_typo_d_driver_id_destroys_no_options() {
 }
 
 // A declared key can hold a value the driver no longer accepts without anyone editing it -- a
-// firmware update that renames or drops a choice is enough, and the growatt `profile` option
+// firmware update that renames or drops a choice is enough, and the `profile` option
 // takes its allowed values from the generated profile list. validateDriverOptions then refuses
 // every later PATCH, including ones touching nothing driver-related: the same lockout as an
 // orphan, so it heals the same way, back to the declared default.
@@ -2481,12 +2481,12 @@ static void test_every_inverter_series_carries_its_device_label() {
     const auto a = r1.poll();
     const auto b = r2.poll();
     const auto text =
-        prometheus::buildMetrics({{"growatt_modbus-1", &a}, {"growatt_modbus-2", &b}},
+        prometheus::buildMetrics({{"modbus_profile-1", &a}, {"modbus_profile-2", &b}},
                                  makeBridge(), r1.diagnostics.snapshot());
 
-    TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts{device=\"growatt_modbus-1\"} "
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts{device=\"modbus_profile-1\"} "
                                "1842.000\n") != std::string::npos);
-    TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts{device=\"growatt_modbus-2\"} "
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_ac_power_watts{device=\"modbus_profile-2\"} "
                                "1842.000\n") != std::string::npos);
     // Bridge-wide series stay unlabelled: the counters live in one Diagnostics for the bus.
     TEST_ASSERT_TRUE(text.find("heliograph_uptime_seconds 86400\n") != std::string::npos);
@@ -2502,7 +2502,7 @@ static void test_help_and_type_appear_once_per_family_across_devices() {
     const auto a = r1.poll();
     const auto b = r2.poll();
     const auto text =
-        prometheus::buildMetrics({{"growatt_modbus-1", &a}, {"growatt_modbus-2", &b}},
+        prometheus::buildMetrics({{"modbus_profile-1", &a}, {"modbus_profile-2", &b}},
                                  makeBridge(), r1.diagnostics.snapshot());
 
     const std::string help = "# HELP heliograph_inverter_ac_power_watts";
