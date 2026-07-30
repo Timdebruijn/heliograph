@@ -16,6 +16,7 @@
 #include "outputs/json_util.h"
 #include "outputs/mqtt/announced_devices.h"
 #include "outputs/mqtt/home_assistant_discovery.h"
+#include "outputs/mqtt/mqtt_output.h"
 #include "outputs/mqtt/mqtt_payloads.h"
 #include "outputs/mqtt/mqtt_topics.h"
 #include "outputs/mqtt/publish_policy.h"
@@ -1157,6 +1158,24 @@ static void test_an_unchanged_line_up_forgets_nothing() {
 }
 
 
+/// The memory guard in front of every publish (audit F5). espMqttClient has this policy
+/// already but compares against max(internal, PSRAM), so on a board with 8 MB of idle PSRAM it
+/// never fires while the allocation itself comes from internal SRAM. This predicate is that
+/// same 16 KB intent, measured on the pool that actually pays.
+static void test_publish_memory_guard() {
+    // Comfortable: the figure a healthy 6CH reports for this exact call -- 90 100 B, measured
+    // 2026-07-30 via max_alloc_heap_bytes, which main.cpp fills from ESP.getMaxAllocHeap().
+    TEST_ASSERT_FALSE(refusePublishForMemory(90100));
+    // The threshold is a floor, not a target: at exactly the floor there is still room.
+    TEST_ASSERT_FALSE(refusePublishForMemory(kMinFreeBlockBytes));
+    TEST_ASSERT_TRUE(refusePublishForMemory(kMinFreeBlockBytes - 1));
+    // The case this exists for: PSRAM would report megabytes free, internal SRAM is nearly
+    // gone. Only the internal figure reaches this function, so the answer is refuse.
+    TEST_ASSERT_TRUE(refusePublishForMemory(4096));
+    TEST_ASSERT_TRUE(refusePublishForMemory(0));
+}
+
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_every_announceable_measurement_is_clearable);
@@ -1223,5 +1242,6 @@ int main(int, char**) {
     RUN_TEST(test_forced_refresh_after_the_interval);
     RUN_TEST(test_a_new_channel_publishes);
     RUN_TEST(test_reset_forces_the_next_publish);
+    RUN_TEST(test_publish_memory_guard);
     return UNITY_END();
 }

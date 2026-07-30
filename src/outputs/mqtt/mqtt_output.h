@@ -203,4 +203,36 @@ private:
 
 inline constexpr uint32_t kMaxReconnectDelayMs = 60000;
 
+/// Largest contiguous internal block below which this output stops handing work to the MQTT
+/// client. Matches espMqttClient's own EMC_MIN_FREE_MEMORY deliberately: the intent is the
+/// library's, only the pool is different -- see refusePublishForMemory.
+inline constexpr uint32_t kMinFreeBlockBytes = 16384;
+
+/// Whether a publish must be refused because internal memory is too low to risk it.
+///
+/// espMqttClient already refuses a PUBLISH when memory is short: Packets/Packet.cpp calls
+/// _allocate(len, check=true), which bails below EMC_MIN_FREE_MEMORY (16384). The problem is
+/// WHICH memory it looks at. EMC_GET_FREE_MEMORY() is a hard #define -- no #ifndef, so a build
+/// flag cannot reach it -- reading std::max(ESP.getMaxAllocHeap(), ESP.getMaxAllocPsram()). A
+/// publish is ~100-200 bytes, far under SPIRAM_MALLOC_ALWAYSINTERNAL (4096), so malloc serves
+/// it from INTERNAL SRAM; but on a board with 8 MB of mostly-idle PSRAM that max() reports
+/// megabytes and the guard never fires. The board with NO PSRAM is therefore the only one where
+/// the library's own safety net works, and the two with more memory are the ones that can
+/// exhaust internal SRAM with the failure counter reading zero throughout (audit F5,
+/// docs/audit-2026-07-29.md).
+///
+/// This applies the same 16 KB intent to the pool the allocation actually comes from, on every
+/// variant, without forking the dependency. Pure, and takes the figure as an argument, so the
+/// decision is host-tested; only the caller reaches for ESP.getMaxAllocHeap().
+///
+/// The trade-off, stated because it is real: under transient pressure from something else -- a
+/// dashboard reload storm measured at a 93 KB dip on the 6CH -- publishes are refused rather
+/// than queued. Measurements self-heal, because every poll cycle republishes them. A one-shot
+/// discovery message does not, and waits for the next re-announce. Accepted: at this threshold
+/// the alternative is risking the allocation that takes the device down, and a refusal is
+/// counted where an exhaustion is silent.
+inline bool refusePublishForMemory(uint32_t largestFreeBlockBytes) {
+    return largestFreeBlockBytes < kMinFreeBlockBytes;
+}
+
 }  // namespace heliograph::mqtt

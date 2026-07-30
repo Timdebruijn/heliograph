@@ -36,8 +36,14 @@ espMqttClient g_client;
 ///
 /// Returns the same bool the one careful call site already wanted, so forgetDevice keeps its
 /// existing semantics.
+///
+/// The memory check in front of it is the library's own policy applied to the right pool --
+/// refusePublishForMemory() in the header carries the whole argument. Counted through the same
+/// path as a client refusal: to anything watching, both mean "this message never left", which
+/// is the question mqtt_publish_failure_total answers.
 bool MqttOutput::publishTracked(const char* topic, uint8_t qos, bool retain, const char* payload) {
-    if (g_client.publish(topic, qos, retain, payload) != 0) {
+    if (!refusePublishForMemory(ESP.getMaxAllocHeap()) &&
+        g_client.publish(topic, qos, retain, payload) != 0) {
         return true;
     }
     if (diagnostics_ != nullptr) {
