@@ -24,6 +24,25 @@ namespace heliograph::profile {
 
 enum class RegSpace : uint8_t { Input, Holding };
 
+/// How far a register map has been proven. Deliberately the same rungs as DriverSupportLevel:
+/// "how much should I trust this" has one answer shape, whether it is asked about code or about
+/// a table. Kept a separate type because a profile is not a driver -- conflating them is exactly
+/// the mistake this field exists to prevent.
+enum class ProfileStatus : uint8_t {
+    /// Transcribed from a vendor document or a mature open-source map. Never met the device.
+    Experimental,
+    /// Confirmed against real hardware, not yet run long enough to trust unattended.
+    Beta,
+    /// Validated and soak-tested.
+    Stable,
+    /// Superseded or known wrong. Kept so a stored configuration still resolves to something
+    /// rather than silently falling back to another family's map.
+    Deprecated,
+};
+
+/// "experimental" / "beta" / "stable" / "deprecated". Stable strings: they reach REST clients.
+const char* profileStatusName(ProfileStatus status);
+
 /// One register (or register pair) and the canonical measurement it feeds.
 struct RegisterMapping {
     const char*     measurementId;
@@ -141,6 +160,17 @@ struct DeviceProfile {
     /// Overrides the driver descriptor's generic candidates once discovery consumes it.
     bool          hasSerial = false;
     SerialProfile serial{};
+
+    /// How far THIS MAP has been proven, which is not the same question as how far the driver
+    /// has been proven. One driver reads every table here, so its DriverSupportLevel can only
+    /// ever describe the least-proven profile in the build. Without a per-profile answer, the
+    /// first map confirmed on hardware would promote the driver and silently carry every
+    /// unconfirmed map up with it -- a Huawei table that has never met a Huawei, wearing the
+    /// same "beta" badge as one somebody actually watched all day.
+    ///
+    /// Defaults to Experimental, the lowest rung, so a profile that forgets to declare it
+    /// understates what we know rather than overstating it.
+    ProfileStatus status = ProfileStatus::Experimental;
 };
 
 /// Looks up a profile by its stable id (e.g. "sph"). Returns nullptr when unknown, so a

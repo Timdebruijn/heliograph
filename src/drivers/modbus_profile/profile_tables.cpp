@@ -7,6 +7,16 @@
 
 namespace heliograph::profile {
 
+const char* profileStatusName(ProfileStatus status) {
+    switch (status) {
+        case ProfileStatus::Experimental: return "experimental";
+        case ProfileStatus::Beta:         return "beta";
+        case ProfileStatus::Stable:       return "stable";
+        case ProfileStatus::Deprecated:   return "deprecated";
+    }
+    return "unknown";
+}
+
 bool findRegister(const BlockData* blocks, size_t blockCount, RegSpace space, uint16_t address,
                   uint16_t& out) {
     for (size_t i = 0; i < blockCount; ++i) {

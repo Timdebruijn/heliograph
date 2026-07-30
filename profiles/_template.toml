@@ -19,6 +19,14 @@ driver = "modbus_profile"      # which driver consumes this profile (see schema.
 id = "my_device"               # stable lowercase id; users select it via the `profile` option
 display_name = "Vendor Model (power range)"
 manufacturer = "Vendor"        # the brand; one driver serves them all, so only this says which
+
+# How far THIS MAP has been proven -- never inherited from the driver, which serves every
+# profile and can only describe the least-proven one. Leave it at "experimental" until somebody
+# has checked the readings against the device's own display at the same moment and said so on
+# the issue tracker. Two written sources agreeing is not a device confirming.
+#   experimental | beta | stable | deprecated   (see docs/device-profiles/schema.md#status)
+status = "experimental"
+
 default = false                # exactly ONE profile per driver has `default = true`
 phases = 1                     # AC phases: 1 or 3
 mppts = 2                      # MPPT/string inputs: 0-8

@@ -49,6 +49,11 @@ driver = "modbus_profile"
 id = "deye_sun_xk_sg"
 display_name = "Deye/Sunsynk SUN-xK-SG hybrid (single phase)"
 manufacturer = "Deye"
+
+# How far this MAP is proven -- its own property, never inherited from the driver.
+# Two independent implementations agree on every mapped row, and no Deye has ever answered
+# this map. Agreement between readers is not confirmation from a device.
+status = "experimental"
 default = false        # sph.toml holds the driver default
 phases = 1
 mppts = 2

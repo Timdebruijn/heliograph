@@ -5,20 +5,23 @@ hand** — run the tool instead. `tools/check_layering.sh` fails if this file is
 
 What a tick means: the profile maps that channel, so the firmware publishes it when the
 device answers. It does **not** mean anybody has seen it against real hardware — see
-[Verification](#verification), where every profile currently sits at the same level.
+[Verification](#verification). The **Status** column is that second question, answered
+per profile: it is the map's own `status`, declared in its TOML, and never inherited
+from the driver that reads it. One driver serves every table here, so promoting the
+driver must not promote a map nobody has confirmed.
 
 ## Read coverage
 
-| Profile | Vendor | AC W | AC V | AC A | Hz | PV W | PV1 V/A | PV2 V/A | E day | E tot | Temp | Bat % | Bat W | Bat V | Bat °C | Load W |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `deye_sun_xk_sg` | Deye | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ | ✔ | · |
-| `goodwe_et_hybrid` | GoodWe | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | · |
-| `mic_tl_x` | Growatt | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | · | · | · | · | · |
-| `min_tl_x` | Growatt | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | · | · | · |
-| `sph` | Growatt | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | ✔ | · |
-| `huawei_sun2000` | Huawei | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | · |
-| `solis_rhi_hybrid` | Solis | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ |
-| `sungrow_sh_hybrid` | Sungrow | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Profile | Vendor | Status | AC W | AC V | AC A | Hz | PV W | PV1 V/A | PV2 V/A | E day | E tot | Temp | Bat % | Bat W | Bat V | Bat °C | Load W |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `deye_sun_xk_sg` | Deye | experimental | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ | ✔ | · |
+| `goodwe_et_hybrid` | GoodWe | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | · |
+| `mic_tl_x` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | · | · | · | · | · |
+| `min_tl_x` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | · | · | · |
+| `sph` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | ✔ | · |
+| `huawei_sun2000` | Huawei | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | · |
+| `solis_rhi_hybrid` | Solis | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ |
+| `sungrow_sh_hybrid` | Sungrow | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 
 `·` means the profile does not map it. That is usually deliberate and always explained in
 the profile's own comments — see [Why a channel is missing](#why-a-channel-is-missing).

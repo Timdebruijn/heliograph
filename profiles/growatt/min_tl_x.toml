@@ -38,6 +38,10 @@ driver = "modbus_profile"
 id = "min_tl_x"
 display_name = "Growatt MIN TL-X (2.5-6 kW)"
 manufacturer = "Growatt"
+
+# How far this MAP is proven -- its own property, never inherited from the driver.
+# Same lineage as the MIC map, same lack of a device.
+status = "experimental"
 default = false        # sph.toml holds the driver default
 phases = 1
 mppts = 2

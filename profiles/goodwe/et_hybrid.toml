@@ -34,6 +34,10 @@ driver = "modbus_profile"
 id = "goodwe_et_hybrid"
 display_name = "GoodWe ET/EH/BT/BH hybrid"
 manufacturer = "GoodWe"
+
+# How far this MAP is proven -- its own property, never inherited from the driver.
+# From a mature library; no ET/EH has answered this map.
+status = "experimental"
 default = false        # sph.toml holds the driver default
 phases = 1
 mppts = 2

@@ -21,6 +21,40 @@ std::vector<std::string> profileOptionValues() {
     return values;
 }
 
+/// The same list, as something worth reading: "Sungrow SH residential hybrid — Sungrow
+/// (experimental)". Parallel to profileOptionValues() and built in the same order, because the
+/// two are matched by index.
+///
+/// The status belongs here rather than on the driver badge. Picking a profile IS picking how
+/// far the register map has been proven, and the driver's badge cannot answer that -- it
+/// describes the least-proven map in the whole build. Somebody choosing a map that has never
+/// met the device it describes should be told so at the moment they choose it.
+std::vector<std::string> profileOptionLabels() {
+    std::vector<std::string> labels;
+    labels.reserve(profileCount() + 1);
+    labels.emplace_back("");  // the "— choose —" entry; the page supplies its own wording
+    for (size_t i = 0; i < profileCount(); ++i) {
+        const DeviceProfile& p = profileAt(i);
+        labels.emplace_back(std::string(p.displayName) + " — " + p.manufacturer + " (" +
+                            profileStatusName(p.status) + ")");
+    }
+    return labels;
+}
+
+/// Built as a named value rather than a positional initialiser: allowedLabels sits after the
+/// numeric bounds in DriverOption, where appending it left every other driver's descriptor
+/// untouched.
+DriverOption profileOption() {
+    DriverOption o{"profile", "Register-map profile",
+                   "Which register map to use (see profiles/). Empty = the default profile. "
+                   "The status shown per entry is how far THAT MAP has been proven -- not how "
+                   "far this driver has.",
+                   "",
+                   profileOptionValues()};
+    o.allowedLabels = profileOptionLabels();
+    return o;
+}
+
 }  // namespace
 
 const DriverDescriptor& descriptor() {
@@ -74,11 +108,7 @@ const DriverDescriptor& descriptor() {
                          "1",
                          {},
                          1, 247},
-            DriverOption{"profile", "Register-map profile",
-                         "Which register map to use (see profiles/). "
-                         "Empty = the default profile.",
-                         "",
-                         profileOptionValues()},
+            profileOption(),
         };
         return x;
     }();

@@ -28,11 +28,44 @@ Files whose name starts with `_` (like the template) are skipped.
 | `id` | string | yes | Stable lowercase identifier (`[a-z][a-z0-9_]*`), unique across all profiles. Users select it with the driver's `profile` option; treat it as API, never rename it. |
 | `display_name` | string | yes | Human-readable model name, e.g. `"Growatt SPH (3-6 kW)"`. Becomes the reported model identity. |
 | `manufacturer` | string | yes | The vendor, e.g. `"Growatt"`. One driver serves every brand, so the profile is the only thing that knows this; it is what Home Assistant shows as the device's maker. |
+| `status` | string | no (`"experimental"`) | How far **this map** has been proven: `experimental`, `beta`, `stable` or `deprecated`. See [Status](#status). |
 | `default` | bool | no (false) | Profile used when the `profile` option is unset. Exactly **one** profile per driver must set this. |
 | `phases` | int | yes | AC phases, 1–3. |
 | `mppts` | int | yes | MPPT/string inputs, 0–8. |
 | `battery` | bool | yes | `true` for hybrids with an attached battery; drives the `ReadBatteryState` capability and battery discovery entities. |
 | `transports` | array | no (`["rtu"]`) | Which transports the device family supports: `"rtu"` and/or `"tcp"`. Declaring `"tcp"` is schema-forward: the bridge has no Modbus TCP *client* transport yet, so a TCP-only profile cannot be polled today. |
+
+## Status
+
+The rungs mirror the driver support levels, because "how much should I trust this" has one
+answer shape whether it is asked about code or about a table:
+
+| | |
+|---|---|
+| `experimental` | Transcribed from a vendor document or a mature open-source map. Has never met the device. |
+| `beta` | Confirmed against real hardware, not yet run long enough to trust unattended. |
+| `stable` | Validated and soak-tested. |
+| `deprecated` | Superseded or known wrong. Kept so a stored configuration still resolves to something instead of silently falling back to another family's map. |
+
+**This is the profile's own property and is never inherited from the driver.** One driver reads
+every table here, so its `DriverSupportLevel` can only ever describe the least-proven profile in
+the build. Without a per-profile answer, the first map confirmed on hardware would promote the
+driver and carry every unconfirmed map up with it — a Huawei table that has never met a Huawei,
+wearing the same badge as one somebody watched all day. A test asserts that relationship rather
+than today's values, so it keeps holding after a promotion.
+
+The default is the **lowest** rung on purpose: a profile that forgets to declare a status must
+understate what we know, never overstate it. Declare it anyway — a default nobody reads is a
+default nobody revisits.
+
+What promotes a profile is a **register-by-register comparison against the device's own display,
+at the same moment**, reported on the issue tracker. Agreement between two written sources is
+not confirmation from a device; the word-order defect that cost six Sungrow rows a factor of
+65536 sat behind two agreeing sources.
+
+The status reaches the user: it is shown in the profile dropdown next to the model name, emitted
+as `allowed_labels` on the driver's `profile` option in `GET /api/v1/drivers`, and carried in
+the Status column of [the coverage matrix](../drivers/coverage.md).
 
 ## `[serial]` — optional
 

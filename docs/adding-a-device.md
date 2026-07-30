@@ -210,6 +210,11 @@ exactly like an inverter that does not report it.
 - [ ] `docs/` protocol notes updated if you learned something structural (register
       generations, quirks) — see `docs/growatt-sph-protocol.md` for the level of detail
       that has paid off.
+- [ ] `status` says what you actually did. A map you transcribed but never watched on a
+      device stays `experimental`, however good its sources are — two written sources
+      agreeing is not a device confirming, and the profile you are copying the format from
+      may be `experimental` for exactly that reason. Raise it to `beta` in the same PR only
+      when you checked the readings against the device's own display and can say so here.
 
 ## 5. Handshake protocols (codecs)
 

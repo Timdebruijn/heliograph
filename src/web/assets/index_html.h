@@ -878,7 +878,7 @@ function optionFields(drv,stored,prefix){
       return `<label for="${prefix}${esc(o.key)}">${esc(o.display_name)}</label>
         <select id="${prefix}${esc(o.key)}" data-opt="${esc(o.key)}" ${hasBlank?'data-mustpick="1"':''} onchange="gateForms()">
         ${(known?'':`<option value="${esc(cur)}" selected>${esc(cur)} — not recognised</option>`)}
-        ${o.allowed_values.map(v=>`<option value="${esc(v)}" ${v===cur&&!needs?'selected':''}>${v===''?'— choose —':esc(v)}</option>`).join('')}
+        ${o.allowed_values.map((v,i)=>`<option value="${esc(v)}" ${v===cur&&!needs?'selected':''}>${v===''?'— choose —':esc((o.allowed_labels&&o.allowed_labels[i])||v)}</option>`).join('')}
         </select>${hint}`;
     }
     const num=o.min_value!==undefined?` type="number" min="${esc(o.min_value)}" max="${esc(o.max_value)}"`:'';

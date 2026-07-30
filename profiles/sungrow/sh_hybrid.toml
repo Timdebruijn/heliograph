@@ -45,6 +45,11 @@ driver = "modbus_profile"
 id = "sungrow_sh_hybrid"
 display_name = "Sungrow SH residential hybrid"
 manufacturer = "Sungrow"
+
+# How far this MAP is proven -- its own property, never inherited from the driver.
+# Best-sourced map in the tree (vendor PDF + a widely deployed map) and still unproven --
+# the word-order defect found in review lived in exactly this profile.
+status = "experimental"
 default = false        # sph.toml holds the driver default
 phases = 1
 mppts = 2

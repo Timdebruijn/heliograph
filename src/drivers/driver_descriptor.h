@@ -49,6 +49,21 @@ struct DriverOption {
     long minValue = 0;
     long maxValue = 0;
 
+    /// What to SHOW for each allowed value, when the stored value is not something to put in
+    /// front of a person. Either empty, or exactly as long as allowedValues -- a partial list
+    /// would let labels slide against their values, so the REST layer emits it only when the
+    /// lengths agree.
+    ///
+    /// Exists because `profile` stores an id like "huawei_sun2000", while the choice being made
+    /// is which vendor's register map to trust and how far it has been proven. Neither is
+    /// legible in the id, and the driver's support level cannot supply it: one driver serves
+    /// every profile here, so its badge describes the least-proven map in the build and says
+    /// nothing about the one being picked.
+    ///
+    /// Declared last, and defaulted, so the hand-written aggregate initialisers in every other
+    /// driver's descriptor stay valid.
+    std::vector<std::string> allowedLabels;
+
     bool isNumeric() const { return minValue != 0 || maxValue != 0; }
 };
 

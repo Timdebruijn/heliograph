@@ -1616,6 +1616,65 @@ static void test_the_declared_word_order_is_consistent_within_each_family() {
     }
 }
 
+// A profile's status is its own, and cannot be inherited from the driver that reads it.
+//
+// This is the whole point of the field. One driver serves every table here, so the day the
+// first map is confirmed on hardware and modbus_profile is promoted to Beta, nothing may carry
+// the unconfirmed maps up with it. The assertion is deliberately about the RELATIONSHIP, not
+// about today's values: it keeps holding after somebody promotes the driver.
+static void test_promoting_the_driver_cannot_promote_a_profile() {
+    // Every compiled-in profile answers for itself. None is confirmed against hardware today,
+    // and the driver's own badge is the floor rather than the verdict.
+    TEST_ASSERT_EQUAL(DriverSupportLevel::Experimental, descriptor().supportLevel);
+    for (size_t i = 0; i < profileCount(); ++i) {
+        const DeviceProfile& p = profileAt(i);
+        TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(ProfileStatus::Experimental),
+                                  static_cast<int>(p.status), p.id);
+    }
+
+    // And the status travels with the PROFILE: a copy carrying a different status keeps it,
+    // which is what makes promoting one map independent of promoting another.
+    DeviceProfile promoted = *findProfile("mic_tl_x");
+    promoted.status        = ProfileStatus::Stable;
+    TEST_ASSERT_EQUAL(static_cast<int>(ProfileStatus::Stable), static_cast<int>(promoted.status));
+    TEST_ASSERT_EQUAL(static_cast<int>(ProfileStatus::Experimental),
+                      static_cast<int>(findProfile("mic_tl_x")->status));
+}
+
+// The names reach REST clients, so they are part of the interface rather than debug text.
+static void test_every_profile_status_has_a_stable_name() {
+    TEST_ASSERT_EQUAL_STRING("experimental", profileStatusName(ProfileStatus::Experimental));
+    TEST_ASSERT_EQUAL_STRING("beta", profileStatusName(ProfileStatus::Beta));
+    TEST_ASSERT_EQUAL_STRING("stable", profileStatusName(ProfileStatus::Stable));
+    TEST_ASSERT_EQUAL_STRING("deprecated", profileStatusName(ProfileStatus::Deprecated));
+}
+
+// The dropdown pairs labels with values by INDEX, so a length mismatch would not fail loudly --
+// it would relabel every entry after the gap, and the page would still render. Somebody would
+// pick a map they were never shown.
+static void test_the_profile_option_labels_line_up_with_their_values() {
+    const DriverOption* option = descriptor().findOption("profile");
+    TEST_ASSERT_NOT_NULL(option);
+    TEST_ASSERT_EQUAL(option->allowedValues.size(), option->allowedLabels.size());
+    TEST_ASSERT_EQUAL(profileCount() + 1, option->allowedValues.size());
+
+    // Entry 0 is the "unset means the default map" slot and carries no label of its own.
+    TEST_ASSERT_TRUE(option->allowedValues[0].empty());
+
+    for (size_t i = 0; i < profileCount(); ++i) {
+        const DeviceProfile& p     = profileAt(i);
+        const std::string&   value = option->allowedValues[i + 1];
+        const std::string&   label = option->allowedLabels[i + 1];
+        TEST_ASSERT_EQUAL_STRING(p.id, value.c_str());
+        // The label must describe THIS profile: its model, its brand, and how far its map has
+        // been proven. A label naming the neighbouring profile is the failure mode.
+        TEST_ASSERT_TRUE_MESSAGE(label.find(p.displayName) != std::string::npos, p.id);
+        TEST_ASSERT_TRUE_MESSAGE(label.find(p.manufacturer) != std::string::npos, p.id);
+        TEST_ASSERT_TRUE_MESSAGE(label.find(profileStatusName(p.status)) != std::string::npos,
+                                 p.id);
+    }
+}
+
 static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     MockTransport transport;
     echoWrites(transport);
@@ -1939,6 +1998,9 @@ int main(int, char**) {
     RUN_TEST(test_the_goodwe_profile_holds_back_the_unsourced_channels);
     RUN_TEST(test_the_mic_and_min_profiles_share_a_layout_and_differ_in_strings);
     RUN_TEST(test_the_declared_word_order_is_consistent_within_each_family);
+    RUN_TEST(test_promoting_the_driver_cannot_promote_a_profile);
+    RUN_TEST(test_every_profile_status_has_a_stable_name);
+    RUN_TEST(test_the_profile_option_labels_line_up_with_their_values);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);

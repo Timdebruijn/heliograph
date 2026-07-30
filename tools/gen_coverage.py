@@ -83,18 +83,31 @@ def render(profiles: list[dict]) -> str:
         "device answers. It does **not** mean anybody has seen it against real hardware — see"
     )
     w(
-        "[Verification](#verification), where every profile currently sits at the same level."
+        "[Verification](#verification). The **Status** column is that second question, answered"
     )
+    w(
+        "per profile: it is the map's own `status`, declared in its TOML, and never inherited"
+    )
+    w(
+        "from the driver that reads it. One driver serves every table here, so promoting the"
+    )
+    w("driver must not promote a map nobody has confirmed.")
     w("")
 
     w("## Read coverage")
     w("")
-    w("| Profile | Vendor | " + " | ".join(c[0] for c in COLUMNS) + " |")
-    w("|---|---|" + "---|" * len(COLUMNS))
+    w("| Profile | Vendor | Status | " + " | ".join(c[0] for c in COLUMNS) + " |")
+    w("|---|---|---|" + "---|" * len(COLUMNS))
     for p in profiles:
         mapped = {r["measurement"] for r in p["registers"]}
         cells = ["✔" if mid in mapped else "·" for _, mid in COLUMNS]
-        w(f"| `{p['id']}` | {p['manufacturer']} | " + " | ".join(cells) + " |")
+        # How far the MAP is proven, read straight from the profile. Column count and ticks say
+        # how much a profile claims; this column says how much of that claim has been tested.
+        w(
+            f"| `{p['id']}` | {p['manufacturer']} | {p['status']} | "
+            + " | ".join(cells)
+            + " |"
+        )
     w("")
     w(
         "`·` means the profile does not map it. That is usually deliberate and always explained in"

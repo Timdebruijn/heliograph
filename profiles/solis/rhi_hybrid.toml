@@ -33,6 +33,10 @@ driver = "modbus_profile"
 id = "solis_rhi_hybrid"
 display_name = "Solis RHI hybrid (3-6 kW, single phase)"
 manufacturer = "Solis"
+
+# How far this MAP is proven -- its own property, never inherited from the driver.
+# Two implementations agree; no RHI has answered this map.
+status = "experimental"
 default = false        # sph.toml holds the driver default
 phases = 1
 mppts = 2

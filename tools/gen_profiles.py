@@ -98,6 +98,21 @@ WORD_ORDERS = {"high_first": "false", "low_first": "true"}
 
 PARITIES = {"none": "None", "even": "Even", "odd": "Odd"}
 
+# How far a register MAP has been proven, mapping to ProfileStatus in profile_tables.h. The
+# rungs deliberately mirror DriverSupportLevel: the question "how much should I trust this"
+# has one answer shape, whether it is asked about code or about a table.
+#
+#   experimental  transcribed from documentation or a community map; never met the device
+#   beta          confirmed against real hardware, not yet run long enough to trust unattended
+#   stable        validated and soak-tested
+#   deprecated    superseded or known wrong; kept so stored configs still resolve
+PROFILE_STATUSES = {
+    "experimental": "Experimental",
+    "beta": "Beta",
+    "stable": "Stable",
+    "deprecated": "Deprecated",
+}
+
 # Commands that are not numeric setpoints (no value, no min/max) and therefore cannot be
 # expressed as a [[write]] register row. They need driver-level semantics (what value means
 # "start"?) — a schema extension when a first device requires one, not a guess now.
@@ -228,6 +243,20 @@ def parse_profile(
         raise ProfileError(f"{where}: mppts must be 0-8, got {mppts}")
     battery = _require(meta, "battery", bool, f"{where} [profile]")
     default = bool(meta.get("default", False))
+
+    # How far this MAP has been proven -- a property of the register table, not of the driver
+    # that reads it. The driver is one piece of code serving every vendor here, so its own
+    # support level can only ever describe the least-proven profile in the build. Left that way,
+    # the first profile confirmed on hardware would promote the driver and carry every
+    # unconfirmed map up with it: a Huawei table that has never met a Huawei, labelled beta.
+    #
+    # Optional, defaulting to the LOWEST rung on purpose. A forgotten field must understate what
+    # we know, never overstate it.
+    status = meta.get("status", "experimental")
+    if status not in PROFILE_STATUSES:
+        raise ProfileError(
+            f"{where}: status must be one of {sorted(PROFILE_STATUSES)}, got {status!r}"
+        )
 
     transports = meta.get("transports", ["rtu"])
     if (
@@ -622,6 +651,7 @@ def parse_profile(
         "id": pid,
         "display_name": display,
         "manufacturer": manufacturer,
+        "status": status,
         "default": default,
         "phases": phases,
         "mppts": mppts,
@@ -786,15 +816,17 @@ def generate(
             f"     /*supportsRtu=*/{rtu}, /*supportsTcp=*/{tcp}, "
             f"/*tcpPort=*/{p['tcp_port']},"
         )
+        status = f"ProfileStatus::{PROFILE_STATUSES[p['status']]}"
         if p["serial"]:
             s = p["serial"]
             w("     /*hasSerial=*/true,")
             w(
                 f"     SerialProfile{{{s['baud']}, SerialParity::{PARITIES[s['parity']]}, "
-                f"8, {s['stop_bits']}, 1000, 3}}}},"
+                f"8, {s['stop_bits']}, 1000, 3}},"
             )
         else:
-            w("     /*hasSerial=*/false, SerialProfile{}},")
+            w("     /*hasSerial=*/false, SerialProfile{},")
+        w(f"     {status}}},")
     w("};")
     w("")
     w("}  // namespace")
