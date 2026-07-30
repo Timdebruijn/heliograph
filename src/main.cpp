@@ -332,9 +332,50 @@ namespace {
 // directions on hardware, one character apart. The struct shipped in 0.24.2 was already
 // written without that mistake, so nothing about what a bridge reports changes here; a
 // compile-time check now exists so the mistake cannot return unnoticed.
+// 0.25.0 makes a register map a data file. Six new inverter families answer this bridge, and
+// not one of them needed a line of C++.
+//
+// SIX NEW FAMILIES, five of them from makers this bridge had never spoken to. They are not
+// named here -- brand knowledge belongs in src/drivers/ and the rule holds for comments too;
+// docs/drivers/coverage.md is the list. Every register traces to a named source: a vendor
+// protocol document, or two mature open-source implementations that agree. Where the sources
+// disagreed the row was dropped and the conflict written down rather than settled by picking a
+// favourite, so several channels are deliberately absent. A battery power whose direction
+// nobody states is worse mapped than missing.
+//
+// THE DRIVER LOST ITS BRAND. One driver now serves seven manufacturers and cannot honestly be
+// named after one of them, so it is `modbus_profile`. Stored configurations migrate themselves
+// on first boot, including every extra device on a shared bus, and a restored backup takes the
+// same path. Nobody has to retype anything.
+//
+// FOUR SCHEMA FEATURES, EACH FORCED BY ONE REAL REGISTER, none added because it seemed useful:
+// a scaling `offset`, for a vendor that stores temperature biased so it never goes negative on
+// the wire; a negative `scale`, for a vendor that states the opposite battery sign convention
+// to ours; `word_order`, for families that put the low half of a 32-bit value at the lower
+// address; and `invalid` sentinels, for devices that answer an unreadable channel with 0xFFFF
+// rather than an error -- without which an inverter asleep at night reports 3276.7 degrees.
+//
+// EVERY MAP SAYS HOW FAR IT HAS BEEN PROVEN, and says it for itself. A profile carries its own
+// status, shown at the moment somebody picks it, because one driver reads all eight tables and
+// a driver-level badge can only ever describe the least-proven map in the build. Left that way,
+// the first map confirmed on hardware would have promoted every unconfirmed map with it.
+//
+// ALL EIGHT MAPS ARE EXPERIMENTAL, and that is not a formality. Each is transcribed from
+// documents; none has been confirmed against the device it describes. The one defect found in
+// review proves why the distinction matters: six rows of one map decoded with their halves swapped
+// -- a factor of 65536, four kilowatts of sun reported as 262 megawatts -- sitting behind two
+// sources that agreed with each other and a test written from the map it was meant to check.
+// Agreement between readers is not confirmation from a device. Check the readings against the
+// inverter's own display before trusting an energy total, and report back either way: a map
+// that turned out wrong is as useful to the next person as one that worked.
+//
+// NOTHING HERE CAN OPERATE AN INVERTER. Every setpoint these profiles record stays dormant --
+// unverified by construction, and two of them need a Modbus function this firmware does not
+// implement. A wrong map can report a wrong number; it cannot put a device into an untested
+// state.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 24
-#define HELIOGRAPH_VERSION_PATCH 3
+#define HELIOGRAPH_VERSION_MINOR 25
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
