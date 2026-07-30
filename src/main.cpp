@@ -485,11 +485,11 @@ void applySerialOverride() {
     }
 }
 
-// RTC-domain SRAM for the reset breadcrumbs. Sixteen bytes on purpose: the serial session
-// of 2026-07-29 (PR #147) measured that the full firmware's restart transition zeroes
-// bytes [16,116) of a larger struct here while the first sixteen survive -- cause still
-// unknown, bare sketches immune. This struct fits entirely inside the measured-surviving
-// window, CRC included; if the window ever shrinks, the CRC reads it as a cold start.
+// RTC-domain SRAM for the reset breadcrumbs. The type must stay trivially default
+// constructible or this object gets zeroed on every boot -- breadcrumbs.h explains why and
+// a static_assert there enforces it. Measured, in case someone reaches for one: a `{}` here
+// is harmless (constant initialisation, no startup write); it is an initialiser on a MEMBER
+// that generates the .init_array entry which defeats the whole point.
 RTC_NOINIT_ATTR breadcrumbs::Storage g_breadcrumbStore;
 static breadcrumbs::BootRecord       g_bootRecord;
 
