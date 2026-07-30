@@ -29,7 +29,10 @@ if [ "$marked" -gt 1 ]; then
     grep -rn 'LEGACY-CONFIG-ID' src/ --exclude-dir=drivers
     status=1
 fi
-if hits=$(grep -rniE 'eversolar|zeversolar|growatt|solax|deye|sunsynk|solis|goodwe' \
+# Keep this list in step with profiles/: two vendors were added to the tree while this grep
+# still listed only the older ones, so the rule it enforces had a hole exactly where the
+# newest brand knowledge was most likely to leak.
+if hits=$(grep -rniE 'eversolar|zeversolar|growatt|solax|deye|sunsynk|solis|goodwe|sungrow|huawei' \
         src/ --exclude-dir=drivers 2>/dev/null | grep -v 'LEGACY-CONFIG-ID'); then
     echo "FAIL: manufacturer names found outside src/drivers/:"
     echo "$hits"
