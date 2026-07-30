@@ -1,0 +1,338 @@
+# SPDX-License-Identifier: MIT
+#
+# Solis (Ginlong) RHI single-phase hybrid — Modbus RTU register profile.
+#
+# STATUS: every mapped row is corroborated by two INDEPENDENT implementations that agree on the
+# address, the width and the scale. NOT confirmed against a real inverter by this project.
+# See docs/solis-rhi-protocol.md for the comparison, what the two sources would not agree on,
+# and the bring-up checklist.
+#
+# SOURCES (read directly, not summarised):
+#   A. wills106/homeassistant-solax-modbus, custom_components/solax_modbus/plugin_solis.py
+#      Large multi-vendor Home Assistant integration; the Solis plugin covers the hybrid family
+#      and several string generations, tagged per entity with allowedtypes=HYBRID.
+#   B. StephanJoubert/home_assistant_solarman,
+#      custom_components/solarman/inverter_definitions/solis_hybrid.yaml
+#      Scoped in its own header to the RHI-(3-6)K-48ES-5G, and it cites the register document it
+#      was transcribed from.
+#
+# Independence checked rather than assumed: different projects, different authors, different
+# formats, and neither file is a generated copy of the other. (That check is not paranoia --
+# the Deye profile's would-be third source turned out to be a byte-identical copy of its second.)
+#
+# WORD ORDER: source B lists a 32-bit value's registers low-word-first (`registers: [33030,
+# 33029]`) because its parser shifts the FIRST entry by 0 -- so the HIGH word sits at the LOWER
+# address, which is the high-word-first convention this schema uses. Reading that list as an
+# address order would put every 32-bit value in this file out by a factor of 65536.
+#
+# REGISTER SPACE: input registers (function 04) for everything read here. The 43000 range is
+# holding (function 03) and is where the setpoints live.
+
+[profile]
+driver = "modbus_profile"
+id = "solis_rhi_hybrid"
+display_name = "Solis RHI hybrid (3-6 kW, single phase)"
+manufacturer = "Solis"
+default = false        # sph.toml holds the driver default
+phases = 1
+mppts = 2
+battery = true
+transports = ["rtu"]
+
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# ------------------------------------------------------------------------------------------
+# Read blocks. Three input blocks and one holding block, all wider than the rows mapped from
+# them so the bring-up TRACE dump can settle the open questions in one session.
+#
+# The third block deliberately reaches past the battery rows to include 33135, the charge
+# DIRECTION register. Nothing is mapped from it, and it is the single most important register to
+# watch during bring-up: see the note on battery power at the bottom.
+#
+# The holding block covers the two setpoints declared at the end of this file, so their current
+# values appear in the dump before anything ever considers writing to them.
+# ------------------------------------------------------------------------------------------
+
+[[block]]
+space = "input"
+start = 33029
+count = 30      # 33029-33058: lifetime + daily generation, PV1/PV2 V+I, total DC power
+
+[[block]]
+space = "input"
+start = 33073
+count = 30      # 33073-33102: AC voltage/current/power, temperature, frequency, status word
+
+[[block]]
+space = "input"
+start = 33133
+count = 40      # 33133-33172: battery, the direction register at 33135, battery energy totals
+
+[[block]]
+space = "holding"
+start = 43073
+count = 40      # 43073-43112: the export-limit and storage-mode setpoints, read for the dump
+
+# --- DC / PV side -------------------------------------------------------------------------
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 Voltage"
+space = "input"
+address = 33049
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.mppt_1.current"
+display_name = "PV1 Current"
+space = "input"
+address = 33050
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 Voltage"
+space = "input"
+address = 33051
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.mppt_2.current"
+display_name = "PV2 Current"
+space = "input"
+address = 33052
+type = "u16"
+scale = 0.1
+unit = "A"
+
+# Source A calls this "PV Total Power" and source B "Inverter DC Power"; same address, same
+# width, same scale. Unlike the Deye map this family DOES publish a whole-array figure, so it
+# needs no arithmetic.
+[[register]]                    # high confidence — both sources, identical
+measurement = "dc.power.total"
+display_name = "PV Power"
+space = "input"
+address = 33057
+type = "u32"
+scale = 1.0
+unit = "W"
+
+# Strings 3 and 4 (33053-33056) appear in source A and not in source B, whose file is scoped to
+# the two-tracker RHI. Left out for the same reason the Deye profile leaves out its third string:
+# right for a model this profile may not be describing is not the same as right.
+
+# --- AC side ------------------------------------------------------------------------------
+
+# Signed in both sources, which matters on a hybrid: it draws from the grid to charge, and
+# reading that unsigned would publish a 2 kW import as roughly 4.3 gigawatts on a 32-bit value.
+[[register]]                    # high confidence — both sources, both signed 32-bit
+measurement = "ac.power.total"
+display_name = "AC Power"
+space = "input"
+address = 33079
+type = "s32"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "ac.phase_l1.voltage"
+display_name = "Inverter Voltage"
+space = "input"
+address = 33073
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "ac.phase_l1.current"
+display_name = "Inverter Current"
+space = "input"
+address = 33076
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "ac.frequency"
+display_name = "Grid Frequency"
+space = "input"
+address = 33094
+type = "u16"
+scale = 0.01
+unit = "Hz"
+
+# --- Temperature --------------------------------------------------------------------------
+
+# Declared signed on source B's authority (its rule 2 is the signed 16-bit decoder); source A
+# leaves the type at its unsigned default. The two decode identically for every temperature a
+# working inverter reports, and s16 additionally survives a sub-zero morning on an outdoor unit
+# rather than reporting 6553 °C -- the same reasoning the MIC TL-X profile records.
+[[register]]                    # high confidence on address and scale; signedness from source B
+measurement = "inverter.temperature"
+display_name = "Inverter Temperature"
+space = "input"
+address = 33093
+type = "s16"
+scale = 0.1
+unit = "°C"
+
+# --- Energy -------------------------------------------------------------------------------
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "energy.today"
+display_name = "Energy Today"
+space = "input"
+address = 33035
+type = "u16"
+scale = 0.1
+unit = "kWh"
+
+[[register]]                    # high confidence — both sources (see the word-order note above)
+measurement = "energy.total"
+display_name = "Energy Total"
+space = "input"
+address = 33029
+type = "u32"
+scale = 1.0
+unit = "kWh"
+
+# --- Battery ------------------------------------------------------------------------------
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "battery.soc"
+display_name = "Battery SoC"
+space = "input"
+address = 33139
+type = "u16"
+scale = 1.0
+unit = "%"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "battery.voltage"
+display_name = "Battery Voltage"
+space = "input"
+address = 33133
+type = "u16"
+scale = 0.1
+unit = "V"
+
+# Lifetime counters, and unlike the instantaneous battery power below they carry no sign
+# ambiguity at all: each rail has its own register and only ever counts up.
+[[register]]                    # high confidence — both sources, identical
+measurement = "battery.energy_charged"
+display_name = "Battery Charged Total"
+space = "input"
+address = 33161
+type = "u32"
+scale = 1.0
+unit = "kWh"
+
+[[register]]                    # high confidence — both sources, identical
+measurement = "battery.energy_discharged"
+display_name = "Battery Discharged Total"
+space = "input"
+address = 33165
+type = "u32"
+scale = 1.0
+unit = "kWh"
+
+# ==============================================================================================
+# DELIBERATELY NOT MAPPED — full reasoning in docs/solis-rhi-protocol.md
+# ==============================================================================================
+#
+# battery.power (33149). Both sources agree it is a signed 32-bit value in watts at that address
+# -- and they do NOT agree on what to do with it, which is the interesting part. Source A refuses
+# to trust the sign: it derives charge versus discharge from register 33135 (the charge-direction
+# word, 0 = charging, 1 = discharging) and calls abs() on the magnitude. Source B publishes the
+# signed value directly. Code that works whether or not the register is genuinely signed tells us
+# its author did not know either.
+#
+# Our canonical battery.power is ONE signed channel, positive while charging. Deriving that here
+# needs the magnitude combined with a separate direction register, which is arithmetic across two
+# registers -- something a profile deliberately cannot express. So this is not a "settle it on the
+# bench" row like the Deye one: even with the convention known, this schema cannot say it. The
+# bench session should still record what 33149 and 33135 do together, because that decides whether
+# a future negate-on-read against a direction register is worth building.
+#
+# battery.current (33134). Signed 16-bit in both sources, direction unstated by either. Same trap
+# as the Deye map: a confidently inverted battery graph is worse than an absent one.
+#
+# House load (33147) and backup load (33148). Both sources carry them and agree. There is no
+# canonical id for a load channel yet -- see docs/device-profiles/canonical-measurements.md --
+# so mapping them needs a vocabulary addition first, not a register.
+#
+# grid.import_power / grid.export_power. The two sources disagree by a factor of a thousand on
+# the meter power registers: source B reads 33257 as watts at scale 1, source A reads the same
+# address as one of three per-phase values at scale 0.001. That is a conflict, not a rounding
+# difference, and picking a winner is exactly what the two-source rule exists to prevent. The
+# cumulative import/export ENERGY registers (33169/33173) agree, but our canonical grid channels
+# are instantaneous power, not energy.
+
+# ------------------------------------------------------------------------------------------
+# Writable setpoints — DECLARED, DORMANT, AND SINGLE-SOURCED.
+#
+# Both rows below come from source A only. Source B reads the storage mode's input-register
+# mirror at 33132 and never touches the 43000 range, so nothing corroborates either address, the
+# bounds, or the mode numbering. That is recorded here rather than smoothed over: the [[write]]
+# section exists to hold research that has been written down and reviewed, and `verified = false`
+# is what keeps it from being anything more.
+#
+# A second reason both stay dormant: which function code a Solis accepts for a write has not been
+# established from either source. This firmware sends FC06 only. Confirm that before the flag is
+# ever flipped -- an inverter that wants FC16 will refuse, and one that silently accepts a
+# malformed write is worse.
+# ------------------------------------------------------------------------------------------
+
+# Export ("backflow") limit. Bounds come from source A's own declared range, and they are real
+# numbers rather than a per-model runtime value -- which is what made the equivalent Deye row
+# unmappable. Raw units are hundreds of watts: raw 25 is 2500 W, hence scale 100 and step 100.
+[[write]]
+command = "set_export_limit_watts"
+display_name = "Export Limit"
+space = "holding"
+address = 43074
+type = "u16"
+scale = 100.0
+unit = "W"
+minimum = 0
+maximum = 9900
+step = 100
+verified = false
+
+# Storage mode. Thirteen complete register values, not a bitmask FIELD -- each option is written
+# as a whole 16-bit word, which is what this firmware's write path can do. The numbering is
+# clearly bit-composed (self-use, timed, backup and feed-in each contribute), and it is quoted
+# here exactly as source A lists it rather than reconstructed from that structure: a mode number
+# assembled by reasoning is precisely the kind of guess that lands a battery in a state nobody
+# has tested.
+[[write]]
+command = "set_battery_operating_mode"
+display_name = "Storage Mode"
+space = "holding"
+address = 43110
+type = "u16"
+verified = false
+options = [
+  { value = 1, label = "Self-Use - No Grid Charging" },
+  { value = 3, label = "Timed Charge/Discharge - No Grid Charging" },
+  { value = 17, label = "Backup/Reserve - No Grid Charging" },
+  { value = 33, label = "Self-Use - No Timed Charge/Discharge" },
+  { value = 35, label = "Self-Use" },
+  { value = 37, label = "Off-Grid Mode" },
+  { value = 41, label = "Battery Awaken" },
+  { value = 43, label = "Battery Awaken + Timed Charge/Discharge" },
+  { value = 49, label = "Backup/Reserve - No Timed Charge/Discharge" },
+  { value = 51, label = "Backup/Reserve" },
+  { value = 64, label = "Feed-in priority - No Grid Charging" },
+  { value = 96, label = "Feed-in priority - No Timed Charge/Discharge" },
+  { value = 98, label = "Feed-in priority" },
+]

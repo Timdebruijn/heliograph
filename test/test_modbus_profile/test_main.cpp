@@ -971,6 +971,148 @@ static void test_the_deye_mode_row_is_declared_and_refused_for_two_reasons() {
     TEST_ASSERT_TRUE(transport.writes.empty());
 }
 
+// --- the Solis RHI single-phase hybrid profile ---------------------------------------------
+
+namespace {
+/// The profile's four blocks: three input, one holding.
+void makeSolisBlocks(BlockData blocks[4]) {
+    blocks[0] = {RegSpace::Input, 33029, 30, {}};
+    blocks[1] = {RegSpace::Input, 33073, 30, {}};
+    blocks[2] = {RegSpace::Input, 33133, 40, {}};
+    blocks[3] = {RegSpace::Holding, 43073, 40, {}};
+}
+}  // namespace
+
+static void test_the_solis_profile_decodes_a_realistic_frame() {
+    BlockData blocks[4];
+    makeSolisBlocks(blocks);
+
+    // 32-bit values are high word first. Source B lists them low-word-first in its own notation,
+    // which is the one transcription mistake that would put every one of these out by 65536.
+    setReg(blocks[0], 33029, 0);
+    setReg(blocks[0], 33030, 8412);   // E-total   -> 8412 kWh
+    setReg(blocks[0], 33035, 214);    // E-today   -> 21.4 kWh
+    setReg(blocks[0], 33049, 3180);   // PV1 V     -> 318.0 V
+    setReg(blocks[0], 33050, 51);     // PV1 I     -> 5.1 A
+    setReg(blocks[0], 33051, 2960);   // PV2 V     -> 296.0 V
+    setReg(blocks[0], 33052, 44);     // PV2 I     -> 4.4 A
+    setReg(blocks[0], 33057, 0);
+    setReg(blocks[0], 33058, 2920);   // PV power  -> 2920 W
+    setReg(blocks[1], 33073, 2342);   // AC V      -> 234.2 V
+    setReg(blocks[1], 33076, 118);    // AC I      -> 11.8 A
+    setReg(blocks[1], 33079, 0);
+    setReg(blocks[1], 33080, 2760);   // AC power  -> 2760 W
+    setReg(blocks[1], 33093, 371);    // Temp      -> 37.1 °C
+    setReg(blocks[1], 33094, 4998);   // Freq      -> 49.98 Hz
+    setReg(blocks[2], 33133, 512);    // Batt V    -> 51.2 V
+    setReg(blocks[2], 33139, 64);     // Batt SoC  -> 64 %
+    setReg(blocks[2], 33161, 0);
+    setReg(blocks[2], 33162, 1840);   // charged   -> 1840 kWh
+    setReg(blocks[2], 33165, 0);
+    setReg(blocks[2], 33166, 1610);   // discharged-> 1610 kWh
+
+    MeasurementSet m;
+    applyProfile(*findProfile("solis_rhi_hybrid"), blocks, 4, m, 1000);
+
+    TEST_ASSERT_EQUAL_DOUBLE(8412.0, m.find(measurement_id::kEnergyTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(21.4, m.find(measurement_id::kEnergyToday)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(318.0, m.find(measurement_id::kDcMppt1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(5.1, m.find(measurement_id::kDcMppt1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(296.0, m.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(2920.0, m.find(measurement_id::kDcPowerTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(234.2, m.find(measurement_id::kAcL1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(11.8, m.find(measurement_id::kAcL1Current)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(2760.0, m.find(measurement_id::kAcPowerTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(37.1, m.find(measurement_id::kTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(49.98, m.find(measurement_id::kAcFrequency)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(51.2, m.find(measurement_id::kBatteryVoltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(64.0, m.find(measurement_id::kBatterySoc)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(1840.0, m.find(measurement_id::kBatteryEnergyCharged)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(1610.0, m.find(measurement_id::kBatteryEnergyDischarged)->value);
+}
+
+// Importing to charge the battery: AC power goes negative, and the s32 declaration is what keeps
+// that from becoming a 4.3 gigawatt reading.
+static void test_the_solis_ac_power_goes_negative_while_importing() {
+    BlockData blocks[4];
+    makeSolisBlocks(blocks);
+    setReg(blocks[1], 33079, 0xFFFF);
+    setReg(blocks[1], 33080, 0xF448);  // -3000
+
+    MeasurementSet m;
+    applyProfile(*findProfile("solis_rhi_hybrid"), blocks, 4, m, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(-3000.0, m.find(measurement_id::kAcPowerTotal)->value);
+}
+
+// The channels the two sources would not agree on. Pinned absent so none can drift back in
+// without somebody deciding to put it there.
+static void test_the_solis_profile_publishes_nothing_the_sources_disputed() {
+    BlockData blocks[4];
+    makeSolisBlocks(blocks);
+    setReg(blocks[2], 33134, 250);   // battery current -- signed, direction unstated
+    setReg(blocks[2], 33135, 1);     // charge direction: the register source A trusts instead
+    setReg(blocks[2], 33149, 0);
+    setReg(blocks[2], 33150, 1500);  // battery power -- magnitude or signed, sources differ
+    setReg(blocks[2], 33147, 900);   // house load -- no canonical id for it yet
+
+    MeasurementSet m;
+    applyProfile(*findProfile("solis_rhi_hybrid"), blocks, 4, m, 1000);
+
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryCurrent));
+    TEST_ASSERT_NULL(m.find(measurement_id::kGridImportPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kGridExportPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcMppt3Voltage));
+}
+
+// Both setpoints are declared and both are dormant. The export limit is a plain FC06 row, so
+// unlike the Deye mode row its only gate is `verified` -- which makes this the row that will go
+// live first if a bench session ever confirms it, and the one most worth pinning as OFF.
+static void test_the_solis_setpoints_are_declared_and_dormant() {
+    const DeviceProfile* p = findProfile("solis_rhi_hybrid");
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_EQUAL_UINT32(2, p->writeCount);
+
+    const WriteMapping* limit = nullptr;
+    const WriteMapping* mode  = nullptr;
+    for (size_t i = 0; i < p->writeCount; ++i) {
+        if (p->writes[i].command == InverterCommandType::SetExportLimitWatts) {
+            limit = &p->writes[i];
+        }
+        if (p->writes[i].command == InverterCommandType::SetBatteryOperatingMode) {
+            mode = &p->writes[i];
+        }
+    }
+    TEST_ASSERT_NOT_NULL(limit);
+    TEST_ASSERT_NOT_NULL(mode);
+
+    TEST_ASSERT_EQUAL_UINT16(43074, limit->address);
+    TEST_ASSERT_EQUAL_DOUBLE(9900.0, limit->maximum);
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, limit->scale);  // raw is hundreds of watts
+    TEST_ASSERT_FALSE(limit->verified);
+
+    TEST_ASSERT_EQUAL_UINT16(43110, mode->address);
+    TEST_ASSERT_EQUAL_UINT32(13, mode->optionCount);
+    TEST_ASSERT_FALSE(mode->verified);
+    // The vendor's own numbering, gaps and all -- 35 is "Self-Use", not option index 4.
+    TEST_ASSERT_EQUAL_INT32(35, mode->options[4].value);
+    TEST_ASSERT_EQUAL_STRING("Self-Use", mode->options[4].label);
+
+    MockTransport  transport;
+    ProfileOptions options;
+    options.profile = p;
+    ModbusProfileDriver driver(transport, options);
+    const InverterCapabilities caps = driver.capabilities();
+    TEST_ASSERT_FALSE(caps.canWrite(InverterCapability::SetExportLimit));
+    TEST_ASSERT_FALSE(caps.canWrite(InverterCapability::SetBatteryOperatingMode));
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetExportLimitWatts;
+    cmd.numericValue = 2500.0;
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, driver.execute(cmd));
+    TEST_ASSERT_TRUE(transport.writes.empty());
+}
+
 static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     MockTransport transport;
     echoWrites(transport);
@@ -1274,6 +1416,10 @@ int main(int, char**) {
     RUN_TEST(test_the_deye_ac_power_goes_negative_while_importing);
     RUN_TEST(test_the_deye_profile_publishes_nothing_it_could_not_source);
     RUN_TEST(test_the_deye_mode_row_is_declared_and_refused_for_two_reasons);
+    RUN_TEST(test_the_solis_profile_decodes_a_realistic_frame);
+    RUN_TEST(test_the_solis_ac_power_goes_negative_while_importing);
+    RUN_TEST(test_the_solis_profile_publishes_nothing_the_sources_disputed);
+    RUN_TEST(test_the_solis_setpoints_are_declared_and_dormant);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);
