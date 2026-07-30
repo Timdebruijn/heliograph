@@ -32,9 +32,10 @@
 // wrong. If the ring ever returns, the rule above is what makes it work.
 //
 // Host-testable end to end: the logic operates on a caller-owned Storage struct, and only
-// main.cpp places that struct in RTC_NOINIT_ATTR memory. Note that the host tests cannot
-// catch a violation of the rule above -- there is no .init_array/RTC split on the host, so
-// a reintroduced initialiser passes every test and fails only on the device.
+// main.cpp places that struct in RTC_NOINIT_ATTR memory. The host tests cannot detect a
+// violation of the rule above by RUNNING -- there is no .init_array/RTC split on the host --
+// which is why the guard below is a compile-time assertion rather than a test case. It does
+// fire on the native build too, since the test suite includes this header.
 
 #pragma once
 
@@ -58,13 +59,17 @@ struct Storage {
     uint32_t crc;
 };
 
-// The guard for the rule at the top of this file, and the only one that can exist: the host
-// tests cannot catch this, because the failure needs .init_array and RTC memory to be
-// different things. Adding an initialiser to any member of Storage -- or nesting a type that
-// has one -- breaks this build instead of silently zeroing the record on every boot of every
-// device. Both traits are needed: `trivially_default_constructible` is what stops the
-// compiler emitting a startup initialiser, and `trivially_copyable` keeps memcpy/CRC over the
-// raw bytes well-defined.
+// The guard for the rule at the top of this file. Adding an initialiser to any member of
+// Storage -- or nesting a type that has one, the trait is transitive -- breaks the build
+// instead of silently zeroing the record on every boot of every device. Both traits earn
+// their place: `trivially_default_constructible` is exactly the property that decides static
+// versus dynamic initialisation, and `trivially_copyable` keeps the memcpy/CRC over raw bytes
+// well-defined.
+//
+// What it does NOT cover, so nobody reads more safety into it than is there: it guards this
+// TYPE, not the storage. A stray write to the object from code running before begin() is an
+// ordering bug that compiles cleanly, and any FUTURE object placed in RTC memory needs its
+// own assertion -- this one says nothing about it.
 static_assert(std::is_trivially_default_constructible_v<Storage>,
               "Storage must have no default member initialisers: a non-trivial default "
               "constructor emits a static initialiser that zeroes RTC_NOINIT memory on every "
