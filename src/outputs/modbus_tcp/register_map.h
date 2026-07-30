@@ -91,6 +91,9 @@ inline constexpr uint16_t kBatteryDischargePower = 306; // float32
 // --- grid meter (400-499) ---
 inline constexpr uint16_t kGridImportPower = 400;  // float32
 inline constexpr uint16_t kGridExportPower = 402;  // float32
+/// House load. In this region rather than a new one: it is a house-level flow like the two
+/// above, and 400-499 has room. Appended at the end of the used range so nothing moves.
+inline constexpr uint16_t kLoadPower       = 404;  // float32
 
 // --- status (500-599) ---
 inline constexpr uint16_t kStatusCodeMirror   = 500;  // uint16
@@ -196,6 +199,7 @@ enum class ValidityBit : uint8_t {
     DcMppt5Voltage = 36,
     DcMppt5Current = 37,
     DcMppt5Power   = 38,
+    LoadPower      = 39,
     _Count
 };
 

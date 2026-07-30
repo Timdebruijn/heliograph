@@ -608,6 +608,35 @@ static void test_strings_three_to_five_land_in_their_own_slots() {
     TEST_ASSERT_TRUE(mppt5 + reg::kMpptStride <= reg::kBatterySoc);
 }
 
+// House load is its own channel, not something derivable from grid flow. On a hybrid the house
+// can be fed by PV, by the battery, by the grid, or by any mix, so a client that computed it
+// from import/export would be wrong exactly when the battery is doing something interesting.
+static void test_house_load_is_published_separately_from_the_grid_rails() {
+    Diagnostics diag;
+    RegisterMap map;
+    BridgeInfo  bridge;
+
+    DeviceState state;
+    state.measurements.declare(measurement_id::kLoadPower, MeasurementType::Power, Unit::Watt,
+                               "House load");
+    state.measurements.set(measurement_id::kLoadPower, 1450.0, g_now);
+    state.lastSuccessfulPollMs = g_now;
+    state.dataValid            = true;
+
+    map.update(state, bridge, diag.snapshot(), g_now);
+
+    TEST_ASSERT_EQUAL_UINT16(404, reg::kLoadPower);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1450.0f, decodeFloat(map, reg::kLoadPower));
+    TEST_ASSERT_TRUE(map.validityBit(ValidityBit::LoadPower));
+
+    // The grid rails stay unknown rather than being inferred from it.
+    TEST_ASSERT_TRUE(std::isnan(decodeFloat(map, reg::kGridImportPower)));
+    TEST_ASSERT_TRUE(std::isnan(decodeFloat(map, reg::kGridExportPower)));
+    TEST_ASSERT_FALSE(map.validityBit(ValidityBit::GridImportPower));
+    // And it sits after them without moving anything: 404 is past export at 402 + 2 registers.
+    TEST_ASSERT_TRUE(reg::kLoadPower >= reg::kGridExportPower + 2);
+}
+
 static void test_validity_bits_fit_the_reserved_space() {
     // 8 registers = 128 bits at reg::kValidityBitmap.
     TEST_ASSERT_TRUE(static_cast<size_t>(ValidityBit::_Count) <= 128);
@@ -645,6 +674,7 @@ int main(int, char**) {
     RUN_TEST(test_a_fresh_map_asserts_nothing_it_has_not_measured);
     RUN_TEST(test_validity_bitmap_and_nan_always_agree);
     RUN_TEST(test_strings_three_to_five_land_in_their_own_slots);
+    RUN_TEST(test_house_load_is_published_separately_from_the_grid_rails);
     RUN_TEST(test_validity_bits_fit_the_reserved_space);
     RUN_TEST(test_relay_registers_use_the_sentinel_without_hardware);
     RUN_TEST(test_firmware_version_registers_report_the_running_version);

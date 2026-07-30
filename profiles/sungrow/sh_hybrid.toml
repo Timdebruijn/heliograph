@@ -275,15 +275,30 @@ type = "u32"
 scale = 0.1
 unit = "kWh"
 
+# --- House load ----------------------------------------------------------------------------
+
+# Vendor document row (13008, S32, 1W) plus source B, which names it "Load power". Signed in
+# both; a house that exports more than it draws is not a thing, but the sources declare it signed
+# and reading a signed register as unsigned is the failure that turns a small negative into
+# 4.29 gigawatts.
+#
+# Left out of the first version of this profile only because the vocabulary had no load id.
+[[register]]                    # vendor doc + source B, identical
+measurement = "load.power"
+display_name = "Load Power"
+space = "input"
+address = 13007
+type = "s32"
+scale = 1.0
+unit = "W"
+
 # ==============================================================================================
 # DELIBERATELY NOT MAPPED
 # ==============================================================================================
 #
-# Load power (13008, S32, 1W) and export power (13010, S32, 1W). Both sources carry both, and
-# they agree. There is still no canonical id for a house-load channel -- see
-# docs/device-profiles/canonical-measurements.md -- so this is blocked on the vocabulary, not on
-# the register. Export power is signed and bidirectional, and our grid channels are two separate
-# unsigned rails, so splitting it needs arithmetic a profile cannot do.
+# Export power (13010, S32, 1W). Both sources carry it and agree. It is signed and
+# bidirectional, and our grid channels are two separate unsigned rails, so splitting it needs
+# arithmetic a profile cannot do. (Load power, its neighbour at 13008, IS mapped -- see above.)
 #
 # Daily/total imported and exported energy (13036/13037, 13045/13046). Agreed by both sources,
 # but our grid.* channels are instantaneous power rather than energy.

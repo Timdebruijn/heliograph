@@ -42,6 +42,7 @@ COLUMNS: list[tuple[str, str]] = [
     ("Bat W", "battery.power"),
     ("Bat V", "battery.voltage"),
     ("Bat °C", "battery.temperature"),
+    ("Load W", "load.power"),
 ]
 
 

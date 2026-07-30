@@ -50,6 +50,7 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `battery.discharge_power` | W | Discharge rail, ditto |
 | `grid.import_power` | W | Power drawn from the grid, for a hybrid with a meter |
 | `grid.export_power` | W | Power fed back to the grid |
+| `load.power` | W | What the house is drawing, as the inverter measures it — **positive = consuming** |
 
 ## Conventions
 

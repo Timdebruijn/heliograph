@@ -138,6 +138,13 @@ inline constexpr const char* kBatteryDischargePower = "battery.discharge_power";
 /// House-level flows, for hybrids with a meter. Also long-standing Modbus registers.
 inline constexpr const char* kGridImportPower = "grid.import_power";
 inline constexpr const char* kGridExportPower = "grid.export_power";
+/// What the house is drawing, as the inverter measures it. Positive = consuming.
+///
+/// Distinct from the grid rails above: on a hybrid the house can be fed by PV, by the battery,
+/// by the grid, or by any mix, so load is not derivable from grid flow. Several vendors publish
+/// it as its own register and their sources agree on it -- it was blocked on this vocabulary
+/// rather than on any register, which is a bad reason for a channel to be missing.
+inline constexpr const char* kLoadPower = "load.power";
 
 /// What the inverter is currently limited TO, as a percentage of its nameplate maximum, and
 /// whether that limit is switched on at all.
@@ -167,6 +174,7 @@ inline constexpr const char* kAll[] = {
     kTemperature,    kOperatingHours, kBatterySoc,     kBatteryPower,   kBatteryVoltage,
     kBatteryCurrent, kBatteryTemperature, kBatteryEnergyCharged, kBatteryEnergyDischarged,
     kBatteryChargePower, kBatteryDischargePower, kGridImportPower, kGridExportPower,
+    kLoadPower,
     kActivePowerLimitPct, kActivePowerLimitEnabled,
 };
 

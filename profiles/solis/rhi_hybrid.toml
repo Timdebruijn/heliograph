@@ -245,6 +245,20 @@ type = "u32"
 scale = 1.0
 unit = "kWh"
 
+# --- House load ----------------------------------------------------------------------------
+
+# Both sources carry this and agree on address, width and scale. It was left out of the first
+# version of this profile only because the canonical vocabulary had no id for a load channel --
+# blocked on the vocabulary, not on the register. `load.power` now exists, so it goes in.
+[[register]]                    # high confidence — both sources, identical
+measurement = "load.power"
+display_name = "House Load"
+space = "input"
+address = 33147
+type = "u16"
+scale = 1.0
+unit = "W"
+
 # ==============================================================================================
 # DELIBERATELY NOT MAPPED — full reasoning in docs/solis-rhi-protocol.md
 # ==============================================================================================
@@ -266,9 +280,9 @@ unit = "kWh"
 # battery.current (33134). Signed 16-bit in both sources, direction unstated by either. Same trap
 # as the Deye map: a confidently inverted battery graph is worse than an absent one.
 #
-# House load (33147) and backup load (33148). Both sources carry them and agree. There is no
-# canonical id for a load channel yet -- see docs/device-profiles/canonical-measurements.md --
-# so mapping them needs a vocabulary addition first, not a register.
+# Backup load (33148). Both sources carry it and agree, but there is one canonical load channel
+# and house load (33147, mapped above) is the one a dashboard wants. A separate backup/EPS rail
+# would need its own canonical id.
 #
 # grid.import_power / grid.export_power. The two sources disagree by a factor of a thousand on
 # the meter power registers: source B reads 33257 as watts at scale 1, source A reads the same

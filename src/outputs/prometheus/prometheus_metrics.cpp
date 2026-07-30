@@ -207,6 +207,8 @@ constexpr GaugeSpec kInverterGauges[] = {
      "Power drawn from the grid"},
     {measurement_id::kGridExportPower, "heliograph_grid_export_power_watts",
      "Power delivered to the grid"},
+    {measurement_id::kLoadPower, "heliograph_load_power_watts",
+     "Power the house is drawing, as the inverter measures it"},
 };
 
 }  // namespace

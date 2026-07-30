@@ -279,6 +279,8 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
     }
 
     // --- battery and grid: empty for a driver without them, and that is visible ---
+    publishMeasurement(state, measurement_id::kLoadPower, reg::kLoadPower,
+                       ValidityBit::LoadPower);
     publishMeasurement(state, measurement_id::kBatterySoc, reg::kBatterySoc,
                        ValidityBit::BatterySoc);
     publishMeasurement(state, measurement_id::kBatteryVoltage, reg::kBatteryVoltage,

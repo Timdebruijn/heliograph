@@ -9,16 +9,16 @@ device answers. It does **not** mean anybody has seen it against real hardware �
 
 ## Read coverage
 
-| Profile | Vendor | AC W | AC V | AC A | Hz | PV W | PV1 V/A | PV2 V/A | E day | E tot | Temp | Bat % | Bat W | Bat V | Bat °C |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `deye_sun_xk_sg` | Deye | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ | ✔ |
-| `goodwe_et_hybrid` | GoodWe | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ |
-| `mic_tl_x` | Growatt | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | · | · | · | · |
-| `min_tl_x` | Growatt | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | · | · |
-| `sph` | Growatt | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | ✔ |
-| `huawei_sun2000` | Huawei | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · |
-| `solis_rhi_hybrid` | Solis | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · |
-| `sungrow_sh_hybrid` | Sungrow | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Profile | Vendor | AC W | AC V | AC A | Hz | PV W | PV1 V/A | PV2 V/A | E day | E tot | Temp | Bat % | Bat W | Bat V | Bat °C | Load W |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `deye_sun_xk_sg` | Deye | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ | ✔ | · |
+| `goodwe_et_hybrid` | GoodWe | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | · |
+| `mic_tl_x` | Growatt | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | · | · | · | · | · |
+| `min_tl_x` | Growatt | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | · | · | · |
+| `sph` | Growatt | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | ✔ | · |
+| `huawei_sun2000` | Huawei | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | · |
+| `solis_rhi_hybrid` | Solis | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ |
+| `sungrow_sh_hybrid` | Sungrow | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 
 `·` means the profile does not map it. That is usually deliberate and always explained in
 the profile's own comments — see [Why a channel is missing](#why-a-channel-is-missing).

@@ -117,7 +117,7 @@ the registers in question. Both mechanisms are always consistent.
 | 100-199 | AC phases |
 | 200-299 | DC/MPPT channels |
 | 300-399 | Battery (empty for EverSolar) |
-| 400-499 | Grid meter (empty for EverSolar) |
+| 400-499 | House flows: grid import/export, load (empty for EverSolar) |
 | 500-599 | Status and errors |
 | 600-699 | Capabilities + validity bitmap |
 | 700-799 | Identity strings |
@@ -207,10 +207,25 @@ that indexes by address. That is why the canonical vocabulary stops at `dc.mppt_
 more trackers still reports its real count at register 621; the strings beyond the fifth are
 simply not published, rather than being folded into another string's registers.
 
-## Battery (300-399) and grid meter (400-499)
+## Battery (300-399) and house flows (400-499)
 
-Fully reserved. For EverSolar everything is NaN / bitmap bit 0. Populated once a driver with
-battery or meter support is added — without changing the map.
+Mostly reserved. For EverSolar everything here is NaN with its validity bit clear; a
+profile-driven hybrid populates whichever of these its register map declares.
+
+| Raw | Regs | Type | Meaning |
+|---|---|---|---|
+| 300 | 2 | float32 | `battery.soc` |
+| 302 | 2 | float32 | `battery.voltage` |
+| 304 | 2 | float32 | `battery.charge_power` |
+| 306 | 2 | float32 | `battery.discharge_power` |
+| 400 | 2 | float32 | `grid.import_power` |
+| 402 | 2 | float32 | `grid.export_power` |
+| 404 | 2 | float32 | `load.power` — what the house is drawing, positive = consuming |
+
+`load.power` sits here rather than in a region of its own: it is a house-level flow like the two
+grid rails above, and it is appended after them so no published address moves. It is **not**
+derivable from grid flow on a hybrid, where the house can be fed by PV, by the battery, by the
+grid, or by any mix.
 
 ## Status and errors (500-599)
 
