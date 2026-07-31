@@ -375,7 +375,30 @@ namespace {
 // state.
 #define HELIOGRAPH_VERSION_MAJOR 0
 #define HELIOGRAPH_VERSION_MINOR 25
-#define HELIOGRAPH_VERSION_PATCH 0
+//
+// 0.25.1 changes nothing a bridge does, and changes what builds it.
+//
+// THE TOOLCHAIN IS PINNED TO A VERSION. The platform URL ended in /stable/, which moves. It had
+// already moved: 0.25.0's images were compiled by an Arduino core two patch releases newer than
+// the one this project last booted on a board, and no commit recorded that, because from the
+// repository's side nothing had changed. Firmware meant to run for years unattended should not
+// have its compiler and RTOS replaced underneath a release without a line in the history saying
+// so. Bumping is now an edit somebody reviews. The same image is 89 KB smaller for it, which is
+// the measure of how different the two toolchains were.
+//
+// The monthly dependency check gained a third source, because pinning created a new silence: a
+// version pin nobody watches is a toolchain frozen for years. Neither existing check could see
+// a platform installed from a release URL -- verified by pinning backwards and watching the
+// report still say everything was up to date.
+//
+// EIGHTY COMPILER WARNINGS FROM OUR OWN CODE, NOW ZERO. Twenty were introduced by 0.25.0 itself;
+// the rest were a format string that is wrong on one of the two builds and right by accident on
+// the other. Nothing was suppressed to get there.
+//
+// One rule, one place: whether a reading may be published -- supported, valid, and not stale --
+// was written out by hand in four outputs and inverted in one of them. Anything else is absent,
+// never zero, and that rule is now asked of one predicate.
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
