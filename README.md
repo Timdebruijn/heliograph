@@ -74,6 +74,25 @@ common set of measurements, and republishes that.
 >   An inverter with two MPPTs has two strings of panels it optimises separately, which is why
 >   readings come per tracker.
 
+```mermaid
+flowchart LR
+    INV["☀️ Your inverter<br><i>any age, any brand<br>this project supports</i>"]
+    subgraph home["Your own network — no account, no cloud, no subscription"]
+        direction TB
+        BR["<b>Heliograph</b><br>ESP32-S3 + RS485<br><i>a small box next to the inverter</i>"]
+        HA["🏠 Home Assistant"]
+        TOOLS["📊 Grafana · Prometheus<br>Node-RED · your own scripts"]
+    end
+    INV -- "RS485<br>two data wires + ground" --> BR
+    BR -- "MQTT auto-discovery<br>entities appear by themselves" --> HA
+    BR -- "Modbus TCP · REST/JSON · /metrics" --> TOOLS
+    style BR fill:#e8f4ea,stroke:#2d7a3e,stroke-width:2px
+    style INV fill:#fff8e1,stroke:#b8860b
+```
+
+Everything in that box stays in your house. The inverter's own cloud, if it still has one, is not
+in the picture — and neither is ours, because there isn't one.
+
 Where it puts the data:
 
 | Integration | How |
@@ -211,10 +230,27 @@ you need. The RS485-CAN and Relay-6CH can be powered either over USB-C or from a
 screw terminal, which is handy when there is no USB power near the inverter; check the
 product page for whichever board you buy.
 
-For one inverter, A/B/GND is genuinely all there is to it. If you are putting **several
-inverters on one bus**, read **[docs/rs485-bus.md](docs/rs485-bus.md)** first: chain topology,
-where the 120 Ω termination goes (two places, not one per device), and why each unit needs its
-own address before you connect them together.
+For one inverter, A/B/GND is genuinely all there is to it.
+
+**Several inverters share one cable.** They hang off it in a chain — not one cable each — and
+each answers to its own address:
+
+```mermaid
+flowchart LR
+    B["🔌 Bridge<br><b>bus end</b><br>120 Ω ON"]
+    I1["Inverter<br>address 1<br>termination OFF"]
+    I2["Inverter<br>address 2<br>termination OFF"]
+    I3["Inverter<br>address 3<br><b>bus end</b><br>120 Ω ON"]
+    B --- I1 --- I2 --- I3
+    style B fill:#e8f4ea,stroke:#2d7a3e,stroke-width:2px
+    style I3 fill:#e8f4ea,stroke:#2d7a3e,stroke-width:2px
+```
+
+Three rules in one picture: **chain, not star**; the 120 Ω terminator goes at the **two ends
+only**; and every unit needs its **own address** set before you connect them, or two inverters
+answer at once and their replies collide. Read
+**[docs/rs485-bus.md](docs/rs485-bus.md)** before you wire it — including what a star topology
+looks like and why it works on the bench and fails in the roof.
 
 > **Several inverters on one bus are polled in turn**, up to eight, each with its own address.
 > The first is configured under *Settings → Driver*, the rest under *Settings → Extra devices* —
@@ -412,6 +448,14 @@ updates are guarded by a watchdog-backed bootloader rollback that has already ea
 in this project's own history.
 
 Details: [docs/architecture.md](docs/architecture.md).
+
+## All the documentation
+
+Twenty-nine documents, and **[docs/README.md](docs/README.md) groups them by what you are trying
+to do** — get it working, fix it when it does not, check whether your inverter is supported,
+connect your own tooling, add a new inverter, or understand how it is built. It also marks which
+documents are dated records rather than instructions, so nobody follows a "next step" that
+happened months ago.
 
 ## Development
 

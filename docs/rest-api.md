@@ -1,6 +1,6 @@
 # REST API design
 
-Server: **ESP32Async/ESPAsyncWebServer 3.11.2** (LGPL-3.0) + AsyncTCP 3.4.10.
+Server: **ESP32Async/ESPAsyncWebServer 3.12.0** (LGPL-3.0) + AsyncTCP 3.5.0.
 JSON: ArduinoJson 7.4.3. All handlers are non-blocking and only read a
 `shared_ptr<const DeviceState>` snapshot — a slow or failing REST client cannot affect
 the RS485 poll.

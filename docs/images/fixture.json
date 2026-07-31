@@ -3,7 +3,7 @@
     "bridge": {
       "id": "heliograph-a1b2c3",
       "name": "Heliograph",
-      "firmware_version": "0.22.1 (Jul 28 2026 16:05:01)",
+      "firmware_version": "0.25.1 (Jul 31 2026 10:11:29)",
       "board_id": "rs485-can",
       "ip_address": "192.168.1.50",
       "ip_mode": "dhcp",
@@ -11,25 +11,25 @@
       "devices_configured": 1,
       "devices_started": 1,
       "device_problems": [],
-      "uptime_seconds": 10899,
+      "uptime_seconds": 5710,
       "wifi_connected": true,
-      "wifi_rssi_dbm": -58,
+      "wifi_rssi_dbm": -53,
       "mqtt_connected": true,
       "modbus_listening": true,
       "modbus_clients": 0,
       "time_synced": true,
-      "time": "2026-07-28 21:51:04",
-      "ntp_last_sync": "2026-07-28 21:49:30",
+      "time": "2026-07-31 13:50:59",
+      "ntp_last_sync": "2026-07-31 12:15:59",
       "ntp_server": "pool.ntp.org",
       "ntp_server_source": "dhcp",
-      "free_heap_bytes": 149760,
+      "free_heap_bytes": 135508,
       "boot_button_pressed": false
     },
     "device": {
       "id": "eversolar_legacy-16",
       "label": "Dak huis",
       "driver_id": "eversolar_legacy",
-      "support_level": "beta",
+      "support_level": "stable",
       "manufacturer": "Ever-Solar",
       "model": "TL3000-20",
       "serial_number": "SN0000000000",
@@ -37,79 +37,79 @@
       "data_valid": true,
       "data_stale": false,
       "consecutive_poll_failures": 0,
-      "last_successful_poll_seconds_ago": 9
+      "last_successful_poll_seconds_ago": 8
     },
     "measurements": {
       "ac.power.total": {
-        "value": 0,
+        "value": 2608,
         "unit": "W",
         "valid": true,
         "stale": false
       },
       "ac.phase_l1.voltage": {
-        "value": 230.6,
+        "value": 243.8,
         "unit": "V",
         "valid": true,
         "stale": false
       },
       "ac.phase_l1.current": {
-        "value": 0.3,
+        "value": 10.6,
         "unit": "A",
         "valid": true,
         "stale": false
       },
       "ac.frequency": {
-        "value": 50,
+        "value": 50.01,
         "unit": "Hz",
         "valid": true,
         "stale": false
       },
       "dc.mppt_1.voltage": {
-        "value": 219,
+        "value": 323.9,
         "unit": "V",
         "valid": true,
         "stale": false
       },
       "dc.mppt_1.current": {
-        "value": 0,
+        "value": 8.3,
         "unit": "A",
         "valid": true,
         "stale": false
       },
       "dc.mppt_1.power": {
-        "value": 0,
+        "value": 2688.37,
         "unit": "W",
         "valid": true,
         "stale": false,
         "derived": true
       },
       "dc.power.total": {
-        "value": 0,
+        "value": 2688.37,
         "unit": "W",
         "valid": true,
         "stale": false,
         "derived": true
       },
       "energy.today": {
-        "value": 16.13,
+        "value": 5.35,
         "unit": "kWh",
         "valid": true,
         "stale": false
       },
       "energy.total": {
-        "value": 35579.1,
+        "value": 35613.1,
         "unit": "kWh",
         "valid": true,
         "stale": false
       },
       "inverter.temperature": {
-        "value": 31.5,
+        "value": 45,
         "unit": "\u00b0C",
         "valid": true,
         "stale": false
       },
       "inverter.operating_hours": {
-        "value": 47556,
+        "value": 47596,
         "unit": "h",
         "valid": true,
         "stale": false
@@ -126,30 +126,30 @@
         "data_valid": true,
         "data_stale": false,
         "modbus_unit_id": 1,
-        "last_successful_poll_seconds_ago": 9,
-        "energy_today_kwh": 16.13,
-        "ac_voltage_v": 230.6,
-        "temperature_c": 31.5,
+        "last_successful_poll_seconds_ago": 8,
+        "energy_today_kwh": 5.35,
+        "ac_voltage_v": 243.8,
+        "temperature_c": 45,
         "battery_soc_pct": null,
         "battery_power_w": null,
-        "ac_power_w": 0
+        "ac_power_w": 2608
       }
     ],
     "totals": {
       "devices_answering": 1,
       "devices_polled": 1,
-      "ac_power_w": 0,
+      "ac_power_w": 2608,
       "ac_power_devices": 1,
-      "energy_today_kwh": 16.13,
+      "energy_today_kwh": 5.35,
       "energy_today_devices": 1,
-      "energy_total_kwh": 35579.1,
+      "energy_total_kwh": 35613.1,
       "energy_total_devices": 1
     },
-    "poll_success_total": 1069,
+    "poll_success_total": 559,
     "poll_failure_total": 1
   },
   "config": {
-    "version": 1,
+    "version": 2,
     "bridge_name": "Heliograph",
     "wifi": {
       "ssid": "HomeNetwork",
@@ -221,12 +221,12 @@
     }
   },
   "diagnostics": {
-    "uptime_seconds": 10899,
-    "firmware_version": "0.22.1 (Jul 28 2026 16:05:01)",
+    "uptime_seconds": 5710,
+    "firmware_version": "0.25.1 (Jul 31 2026 10:11:29)",
     "board": "Waveshare ESP32-S3-RS485-CAN",
-    "free_heap_bytes": 149504,
-    "minimum_free_heap_bytes": 107196,
-    "max_alloc_heap_bytes": 98292,
+    "free_heap_bytes": 135752,
+    "minimum_free_heap_bytes": 107372,
+    "max_alloc_heap_bytes": 90100,
     "psram_size_bytes": 8388608,
     "psram_free_bytes": 8378140,
     "reset_reason": 3,
@@ -238,14 +238,19 @@
     "coredump_cause_name": null,
     "coredump_fault_address": null,
     "wifi_connected": true,
-    "wifi_rssi_dbm": -58,
+    "wifi_rssi_dbm": -53,
     "mqtt_connected": true,
     "time_synced": true,
-    "time": "2026-07-28 21:51:04",
-    "ntp_last_sync": "2026-07-28 21:49:30",
+    "time": "2026-07-31 13:50:59",
+    "ntp_last_sync": "2026-07-31 12:15:59",
     "ntp_server": "pool.ntp.org",
     "ntp_server_source": "dhcp",
-    "poll_success_total": 1069,
+    "poll_success_total": 559,
+    "poll_duration_count": 559,
+    "poll_duration_last_ms": 103,
+    "poll_duration_min_ms": 97,
+    "poll_duration_max_ms": 108,
+    "poll_duration_ewma_ms": 102,
     "poll_failure_total": 1,
     "consecutive_poll_failures": 0,
     "checksum_error_total": 0,
@@ -254,12 +259,15 @@
     "wifi_reconnect_total": 0,
     "mqtt_reconnect_total": 0,
     "modbus_client_connections_total": 0,
-    "rest_requests_total": 57,
+    "rest_requests_total": 5602,
     "mqtt_publish_failure_total": 0,
-    "last_successful_poll_ms": 10889626,
-    "rs485_stack_free_bytes": 3532,
-    "loop_stack_free_bytes": 3784,
+    "last_successful_poll_ms": 5702164,
+    "rs485_stack_free_bytes": 3356,
+    "loop_stack_free_bytes": 3672,
     "last_error": "poll failed: timeout",
+    "boot_count": 4,
+    "previous_uptime_ms": 55258153,
+    "previous_firmware": "0.25.0",
     "coredump_backtrace": null,
     "coredump_backtrace_corrupted": null
   },
@@ -274,6 +282,7 @@
         "supports_read": true,
         "supports_write": true,
         "auto_detection": true,
+        "supports_multiple_devices": true,
         "serial_profiles": [
           {
             "baud_rate": 9600,
@@ -314,10 +323,11 @@
         "display_name": "Ever-Solar / Zeversolar (legacy PMU)",
         "manufacturer": "Ever-Solar",
         "protocol": "EverSolar PMU RS485",
-        "support_level": "beta",
+        "support_level": "stable",
         "supports_read": true,
         "supports_write": false,
         "auto_detection": true,
+        "supports_multiple_devices": true,
         "serial_profiles": [
           {
             "baud_rate": 9600,
@@ -358,6 +368,7 @@
         "supports_read": true,
         "supports_write": false,
         "auto_detection": true,
+        "supports_multiple_devices": false,
         "serial_profiles": [
           {
             "baud_rate": 9600,
@@ -380,13 +391,14 @@
       },
       {
         "id": "modbus_profile",
-        "display_name": "Growatt (Modbus RTU)",
-        "manufacturer": "Growatt",
+        "display_name": "Modbus RTU (profile-driven)",
+        "manufacturer": "Various",
         "protocol": "Modbus RTU",
         "support_level": "experimental",
         "supports_read": true,
-        "supports_write": false,
+        "supports_write": true,
         "auto_detection": true,
+        "supports_multiple_devices": true,
         "serial_profiles": [
           {
             "baud_rate": 9600,
@@ -405,7 +417,7 @@
           {
             "key": "unit_id",
             "display_name": "Modbus unit id",
-            "description": "The inverter's Modbus slave address (Growatt default is 1). Range 1-247.",
+            "description": "The inverter's Modbus slave address. Most vendors ship 1, some ship 247 -- check the profile's notes. Range 1-247.",
             "default_value": "1",
             "min_value": 1,
             "max_value": 247,
@@ -414,12 +426,29 @@
           {
             "key": "profile",
             "display_name": "Register-map profile",
-            "description": "Which Growatt register map to use (profiles/growatt/). Empty = the default profile.",
+            "description": "Which register map to use (see profiles/). Empty = the default profile. The status shown per entry is how far THAT MAP has been proven -- not how far this driver has.",
             "default_value": "",
             "allowed_values": [
               "",
+              "deye_sun_xk_sg",
+              "goodwe_et_hybrid",
               "mic_tl_x",
-              "sph"
+              "min_tl_x",
+              "sph",
+              "huawei_sun2000",
+              "solis_rhi_hybrid",
+              "sungrow_sh_hybrid"
+            ],
+            "allowed_labels": [
+              "",
+              "Deye/Sunsynk SUN-xK-SG hybrid (single phase) \u2014 Deye (experimental)",
+              "GoodWe ET/EH/BT/BH hybrid \u2014 GoodWe (experimental)",
+              "Growatt MIC TL-X (0.6-3.3 kW) \u2014 Growatt (experimental)",
+              "Growatt MIN TL-X (2.5-6 kW) \u2014 Growatt (experimental)",
+              "Growatt SPH (3-6 kW) \u2014 Growatt (experimental)",
+              "Huawei SUN2000 (residential) \u2014 Huawei (experimental)",
+              "Solis RHI hybrid (3-6 kW, single phase) \u2014 Solis (experimental)",
+              "Sungrow SH residential hybrid \u2014 Sungrow (experimental)"
             ]
           }
         ]
@@ -433,6 +462,7 @@
         "supports_read": true,
         "supports_write": false,
         "auto_detection": false,
+        "supports_multiple_devices": true,
         "serial_profiles": [],
         "options": [
           {
@@ -464,6 +494,7 @@
         "supports_read": true,
         "supports_write": true,
         "auto_detection": false,
+        "supports_multiple_devices": true,
         "serial_profiles": [],
         "options": [
           {
