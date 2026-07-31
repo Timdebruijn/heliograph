@@ -1948,6 +1948,15 @@ static void test_breadcrumbs_payload_shapes() {
     doc = parse(json);
     TEST_ASSERT_EQUAL_UINT32(65400, doc["previous_uptime_ms"].as<uint32_t>());
     TEST_ASSERT_EQUAL_STRING("0.24.1", doc["previous_firmware"]);
+
+    // A version whose three components are all DIFFERENT and all nonzero. Every firmware this
+    // project has shipped is 0.x, so every stored breadcrumb has a zero major -- which meant the
+    // assertion above held just as well if the major were decoded from the wrong byte. Proved:
+    // changing the shift from 16 to 24 left all 146 tests in this suite passing. It fails here.
+    bridge.previousFirmware = 0x00010203;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), bridge, json));
+    doc = parse(json);
+    TEST_ASSERT_EQUAL_STRING("1.2.3", doc["previous_firmware"]);
 }
 
 static void test_diagnostics_payload_has_no_secrets() {
