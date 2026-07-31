@@ -633,7 +633,7 @@ Elaborated in `docs/security.md`. Core:
 
 | Topic | MVP |
 |---|---|
-| Global read-only mode | **On** by default; opt-out in *Settings → Security*, which unlocks the relay/DRM outputs (no driver can write to an inverter) |
+| Global read-only mode | **On** by default; opt-out in *Settings → Security*, which unlocks the relay/DRM outputs **and the inverter write path** — two drivers implement one, see docs/security.md |
 | Modbus writing | Off; FC6/16 → exception 0x01 |
 | Raw TCP bridge | Off (not implemented) |
 | REST GET | Unsecured (local network) |

@@ -7,7 +7,7 @@ the same LAN", not "someone holding the PCB in their hands".
 
 | Topic | Status |
 |---|---|
-| Global read-only mode | On by default; a deliberate opt-out in *Settings → Security*. While on, every inverter command and every relay move is refused. Turning it off unlocks the relay/DRM contacts — no driver in this build can write to an inverter, so nothing reaches the inverter either way |
+| Global read-only mode | On by default; a deliberate opt-out in *Settings → Security*. While on, every inverter command and every relay move is refused. **This is the protection that actually holds** — see [What can reach the inverter](#what-can-reach-the-inverter) below, because it is not true that no driver is capable of writing |
 | Modbus writes | Off; FC6/FC16 → exception 0x01. `write_enabled=true` is rejected by config validation |
 | Raw TCP bridge | Not implemented |
 | REST GET | Unsecured (local network) |
@@ -20,6 +20,28 @@ the same LAN", not "someone holding the PCB in their hands".
 | Request size | 4096 bytes, rejected with 413 |
 | String lengths | Bounded in `validate()`; SSID 32 and PSK 64 are the 802.11/WPA2 limits |
 | Hardcoded credentials | None. Verified by scanning the firmware image for strings |
+
+## What can reach the inverter
+
+This section exists because the sentence it replaces was wrong, and wrong in the direction that
+matters here: it said no driver in this build can write to an inverter. Two of the four can.
+
+| Driver | Can it write? |
+|---|---|
+| `eversolar_legacy` | No. `supportsWrite = false`, and the protocol defines no writes at all |
+| `solax_x1` | No. `supportsWrite = false` |
+| `modbus_profile` | **Declares it and implements it** — `execute()` writes one holding register over FC06 and verifies the device's echo. But every `[[write]]` row in every shipped profile is `verified = false`, and the driver refuses an unverified row, so **no profile writes today** |
+| `sunspec` | **Declares it and implements it, and its gate is a device property rather than a review flag.** `execute()` writes the power-limit registers and the connect/disconnect register. It requires that the inverter published SunSpec model 123 and that the block was read. Attach a SunSpec inverter that implements model 123, turn read-only mode off, send the command, and it will write |
+
+**So what actually protects the inverter with the shipped configuration is
+`security.read_only_mode`, which is `true` by default and refuses every command before a driver
+is reached.** Not an absence of capability. If you are relying on this bridge being unable to
+act on your inverter — for a rented installation, a warranty condition, or a site where you are
+not the only one with LAN access — rely on that flag, keep it on, and note that it is reachable
+by anyone who has the admin password.
+
+The relay/DRM outputs are governed by the same flag plus their own `relays.enabled`, and are
+covered in [docs/drm.md](drm.md).
 
 ## Known limitations — explicit
 
@@ -179,7 +201,7 @@ admin password strong and the network trusted.
 
 | Can | Cannot |
 |---|---|
-| Read all measurements (REST, Modbus, Prometheus) | Control the inverter — no driver can write |
+| Read all measurements (REST, Modbus, Prometheus) | Control the inverter — refused while read-only mode is on, which is the default |
 | Read the configuration **without secrets** | Read passwords via the API |
 | DoS the device with traffic | Disrupt the RS485 polling (separate core, separate task) |
 | — | Change settings, OTA, or reboot without the admin password |

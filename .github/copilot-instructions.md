@@ -46,7 +46,7 @@ See `docs/adding-a-device.md` for the full workflow.
 
 | Environment | Command | Purpose |
 |---|---|---|
-| `native` | `pio test -e native` | 390+ host tests, no hardware needed |
+| `native` | `pio test -e native` | ~930 host tests, no hardware needed |
 | `waveshare-rs485-can` etc. | `pio run -e waveshare-rs485-can` | Production firmware, one env per board (all drivers) |
 | `mock` | `pio run -e mock` | Full output stack with a simulated inverter |
 
@@ -63,7 +63,7 @@ python3 tools/check_web_js.py         # embedded JS (when touching src/web/)
 ruff check tools/                     # Python tooling lint
 ```
 
-CI runs the same checks plus both firmware builds.
+CI runs the same checks plus a firmware build for each of the four environments.
 
 ## Code style
 
@@ -111,8 +111,11 @@ CI runs the same checks plus both firmware builds.
 | Growatt SPH hybrid, MIC TL-X | Modbus RTU | `src/drivers/modbus_profile/` (profile-driven) |
 | SolaX X1 series | PMU (AA55) over RS485 | `src/drivers/solax_x1/` |
 
-All drivers are **read-only**. Write support requires hardware-verified register maps
-and an explicit write path — neither is enabled today.
+**Do not describe this firmware as read-only.** Two drivers (`modbus_profile`, `sunspec`)
+declare `supportsWrite` and implement a real `execute()`. What holds today is a chain of gates,
+not an absence of capability: no profile ships a `verified` write row, so no profile writes;
+SunSpec's path additionally needs the device to publish model 123; and `security.read_only_mode`
+is **on by default** and refuses the whole path regardless. Describe the gates, not a blanket.
 
 ## Licensing
 
