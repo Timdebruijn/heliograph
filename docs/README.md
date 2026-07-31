@@ -83,7 +83,6 @@ them as guidance — a "next step" in one of them may have happened months ago.
 |---|---|
 | [audit-2026-07-29.md](audit-2026-07-29.md) | Resource and efficiency audit: tasks, memory, timing, build variants. |
 | [esp32s3-hardware-audit.md](esp32s3-hardware-audit.md) | Hardware audit against v0.13.2, 2026-07-26. |
-| [implementation-plan.md](implementation-plan.md) | The phase log the project was built from. Dutch. |
 | [solar-assistant-source.md](solar-assistant-source.md) | Notes on a comparable product's MQTT structure. |
 
 ---
