@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: MIT
+#
+# Lint configuration for tools/ — the build-time Python that generates C++ tables, gzips the
+# web assets and gates the CI. None of it runs on the ESP32, but a bug here produces a firmware
+# image, so it is held to the same standard as the firmware.
+#
+# WHY THIS FILE EXISTS. There was no ruff config, which meant CI ran ruff's DEFAULTS: E4, E7,
+# E9 and F — roughly ten rules out of eight hundred. That gate reads as "lint passes" and is
+# far narrower than it looks. Everything selected below found real things on first run.
+
+target-version = "py311"
+
+# No line-length here on purpose. This tree is already formatted at ruff's default 88, and
+# setting any other number makes `ruff format` rewrite all eleven files — a diff that would bury
+# whatever change it travelled with. The C++ side uses 100 columns; that is clang-format's
+# business, not this file's.
+
+[lint]
+# Chosen to catch mistakes, not to impose a house style. Each family earned its place by
+# reporting something worth fixing on the code as it stood.
+select = [
+    "E4", "E7", "E9",  # pycodestyle errors — ruff's own defaults, kept
+    "F",               # pyflakes: undefined names, unused imports
+    "B",               # bugbear: mutable defaults, loop-variable capture, silent except
+    "UP",              # pyupgrade: syntax superseded by our own target-version
+    "RUF",             # ruff's own — includes RUF100, which finds suppressions that suppress
+                       # nothing. Nine such directives were live here and had stopped applying.
+    "SIM",             # simplify: try/except/pass that contextlib.suppress says better
+    "C4",              # comprehensions: dict(generator) and friends
+    "PLE",             # pylint errors — genuine mistakes only
+    "I",               # import sorting, so an added import never re-orders a diff
+    "PLW1510",         # subprocess.run without an explicit check=; see below
+]
+
+# DELIBERATELY NOT SELECTED, each for a reason rather than by omission:
+#
+#   PLW0603 (global-statement)  set_root() assigns module globals on purpose — it is how the
+#                               PlatformIO SCons branch injects PROJECT_DIR when the script is
+#                               exec()'d without __file__. Documented at both sites.
+#   T201 (print)                These are command-line tools. print IS the interface.
+#   D, ANN, EM, TRY, COM        Docstring, annotation, exception-message and trailing-comma
+#                               style. Opinions, not defects.
+#   S (bandit)                  Flags subprocess use and `assert` as such. Both are correct
+#                               here: the subprocesses are node and chrome by design, and the
+#                               asserts guard generated output in a build-time script.
+#   E501 (line-too-long)        `ruff format` owns line length; two tools disagreeing about
+#                               the same line is a fight with no winner.
+#
+# On PLW1510: every subprocess.run here already inspects returncode afterwards and reports a
+# specific failure, which is better than the traceback check=True would raise. The rule still
+# earns its place — it makes that choice explicit at the call site instead of leaving a reader
+# to check whether the omission was deliberate.
+
+[lint.per-file-ignores]
+# One exemption, with its reason — which is the point of putting it here rather than reaching
+# for a per-line noqa. The nine stale directives this config's RUF100 removed are what that
+# habit looks like after a year.
+#
+# UP036 calls the `if sys.version_info < (3, 11)` guard dead code, because target-version says
+# 3.11 is the floor. It is confusing two different things. target-version tells ruff which
+# SYNTAX it may assume when rewriting; the guard is a RUNTIME check against whichever
+# interpreter actually invokes the script, and PlatformIO chooses that, not us. Deleting it
+# would replace a sentence naming the required version with a tomllib ImportError traceback on
+# whatever machine happens to have an older Python.
+"gen_profiles.py" = ["UP036"]

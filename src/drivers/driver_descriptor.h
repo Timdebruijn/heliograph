@@ -60,9 +60,13 @@ struct DriverOption {
     /// every profile here, so its badge describes the least-proven map in the build and says
     /// nothing about the one being picked.
     ///
-    /// Declared last, and defaulted, so the hand-written aggregate initialisers in every other
-    /// driver's descriptor stay valid.
-    std::vector<std::string> allowedLabels;
+    /// Declared last, and given an explicit default, so the hand-written aggregate initialisers
+    /// in every other driver's descriptor stay valid AND stay quiet. The `= {}` is not
+    /// decoration: without a default member initialiser, -Wextra reports every aggregate
+    /// initialiser that stops before this field, which was twenty warnings across five drivers
+    /// and three test files the moment this field was added. A field that genuinely defaults to
+    /// empty should say so here rather than at each of those twenty sites.
+    std::vector<std::string> allowedLabels = {};
 
     bool isNumeric() const { return minValue != 0 || maxValue != 0; }
 };

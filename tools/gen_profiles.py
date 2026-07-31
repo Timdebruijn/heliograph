@@ -25,12 +25,12 @@ from __future__ import annotations
 
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 if sys.version_info < (3, 11):
     sys.stderr.write(
-        "gen_profiles.py needs Python >= 3.11 (tomllib); found %s\n"
-        % sys.version.split()[0]
+        f"gen_profiles.py needs Python >= 3.11 (tomllib); found {sys.version.split()[0]}\n"
     )
     sys.exit(1)
 
@@ -880,7 +880,10 @@ def run(check_only: bool = False) -> int:
 
     if not errors:
         ids = [p["id"] for p in profiles]
-        for dup in {i for i in ids if ids.count(i) > 1}:
+        # Counter, not `ids.count(i)` inside a comprehension over ids: that called count() once
+        # per profile, and iterated a SET, so the same broken input could report its duplicates
+        # in a different order each run. Sorted output is what makes a failure diffable.
+        for dup in sorted(i for i, n in Counter(ids).items() if n > 1):
             errors.append(f"profile id '{dup}' is defined in more than one file")
         # Two DIFFERENT ids can still collapse to one C++ identifier: cpp_symbol() splits on
         # underscores and capitalises, so `a_b` and `a__b` both become `AB`. The check above
@@ -947,10 +950,10 @@ def main(argv: list[str]) -> int:
 
 # Under PlatformIO (extra_scripts) SCons provides Import(); standalone it does not.
 try:
-    Import("env")  # type: ignore[name-defined]  # noqa: F821
-    set_root(Path(env["PROJECT_DIR"]))  # type: ignore[name-defined]  # noqa: F821
+    Import("env")  # type: ignore[name-defined]
+    set_root(Path(env["PROJECT_DIR"]))  # type: ignore[name-defined]
     if run() != 0:
-        env.Exit(1)  # type: ignore[name-defined]  # noqa: F821
+        env.Exit(1)  # type: ignore[name-defined]
 except NameError:
     if __name__ == "__main__":
         sys.exit(main(sys.argv[1:]))

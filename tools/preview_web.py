@@ -22,7 +22,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import build_web  # noqa: E402
+import build_web
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -36,7 +36,7 @@ def page() -> bytes:
 class Handler(http.server.BaseHTTPRequestHandler):
     body = b""
 
-    def do_GET(self):  # noqa: N802  (http.server's own casing)
+    def do_GET(self):  # http.server's own casing, not ours
         # Every path, not only "/": the page is a single document and a stray request for a
         # favicon or a stylesheet should get the page rather than a 404 in the console.
         self.send_response(200)

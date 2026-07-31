@@ -327,7 +327,7 @@ def main() -> None:
         "aa 55 00 00 01 00 10 80 12 58 48 33 30 30 30 36 30 31 31 35 35 30 36 31 39 00 01"
         " 05 08".replace(" ", "")
     )
-    generated = dict((n, f) for n, _, f in FIXTURES)["kRespOfflineQueryCaptured"]
+    generated = {n: f for n, _, f in FIXTURES}["kRespOfflineQueryCaptured"]
     assert generated == captured, (
         "kRespOfflineQueryCaptured drifted from the hardware capture"
     )
@@ -337,7 +337,7 @@ def main() -> None:
         " 00 05 68 9b 00 00 b9 29 00 01 00 00 00 00 ff ff 00 00 00 00 00 00 ff 00 00 00"
         " 0b 8f".replace(" ", "")
     )
-    generated_info = dict((n, f) for n, _, f in FIXTURES)["kRespNormalInfoCaptured"]
+    generated_info = {n: f for n, _, f in FIXTURES}["kRespNormalInfoCaptured"]
     assert generated_info == captured_info, (
         "kRespNormalInfoCaptured drifted from the hardware capture"
     )

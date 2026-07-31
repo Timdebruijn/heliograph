@@ -34,9 +34,10 @@ import sys
 import threading
 import urllib.error
 import urllib.request
+from typing import ClassVar
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import build_web  # noqa: E402
+import build_web
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSET = ROOT / "src/web/assets/index_html.h"
@@ -164,13 +165,16 @@ def extract_page() -> str:
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
-    page = ""
-    data: dict = {}
+    # ClassVar, not an instance field: http.server builds a fresh Handler per request, so
+    # class attributes are the channel through which the page and its API payloads reach
+    # them. A mutable default on an instance would be a bug; here it is the mechanism.
+    page: ClassVar[str] = ""
+    data: ClassVar[dict] = {}
 
-    def log_message(self, *args):  # noqa: D102 - quiet
+    def log_message(self, *args):  # keep the console quiet
         pass
 
-    def do_GET(self):  # noqa: N802 - http.server's spelling
+    def do_GET(self):  # http.server's spelling, not ours
         path = self.path.split("?")[0]
         if path.startswith("/api/v1/"):
             name = path[len("/api/v1/") :].strip("/")
@@ -285,6 +289,7 @@ def main() -> int:
                 ],
                 capture_output=True,
                 timeout=120,
+                check=False,
             )
             size = target.stat().st_size if target.exists() else 0
             print(f"  {filename:18s} {size // 1024:4d} KB")

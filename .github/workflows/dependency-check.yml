@@ -95,15 +95,58 @@ jobs:
             echo "updates=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Every `https://github.com/OWNER/REPO/releases/download/TAG/asset` in platformio.ini,
+      # compared against that repository's latest release. This is how the ESP32 PLATFORM is
+      # pinned, and neither step above can see it: `pio pkg outdated` compares registry packages
+      # and a platform installed from a URL has no registry version, while the git-pin step
+      # matches `OWNER/REPO#tag` and a download URL carries no `#`.
+      #
+      # Proved rather than assumed, 2026-07-31: pinning the platform back to the previous release
+      # and running `pio pkg outdated` still printed "Everything is up-to-date!".
+      #
+      # This step exists because pinning the platform CREATED the gap it fills. The URL used to
+      # end in /stable/, which auto-updated -- silently, which is why it is now pinned, but it did
+      # at least keep moving. A pin with no monitoring is the opposite failure: a toolchain frozen
+      # for years while nobody is told. Both are silence; this is the one that can be fixed.
+      - name: Check release-URL-pinned platforms
+        id: urlpins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPORT=""
+          while IFS= read -r url; do
+            rest=${url#https://github.com/}
+            repo=$(echo "$rest" | cut -d/ -f1,2)
+            have=$(echo "$rest" | cut -d/ -f5)
+            latest=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name' 2>/dev/null || true)
+            if [ -z "$latest" ]; then
+              REPORT="${REPORT}${repo}: pinned at ${have}; could not determine the latest release"$'\n'
+            elif [ "$latest" != "$have" ]; then
+              REPORT="${REPORT}${repo}: pinned at ${have}, latest is ${latest}"$'\n'
+            fi
+          done < <(grep -oE 'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[A-Za-z0-9_.-]+/' platformio.ini | sort -u)
+          echo "$REPORT"
+          {
+            echo "report<<EOF"
+            echo "$REPORT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          if [ -n "$REPORT" ]; then
+            echo "updates=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updates=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Open or update tracking issue
-        if: steps.outdated.outputs.registry_updates == 'true' || steps.gitpins.outputs.updates == 'true'
+        if: steps.outdated.outputs.registry_updates == 'true' || steps.gitpins.outputs.updates == 'true' || steps.urlpins.outputs.updates == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPORT: ${{ steps.outdated.outputs.report }}
           GIT_REPORT: ${{ steps.gitpins.outputs.report }}
+          URL_REPORT: ${{ steps.urlpins.outputs.report }}
         run: |
           TITLE="PlatformIO dependencies have updates available"
-          BODY=$(printf 'Monthly `pio pkg outdated` report:\n\n```\n%s\n```\n\nGit-pinned dependencies (not visible to `pio pkg outdated`):\n\n```\n%s\n```\n\nReview the changelogs and bump deliberately — toolchain and library updates are hardware-tested changes, per docs/decisions.md.' "$REPORT" "${GIT_REPORT:-none behind}")
+          BODY=$(printf 'Monthly `pio pkg outdated` report:\n\n```\n%s\n```\n\nGit-pinned dependencies (not visible to `pio pkg outdated`):\n\n```\n%s\n```\n\nRelease-URL-pinned platforms (visible to neither of the above — this is the ESP32 toolchain):\n\n```\n%s\n```\n\nReview the changelogs and bump deliberately — toolchain and library updates are hardware-tested changes, per docs/decisions.md. A toolchain bump is not done until a board has booted on it.' "$REPORT" "${GIT_REPORT:-none behind}" "${URL_REPORT:-none behind}")
           EXISTING=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body "$BODY"

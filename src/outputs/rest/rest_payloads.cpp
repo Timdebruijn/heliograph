@@ -89,7 +89,7 @@ DeviceSummary summariseDevice(const DeviceState& state, const std::string& devic
         // an unread channel holds 0.0, and markAllStale() leaves `valid` true when a device
         // goes offline -- so without !stale a dead inverter's last daylight reading was summed
         // into the Dashboard total forever. At 03:00 the bridge reported watts (review).
-        if (m != nullptr && m->supported && m->valid && !m->stale) {
+        if (publishable(m)) {
             has   = true;
             value = m->value;
         }
@@ -405,8 +405,13 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
             // payload -- these two fields say how long it ran and what it was running.
             doc["previous_uptime_ms"] = bridge.previousUptimeMs;
             char v[16];
-            snprintf(v, sizeof v, "%u.%u.%u", (bridge.previousFirmware >> 16) & 0xFF,
-                     (bridge.previousFirmware >> 8) & 0xFF, bridge.previousFirmware & 0xFF);
+            // Cast rather than switch to %lu: uint32_t is `unsigned long` on xtensa and
+            // `unsigned int` on the host, so either bare format string is wrong on one of the
+            // two builds. Each component is masked to a byte, so narrowing to unsigned is exact.
+            snprintf(v, sizeof v, "%u.%u.%u",
+                     static_cast<unsigned>((bridge.previousFirmware >> 16) & 0xFF),
+                     static_cast<unsigned>((bridge.previousFirmware >> 8) & 0xFF),
+                     static_cast<unsigned>(bridge.previousFirmware & 0xFF));
             doc["previous_firmware"] = v;
         }
     }

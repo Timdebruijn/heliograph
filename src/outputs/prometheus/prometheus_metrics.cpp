@@ -286,7 +286,7 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
             }
             for (const auto& dev : devices) {
                 const auto* m = dev.state->measurements.find(gauge.measurementId);
-                if (m == nullptr || !m->supported || !m->valid || m->stale) {
+                if (!publishable(m)) {
                     continue;  // omit, do not zero
                 }
                 if (!headerWritten) {

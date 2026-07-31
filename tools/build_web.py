@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import pathlib
 import re
@@ -77,10 +78,10 @@ def set_root(root: pathlib.Path) -> None:
     ROOT = root
 
 
-try:
+# NameError is the SCons case: exec()'d without __file__, so ROOT stays the provisional cwd
+# and the PlatformIO branch below overrides it.
+with contextlib.suppress(NameError):
     set_root(pathlib.Path(__file__).resolve().parent.parent)
-except NameError:
-    pass  # provisional cwd; the PlatformIO branch below overrides it
 
 
 def assets() -> pathlib.Path:
@@ -313,10 +314,10 @@ def run() -> int:
 
 # Under PlatformIO (extra_scripts) SCons provides Import(); standalone it does not.
 try:
-    Import("env")  # type: ignore[name-defined]  # noqa: F821
-    set_root(pathlib.Path(env["PROJECT_DIR"]))  # type: ignore[name-defined]  # noqa: F821
+    Import("env")  # type: ignore[name-defined]
+    set_root(pathlib.Path(env["PROJECT_DIR"]))  # type: ignore[name-defined]
     if run() != 0:
-        env.Exit(1)  # type: ignore[name-defined]  # noqa: F821
+        env.Exit(1)  # type: ignore[name-defined]
 except NameError:
     if __name__ == "__main__":
         sys.exit(run())

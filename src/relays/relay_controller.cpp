@@ -2,6 +2,8 @@
 
 #include "relay_controller.h"
 
+#include <algorithm>
+
 namespace heliograph {
 
 RelayController::RelayController(ClockFn clock, RateLimitPolicy rateLimit)
@@ -72,13 +74,7 @@ CommandResult RelayController::applyPattern(const std::vector<bool>& pattern) {
     if (pattern.size() != static_cast<size_t>(count_)) {
         return CommandResult::OutOfRange;
     }
-    bool assertsAny = false;
-    for (uint8_t i = 0; i < count_; ++i) {
-        if (pattern[i]) {
-            assertsAny = true;
-            break;
-        }
-    }
+    const bool assertsAny = std::any_of(pattern.begin(), pattern.end(), [](bool on) { return on; });
     // One token for the whole pattern, and only when it asserts anything: a release-only
     // pattern is the safe direction and passes unconditionally, like set(index, false).
     if (assertsAny) {

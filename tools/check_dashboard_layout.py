@@ -31,7 +31,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import build_web  # noqa: E402
+import build_web
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -680,6 +680,7 @@ def render(
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
     verdict = re.search(r"<title>(LAYOUT-[^<]*)</title>", result.stdout)
     return (verdict.group(1) if verdict else "", result.stdout)
