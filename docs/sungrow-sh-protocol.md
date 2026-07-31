@@ -147,9 +147,9 @@ read the register the manufacturer points you at.
 
 ## Not mapped
 
-- **Load power (13008) and export power (13010).** Both sources agree on both. There is still no
-  canonical id for a house-load channel, so this is blocked on the
-  [vocabulary](device-profiles/canonical-measurements.md), not on the register. Export power is
+- **Export power (13010).** Both sources agree. (Load power was in this list until `load.power`
+  joined the [vocabulary](device-profiles/canonical-measurements.md); PDU 13007 is mapped now and
+  appears in the table above.) Export power is
   signed and bidirectional; our grid channels are two unsigned rails, so splitting it needs
   arithmetic a profile cannot do.
 - **Imported/exported energy (13036/13037, 13045/13046).** Agreed, but our `grid.*` channels are

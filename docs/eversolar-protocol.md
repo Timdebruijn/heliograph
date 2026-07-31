@@ -1,7 +1,9 @@
 # EverSolar / Zeversolar legacy RS485 protocol
 
-Status: reconstructed from the reference implementation; **since 2026-07-19 partially verified
-against a real TL3000-20** (Phase 3, first contact). Hardware findings are marked as such;
+Status: **Stable** since 2026-07-29 — the only driver in this project at that level. Reconstructed
+from the reference implementation, verified against a real TL3000-20 from 2026-07-19, and promoted
+after eight consecutive unassisted sunrises: the one bug this protocol carried appeared only at the
+night-to-morning transition, so a reboot hid it and no bench test could ever close it. Hardware findings are marked as such;
 two captured frames are stored byte-for-byte in `tools/gen_fixtures.py`, which
 verifies itself against the captures. Where something is unknown, that is stated explicitly — no
 fields have been invented.

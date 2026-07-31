@@ -17,7 +17,10 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | GET | `/api/v1/devices/<id>/measurements` | — | All measurements |
 | GET | `/api/v1/devices/<id>/capabilities` | — | Capabilities |
 | GET | `/api/v1/diagnostics` | — | Diagnostics |
+| GET | `/api/v1/logs` | **✔** | The in-memory log ring. Admin-gated because log lines quote configuration |
 | GET | `/api/v1/drivers` | — | Registered drivers + descriptors |
+| GET | `/api/v1/discovery` | — | The last discovery report |
+| GET | `/api/v1/wifi/scan` | **✔** | Networks in range, for the settings page |
 | GET | `/api/v1/config` | — | Config **without secrets** |
 | PATCH | `/api/v1/config` | **✔** | Change config |
 | GET | `/api/v1/config/backup` | **✔** | Download the whole configuration as a file (`?secrets=true` to include passwords) |
@@ -29,8 +32,14 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
 | POST | `/api/v1/actions/reboot` | **✔** | Reboot |
 | POST | `/api/v1/actions/clear-coredump` | **✔** | Discard a stored crash dump (404 when there is none) |
+| POST | `/api/v1/actions/factory-reset` | **✔** | Erase the stored configuration and return to first-boot setup |
+| POST | `/api/v1/devices/<id>/commands` | **✔** | Submit a setpoint for the write queue — see [Commands](#commands) |
+| GET | `/api/v1/devices/<id>/commands/<request_id>` | — | What happened to a submitted command |
+| POST | `/api/v1/relays/<n>` | **✔** | Switch one relay — relay boards only, see [docs/drm.md](drm.md) |
+| POST | `/api/v1/drm/set` | **✔** | Set the DRM curtailment mode — see [docs/drm.md](drm.md) |
 | POST | `/api/v1/ota` | **✔** | Firmware upload (`?board=` and `?sha256=` optional; both refuse a mismatch) |
 | GET | `/api/v1/events` | — | Server-Sent Events (live updates) |
+| POST | `/api/v1/provision` | — | First-boot setup: WiFi + admin password. Open only while no password exists yet — see [Auth](#auth) |
 | GET | `/metrics` | — | Prometheus |
 
 Each driver in `/api/v1/drivers` declares its own options, and the web UI renders them
@@ -70,8 +79,23 @@ save, including ones touching nothing driver-related.
 must be able to show the available drivers and their support level without hardcoding
 them in the frontend.
 
-There are **no control endpoints** (`/actions/set-power-limit` etc.). Those only appear
-once a driver has write capabilities.
+## Commands
+
+`POST /api/v1/devices/<id>/commands` submits one setpoint. It **accepts for a queue** rather than
+performing anything: the RS485 task owns the bus and runs the transaction on its next cycle, so
+the reply is `202` with a `request_id`, and `GET /api/v1/devices/<id>/commands/<request_id>` says
+what became of it.
+
+**Nothing currently ends in a device being written to**, and the endpoint says so rather than
+pretending. Every shipping driver answers `Unsupported`, and both halves return
+`404 no_command_path` while no write path is wired at all. The layers below are real —
+[write-path.md](device-profiles/write-path.md) describes what a profile must declare before a
+register is ever written, and `security.read_only_mode` refuses the whole path regardless.
+
+This section previously read "there are **no control endpoints**". That stopped being true when
+the queue and its entry points landed; the endpoints exist, they are admin-gated, and they
+decline for reasons a caller can act on. Which is a different thing from not existing, and worth
+knowing if you are building against this API.
 
 ## `GET /api/v1/status`
 
@@ -172,7 +196,7 @@ Uniform, for every error:
 | 404 | Unknown device or path |
 | 409 | Discovery already in progress; RS485 bus busy |
 | 413 | Body > 4 KB (8 KB on `/config/restore`, which carries a whole configuration) |
-| 429 | Rate limit (1 req/s on `/actions/*`) |
+| 429 | Rate limit — 1 req/s, shared across **every** write-ish route: `/actions/*`, `POST /devices/<id>/commands`, `POST /relays/<n>` and `POST /drm/set`. One limiter, not one per path |
 | 503 | No valid data yet (cold start) |
 
 Never an HTTP 200 with an error message in the body.
@@ -625,6 +649,9 @@ If SSE goes away, the web interface polls `/api/v1/status` every 5 s — SSE is 
 optimization, not a dependency.
 
 ## Prometheus
+
+> The example below predates the per-device `device="…"` label that every series now
+> carries; see [prometheus.md](prometheus.md) for the current shape.
 
 ```
 # HELP heliograph_inverter_ac_power_watts Current AC output power

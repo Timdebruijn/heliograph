@@ -190,6 +190,7 @@ battery's.
 |---|---|
 | `heliograph_grid_import_power_watts` | W |
 | `heliograph_grid_export_power_watts` | W |
+| `heliograph_load_power_watts` | W, what the house is drawing |
 
 Which of these appear depends on the inverter: a driver only reports what its device actually
 provides, so a single-phase inverter has no three-phase series and an inverter without a
@@ -371,8 +372,8 @@ drops: 0 dBm would read as a perfect signal.
 
 ## Cardinality
 
-`heliograph_build_info` carries `version`, `driver` and `board` labels. That is the complete
-set — **the inverter's serial number is deliberately not a label**. Serial numbers are
+`heliograph_build_info` carries `device`, `version`, `driver` and `board` labels. That is the
+complete set — **the inverter's serial number is deliberately not a label**. Serial numbers are
 high-cardinality by definition, and putting one in a label would multiply every series by the
 number of devices a scraper has ever seen, which is how a small Prometheus turns into a large
 one. The serial is available over the REST API instead.
@@ -382,6 +383,9 @@ one. The serial is available over the REST API instead.
 An abbreviated real scrape from a production bridge. Note that this one is an RS485-CAN — a
 monitoring-only board — which is exactly why there are **no relay or DRM series in it**: on a
 board without relays those are omitted rather than reported as zeroes.
+
+> The example below predates the per-device `device="…"` label described above, which
+> every device-scoped series carries. Read it for the metric NAMES, not the exact lines.
 
 ```
 # HELP heliograph_build_info Firmware build information

@@ -440,8 +440,6 @@ consumer would treat it as current. Unknown is therefore the more honest answer 
 
 - Whether `energy.today` remains usable as `total_increasing` around midnight (reset to 0)
   depends on the inverter's behavior — to be determined in Phase 9.
-- The eModbus server wiring (`modbus_tcp_server.cpp`) has **not been compiled yet**; only the
-  register map has been tested.
 
 Registers 850-851 are **read-only observation** of the bridge relays (DRM contacts).
 Relay control never goes through Modbus: the unauthenticated Modbus surface only

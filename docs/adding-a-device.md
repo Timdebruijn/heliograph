@@ -183,6 +183,13 @@ exactly like an inverter that does not report it.
 
 ## 4. Testing against the real device
 
+> **You need a build environment for this step, and only for this step.** A profile is compiled
+> into the firmware, so a *new* profile means building an image yourself — there is no released
+> binary containing a map that does not exist yet. If you have never used PlatformIO:
+> `pip install platformio` is the whole installation, and `pio run -e <your board env>` is the
+> whole build. Nothing else on your machine is touched. Reading and writing the TOML needs none
+> of this; it is the testing that does.
+
 1. Build and flash (`pio run -e waveshare-rs485-can`, or the env for your board — the image contains all
    drivers), or OTA-upload the `.bin` if a bridge is already installed.
 2. Select the driver and, if not the default, your profile in the bridge web UI
