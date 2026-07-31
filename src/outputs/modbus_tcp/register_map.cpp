@@ -153,7 +153,7 @@ void RegisterMap::publishMeasurement(const DeviceState& state, const char* id, u
     // aware it is not load-bearing -- removing it breaks no test, because it cannot change
     // the output. In MQTT and discovery the same flag *is* load-bearing, since there the
     // difference is a key or an entity existing at all.
-    const bool usable = m != nullptr && m->supported && m->valid && !m->stale;
+    const bool usable = publishable(m);
     writeFloat(address, usable ? m->value : 0.0, usable);
     setValidity(bit, usable);
 }
@@ -216,7 +216,7 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
                        ValidityBit::EnergyTotal);
 
     const auto* hours = state.measurements.find(measurement_id::kOperatingHours);
-    const bool hoursUsable = hours != nullptr && hours->supported && hours->valid && !hours->stale;
+    const bool hoursUsable = publishable(hours);
     writeU32(reg::kOperatingHours,
              hoursUsable ? static_cast<uint32_t>(hours->value) : kInvalidU32);
     setValidity(ValidityBit::OperatingHours, hoursUsable);

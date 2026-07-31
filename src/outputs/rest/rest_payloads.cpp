@@ -89,7 +89,7 @@ DeviceSummary summariseDevice(const DeviceState& state, const std::string& devic
         // an unread channel holds 0.0, and markAllStale() leaves `valid` true when a device
         // goes offline -- so without !stale a dead inverter's last daylight reading was summed
         // into the Dashboard total forever. At 03:00 the bridge reported watts (review).
-        if (m != nullptr && m->supported && m->valid && !m->stale) {
+        if (publishable(m)) {
             has   = true;
             value = m->value;
         }

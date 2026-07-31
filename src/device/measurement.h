@@ -70,7 +70,26 @@ struct Measurement {
     /// infer meter-grade precision from a derived value.
     bool     derived     = false;
     uint64_t timestampMs = 0;
+
+    /// Whether this reading may be published as a number right now.
+    ///
+    /// All three flags matter and they mean different things: `supported` says the device has
+    /// this channel at all, `valid` says the last read produced a figure, `stale` says that
+    /// figure is too old to stand for the present. Anything else is absent -- never zero. The
+    /// distinction is the project's oldest rule and the easiest to get subtly wrong, which is
+    /// why it lives here as one predicate instead of being spelled out per output.
+    bool publishable() const { return supported && valid && !stale; }
 };
+
+/// The same question for a pointer that may be null, which is how every output reaches a
+/// measurement it looked up by id: `find()` returns nullptr for a channel this device does not
+/// publish, and a missing channel is exactly as unpublishable as an invalid one.
+///
+/// Four outputs each wrote this condition out by hand -- the Modbus register map twice, REST
+/// once, Prometheus once in De Morgan form (`m == nullptr || !m->supported || ...`). Four
+/// hand-maintained copies of one rule, one of them inverted, is a change waiting to be applied
+/// to three places out of four.
+inline bool publishable(const Measurement* m) { return m != nullptr && m->publishable(); }
 
 /// Well-known measurement ids. Drivers fill only what they actually read.
 namespace measurement_id {
