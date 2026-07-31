@@ -196,7 +196,7 @@ Uniform, for every error:
 | 404 | Unknown device or path |
 | 409 | Discovery already in progress; RS485 bus busy |
 | 413 | Body > 4 KB (8 KB on `/config/restore`, which carries a whole configuration) |
-| 429 | Rate limit (1 req/s on `/actions/*`) |
+| 429 | Rate limit — 1 req/s, shared across **every** write-ish route: `/actions/*`, `POST /devices/<id>/commands`, `POST /relays/<n>` and `POST /drm/set`. One limiter, not one per path |
 | 503 | No valid data yet (cold start) |
 
 Never an HTTP 200 with an error message in the body.
@@ -649,6 +649,9 @@ If SSE goes away, the web interface polls `/api/v1/status` every 5 s — SSE is 
 optimization, not a dependency.
 
 ## Prometheus
+
+> The example below predates the per-device `device="…"` label that every series now
+> carries; see [prometheus.md](prometheus.md) for the current shape.
 
 ```
 # HELP heliograph_inverter_ac_power_watts Current AC output power
