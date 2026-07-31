@@ -151,5 +151,14 @@ jobs:
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body "$BODY"
           else
-            gh issue create --title "$TITLE" --body "$BODY" --label dependencies
+            # Assigned, not merely labelled. An unassigned issue opened by a bot reaches the
+            # maintainer only if their repository watch setting happens to include new issues --
+            # a setting nobody remembers choosing and which this workflow cannot read. Being
+            # assigned notifies regardless, and subsequent comments on that issue notify too,
+            # which is the path every month after the first one takes.
+            #
+            # The point of this job is to be told. An update nobody hears about is the same
+            # outcome as not checking.
+            gh issue create --title "$TITLE" --body "$BODY" --label dependencies \
+              --assignee "${{ github.repository_owner }}"
           fi
