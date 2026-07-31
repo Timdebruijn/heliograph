@@ -45,14 +45,38 @@ an electrically hostile neighbour.
 RS485 is a **daisy chain**. Each device connects to the next; the cable enters a device and
 leaves it toward the following one.
 
-```
-[Bridge] ---- [Inverter 1] ---- [Inverter 2] ---- [Inverter 3]
-   ^                                                    ^
- bus end                                             bus end
+```mermaid
+flowchart LR
+    B["🔌 Bridge<br><b>bus end</b><br>120 Ω ON"]
+    I1["Inverter<br>address 1<br>termination OFF"]
+    I2["Inverter<br>address 2<br>termination OFF"]
+    I3["Inverter<br>address 3<br><b>bus end</b><br>120 Ω ON"]
+    B --- I1 --- I2 --- I3
+    style B fill:#e8f4ea,stroke:#2d7a3e,stroke-width:2px
+    style I3 fill:#e8f4ea,stroke:#2d7a3e,stroke-width:2px
 ```
 
+One cable, three wires, threaded through every device in turn. That single picture carries three
+separate rules, and the rest of this page is those three rules explained: **the shape** is a
+chain, **the ends** are the only two places a 120 Ω resistor goes, and **each device answers to
+its own address** so their replies do not collide.
+
 What you must not build is a star — several separate cables radiating from one point to one
-device each. It appears to work on a short bench run and then fails intermittently once the
+device each.
+
+```mermaid
+flowchart TD
+    C["🔌 Bridge"]
+    C --- D1["Inverter 1"]
+    C --- D2["Inverter 2"]
+    C --- D3["Inverter 3"]
+    X["✘ Do not wire it like this"]
+    style X fill:#fbeaea,stroke:#a33,stroke-width:2px
+    style C fill:#fbeaea,stroke:#a33
+```
+
+Each of those three legs is an unterminated stub, and each one reflects the signal back onto the
+bus. It appears to work on a short bench run and then fails intermittently once the
 cable gets longer, because every unterminated stub reflects the signal back onto the bus.
 
 If a device sits slightly off the main run, keep that stub as short as you can. Centimetres are

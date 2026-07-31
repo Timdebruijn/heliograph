@@ -54,6 +54,13 @@ ENDPOINTS = ["status", "config", "diagnostics", "drivers", "discovery", "capture
 # `health.png` replaces diagnostics+logs. The old names are gone rather than kept as aliases:
 # a README pointing at `device.png` should break loudly, not quietly show a screen that no
 # longer exists.
+# The five tabs this can shoot unattended. docs/images/discovery.png is NOT in this list and
+# cannot be: it shows the Discovery wizard mid-flow, which needs a bus with something on it and a
+# human clicking through interface -> mode -> probe -> candidates -> confirm. It was made by hand.
+#
+# The consequence is worth knowing rather than discovering later: every other image in the README
+# refreshes when this script runs, and that one silently keeps whatever firmware it was taken on.
+# If the wizard's layout changes, it is the image nobody notices is stale.
 TABS = {
     "live": "live.png",
     "inv": "inverters.png",
