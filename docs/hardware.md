@@ -300,9 +300,11 @@ buzzer confirms the wipe; the RS485-CAN has neither, so there the reboot is the 
 ## Open / to be verified on hardware
 
 1. **BOOT factory reset on the RS485-CAN and the 1CH** — see the table above.
-2. **Relay actuation on the Relay-1CH** — the board has been powered and flashed, but its single
-   relay (GPIO47) has not been switched and measured. The 6CH's six were verified on 2026-07-23
-   (order, polarity, failsafe on power-cut).
+2. **Relay polarity on the Relay-1CH, with a meter.** The relay itself was switched on 2026-07-28
+   and the indicator LED followed in both directions, so actuation is confirmed — see the pin
+   table above. What has not been done is putting a multimeter on the contacts to confirm which
+   way NO/NC sit, which is the check that matters before wiring it to a DRM port. The 6CH's six
+   were fully verified on 2026-07-23 (order, polarity, failsafe on power-cut).
 3. **GPIO47 on the RS485-CAN** — no documented function there. The firmware does not touch it;
    the safest state for a pin with no known function is untouched hi-Z. It is the relay pin on
    the 1CH, which is why it appears twice in this project's history.
