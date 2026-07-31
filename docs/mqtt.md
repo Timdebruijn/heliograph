@@ -102,19 +102,35 @@ inverter that's off at night doesn't make the bridge offline — that would make
 entities `unavailable` in Home Assistant and ruin the history. The inverter status lives in
 `state` as `inverter_online`.
 
-The `relay/<n>/set` topics (relay boards only) are the single subscription this firmware
-has. Commands pass the RelayController's gates — `security.read_only_mode` off AND
-`relays.enabled` on — and the acknowledged state follows on `relay/<n>/state`, so a
-refused command visibly snaps the Home Assistant switch back. There are **no command
-topics for the inverter.** The active driver has no write capabilities, so the
-bridge subscribes to nothing else. That is not a configuration choice but a consequence of
-`capabilities.write.none()`.
+The bridge subscribes to **three** things:
+
+| Topic | Gated by |
+|---|---|
+| `relay/<n>/set` (relay boards only) | `security.read_only_mode` off **and** `relays.enabled` on |
+| `drm/set` (relay boards only) | the same two gates |
+| `<device>/command/set` | `security.read_only_mode` off, then the driver's own capability check |
+
+Relay commands pass the RelayController's gates, and the acknowledged state follows on
+`relay/<n>/state`, so a refused command visibly snaps the Home Assistant switch back.
+
+**This section used to say the relay topics were the only subscription, and that there were no
+command topics for the inverter because the active driver had no write capabilities.** Both
+stopped being true when the command queue landed: the subscription is unconditional wherever a
+handler is wired, which it always is. What is still true is that no shipped register map has a
+`verified` write row, so a command on that topic ends in `unsupported` rather than a register
+write — and `read_only_mode` refuses the whole path before a driver is reached. See
+[docs/security.md](security.md#what-can-reach-the-inverter) for which drivers can write and under
+what conditions; the honest summary is "gated", not "absent".
+
+The outcome of a submitted command is published on `<device>/command/result`.
 
 ## Publishing strategy
 
-- **Publish-on-change** with deadband, to avoid broker spam: power ≥ 5 W difference,
-  voltage ≥ 0.5 V, energy on every change, status on every change.
-- **Periodic forced refresh** every 60 s (configurable), even without a change.
+- **Publish-on-change** with deadband, to avoid broker spam: power ≥ 5 W, voltage ≥ 0.5 V,
+  current ≥ 0.1 A, frequency ≥ 0.02 Hz, temperature ≥ 0.2 °C; energy and status on every change.
+- **Periodic forced refresh** every 60 s, even without a change. Fixed, not configurable: it is
+  a compile-time constant in `publish_policy.h`, and nothing in the settings or the config file
+  changes it. (This line said "configurable" and there has never been a setting for it.)
 - `identity` and `capabilities` only on change or after (re)connection.
 - JSON document is bounded: `JsonDocument` with explicit capacity checking; exceeding it
   logs an error and does not publish — never a truncated JSON message.
