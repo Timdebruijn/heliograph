@@ -53,7 +53,7 @@ jobs:
         # default rule set drifts -- a new ruff enabling RUF100/EXE001 failed an unrelated
         # feature PR on pre-existing tools/ files (2026-07-23). Bumping ruff is now a
         # deliberate change (raise the pin, fix what it finds) instead of a random red build.
-        run: pip install platformio "ruff==0.15.18"
+        run: pip install platformio "ruff==0.16.1"
 
       - name: Ruff (Python tools)
         run: |
