@@ -55,7 +55,26 @@ relay boards (see [Curtailment](#curtailment-turning-the-inverter-down)).
 ### It reads your inverter
 
 Heliograph speaks your inverter's native protocol over RS485, converts everything into one
-common set of measurements, and republishes that:
+common set of measurements, and republishes that.
+
+> **Four words that appear throughout this page.** You do not need to understand them to follow
+> the setup, but they stop being mysterious once someone says them plainly:
+>
+> - **RS485** — a two-wire electrical standard for sending data over a long cable, used by
+>   nearly every inverter's communication port. It is wiring, not software: two data wires and
+>   a ground, and several devices may share one pair.
+> - **Modbus RTU** — the most common *language* spoken over those wires. "RTU" here just means
+>   the serial-cable flavour. Not to be confused with **Modbus TCP**, which is the same language
+>   over your *network*, and is one of the things Heliograph offers to your own tooling. Your
+>   inverter side is RTU; the port-502 side is TCP. They are not the same wires.
+> - **Unit id** — the number that identifies one device on a shared RS485 cable, so that two
+>   inverters on one pair can be told apart. Most ship as 1; some vendors ship something else,
+>   and the table below says so where it matters.
+> - **MPPT** — *maximum power point tracker*: one of the inverter's independent solar inputs.
+>   An inverter with two MPPTs has two strings of panels it optimises separately, which is why
+>   readings come per tracker.
+
+Where it puts the data:
 
 | Integration | How |
 |---|---|
@@ -285,8 +304,28 @@ first, **swapping A and B is the single most common fix** — it cannot damage a
 Open the dashboard and run the wizard on the *Discovery* tab. It tries the supported
 protocols and proposes a driver. It identifies the **protocol**, not the model — so a driver
 that ships several register maps still needs the map chosen, and the wizard's confirm step
-asks for it. If nothing answers, turn the log level up to `trace` under *Settings* and watch
-the *Logs* tab — it shows exactly what is being sent and whether anything comes back.
+asks for it.
+
+The wizard offers two modes. **Quick** tries each driver at its own default address, which is
+what you want for one inverter. **Extended** additionally sweeps addresses 1–8, which is slower
+and is how you check that the addresses you assigned to several inverters actually took.
+
+**If nothing answers**, work down this list — the first two fix most cases:
+
+1. **Swap A and B.** It cannot damage anything, and reversed data wires are the single most
+   common cause of complete silence.
+2. **Check the ground wire is connected.** Without a shared reference the bus can stay silent
+   however the data wires are arranged.
+3. **Unplug the manufacturer's dongle** if one is on that port. Two masters on one bus corrupt
+   each other's messages, and the dongle will not yield.
+4. **Try the other baud rate.** Most inverters ship at 9600; some at 115200. Discovery tries
+   both, but a device configured to something else answers neither.
+5. **Check the unit id.** Most vendors ship 1 — GoodWe ships this family at **247**, and a
+   wrong address looks exactly like a wiring fault. Extended discovery finds it for you.
+6. **Then turn the log level up to `trace`** under *Settings* and watch the *Logs* tab. It
+   shows exactly what is being sent and whether anything comes back, which separates "my wiring
+   is wrong" from "it replied and we could not read it" — a distinction worth having before you
+   open an issue.
 
 <p align="center">
   <img src="docs/images/discovery.png" width="480" alt="The Discovery wizard stepping through interface, mode, probing, candidates, confirm, test poll and save">
