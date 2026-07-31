@@ -30,8 +30,7 @@ from pathlib import Path
 
 if sys.version_info < (3, 11):
     sys.stderr.write(
-        "gen_profiles.py needs Python >= 3.11 (tomllib); found %s\n"
-        % sys.version.split()[0]
+        f"gen_profiles.py needs Python >= 3.11 (tomllib); found {sys.version.split()[0]}\n"
     )
     sys.exit(1)
 
@@ -951,10 +950,10 @@ def main(argv: list[str]) -> int:
 
 # Under PlatformIO (extra_scripts) SCons provides Import(); standalone it does not.
 try:
-    Import("env")  # type: ignore[name-defined]  # noqa: F821
-    set_root(Path(env["PROJECT_DIR"]))  # type: ignore[name-defined]  # noqa: F821
+    Import("env")  # type: ignore[name-defined]
+    set_root(Path(env["PROJECT_DIR"]))  # type: ignore[name-defined]
     if run() != 0:
-        env.Exit(1)  # type: ignore[name-defined]  # noqa: F821
+        env.Exit(1)  # type: ignore[name-defined]
 except NameError:
     if __name__ == "__main__":
         sys.exit(main(sys.argv[1:]))

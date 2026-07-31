@@ -38,7 +38,10 @@ def main() -> int:
             path.write_text("\n".join(scripts))
             try:
                 result = subprocess.run(
-                    ["node", "--check", str(path)], capture_output=True, text=True
+                    ["node", "--check", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
             except FileNotFoundError:
                 # Without this the script dies on a bare traceback that names no cause. The
@@ -164,7 +167,9 @@ process.exit(bad === 0 ? 0 : 1);
     )
     path = pathlib.Path(scratch) / "version_compare.js"
     path.write_text(harness)
-    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    result = subprocess.run(
+        ["node", str(path)], capture_output=True, text=True, check=False
+    )
     print(f"version comparison: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
@@ -253,7 +258,9 @@ process.exit(bad === 0 ? 0 : 1);
     )
     path = pathlib.Path(scratch) / "fleet_mode.js"
     path.write_text(harness)
-    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    result = subprocess.run(
+        ["node", str(path)], capture_output=True, text=True, check=False
+    )
     print(f"fleet mode: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
@@ -396,7 +403,9 @@ process.exit(bad === 0 ? 0 : 1);
     )
     path = pathlib.Path(scratch) / "address_collision.js"
     path.write_text(harness)
-    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    result = subprocess.run(
+        ["node", str(path)], capture_output=True, text=True, check=False
+    )
     print(f"address collision: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
@@ -484,7 +493,9 @@ const fail = m => {{ console.error(m); bad++; }};
 """
     path = pathlib.Path(scratch) / "auth_prompt.js"
     path.write_text(harness)
-    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    result = subprocess.run(
+        ["node", str(path)], capture_output=True, text=True, check=False
+    )
     print(f"auth prompt re-entrancy: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
@@ -553,7 +564,9 @@ const fail = m => { console.error(m); bad++; };
     )
     path = pathlib.Path(scratch) / "auth_fetch_race.js"
     path.write_text(harness)
-    result = subprocess.run(["node", str(path)], capture_output=True, text=True)
+    result = subprocess.run(
+        ["node", str(path)], capture_output=True, text=True, check=False
+    )
     print(f"auth fetch race: {'OK' if result.returncode == 0 else 'FAIL'}")
     if result.returncode != 0:
         print(result.stdout + result.stderr)
