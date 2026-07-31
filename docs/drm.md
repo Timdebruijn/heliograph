@@ -1,8 +1,11 @@
 # DRM curtailment — relays as demand-response contacts
 
-Status: **software complete, not yet validated on relay hardware.** Nothing in this
-document has touched a real inverter DRM port yet; the relay polarity check and the first
-wired test are pending the physical Relay-6CH board.
+Status: **relay hardware validated; the inverter side is not.** Both relay boards exist and
+have been measured — the 6CH's six relays for order, polarity and failsafe-on-power-cut on
+2026-07-23, the 1CH's single relay for switching and LED response on 2026-07-28 (see
+[docs/hardware.md](hardware.md)). What has **not** happened is the part that matters most:
+nothing in this document has been wired to a real inverter's DRM port. Treat the relay side as
+proven and the inverter side as entirely untried.
 
 ## What this is
 

@@ -99,11 +99,13 @@ difference, so neither reading is mapped and `grid.import_power`/`grid.export_po
 The cumulative import/export *energy* registers (33169/33173) do agree — but our canonical grid
 channels are instantaneous power.
 
-### House load — blocked on the vocabulary, not the register
+### House load — mapped since `load.power` was added
 
-Both sources carry house load (33147) and backup load (33148) and agree on both. There is no
-canonical id for a load channel yet, so mapping them needs a
-[vocabulary addition](device-profiles/canonical-measurements.md) first.
+Both sources carry house load (33147) and backup load (33148) and agree on both. House load is
+**mapped** as `load.power`, which joined the
+[vocabulary](device-profiles/canonical-measurements.md) on 2026-07-30; this section said it was
+blocked on that id until the id existed. Backup load stays unmapped — it is a different quantity
+(what the backup port carries, not what the house draws) and has no canonical id.
 
 ### Strings 3 and 4
 

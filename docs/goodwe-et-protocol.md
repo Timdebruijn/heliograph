@@ -113,7 +113,8 @@ The older `sph` profile maps it too, at register 1009, with a comment recording 
 unconfirmed — noted here so this table is not read as saying no other profile has the channel.
 
 **House consumption.** The source computes it from several registers rather than reading one, and
-a profile does no arithmetic. There is also no canonical id for a load channel yet.
+a profile does no arithmetic. `load.power` exists in the vocabulary now, so the id is no longer
+the obstacle — the arithmetic is, and that stays out of a data file.
 
 ## Writing: nothing, deliberately
 

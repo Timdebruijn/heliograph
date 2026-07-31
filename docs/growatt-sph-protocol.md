@@ -29,7 +29,7 @@ checked against the inverter display — this is the single most likely thing to
 | Quantity | Register(s) | Canonical id | Scale (assumed) | Confidence |
 |---|---|---|---|---|
 | PV total power | 116–117 | `dc.power.total` | ×0.1 W | medium |
-| AC / grid power | 40–41 | `ac.power.total` | ×0.1 W | low (sign/meaning unclear) |
+| AC / grid power | **35–36** | `ac.power.total` | ×0.1 W | address high, sign unverified |
 | Battery power | 1009–1010 | `battery.power` | ×0.1 W | medium — labelled "discharge power"; sign convention TBD |
 | Battery SoC | 1014 | `battery.soc` | ×1 % | high |
 | Battery voltage | 1013 | `battery.voltage` | ×0.1 V | medium |
