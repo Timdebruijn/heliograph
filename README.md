@@ -449,6 +449,14 @@ in this project's own history.
 
 Details: [docs/architecture.md](docs/architecture.md).
 
+## All the documentation
+
+Twenty-nine documents, and **[docs/README.md](docs/README.md) groups them by what you are trying
+to do** — get it working, fix it when it does not, check whether your inverter is supported,
+connect your own tooling, add a new inverter, or understand how it is built. It also marks which
+documents are dated records rather than instructions, so nobody follows a "next step" that
+happened months ago.
+
 ## Development
 
 ```bash
