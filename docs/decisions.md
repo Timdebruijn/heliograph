@@ -35,11 +35,20 @@ but for `framework = arduino` it still ships **Arduino core 2.0.17 on ESP-IDF 4.
 Anyone writing `platform = espressif32` silently gets an outdated toolchain without
 core 3.x.
 
-Required in `platformio.ini`:
+Required in `platformio.ini` — **pinned to a version, not to `stable`**:
 
 ```ini
-platform = https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip
+platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip
 ```
+
+> This block used to end in `/stable/`, and that is a trap worth naming rather than quietly
+> editing away. `stable` moves. On 2026-07-31 it was found to have moved without anyone
+> noticing: a developer machine was still on 55.3.39 (Arduino core 3.3.9) while CI had been on
+> 55.03.311 (core 3.3.11) since 2026-07-24 — so release v0.25.0 shipped from a toolchain nobody
+> had booted, and no commit recorded the change because from the repository's side nothing had
+> changed. Anyone following this file verbatim would reintroduce exactly that. The pin is a
+> deliberate edit now; see the comment in `platformio.ini` and the monthly dependency check,
+> which grew a source specifically to watch it.
 
 pioarduino (`55.03.39`, 2026-06-04 = Arduino 3.3.9 / IDF 5.5.4, last push 2026-07-13,
 Apache-2.0) is de facto the maintained route to core 3.x. This is precisely the legacy risk

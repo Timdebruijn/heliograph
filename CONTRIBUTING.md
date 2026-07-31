@@ -40,7 +40,8 @@ To look at the page without a bridge, `python3 tools/preview_web.py` serves it o
 battery, one that never replied. That last one is what the diagnosis card is for, and the only
 way to see it on a desk.
 
-CI runs the same checks, plus both firmware builds.
+CI runs the same checks, plus a firmware build for each of the four environments
+(`waveshare-rs485-can`, `waveshare-relay-1ch`, `waveshare-relay-6ch`, `mock`).
 
 ## Code style
 
