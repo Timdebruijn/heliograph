@@ -120,11 +120,21 @@ picture:
 | SolaX X1 series (X1 Mini G1/G2/G3) | RS485 | **Experimental** — the first attempt on real hardware (an X1-Mini-G1) returned no data at all. Read [docs/solax-x1-protocol.md](docs/solax-x1-protocol.md) before you buy or wire anything |
 | Any inverter implementing **SunSpec** | Modbus RTU over RS485 | **Experimental** — one generic driver for the published standard, so no per-vendor file is needed. Not yet confirmed against any physical device; see [docs/sunspec.md](docs/sunspec.md) for which vendors are worth trying |
 
-What the labels mean:
+What the labels mean, weakest first:
 
-- **Beta** — works, in daily use, still collecting evidence before being called Stable.
 - **Experimental** — the protocol has been implemented from documentation, but nobody has
   confirmed it against that inverter yet. It may simply not work. You would be the first.
+- **Beta** — confirmed against a real inverter, running, still collecting evidence before
+  being called Stable. Nothing sits here today.
+- **Stable** — validated and soak-tested on real hardware over a long enough run to trust it
+  unattended. One driver has reached this.
+
+The same three words apply to the **register map** you pick, separately from the driver that
+reads it. One driver serves every Modbus inverter here, so its label can only ever describe the
+least-proven map in the build — the map's own status is shown next to it when you choose one,
+and in [the coverage matrix](docs/drivers/coverage.md). **Every Modbus map here is
+Experimental**, including those for inverters this project has running: what has been proven
+there is the plumbing, not the register table.
 
 Two more things to check on your own inverter:
 
