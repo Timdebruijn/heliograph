@@ -190,6 +190,7 @@ battery's.
 |---|---|
 | `heliograph_grid_import_power_watts` | W |
 | `heliograph_grid_export_power_watts` | W |
+| `heliograph_load_power_watts` | W, what the house is drawing |
 
 Which of these appear depends on the inverter: a driver only reports what its device actually
 provides, so a single-phase inverter has no three-phase series and an inverter without a
