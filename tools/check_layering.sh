@@ -227,6 +227,53 @@ else
     echo "OK"
 fi
 
+echo "==> 9. Every documentation link points at something the public can actually open"
+# A link check that only asks "does this file exist" passes on the author's machine and fails
+# for everyone else: an ignored file is present locally and absent from the clone. That is
+# exactly how docs/README.md shipped a link to docs/implementation-plan.md, which .gitignore
+# keeps out of the repo on purpose (it is a personal tracker). Ask git, not the filesystem.
+#
+# Directories are checked by whether they CONTAIN a tracked file -- git tracks files, not
+# directories, so `git ls-files <dir>` returning anything means the link resolves on GitHub.
+# The first version of this check reported .vscode/ as broken for that reason.
+if link_report=$(python3 - <<'PYEOF'
+import pathlib, re, subprocess, sys
+
+tracked = set(subprocess.run(["git", "ls-files"], capture_output=True, text=True).stdout.split())
+tracked_dirs = {str(pathlib.PurePosixPath(t).parent) for t in tracked}
+root = pathlib.Path(".").resolve()
+bad = []
+
+for doc in sorted(pathlib.Path(".").rglob("*.md")):
+    if ".git" in doc.parts or ".pio" in doc.parts:
+        continue
+    if str(doc) not in tracked:
+        continue  # only published documents can mislead a reader
+    text = doc.read_text(encoding="utf-8")
+    for m in re.finditer(r"\[([^\]]*)\]\(([^)#]+)(#[^)]*)?\)", text):
+        target = m.group(2)
+        if target.startswith(("http://", "https://", "mailto:")):
+            continue
+        try:
+            rel = str((doc.parent / target).resolve().relative_to(root))
+        except ValueError:
+            continue  # outside the repo; not ours to judge
+        if rel in tracked or rel in tracked_dirs:
+            continue
+        bad.append(f"{doc}:{text[: m.start()].count(chr(10)) + 1} -> {target}")
+
+if bad:
+    print("\n".join(bad))
+    sys.exit(1)
+PYEOF
+    ); then
+    echo "OK"
+else
+    echo "FAIL: documentation links to files that are not in the repository:"
+    echo "$link_report"
+    status=1
+fi
+
 echo
 if [ $status -eq 0 ]; then
     echo "RESULT: PASS"
