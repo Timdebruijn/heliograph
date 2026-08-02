@@ -404,7 +404,27 @@ namespace {
 //
 // Cost in the RS485 hot path when nothing is recording: one inline null check. It never takes
 // the bus lock and never touches the line.
-#define HELIOGRAPH_VERSION_PATCH 0
+//
+// 0.26.1 MAKES THAT REPORT REACHABLE. 0.26.0 could record a driver capture and could not hand it
+// back: the endpoint answered with the PASSIVE report every time -- status "idle", zero frames,
+// no sent/received at all -- while the bridge log said "6 frames (3 sent, 3 received), 198
+// bytes" in the same minute.
+//
+// ESPAsyncWebServer matches a registered URI as a PREFIX (`_uri == url || url.startsWith(_uri +
+// "/")`), so /api/v1/capture answered everything beneath it and, being registered first, won.
+// GET /api/v1/capture/anything returned the same document. The route is now
+// /api/v1/driver-capture, which cannot be a subpath of anything registered.
+//
+// Renamed rather than reordered. Registering the specific route first also works and leaves the
+// correctness of one route depending on a line two hundred lines away; the next person to group
+// these tidily breaks it exactly as silently as it broke this time.
+//
+// WHAT FOUND IT: flashing it. Not 964 host tests, not seven CI checks, not four review agents,
+// not two automated review passes -- all of which ran over this code. The routing lives in the
+// 97% of rest_api.cpp that sits inside `#if defined(ESP32)`, so on the host it is a stub and
+// none of that could reach it. check_layering.sh rule 11 refuses a route that is a prefix of
+// another, which is the part of this that a machine can check.
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;

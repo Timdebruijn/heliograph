@@ -355,6 +355,42 @@ else
     echo "OK"
 fi
 
+echo "==> 11. No REST route is a prefix of another"
+# ESPAsyncWebServer matches a registered URI as a PREFIX: `_uri == url || url.startsWith(_uri
+# + "/")`. So /api/v1/capture answers /api/v1/capture/driver, /api/v1/capture/anything, and
+# every other path beneath it -- and whichever route was registered FIRST wins.
+#
+# That is not hypothetical. 0.26.0 shipped GET /api/v1/capture/driver, documented it, and
+# rendered a UI page against it. Every driver capture ran correctly on the bus and then answered
+# with the PASSIVE report: status "idle", zero frames, no sent/received fields at all. The bridge
+# log said "6 frames (3 sent, 3 received), 198 bytes" in the same minute the endpoint said
+# nothing had happened. Host tests, four review agents and two automated review passes all missed
+# it, because the routing lives in the 97% of rest_api.cpp that is inside `#if defined(ESP32)`.
+#
+# The fix was to stop making it a subpath. This rule is here because the OTHER fix -- registering
+# the more specific route first -- also works, and puts the correctness of one route two hundred
+# lines away from the route it depends on.
+routes=$(grep -oE 'g_server->on\("[^"]+"' src/outputs/rest/rest_api.cpp | sed 's/g_server->on("//;s/"$//' | sort -u)
+collisions=""
+for a in $routes; do
+    # "/" is not a prefix of anything by this rule: startsWith("//") is what it would take.
+    [ "$a" = "/" ] && continue
+    for b in $routes; do
+        [ "$a" = "$b" ] && continue
+        case "$b" in
+            "$a"/*) collisions="$collisions
+      $a  swallows  $b" ;;
+        esac
+    done
+done
+if [ -n "$collisions" ]; then
+    echo "FAIL: a route is a prefix of another; the first one registered answers both:"
+    printf '%s\n' "$collisions" | sed '/^[[:space:]]*$/d'
+    status=1
+else
+    echo "OK"
+fi
+
 echo
 if [ $status -eq 0 ]; then
     echo "RESULT: PASS"

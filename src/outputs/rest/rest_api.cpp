@@ -1151,7 +1151,19 @@ bool RestApi::begin() {
     // independent last-reports to hand back, and a consumer would have to branch on a mode field
     // anyway -- with half the fields absent, which reads as missing data rather than as a
     // different kind of report.
-    g_server->on("/api/v1/capture/driver", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    //
+    // NOT /api/v1/capture/driver, which is what this was until it ran on hardware. The server
+    // matches a registered URI as a PREFIX -- `_uri == url || url.startsWith(_uri + "/")` -- so
+    // /api/v1/capture swallowed every path beneath it, and since it is registered first it won.
+    // Every driver capture completed on the bus and then answered with the passive report:
+    // status "idle", no frames, and no `sent`/`received` at all. The log said "6 frames (3 sent,
+    // 3 received), 198 bytes" while the endpoint said nothing had happened.
+    //
+    // Fixed by making it not a subpath, rather than by registering this one first. Order would
+    // work and would sit two hundred lines away from the route it depends on; the next person to
+    // group these tidily would break it exactly as silently. Rule 11 in check_layering.sh now
+    // refuses a route that is a prefix of another.
+    g_server->on("/api/v1/driver-capture", HTTP_GET, [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         if (context_.driverCaptureReport == nullptr) {
             sendError(request, {404, "no_capture", "this build cannot capture"});
