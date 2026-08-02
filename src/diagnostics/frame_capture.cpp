@@ -16,6 +16,8 @@ uint32_t bitsPerCharacter(const SerialProfile& profile) {
            profile.stopBits;
 }
 
+}  // namespace
+
 bool modbusCrcHolds(const std::vector<uint8_t>& bytes) {
     // Four is the shortest thing that can carry one: unit, function and two CRC bytes. Below
     // that there is nothing to check rather than a check that fails.
@@ -34,8 +36,6 @@ bool pmuFrameHolds(const std::vector<uint8_t>& bytes) {
     pmu::Frame frame;
     return pmu::parseFrame(bytes.data(), bytes.size(), frame) == pmu::ParseResult::Ok;
 }
-
-}  // namespace
 
 uint32_t idleGapMsFor(const SerialProfile& profile) {
     if (profile.baudRate == 0) {
