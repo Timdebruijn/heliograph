@@ -81,6 +81,33 @@ jobs:
             ~/.cache/pip
           key: pio-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
+      # The COMPILED tree, which is a different thing from the cache above: that one holds the
+      # packages, this one holds the objects built from them. The native env compiles 65 src
+      # objects and then links them into a separate binary per test suite, so the src half is
+      # built once and paid for on every run. Locally the same suite takes ~40 s cold and ~24 s
+      # warm; this is an attempt to give CI the warm number.
+      #
+      # ~15 MB, measured -- worth stating next to the toolchain cache's ~1.7 GB, because the
+      # repo budget is 10 GB and cache-warm.yml exists partly because five oversized entries
+      # were evicting the small useful ones. This is not one of those.
+      #
+      # KEYED PER COMMIT with a prefix fallback, which is the shape that makes it work at all: a
+      # key that matched exactly would only ever hit on a re-run of the same commit, and a key
+      # that ignored the commit would never be refreshed. The restore-key picks up the newest
+      # tree built from the same platformio.ini, and SCons decides what is stale from there.
+      #
+      # platformio.ini is in the key because it carries the BUILD FLAGS. SCons tracks source
+      # dependencies, not the command line it was invoked with, so a changed -D would otherwise
+      # link objects compiled under the old one -- the one way this cache could turn a red run
+      # green. Everything else that matters is content-hashed by SCons itself.
+      - name: Cache the native build tree
+        uses: actions/cache@v6
+        with:
+          path: .pio/build/native
+          key: pio-build-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}-${{ github.sha }}
+          restore-keys: |
+            pio-build-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}-
+
       - name: Install PlatformIO
         run: pip install platformio
 
