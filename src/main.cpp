@@ -375,31 +375,36 @@ namespace {
 // implement. A wrong map can report a wrong number; it cannot put a device into an untested
 // state.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 25
+#define HELIOGRAPH_VERSION_MINOR 26
 //
-// 0.25.1 changes nothing a bridge does, and changes what builds it.
+// 0.26.0 can record a conversation it is having, not just one it is overhearing.
 //
-// THE TOOLCHAIN IS PINNED TO A VERSION. The platform URL ended in /stable/, which moves. It had
-// already moved: 0.25.0's images were compiled by an Arduino core two patch releases newer than
-// the one this project last booted on a board, and no commit recorded that, because from the
-// repository's side nothing had changed. Firmware meant to run for years unattended should not
-// have its compiler and RTOS replaced underneath a release without a line in the history saying
-// so. Bumping is now an edit somebody reviews. The same image is 89 KB smaller for it, which is
-// the measure of how different the two toolchains were.
+// The raw bus capture has always been PASSIVE by design: the bus task runs it instead of a poll,
+// so the bridge is silent for the whole window. Right for an unidentified device, where our own
+// traffic would present two conversations as one stream -- and structurally unable to record a
+// protocol we already speak, because the driver that would produce that traffic is the thing it
+// pauses. Thirty seconds against a live inverter with a working driver: zero frames, zero bytes.
 //
-// The monthly dependency check gained a third source, because pinning created a new silence: a
-// version pin nobody watches is a toolchain frozen for years. Neither existing check could see
-// a platform installed from a release URL -- verified by pinning backwards and watching the
-// report still say everything was up to date.
+// mode=driver arms a recorder instead of taking the bus. Polling continues; that traffic IS the
+// recording. One observation made it possible: every driver reaches the bus through Transport,
+// and both protocol layers hand a complete request to a single write(), so the transport knows
+// which direction each byte went without any driver being asked. No driver changed, and every
+// driver added later is covered the day it arrives.
 //
-// EIGHTY COMPILER WARNINGS FROM OUR OWN CODE, NOW ZERO. Twenty were introduced by 0.25.0 itself;
-// the rest were a format string that is wrong on one of the two builds and right by accident on
-// the other. Nothing was suppressed to get there.
+// That also makes the framing exact. The passive mode cuts on the t3.5 idle gap, which is honest
+// at 9600 and 19200 and approximate above, because at 38400 the real gap is finer than any
+// reader resolves. Here the primary boundary is the direction turning around, which holds at any
+// baud rate -- and every record says which rule cut it, because a boundary the protocol made and
+// one the recorder imposed are otherwise indistinguishable.
 //
-// One rule, one place: whether a reading may be published -- supported, valid, and not stale --
-// was written out by hand in four outputs and inverted in one of them. Anything else is absent,
-// never zero, and that rule is now asked of one predicate.
-#define HELIOGRAPH_VERSION_PATCH 1
+// What it buys, beyond bytes: a shipped driver can be checked against its protocol document on
+// real hardware without a USB-RS485 tap at the inverter, and "requests with no replies" becomes
+// a diagnosis the passive mode structurally cannot reach -- there the bridge is the silent one,
+// so a dead bus and an unanswering device produce the same empty report.
+//
+// Cost in the RS485 hot path when nothing is recording: one inline null check. It never takes
+// the bus lock and never touches the line.
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
