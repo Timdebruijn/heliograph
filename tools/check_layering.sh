@@ -355,6 +355,95 @@ else
     echo "OK"
 fi
 
+echo "==> 11. A bare-string REST route never swallows another route"
+# A bare-string URI gets Type::BackwardCompatible in ESPAsyncWebServer -- `_value == path ||
+# path.startsWith(_value + "/")`. NOT the type its own AsyncURIMatcher::prefix() gives you, which
+# is looser still (a bare startsWith, so it would match /api/v1/captureXYZ too). So a bare
+# "/api/v1/capture" answers /api/v1/capture/driver and every other path beneath it, and whichever
+# route was registered FIRST wins.
+#
+# That is not hypothetical. 0.26.0 shipped GET /api/v1/capture/driver, documented it, and
+# rendered a UI page against it. Every driver capture ran correctly on the bus and then answered
+# with the PASSIVE report: status "idle", zero frames, no sent/received fields at all. The bridge
+# log said "6 frames (3 sent, 3 received), 198 bytes" in the same minute the endpoint said
+# nothing had happened. Host tests, four review agents and two automated review passes all missed
+# it, because the routing lives in the 97% of rest_api.cpp that is inside `#if defined(ESP32)`.
+#
+# The file already knew this. The note above /api/v1/devices tells the same story about a
+# different route and reaches for AsyncURIMatcher::exact, which is the actual fix -- a route that
+# should answer one URL says so. The capture route was added as a bare string three hundred lines
+# below that note.
+#
+# THREE REGISTRATION FORMS, and only one of them is dangerous:
+#
+#   g_server->on("/x", ...)                       bare string -> matches /x AND /x/anything
+#   g_server->on(AsyncURIMatcher::exact("/x"))    exact       -> matches /x only, swallows nothing
+#   g_server->on(AsyncURIMatcher::prefix("/x/"))  prefix      -> deliberate, e.g. /api/v1/devices/<id>
+#
+# So the rule is not "no route is a prefix of another" -- that would condemn the devices routes,
+# which are correct by design. It is: a BARE STRING route must not be a prefix of any other
+# registered path. Exact routes are listed too, because they are what can be swallowed.
+#
+# AsyncEventSource paths are collected as well (it is a handler with a URI like any other), which
+# is the false negative an automated review pointed out in the first version of this rule.
+# stderr folded in: without it a traceback -- a moved file, a syntax slip in the block below --
+# goes to the terminal while $route_report stays empty, so the FAIL prints a heading and no
+# reason. A check that fails without saying why gets stared at and then ignored.
+if route_report=$(python3 - 2>&1 <<'PYEOF'
+import re, sys
+
+src = open("src/outputs/rest/rest_api.cpp", encoding="utf-8").read()
+
+# Parsed from the whole file rather than line by line. The first version of this rule grepped
+# `g_server->on("..."` on one line and silently missed /api/v1/provision and /api/v1/ota, whose
+# URI sits on the continuation line -- a check that reports OK while not looking is the failure
+# mode this rule exists to prevent.
+#
+# The METHOD is captured too, and that is not decoration. canHandle() tests
+# `_method.matches(request->method())` BEFORE the URI, so GET /x and POST /x/y never collide.
+# Ignoring that would fail the build on a pair this project is very likely to write -- it already
+# pairs GET resources with POST siblings all over /api/v1/actions/.
+BARE = re.compile(r'->on\(\s*"([^"]+)"\s*,\s*(HTTP_\w+)')
+MATCHED = re.compile(r'AsyncURIMatcher::(?:exact|prefix)\(\s*"([^"]+)"\s*\)\s*,\s*(HTTP_\w+)')
+EVENTS = re.compile(r'AsyncEventSource\(\s*"([^"]+)"')
+
+bare = set(BARE.findall(src))
+every = bare | set(MATCHED.findall(src)) | {(p, "HTTP_GET") for p in EVENTS.findall(src)}
+
+# A rule that stops finding routes must say so rather than pass. Renaming g_server, or moving
+# every route to a helper, would otherwise turn this into a green check over an empty set.
+if len(every) < 20:
+    print(f"      only {len(every)} routes found; this rule has stopped seeing them")
+    sys.exit(1)
+
+def overlaps(m1, m2):
+    return m1 == m2 or "HTTP_ANY" in (m1, m2)
+
+bad = []
+for a, ma in sorted(bare):
+    # "/" swallows nothing: reaching a subpath would take startsWith("//").
+    if a == "/":
+        continue
+    for b, mb in sorted(every):
+        if b != a and b.startswith(a + "/") and overlaps(ma, mb):
+            bad.append(f"      {a} [{ma}]  swallows  {b} [{mb}]")
+
+if bad:
+    print("\n".join(bad))
+    sys.exit(1)
+PYEOF
+    ); then
+    echo "OK"
+else
+    echo "FAIL: a bare-string route matches paths that belong to another route."
+    echo "      Registration order decides which one answers. Use AsyncURIMatcher::exact():"
+    echo "$route_report"
+    status=1
+fi
+# KNOWN LIMIT, stated because a silent one is what got us here: the relay routes are built at
+# runtime (`/api/v1/relays/<n>/set`, from a std::string), so no static reading finds them. A bare
+# string "/api/v1/relays" added later would swallow all eight and this rule would say OK.
+
 echo
 if [ $status -eq 0 ]; then
     echo "RESULT: PASS"

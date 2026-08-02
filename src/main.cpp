@@ -404,7 +404,32 @@ namespace {
 //
 // Cost in the RS485 hot path when nothing is recording: one inline null check. It never takes
 // the bus lock and never touches the line.
-#define HELIOGRAPH_VERSION_PATCH 0
+//
+// 0.26.1 MAKES THAT REPORT REACHABLE. 0.26.0 could record a driver capture and could not hand it
+// back: the endpoint answered with the PASSIVE report every time -- status "idle", zero frames,
+// no sent/received at all -- while the bridge log said "6 frames (3 sent, 3 received), 198
+// bytes" in the same minute.
+//
+// A bare-string URI in ESPAsyncWebServer matches ^uri(/.*)?$, so /api/v1/capture answered
+// everything beneath it and, being registered first, won. GET /api/v1/capture/anything returned
+// the same document.
+//
+// The URL is unchanged; the MATCHER is. /api/v1/capture is AsyncURIMatcher::exact now, so it
+// answers one URL and stops claiming a subtree it never owned. That over-matching was a defect
+// in its own right -- /api/v1/capture/nonsense answering 200 with a report is wrong whatever
+// lives beneath it -- and renaming the child would have left it in place.
+//
+// This file already carried the answer. The note above /api/v1/devices tells the same story
+// about a different route, reaches for the same matcher, and ends "It did exactly that, and the
+// web UI crashed on the wrong shape rather than getting a clean 404." The capture route was
+// added as a bare string three hundred lines below that paragraph.
+//
+// WHAT FOUND IT: flashing it. Not the host tests, not CI, not the review passes -- all of which
+// ran over this code and none of which could reach it, because the routing lives in the part of
+// rest_api.cpp inside `#if defined(ESP32)` and the host build compiles a stub. (Counts left out
+// deliberately: they would be wrong within a month and would make a still-true paragraph read
+// as stale.) check_layering.sh rule 11 covers the part of this a machine can check.
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;

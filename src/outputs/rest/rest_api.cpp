@@ -1131,7 +1131,17 @@ bool RestApi::begin() {
         request->send(202, kJson, "{\"status\":\"accepted\"}");
     });
 
-    g_server->on("/api/v1/capture", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    // AsyncURIMatcher::exact, for the third time in this file and for the third time after it
+    // went wrong: a bare string URI matches ^uri(/.*)?$, so this route answered /api/v1/capture,
+    // /api/v1/capture/driver and /api/v1/capture/anything-at-all -- always with the PASSIVE
+    // report. 0.26.0 shipped a driver capture that recorded correctly on the bus and could never
+    // be read back: the log said "6 frames (3 sent, 3 received), 198 bytes" while the endpoint
+    // said status "idle", no frames, and no sent/received fields at all.
+    //
+    // The note above /api/v1/devices already told this story about a different route. Adding a
+    // subpath under a bare-string route is the trap; making the parent exact is the fix.
+    g_server->on(AsyncURIMatcher::exact("/api/v1/capture"), HTTP_GET,
+                 [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         if (context_.captureReport == nullptr) {
             sendError(request, {404, "no_capture", "this build cannot capture"});
@@ -1151,7 +1161,12 @@ bool RestApi::begin() {
     // independent last-reports to hand back, and a consumer would have to branch on a mode field
     // anyway -- with half the fields absent, which reads as missing data rather than as a
     // different kind of report.
-    g_server->on("/api/v1/capture/driver", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    //
+    // Exact, like its parent above and for the same reason. This route only ever answers one
+    // URL, and a bare string here would put the next subpath somebody adds beneath it into the
+    // same trap this pair just came out of.
+    g_server->on(AsyncURIMatcher::exact("/api/v1/capture/driver"), HTTP_GET,
+                 [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         if (context_.driverCaptureReport == nullptr) {
             sendError(request, {404, "no_capture", "this build cannot capture"});
