@@ -129,4 +129,19 @@ private:
 /// bounds how long a recorder sits in the RS485 path and how much of the report can accumulate.
 inline constexpr uint32_t kMaxDriverCaptureSeconds = 300;
 
+/// Ceiling on the number of records, and LOWER than the passive capture's 256 on purpose.
+///
+/// Not a memory limit on the tap -- it is what keeps a finished capture fetchable. Each record
+/// in this report carries two fields the passive one does not (`direction`, `cut_by`), which is
+/// roughly 48 extra bytes of JSON per record, and the response is bounded at
+/// kMaxCaptureResponseBytes. Measured against the true worst case (six-digit timestamps, the
+/// longest cut_by name, the full 12 KB of bytes): 128 records render to 56.0 KB, 160 to 60.3 KB,
+/// and 200 does not fit at all.
+///
+/// Letting a client ask for 256 would mean a capture that completes, spends real bus time, and
+/// can then only ever answer 500 -- the report exists on the device and no request can retrieve
+/// it. Refusing up front, with a reason, is the honest version. 128 records is 64 exchanges,
+/// which is many poll cycles for the job this does.
+inline constexpr long kMaxDriverCaptureFrames = 128;
+
 }  // namespace heliograph

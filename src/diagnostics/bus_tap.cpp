@@ -20,6 +20,7 @@ const char* cutReasonName(CutReason reason) {
         case CutReason::DirectionChange: return "direction_change";
         case CutReason::IdleGap:         return "idle_gap";
         case CutReason::ByteCap:         return "byte_cap";
+        case CutReason::CaptureFull:     return "capture_full";
         case CutReason::WindowEnd:       return "window_end";
     }
     return "unknown";
@@ -89,9 +90,11 @@ void BusTap::feed(BusDirection direction, const uint8_t* data, size_t len, uint6
         open_.gapBeforeMs = static_cast<uint32_t>(nowMs - lastByteMs_);
         openHasBytes_     = true;
     }
+    bool ranOutOfRoom = false;
     for (size_t i = 0; i < len; ++i) {
         if (totalBytes_ >= config_.maxTotalBytes) {
-            truncated_ = true;
+            truncated_   = true;
+            ranOutOfRoom = true;
             break;
         }
         if (open_.bytes.size() >= config_.maxFrameBytes) {
@@ -111,6 +114,15 @@ void BusTap::feed(BusDirection direction, const uint8_t* data, size_t len, uint6
         ++totalBytes_;
     }
     lastByteMs_ = nowMs;
+
+    // Closed HERE rather than left open for finish() to deal with. Left open, the record
+    // survives to the end of the window and finish() labels it WindowEnd -- which is a false
+    // account when the budget ran out with most of the window still to go, and cut_by exists
+    // precisely so a reader does not have to guess at that. Every later feed() is refused by
+    // the cap check above, so nothing would have been added to it anyway.
+    if (ranOutOfRoom) {
+        closeFrame(CutReason::CaptureFull);
+    }
 }
 
 void BusTap::finish(uint64_t nowMs) {

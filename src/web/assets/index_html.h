@@ -2007,13 +2007,14 @@ function renderDriverCapture(d){
         <td class="n dim">${esc(f.gap_before_ms)} ms</td>
         <td class="n">${esc(f.length)}</td>
         <td>${f.modbus_crc_ok?'<span style="color:var(--ok)">Modbus</span>':f.aa55_ok?'<span style="color:var(--ok)">AA55</span>':'<span class="dim">—</span>'}</td>
-        <td class="dim">${esc(f.cut_by==='byte_cap'?'split':f.cut_by==='direction_change'?'turn':f.cut_by==='idle_gap'?'silence':'end')}</td>
+        <td class="dim">${esc(f.cut_by==='byte_cap'?'split':f.cut_by==='capture_full'?'full':f.cut_by==='direction_change'?'turn':f.cut_by==='idle_gap'?'silence':'end')}</td>
         <td><code style="word-break:break-all">${esc(f.hex)}</code></td></tr>`).join('')}
     </tbody></table>
     <div class="hint"><b>→</b> is the bridge asking, <b>←</b> is the device answering. The gap on a
       reply is how long that device took — which is what a driver's read timeout has to cover.
       <b>split</b> in the last column means the record hit its byte limit, so those bytes and the
-      next row's may belong to one frame.</div>
+      next row's may belong to one frame; <b>full</b> means the recording ran out of room there
+      and nothing after it was kept.</div>
     <div class="acts"><button onclick="downloadDriverCapture()">Download as a text file</button></div>`;
 }
 function downloadDriverCapture(){

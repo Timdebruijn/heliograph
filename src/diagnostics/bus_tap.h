@@ -59,8 +59,15 @@ enum class CutReason : uint8_t {
     /// Silence at least as long as the t3.5 gap. The same rule the passive capture leans on.
     IdleGap,
     /// Neither -- the record hit its byte bound and was split. A cut the protocol did not make,
-    /// so the bytes on either side may well belong together.
+    /// so the bytes on either side may well belong together. Recording continues after it.
     ByteCap,
+    /// The capture's total byte budget ran out here. Also a cut the protocol did not make, and
+    /// kept separate from ByteCap because the consequence differs: after ByteCap the recording
+    /// carries on, after this one NOTHING further is recorded, however much of the window is
+    /// left. Reported per record because "the window closed on it" and "it ran out of room"
+    /// mean very different things about the traffic that followed, and the report-level
+    /// `truncated` flag cannot say which record it happened to.
+    CaptureFull,
     /// The window ended with this record still open.
     WindowEnd,
 };

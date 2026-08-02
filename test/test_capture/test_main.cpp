@@ -593,7 +593,9 @@ static void test_a_record_split_on_its_byte_bound_says_so() {
     TEST_ASSERT_EQUAL(CutReason::WindowEnd, tap.frames()[1].cutBy);
 }
 
-/// The bounds are the passive capture's bounds, for the same no-PSRAM reason.
+/// The bounds are the passive capture's bounds, for the same no-PSRAM reason. "Stops" means
+/// stops: the assertions check that nothing more is recorded afterwards, not merely that a
+/// counter reached its ceiling.
 static void test_the_byte_ceiling_stops_the_tap() {
     TapConfig config     = tapConfig();
     config.maxTotalBytes = 6;
@@ -602,11 +604,37 @@ static void test_the_byte_ceiling_stops_the_tap() {
 
     rx(tap, {1, 2, 3, 4}, 0);
     rx(tap, {5, 6, 7, 8}, 50);
-    tap.finish(51);
+    const size_t afterTheCap = tap.frames().size();
+    // Two more attempts, one in each direction, well inside the window.
+    rx(tap, {9, 10}, 100);
+    tx(tap, {11, 12}, 150);
+    tap.finish(200);
 
     TEST_ASSERT_EQUAL_UINT32(6, tap.totalBytes());
     TEST_ASSERT_TRUE(tap.truncated());
     TEST_ASSERT_TRUE(tap.done(1));
+    TEST_ASSERT_EQUAL_size_t(afterTheCap, tap.frames().size());
+}
+
+/// A record that stopped growing because the capture ran out of room must say so. Leaving it
+/// open until finish() would label it WindowEnd -- a false account when the budget ran out with
+/// most of the window still to go, and the report-level `truncated` flag cannot say WHICH
+/// record it happened to. Found by review, 2026-08-02.
+static void test_running_out_of_room_is_not_reported_as_the_window_ending() {
+    TapConfig config     = tapConfig();
+    config.maxTotalBytes = 10;
+    config.durationMs    = 1000;
+    BusTap tap(config, profileAt(9600));
+    tap.begin(0);
+
+    tx(tap, {1, 2, 3, 4, 5, 6, 7, 8}, 10);
+    // The budget runs out inside this write, with 980 ms of window still to go.
+    tx(tap, {9, 10, 11, 12}, 12);
+    tap.finish(1000);
+
+    TEST_ASSERT_EQUAL_size_t(1, tap.frames().size());
+    TEST_ASSERT_EQUAL(CutReason::CaptureFull, tap.frames()[0].cutBy);
+    TEST_ASSERT_EQUAL_size_t(10, tap.frames()[0].bytes.size());
 }
 
 /// A recording with requests and no replies is the most informative shape this can produce: it
@@ -968,6 +996,7 @@ int main() {
     RUN_TEST(test_silence_still_cuts_when_the_direction_does_not_change);
     RUN_TEST(test_a_record_split_on_its_byte_bound_says_so);
     RUN_TEST(test_the_byte_ceiling_stops_the_tap);
+    RUN_TEST(test_running_out_of_room_is_not_reported_as_the_window_ending);
     RUN_TEST(test_requests_with_no_replies_are_visible_as_such);
     RUN_TEST(test_the_checksum_verdicts_agree_with_the_passive_capture);
     RUN_TEST(test_a_real_transaction_is_recorded_as_a_request_and_a_reply);

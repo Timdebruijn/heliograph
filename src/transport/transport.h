@@ -54,8 +54,14 @@ public:
     /// never hold the bus lock indefinitely. See the receive loops in the drivers.
     virtual uint64_t nowMs() const = 0;
 
-    /// Exclusive access to the bus. Exactly one component may talk at a time; the raw TCP
-    /// bridge and discovery both go through this rather than touching the UART directly.
+    /// Exclusive access to the bus. Exactly one component may talk at a time: a driver's
+    /// transaction, a discovery probe, or a passive capture -- all through here, never touching
+    /// the UART directly.
+    ///
+    /// (This used to name a "raw TCP bridge" as one of the users. There has never been one in
+    /// this tree; the Modbus TCP server reads the cached register map and never sees a
+    /// Transport. Found by review, 2026-08-02, three lines above a facility that was being
+    /// extended on the strength of who takes this lock.)
     virtual bool lock(uint32_t timeoutMs) = 0;
     virtual void unlock() = 0;
 

@@ -1073,9 +1073,10 @@ bool RestApi::begin() {
         request->send(202, kJson, "{\"status\":\"accepted\"}");
     });
 
-    // Raw bus capture, for a device discovery could not name. Every parameter travels in the
-    // query: they are four numbers and an enum, and a JSON body would need the whole
-    // collectBody dance for that.
+    // Bus capture, in either of its two modes: `passive` for a device discovery could not name,
+    // `driver` for one we already talk to. Every parameter travels in the query: they are a
+    // handful of numbers and two enums, and a JSON body would need the whole collectBody dance
+    // for that.
     g_server->on("/api/v1/actions/capture", HTTP_POST,
                  [this, authorised, rateLimited](AsyncWebServerRequest* request) {
         if (!authorised(request) || rateLimited(request)) {
@@ -1126,10 +1127,17 @@ bool RestApi::begin() {
                                         std::to_string(kMaxDriverCaptureSeconds)});
                 return;
             }
-            tap.durationMs   = static_cast<uint32_t>(seconds) * 1000u;
+            tap.durationMs    = static_cast<uint32_t>(seconds) * 1000u;
             const long frames = number("frames", 64);
-            if (frames < 1 || frames > 256) {
-                sendError(request, {400, "invalid_parameter", "frames must be between 1 and 256"});
+            // Lower than the passive mode's 256, and refused rather than silently clamped: this
+            // report carries a direction and a cut reason per record, and above ~160 records it
+            // no longer fits the response bound. A capture that completes and can only ever
+            // answer 500 has spent real bus time for a report nobody can fetch.
+            if (frames < 1 || frames > kMaxDriverCaptureFrames) {
+                sendError(request, {400, "invalid_parameter",
+                                    "frames must be between 1 and " +
+                                        std::to_string(kMaxDriverCaptureFrames) +
+                                        " in mode=driver"});
                 return;
             }
             tap.maxFrames = static_cast<size_t>(frames);

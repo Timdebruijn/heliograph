@@ -329,7 +329,8 @@ Each record carries a **direction** and the rule that ended it:
 | gap on a **←** | the device's response time — what a driver's read timeout has to cover |
 | `turn` | the conversation turned around. Exact at any baud rate |
 | `silence` | the same t3.5 idle gap the passive mode uses throughout |
-| `split` | the record hit its byte limit — **a cut the protocol did not make**, so these bytes and the next row's may belong together |
+| `split` | the record hit its byte limit — **a cut the protocol did not make**, so these bytes and the next row's may belong together. The recording carries on |
+| `full` | the recording ran out of room here. Also not a protocol boundary, and unlike `split` **nothing after it was recorded**, however much of the window was left |
 | `end` | the window closed with this record still open |
 
 Only `turn` and `silence` mean "these bytes are one frame". Because the direction boundary is

@@ -435,14 +435,14 @@ exists.
 
 ### `POST /api/v1/actions/capture`
 
-Contributor-facing; [docs/adding-a-device.md](adding-a-device.md#6-capturing-an-unknown-device)
+Contributor-facing; [docs/adding-a-device.md](adding-a-device.md#6-capturing-the-bus)
 is the guide, this is the wire contract.
 
 | Parameter | Default | Range | Modes |
 |---|---|---|---|
 | `mode` | `passive` | `passive`, `driver` | both |
 | `seconds` | 30 | 1–300 | both |
-| `frames` | 64 | 1–256 | both |
+| `frames` | 64 | 1–256 (`passive`), **1–128** (`driver`) | both |
 | `baud` | 9600 | 300–921600 | `passive` only |
 | `parity` | `none` | `none`, `even`, `odd` | `passive` only |
 | `data_bits` | 8 | 5–8 | `passive` only |
@@ -452,6 +452,11 @@ The four line parameters are **rejected with 400** in `mode=driver` rather than 
 a working driver, so the line is a fact about the bridge; accepting a baud rate and then
 recording at a different one would put a number in the report the capture never ran at.
 
+`frames` is capped lower in `mode=driver` — 128 rather than 256 — and refused rather than
+clamped. Each record there carries a direction and a cut reason, and above roughly 160 records
+the report no longer fits the response bound: the capture would complete, spend real bus time,
+and then only ever answer 500. Measured worst case at the ceiling is 56 KB of a 64 KB bound.
+
 `mode` is optional and defaults to `passive`, so every existing caller keeps its meaning.
 
 202 on acceptance; **409** when a capture or a discovery run is already using the bus. The guard
@@ -459,12 +464,15 @@ is symmetric — `/actions/discover` refuses while a capture is pending or runni
 be: rs485Task checks discovery first, so a discovery accepted alongside a pending capture would
 jump the queue and the capture would then record the tail of the probe run.
 
-The capture runs on the task that owns the bus, **instead of** that cycle's poll — the same
-handover discovery uses. That is the concurrency answer: there is no iteration in which the bus
-is being listened to and polled, so the two cannot interleave. The bridge transmits nothing for
-the whole window.
+### `GET /api/v1/capture`
 
-`GET /api/v1/capture` returns the report, poll it for progress:
+The **passive** report. In that mode the capture runs on the task that owns the bus, **instead
+of** that cycle's poll — the same handover discovery uses. That is the concurrency answer: there
+is no iteration in which the bus is being listened to and polled, so the two cannot interleave,
+and the bridge transmits nothing for the whole window. None of that is true of `mode=driver`,
+which arms a recorder and lets the poll continue; see its own section below.
+
+Poll it for progress:
 
 ```json
 {
@@ -531,7 +539,8 @@ intermittently in service.
 |---|---|
 | `direction_change` | the conversation turned around — exact at any baud rate |
 | `idle_gap` | silence, same rule the passive mode uses throughout |
-| `byte_cap` | the record hit its byte bound and was split — **a cut the protocol did not make**, so the halves may belong together |
+| `byte_cap` | the record hit its byte bound and was split — **a cut the protocol did not make**, so the halves may belong together. Recording continues |
+| `capture_full` | the capture's total byte budget ran out here. Also not a protocol boundary, and unlike `byte_cap` **nothing further was recorded**, however much of the window was left |
 | `window_end` | the window closed with this record still open |
 
 Only `direction_change` and `idle_gap` mean "these bytes are one frame". Because the direction

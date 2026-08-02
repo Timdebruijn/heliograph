@@ -246,6 +246,31 @@ tracked_dirs = {str(pathlib.PurePosixPath(t).parent) for t in tracked}
 root = pathlib.Path(".").resolve()
 bad = []
 
+
+def slug(heading: str) -> str:
+    """GitHub's heading anchor: lowercase, punctuation dropped, EACH space to a hyphen.
+
+    "## 6.5 Recording a driver" -> "65-recording-a-driver": the dot vanishes rather than
+    becoming a hyphen, which is exactly the kind of detail nobody gets right by hand.
+
+    One space per hyphen, not one per RUN of spaces. "Recovery - hold BOOT" with an em dash
+    leaves two spaces once the dash is dropped, and therefore two hyphens. Collapsing them was
+    the first version of this function, and it reported a correct link in README.md as broken --
+    a check that cries wolf gets switched off, so the slug rule has to be exact.
+    """
+    s = heading.strip().lstrip("#").strip().lower()
+    s = re.sub(r"[^\w\s-]", "", s)
+    return re.sub(r"\s", "-", s)
+
+
+def anchors_in(path: pathlib.Path) -> set:
+    return {
+        slug(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.startswith("#")
+    }
+
+
 for doc in sorted(pathlib.Path(".").rglob("*.md")):
     if ".git" in doc.parts or ".pio" in doc.parts:
         continue
@@ -260,9 +285,19 @@ for doc in sorted(pathlib.Path(".").rglob("*.md")):
             rel = str((doc.parent / target).resolve().relative_to(root))
         except ValueError:
             continue  # outside the repo; not ours to judge
-        if rel in tracked or rel in tracked_dirs:
+        line_no = text[: m.start()].count(chr(10)) + 1
+        if rel not in tracked and rel not in tracked_dirs:
+            bad.append(f"{doc}:{line_no} -> {target}")
             continue
-        bad.append(f"{doc}:{text[: m.start()].count(chr(10)) + 1} -> {target}")
+        # The ANCHOR, not just the file. A link to a real document at a heading that no longer
+        # exists lands the reader at the top of it with no sign anything is wrong -- which is
+        # worse than a 404, because it looks like it worked. This rule was written checking only
+        # the path, and a renamed heading in the very same commit slipped straight through it
+        # (found by review, 2026-08-02).
+        anchor = (m.group(3) or "")[1:]
+        if anchor and rel.endswith(".md") and rel in tracked:
+            if anchor not in anchors_in(root / rel):
+                bad.append(f"{doc}:{line_no} -> {target} (no such heading)")
 
 if bad:
     print("\n".join(bad))

@@ -2,6 +2,7 @@
 // REST payloads, configuration redaction/validation and Prometheus output.
 
 #include <unity.h>
+#include <cstdio>
 
 #include <cstring>
 
