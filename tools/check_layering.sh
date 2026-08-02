@@ -386,7 +386,10 @@ echo "==> 11. A bare-string REST route never swallows another route"
 #
 # AsyncEventSource paths are collected as well (it is a handler with a URI like any other), which
 # is the false negative an automated review pointed out in the first version of this rule.
-if route_report=$(python3 - <<'PYEOF'
+# stderr folded in: without it a traceback -- a moved file, a syntax slip in the block below --
+# goes to the terminal while $route_report stays empty, so the FAIL prints a heading and no
+# reason. A check that fails without saying why gets stared at and then ignored.
+if route_report=$(python3 - 2>&1 <<'PYEOF'
 import re, sys
 
 src = open("src/outputs/rest/rest_api.cpp", encoding="utf-8").read()

@@ -424,11 +424,11 @@ namespace {
 // web UI crashed on the wrong shape rather than getting a clean 404." The capture route was
 // added as a bare string three hundred lines below that paragraph.
 //
-// WHAT FOUND IT: flashing it. Not 964 host tests, not seven CI checks, not four review agents,
-// not two automated review passes -- all of which ran over this code. The routing lives in the
-// 97% of rest_api.cpp that sits inside `#if defined(ESP32)`, so on the host it is a stub and
-// none of that could reach it. check_layering.sh rule 11 refuses a route that is a prefix of
-// another, which is the part of this that a machine can check.
+// WHAT FOUND IT: flashing it. Not the host tests, not CI, not the review passes -- all of which
+// ran over this code and none of which could reach it, because the routing lives in the part of
+// rest_api.cpp inside `#if defined(ESP32)` and the host build compiles a stub. (Counts left out
+// deliberately: they would be wrong within a month and would make a still-true paragraph read
+// as stale.) check_layering.sh rule 11 covers the part of this a machine can check.
 #define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)

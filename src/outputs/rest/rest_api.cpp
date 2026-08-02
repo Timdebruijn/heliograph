@@ -1163,8 +1163,8 @@ bool RestApi::begin() {
     // different kind of report.
     //
     // Exact, like its parent above and for the same reason. This route only ever answers one
-    // URL, and a bare string here would put the next subpath somebody adds under /api/v1/
-    // driver-capture/ in the same trap this pair just came out of.
+    // URL, and a bare string here would put the next subpath somebody adds beneath it into the
+    // same trap this pair just came out of.
     g_server->on(AsyncURIMatcher::exact("/api/v1/capture/driver"), HTTP_GET,
                  [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
