@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "app/capture_runner.h"
+#include "app/driver_capture_runner.h"
 #include "config/config_backup.h"
 #include "device/bridge_info.h"
 #include "device/device_state.h"
@@ -195,6 +196,19 @@ bool buildLogsPayload(const std::vector<std::string>& lines, uint32_t totalLines
 inline constexpr size_t kMaxCaptureResponseBytes = 65536;
 bool buildCapturePayload(const CaptureReport& report, uint64_t nowMs, std::string& out,
                          size_t maxBytes = kMaxCaptureResponseBytes);
+
+/// A capture of the driver's own conversation.
+///
+/// A separate builder rather than a mode flag on the one above, because the two reports differ
+/// in what a reader has to know about them: every frame here carries a direction and the rule
+/// that ended it, and the summary counts requests against replies. Folding both into one shape
+/// would mean half the fields being absent depending on which mode produced it -- a consumer
+/// would have to branch anyway, and the absent half would look like missing data rather than
+/// like a different kind of report.
+///
+/// Same byte bound, same reason.
+bool buildDriverCapturePayload(const DriverCaptureReport& report, uint64_t nowMs,
+                               std::string& out, size_t maxBytes = kMaxCaptureResponseBytes);
 /// What a restore would do, before it does it.
 ///
 /// The preview is computed against the MERGED result, not against the file, so it tells the

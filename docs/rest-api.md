@@ -27,8 +27,9 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | POST | `/api/v1/config/restore` | **✔** | Apply a backup file (`?dry_run=true` to preview only) |
 | POST | `/api/v1/actions/undo-restore` | **✔** | Swap back to the configuration from before the last restore |
 | POST | `/api/v1/actions/discover` | **✔** | Start discovery |
-| POST | `/api/v1/actions/capture` | **✔** | Record raw RS485 traffic (`?seconds=&baud=&parity=&frames=`) |
-| GET | `/api/v1/capture` | — | The last capture, with per-frame hex and checksum verdicts |
+| POST | `/api/v1/actions/capture` | **✔** | Record the bus (`?mode=passive\|driver&seconds=&frames=`, plus line settings in `passive`) |
+| GET | `/api/v1/capture` | — | The last passive capture, with per-frame hex and checksum verdicts |
+| GET | `/api/v1/capture/driver` | — | The last driver capture: the same, plus a direction per frame |
 | POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
 | POST | `/api/v1/actions/reboot` | **✔** | Reboot |
 | POST | `/api/v1/actions/clear-coredump` | **✔** | Discard a stored crash dump (404 when there is none) |
@@ -414,20 +415,44 @@ a field on this object would have been a knob that changed nothing.
 
 While the override is off these fields are stored but not validated — they configure nothing.
 
-## Capturing an unknown device
+## Capturing the bus
 
-`POST /api/v1/actions/capture` records raw RS485 traffic without needing a driver that
-understands it. Contributor-facing; [docs/adding-a-device.md](adding-a-device.md#6-capturing-an-unknown-device)
+Two modes, and which one you want depends on a single question: **does this build already have a
+driver for the device?**
+
+| | `mode=passive` (default) | `mode=driver` |
+|---|---|---|
+| For | a device nothing here can identify | a driver we ship, checked against its protocol document |
+| The bridge | says nothing for the whole window | polls exactly as normal |
+| Polling | stops | continues — that traffic *is* the recording |
+| Line settings | you supply them; a wrong guess shows as bytes with no valid checksums | taken from the driver, and refused if you send them |
+| Frames cut on | silence (Modbus t3.5) | direction change, then silence |
+| Report | `GET /api/v1/capture` | `GET /api/v1/capture/driver` |
+
+Point `passive` at an inverter that already works and it records **nothing** — the driver that
+would produce the traffic is the thing it pauses. That is not a bug in it; it is why `driver`
+exists.
+
+### `POST /api/v1/actions/capture`
+
+Contributor-facing; [docs/adding-a-device.md](adding-a-device.md#6-capturing-an-unknown-device)
 is the guide, this is the wire contract.
 
-| Parameter | Default | Range |
-|---|---|---|
-| `seconds` | 30 | 1–300 |
-| `frames` | 64 | 1–256 |
-| `baud` | 9600 | 300–921600 |
-| `parity` | `none` | `none`, `even`, `odd` |
-| `data_bits` | 8 | 5–8 |
-| `stop_bits` | 1 | 1–2 |
+| Parameter | Default | Range | Modes |
+|---|---|---|---|
+| `mode` | `passive` | `passive`, `driver` | both |
+| `seconds` | 30 | 1–300 | both |
+| `frames` | 64 | 1–256 | both |
+| `baud` | 9600 | 300–921600 | `passive` only |
+| `parity` | `none` | `none`, `even`, `odd` | `passive` only |
+| `data_bits` | 8 | 5–8 | `passive` only |
+| `stop_bits` | 1 | 1–2 | `passive` only |
+
+The four line parameters are **rejected with 400** in `mode=driver` rather than ignored. There is
+a working driver, so the line is a fact about the bridge; accepting a baud rate and then
+recording at a different one would put a number in the report the capture never ran at.
+
+`mode` is optional and defaults to `passive`, so every existing caller keeps its meaning.
 
 202 on acceptance; **409** when a capture or a discovery run is already using the bus. The guard
 is symmetric — `/actions/discover` refuses while a capture is pending or running too. It has to
@@ -467,6 +492,59 @@ Frames are cut on `idle_gap_ms` of silence, derived from the baud rate (Modbus t
 floored at 2 ms. Above 19200 the true gap is finer than the read loop can resolve, so adjacent
 frames may merge into one record — the byte stream stays complete and ordered, only the cut
 points are approximate. Stated here rather than left to be discovered from confusing output.
+
+### `GET /api/v1/capture/driver`
+
+The driver-mode report. A separate document, not the same one with extra fields:
+
+```json
+{
+  "status": "done",
+  "line": { "baud_rate": 9600, "parity": "none", "data_bits": 8, "stop_bits": 1,
+            "idle_gap_ms": 4 },
+  "requested_seconds": 30, "max_frames": 64, "elapsed_ms": 30004,
+  "summary": { "frames": 14, "bytes": 182, "sent": 7, "received": 7,
+               "modbus_crc_ok": 14, "aa55_frames_ok": 0, "truncated": false },
+  "frames": [
+    { "direction": "tx", "offset_ms": 12, "gap_before_ms": 12, "length": 8,
+      "modbus_crc_ok": true, "aa55_ok": false, "cut_by": "direction_change",
+      "hex": "01 03 00 00 00 0A C5 CD" },
+    { "direction": "rx", "offset_ms": 54, "gap_before_ms": 42, "length": 25,
+      "modbus_crc_ok": true, "aa55_ok": false, "cut_by": "idle_gap",
+      "hex": "01 03 14 ..." }
+  ]
+}
+```
+
+**`summary.sent` against `summary.received` is the pair to read first.** Requests with no
+replies means the bridge is talking and the device is not answering — a diagnosis the passive
+mode cannot reach, because there the bridge is the silent one and a dead bus looks identical to
+a quiet one.
+
+`gap_before_ms` on an `rx` frame is the device's **response time**. That is what a driver's read
+timeout has to cover, and the number to look at when an inverter answers reliably by hand and
+intermittently in service.
+
+`cut_by` says which rule ended each record:
+
+| Value | Meaning |
+|---|---|
+| `direction_change` | the conversation turned around — exact at any baud rate |
+| `idle_gap` | silence, same rule the passive mode uses throughout |
+| `byte_cap` | the record hit its byte bound and was split — **a cut the protocol did not make**, so the halves may belong together |
+| `window_end` | the window closed with this record still open |
+
+Only `direction_change` and `idle_gap` mean "these bytes are one frame". Because the direction
+boundary is exact, this mode does **not** carry the passive mode's approximation above 19200
+baud.
+
+While a driver capture runs, the report carries `status` and `elapsed_ms` but **no frames** — the
+bus task is still appending to them. Poll until `status` is `done`.
+
+Traffic that arrives after the window closes is not recorded. Unlike the passive mode, this one
+cannot stop the traffic when its deadline passes; it can only be unhooked on the bus task's next
+visit, so the recorder itself refuses late bytes rather than quietly swallowing the poll that
+straddles the deadline.
 
 The report is bounded at 64 KB and the capture stops when full rather than dropping the oldest:
 for a handshake the interesting part is at the beginning, and a ring buffer would reliably
