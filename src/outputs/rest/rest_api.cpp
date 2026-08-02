@@ -1131,7 +1131,17 @@ bool RestApi::begin() {
         request->send(202, kJson, "{\"status\":\"accepted\"}");
     });
 
-    g_server->on("/api/v1/capture", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    // AsyncURIMatcher::exact, for the third time in this file and for the third time after it
+    // went wrong: a bare string URI matches ^uri(/.*)?$, so this route answered /api/v1/capture,
+    // /api/v1/capture/driver and /api/v1/capture/anything-at-all -- always with the PASSIVE
+    // report. 0.26.0 shipped a driver capture that recorded correctly on the bus and could never
+    // be read back: the log said "6 frames (3 sent, 3 received), 198 bytes" while the endpoint
+    // said status "idle", no frames, and no sent/received fields at all.
+    //
+    // The note above /api/v1/devices already told this story about a different route. Adding a
+    // subpath under a bare-string route is the trap; making the parent exact is the fix.
+    g_server->on(AsyncURIMatcher::exact("/api/v1/capture"), HTTP_GET,
+                 [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         if (context_.captureReport == nullptr) {
             sendError(request, {404, "no_capture", "this build cannot capture"});
@@ -1152,18 +1162,11 @@ bool RestApi::begin() {
     // anyway -- with half the fields absent, which reads as missing data rather than as a
     // different kind of report.
     //
-    // NOT /api/v1/capture/driver, which is what this was until it ran on hardware. The server
-    // matches a registered URI as a PREFIX -- `_uri == url || url.startsWith(_uri + "/")` -- so
-    // /api/v1/capture swallowed every path beneath it, and since it is registered first it won.
-    // Every driver capture completed on the bus and then answered with the passive report:
-    // status "idle", no frames, and no `sent`/`received` at all. The log said "6 frames (3 sent,
-    // 3 received), 198 bytes" while the endpoint said nothing had happened.
-    //
-    // Fixed by making it not a subpath, rather than by registering this one first. Order would
-    // work and would sit two hundred lines away from the route it depends on; the next person to
-    // group these tidily would break it exactly as silently. Rule 11 in check_layering.sh now
-    // refuses a route that is a prefix of another.
-    g_server->on("/api/v1/driver-capture", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    // Exact, like its parent above and for the same reason. This route only ever answers one
+    // URL, and a bare string here would put the next subpath somebody adds under /api/v1/
+    // driver-capture/ in the same trap this pair just came out of.
+    g_server->on(AsyncURIMatcher::exact("/api/v1/capture/driver"), HTTP_GET,
+                 [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         if (context_.driverCaptureReport == nullptr) {
             sendError(request, {404, "no_capture", "this build cannot capture"});

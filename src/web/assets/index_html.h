@@ -1978,7 +1978,7 @@ async function startDriverCapture(){
 }
 async function pollDriverCapture(){
   if(!$('#dcap_msg')){clearInterval(dcapTimer);dcapTimer=null;return}
-  let d;try{d=await getJson('/api/v1/driver-capture')}catch(e){return}
+  let d;try{d=await getJson('/api/v1/capture/driver')}catch(e){return}
   if(d.status==='requested'||d.status==='running'){
     // No byte count while it runs: the frames belong to the bus task until it is done, so the
     // report genuinely has nothing to show yet. Claiming "0 bytes so far" would read as a

@@ -29,7 +29,7 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | POST | `/api/v1/actions/discover` | **✔** | Start discovery |
 | POST | `/api/v1/actions/capture` | **✔** | Record the bus (`?mode=passive\|driver&seconds=&frames=`, plus line settings in `passive`) |
 | GET | `/api/v1/capture` | — | The last passive capture, with per-frame hex and checksum verdicts |
-| GET | `/api/v1/driver-capture` | — | The last driver capture: the same, plus a direction per frame |
+| GET | `/api/v1/capture/driver` | — | The last driver capture: the same, plus a direction per frame |
 | POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
 | POST | `/api/v1/actions/reboot` | **✔** | Reboot |
 | POST | `/api/v1/actions/clear-coredump` | **✔** | Discard a stored crash dump (404 when there is none) |
@@ -427,7 +427,7 @@ driver for the device?**
 | Polling | stops | continues — that traffic *is* the recording |
 | Line settings | you supply them; a wrong guess shows as bytes with no valid checksums | taken from the driver, and refused if you send them |
 | Frames cut on | silence (Modbus t3.5) | direction change, then silence |
-| Report | `GET /api/v1/capture` | `GET /api/v1/driver-capture` |
+| Report | `GET /api/v1/capture` | `GET /api/v1/capture/driver` |
 
 Point `passive` at an inverter that already works and it records **nothing** — the driver that
 would produce the traffic is the thing it pauses. That is not a bug in it; it is why `driver`
@@ -501,7 +501,7 @@ floored at 2 ms. Above 19200 the true gap is finer than the read loop can resolv
 frames may merge into one record — the byte stream stays complete and ordered, only the cut
 points are approximate. Stated here rather than left to be discovered from confusing output.
 
-### `GET /api/v1/driver-capture`
+### `GET /api/v1/capture/driver`
 
 The driver-mode report. A separate document, not the same one with extra fields:
 

@@ -410,14 +410,19 @@ namespace {
 // no sent/received at all -- while the bridge log said "6 frames (3 sent, 3 received), 198
 // bytes" in the same minute.
 //
-// ESPAsyncWebServer matches a registered URI as a PREFIX (`_uri == url || url.startsWith(_uri +
-// "/")`), so /api/v1/capture answered everything beneath it and, being registered first, won.
-// GET /api/v1/capture/anything returned the same document. The route is now
-// /api/v1/driver-capture, which cannot be a subpath of anything registered.
+// A bare-string URI in ESPAsyncWebServer matches ^uri(/.*)?$, so /api/v1/capture answered
+// everything beneath it and, being registered first, won. GET /api/v1/capture/anything returned
+// the same document.
 //
-// Renamed rather than reordered. Registering the specific route first also works and leaves the
-// correctness of one route depending on a line two hundred lines away; the next person to group
-// these tidily breaks it exactly as silently as it broke this time.
+// The URL is unchanged; the MATCHER is. /api/v1/capture is AsyncURIMatcher::exact now, so it
+// answers one URL and stops claiming a subtree it never owned. That over-matching was a defect
+// in its own right -- /api/v1/capture/nonsense answering 200 with a report is wrong whatever
+// lives beneath it -- and renaming the child would have left it in place.
+//
+// This file already carried the answer. The note above /api/v1/devices tells the same story
+// about a different route, reaches for the same matcher, and ends "It did exactly that, and the
+// web UI crashed on the wrong shape rather than getting a clean 404." The capture route was
+// added as a bare string three hundred lines below that paragraph.
 //
 // WHAT FOUND IT: flashing it. Not 964 host tests, not seven CI checks, not four review agents,
 // not two automated review passes -- all of which ran over this code. The routing lives in the
