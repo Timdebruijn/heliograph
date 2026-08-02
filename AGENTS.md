@@ -75,9 +75,8 @@ ruff check tools/                     # Python tooling lint
 `check_layering.sh` prints every rule it checks. **Always read the final `RESULT:` line**;
 an earlier check may have failed even if the last sub-check printed "OK".
 
-CI runs the same checks plus a firmware build for each of the four board environments
+CI runs the same checks plus a firmware build for each of the four firmware environments
 (`waveshare-rs485-can`, `waveshare-relay-1ch`, `waveshare-relay-6ch`, `mock`).
-
 ---
 
 ## Build environments
