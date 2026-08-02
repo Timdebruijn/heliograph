@@ -1061,8 +1061,13 @@ function paintHealth(){
     <div class="between"><b>Counters</b><button class="alt pill" onclick="copyCounters(this)">Copy as text</button></div>
     <div class="hint">Named the way a person would ask for them; the raw field name is still on <code>/api/v1/diagnostics</code>, unchanged.</div>
     <div class="groups" id="h_counters" style="margin-top:14px"></div>
-  </div>`;
+  </div>
+  ${driverCaptureHtml()}`;
   $('#health').innerHTML=h;
+  // Rendered again after the card exists, so a repaint of this tab does not throw away a
+  // recording somebody is still reading. The other capture loses its table on a repaint; this
+  // one keeps the last report in a variable precisely so it does not have to.
+  if(driverCapture)renderDriverCapture(driverCapture);
   renderLogs();
 }
 let logLines=[], logMeta='', logStop=false;
@@ -1937,6 +1942,93 @@ function downloadCapture(){
     ...(d.frames||[]).map(f=>String(f.offset_ms).padStart(8)+'  '+String(f.gap_before_ms).padStart(6)+'  '+
       String(f.length).padStart(3)+'  '+(f.modbus_crc_ok?'modbus  ':f.aa55_ok?'aa55    ':'-       ')+'  '+f.hex)];
   saveBlob(new Blob([lines.join('\n')+'\n'],{type:'text/plain'}),'heliograph-capture-'+d.line.baud_rate+'.txt');
+}
+// ---------------- driver capture: recording the conversation we already have ----------------
+// Lives on Health, not in the troubleshooting flow. That flow only appears when discovery names
+// nothing, which is exactly the bridge this cannot help -- there is no driver talking to record.
+let dcapTimer=null, driverCapture=null;
+function driverCaptureHtml(){
+  return `<div class="card" style="margin-top:12px">
+    <div class="between"><b>Record the driver's own conversation</b>
+      <button class="alt pill" onclick="startDriverCapture()">Start recording</button></div>
+    <div class="hint"><b>Polling continues</b> — that traffic is the recording. Nothing is
+      interrupted and the inverter keeps reporting throughout. Use this to check what the bridge
+      actually puts on the wire against the protocol document, or to attach real bytes to a bug
+      report when you have no RS485 tap at the inverter.</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+      <label for="dcap_secs" style="margin:0">Record for</label>
+      <input id="dcap_secs" class="tiny" type="number" value="30" min="1" max="300" style="width:80px">
+      <span class="hint" style="margin:0">seconds — a poll cycle or two is usually enough</span>
+    </div>
+    <div id="dcap_msg" class="msg hide"></div><div id="dcap_out"></div></div>`;
+}
+async function startDriverCapture(){
+  // No line settings: there is a working driver, so the bridge knows the line and the API
+  // refuses the parameters rather than recording at something other than what you asked for.
+  const q='?mode=driver&seconds='+(Number(val('dcap_secs'))||30);
+  say('#dcap_msg','','Starting…');$('#dcap_out').innerHTML='';driverCapture=null;
+  const r=await authFetch('/api/v1/actions/capture'+q,{method:'POST'});
+  if(!r.ok&&r.status!==202){
+    const d=await r.json().catch(()=>({}));
+    say('#dcap_msg','err',esc((d.error&&d.error.message)||httpWhy(r)));return;
+  }
+  say('#dcap_msg','','Recording while the bridge polls…');
+  if(dcapTimer)clearInterval(dcapTimer);
+  dcapTimer=setInterval(pollDriverCapture,1000);
+}
+async function pollDriverCapture(){
+  if(!$('#dcap_msg')){clearInterval(dcapTimer);dcapTimer=null;return}
+  let d;try{d=await getJson('/api/v1/capture/driver')}catch(e){return}
+  if(d.status==='requested'||d.status==='running'){
+    // No byte count while it runs: the frames belong to the bus task until it is done, so the
+    // report genuinely has nothing to show yet. Claiming "0 bytes so far" would read as a
+    // silent bus rather than as a report that is not finished.
+    say('#dcap_msg','','Recording… '+Math.round((d.elapsed_ms||0)/1000)+' of '+(d.requested_seconds||0)+' s.');
+    return;
+  }
+  clearInterval(dcapTimer);dcapTimer=null;
+  if(d.status==='idle')return;
+  renderDriverCapture(d);
+}
+function renderDriverCapture(d){
+  driverCapture=d;
+  const s=d.summary||{}, sent=s.sent||0, got=s.received||0;
+  // The verdict first, and it is a different verdict from the passive mode's. There the question
+  // was "is the line speed right"; here the line is known, so the question is whether anything
+  // answered.
+  if(!sent)say('#dcap_msg','err','The bridge sent nothing at all during the recording. Either no device is configured, or the poll interval is longer than the window — try a longer recording.');
+  else if(!got)say('#dcap_msg','err',esc(sent)+' requests went out and nothing came back. The bridge is talking and the device is not answering: check the address, the wiring, and whether the inverter is awake.');
+  else say('#dcap_msg','ok',esc(sent)+' requests, '+esc(got)+' replies, '+esc(s.bytes)+' bytes at '+esc(d.line.baud_rate)+' baud.');
+  $('#dcap_out').innerHTML=`
+    ${s.truncated?'<div class="msg err" style="display:block">Stopped early — a limit was reached. The beginning is kept.</div>':''}
+    <table><thead><tr><th>Time</th><th></th><th>Gap</th><th>Len</th><th>Checksum</th><th>Cut by</th><th>Bytes</th></tr></thead><tbody>
+      ${(d.frames||[]).map(f=>`<tr><td class="n">${esc(f.offset_ms)} ms</td>
+        <td>${f.direction==='tx'?'<b>→</b>':'<span style="color:var(--ok)">←</span>'}</td>
+        <td class="n dim">${esc(f.gap_before_ms)} ms</td>
+        <td class="n">${esc(f.length)}</td>
+        <td>${f.modbus_crc_ok?'<span style="color:var(--ok)">Modbus</span>':f.aa55_ok?'<span style="color:var(--ok)">AA55</span>':'<span class="dim">—</span>'}</td>
+        <td class="dim">${esc(f.cut_by==='byte_cap'?'split':f.cut_by==='direction_change'?'turn':f.cut_by==='idle_gap'?'silence':'end')}</td>
+        <td><code style="word-break:break-all">${esc(f.hex)}</code></td></tr>`).join('')}
+    </tbody></table>
+    <div class="hint"><b>→</b> is the bridge asking, <b>←</b> is the device answering. The gap on a
+      reply is how long that device took — which is what a driver's read timeout has to cover.
+      <b>split</b> in the last column means the record hit its byte limit, so those bytes and the
+      next row's may belong to one frame.</div>
+    <div class="acts"><button onclick="downloadDriverCapture()">Download as a text file</button></div>`;
+}
+function downloadDriverCapture(){
+  const d=driverCapture;if(!d)return;
+  const s=d.summary||{};
+  const lines=['# Heliograph driver capture (the bridge kept polling throughout)',
+    '# line: '+d.line.baud_rate+' baud, '+d.line.parity+' parity, '+d.line.data_bits+' data bits, '+d.line.stop_bits+' stop bits',
+    '# '+s.frames+' records, '+s.bytes+' bytes, '+(s.sent||0)+' sent, '+(s.received||0)+' received, '+
+      (s.modbus_crc_ok||0)+' valid Modbus CRC, '+(s.aa55_frames_ok||0)+' valid AA55'+
+      (s.truncated?' (stopped at a limit)':''),
+    '#','# dir  time_ms  gap_ms  len  checksum  cut_by            bytes',
+    ...(d.frames||[]).map(f=>(f.direction==='tx'?'-> ':'<- ')+String(f.offset_ms).padStart(8)+'  '+
+      String(f.gap_before_ms).padStart(6)+'  '+String(f.length).padStart(3)+'  '+
+      (f.modbus_crc_ok?'modbus  ':f.aa55_ok?'aa55    ':'-       ')+'  '+String(f.cut_by).padEnd(16)+'  '+f.hex)];
+  saveBlob(new Blob([lines.join('\n')+'\n'],{type:'text/plain'}),'heliograph-driver-capture.txt');
 }
 function saveBlob(blob,name){
   const url=URL.createObjectURL(blob);

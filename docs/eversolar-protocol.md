@@ -8,6 +8,11 @@ two captured frames are stored byte-for-byte in `tools/gen_fixtures.py`, which
 verifies itself against the captures. Where something is unknown, that is stated explicitly — no
 fields have been invented.
 
+**Checking this document against a running bridge** no longer needs a USB-RS485 tap and a laptop
+at the inverter. Health → *"Record the driver's own conversation"* records the requests and
+replies as they happen, with a direction on each; hold them next to the frame layouts below. See
+[adding-a-device.md § 6.5](adding-a-device.md#65-recording-a-driver-we-already-have).
+
 ## Origin and license
 
 | | |
