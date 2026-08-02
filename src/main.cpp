@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "app/capture_runner.h"
+#include "app/driver_capture_runner.h"
 #include "app/device_plan.h"
 #include "app/discovery_runner.h"
 #include "boards/board.h"
@@ -558,6 +559,11 @@ DiscoveryRunner g_discovery{g_registry, nowMs};
 /// Owns passive bus captures, on the same terms and for the same reason.
 CaptureRunner g_capture{nowMs};
 
+/// Owns driver captures. Same request-from-the-web, act-on-the-bus-task split, opposite
+/// mechanics: this one never takes an iteration away from polling, because the polling is what
+/// it records.
+DriverCaptureRunner g_driverCapture{nowMs};
+
 /// The configured driver, or the highest-priority one compiled in. No manufacturer name here.
 std::string selectedDriverId() {
     if (!g_config.driver.id.empty() && g_registry.contains(g_config.driver.id)) {
@@ -575,6 +581,28 @@ std::string selectedDriverId() {
 /// running discovery from the web UI on a healthy bridge silently reset the line and the
 /// inverter went quiet until the next power cycle -- the same failure the override exists to
 /// prevent, on the one path that reconfigures the line at runtime (review, 2026-07-25).
+/// The line the bus is actually running at.
+///
+/// Two sources and no third: the stored override when it is on, otherwise the profile the
+/// driver's begin() put on the UART -- the first of its recommended profiles, which is exactly
+/// what applySerialOverride() below declines to replace. A driver capture reports this because
+/// the idle gap derives from it, and because nobody can check the framing against a protocol
+/// document a day later without knowing what the line was.
+///
+/// Caller holds g_configMutex.
+SerialProfile effectiveSerialProfile() {
+    if (g_config.serial.enabled) {
+        return g_config.serial.profile;
+    }
+    if (g_driver != nullptr && !g_driver->descriptor().recommendedSerialProfiles.empty()) {
+        return g_driver->descriptor().recommendedSerialProfiles.front();
+    }
+    // No driver, or one that declares no profile. Falls back to SerialProfile's own default
+    // rather than guessing; with no driver there is no conversation to record anyway, so this
+    // is a value for the report to carry, not one anybody acts on.
+    return SerialProfile{};
+}
+
 void applySerialOverride() {
     if (!g_config.serial.enabled) {
         // Logged even when nothing is overridden. Most bridges follow their driver, and without
@@ -1076,21 +1104,41 @@ void startRestApi() {
     // capture would then record the tail of the probe run -- exactly what the guard on the
     // other side exists to prevent. Guarding one direction only left that hole open.
     ctx.requestDiscovery = [](bool extended) {
-        if (g_capture.busy()) {
+        // A driver capture is refused here too, and for a reason the other two do not have. It
+        // does not want the bus -- it would happily keep recording through a probe sweep. That
+        // is the problem: a sweep re-registers every inverter and walks eight addresses, so the
+        // recording would be of something no driver ever does, filed under a report that claims
+        // to show the driver's own conversation.
+        if (g_capture.busy() || g_driverCapture.busy()) {
             return false;
         }
         return g_discovery.request(extended);
     };
     ctx.discoveryReport     = [] { return g_discovery.report(); };
     // Refused while discovery is pending or running as well as while another capture is: both
-    // want exclusive use of the same bus.
+    // want exclusive use of the same bus. A driver capture blocks it too -- this one takes the
+    // bus away from the driver, which is precisely the traffic the other is recording.
     ctx.requestCapture = [](const diag::CaptureConfig& config, const SerialProfile& profile) {
-        if (g_discovery.busy()) {
+        if (g_discovery.busy() || g_driverCapture.busy()) {
             return false;
         }
         return g_capture.request(config, profile);
     };
     ctx.captureReport = [] { return g_capture.report(); };
+    // The mirror of the two above. Nothing else may be holding or about to hold the bus: a
+    // recording of a probe sweep or of a passive window (in which the bridge says nothing at
+    // all) is not what this report claims to contain.
+    ctx.requestDriverCapture = [](const diag::TapConfig& config) {
+        if (g_discovery.busy() || g_capture.busy()) {
+            return false;
+        }
+        // The line is not the operator's to choose here -- there is a working driver and it is
+        // already talking. Read from the bridge rather than taken from the request, so the
+        // report cannot end up describing a line the capture did not run at.
+        std::lock_guard<std::mutex> lock(g_configMutex);
+        return g_driverCapture.request(config, effectiveSerialProfile());
+    };
+    ctx.driverCaptureReport = [] { return g_driverCapture.report(); };
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
     // The undo behind a configuration restore. Straight through to the store, which owns both
     // the stash and the swap; the REST layer only decides when.
@@ -1245,6 +1293,33 @@ void rs485Task(void* /*arg*/) {
         // on xtensa); the scan only walks the unused region -- microseconds.
         g_diagnostics.recordRs485StackFree(
             static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr)));
+        // The driver capture, and note that it does NOT `continue`. Every other branch in this
+        // loop takes the iteration away from polling because it needs the bus to itself; this
+        // one arms a recorder and gets out of the way, because the poll further down is the
+        // thing it exists to record. Taking the iteration would reproduce exactly the bug that
+        // issue #62 is about -- a capture that records nothing because it paused the driver
+        // whose traffic it wanted.
+        //
+        // It is also first, so that a capture armed this iteration covers the poll in the same
+        // iteration rather than starting one cycle late.
+        switch (g_driverCapture.service(g_transport)) {
+            case DriverCaptureService::Armed:
+                log::info("driver capture: recording the bus for %u s",
+                          static_cast<unsigned>(g_driverCapture.report().config.durationMs / 1000));
+                break;
+            case DriverCaptureService::Collected: {
+                const auto report = g_driverCapture.report();
+                log::info("driver capture: %u frames (%u sent, %u received), %u bytes",
+                          static_cast<unsigned>(report.frames.size()),
+                          static_cast<unsigned>(report.txFrames),
+                          static_cast<unsigned>(report.rxFrames),
+                          static_cast<unsigned>(report.totalBytes));
+                break;
+            }
+            case DriverCaptureService::Idle:
+            case DriverCaptureService::Recording:
+                break;
+        }
         // Discovery first, and instead of polling this cycle: probing re-registers every
         // inverter on the bus, so the two must never interleave. This task owns the bus, which
         // is why the web handler only ever *requests* a run.

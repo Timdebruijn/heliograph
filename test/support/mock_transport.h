@@ -118,6 +118,10 @@ public:
     }
 
     uint64_t nowMs() const override { return clockMs_; }
+    /// Moves the simulated clock forward without any I/O. For tests about what happens when time
+    /// passes BETWEEN transactions -- a capture window closing, say -- which msPerRead cannot
+    /// express because it only advances while somebody is reading.
+    void advanceClock(uint64_t ms) { clockMs_ += ms; }
     /// Milliseconds the simulated clock advances per read(). 0 (default) = time stands still.
     uint32_t msPerRead = 0;
     /// When set, every read() returns one noise byte and never a valid frame or silence.

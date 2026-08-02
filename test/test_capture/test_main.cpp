@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "app/capture_runner.h"
+#include "app/driver_capture_runner.h"
 #include "diagnostics/bus_tap.h"
 #include "diagnostics/frame_capture.h"
 #include "protocols/modbus/modbus_client.h"
@@ -779,6 +780,158 @@ static void test_a_device_that_never_answers_leaves_requests_only() {
     TEST_ASSERT_EQUAL_UINT32(0, tap.rxFrames());
 }
 
+// ---------------------------------------------------------------------------------------
+// DriverCaptureRunner: the arm/collect handover. The passive runner's tests are about what it
+// does with an iteration of the bus task; these are about it NOT taking one.
+// ---------------------------------------------------------------------------------------
+
+static uint64_t testClock() { return g_clock; }
+
+static diag::TapConfig windowOf(uint32_t ms) {
+    diag::TapConfig c;
+    c.durationMs = ms;
+    c.idleGapMs  = 4;
+    return c;
+}
+
+static void runTransaction(MockTransport& transport) {
+    uint16_t regs[2] = {0, 0};
+    modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2, regs, 2);
+}
+
+static void answerNormally(MockTransport& transport) {
+    transport.setResponder([](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        reply = modbusReply(request[0], 1, 2);
+        return true;
+    });
+}
+
+static void test_nothing_is_armed_until_something_is_requested() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+
+    TEST_ASSERT_EQUAL(DriverCaptureService::Idle, runner.service(transport));
+    TEST_ASSERT_FALSE(transport.tapped());
+    TEST_ASSERT_EQUAL(DriverCaptureStatus::Idle, runner.report().status);
+}
+
+/// The claim the whole design rests on, tested rather than asserted in a comment: arming does
+/// not take the bus. If it did, the driver could not poll, and there would be nothing to record
+/// -- which is the bug this feature exists to fix.
+static void test_arming_never_takes_the_bus() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    TEST_ASSERT_TRUE(runner.request(windowOf(1000), profileAt(9600)));
+    TEST_ASSERT_EQUAL(DriverCaptureService::Armed, runner.service(transport));
+
+    TEST_ASSERT_TRUE(transport.tapped());
+    TEST_ASSERT_EQUAL_UINT32(0, transport.lockCalls);
+    TEST_ASSERT_FALSE(transport.locked);
+    // And it does not touch the line either, so there is nothing to put back afterwards.
+    TEST_ASSERT_EQUAL_UINT32(0, transport.configureCalls);
+}
+
+/// The end-to-end shape: arm, let the bridge poll as it normally would, collect.
+static void test_a_poll_during_the_window_lands_in_the_report() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    runner.request(windowOf(1000), profileAt(9600));
+    runner.service(transport);
+    runTransaction(transport);
+
+    // Still inside the window: the bus task keeps visiting, and keeps polling.
+    TEST_ASSERT_EQUAL(DriverCaptureService::Recording, runner.service(transport));
+
+    transport.advanceClock(1000);
+    TEST_ASSERT_EQUAL(DriverCaptureService::Collected, runner.service(transport));
+
+    const auto report = runner.report();
+    TEST_ASSERT_EQUAL(DriverCaptureStatus::Done, report.status);
+    TEST_ASSERT_EQUAL_UINT32(1, report.txFrames);
+    TEST_ASSERT_EQUAL_UINT32(1, report.rxFrames);
+    TEST_ASSERT_EQUAL_UINT32(2, report.modbusFrames);
+    // Unhooked, so the next poll costs nothing and cannot grow a report nobody is reading.
+    TEST_ASSERT_FALSE(transport.tapped());
+}
+
+/// While it runs, the frame list belongs to the bus task. Handing out a copy mid-flight would
+/// mean reading a vector another task is appending to; the page gets status and timing instead.
+static void test_the_report_carries_no_frames_until_it_is_done() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    runner.request(windowOf(1000), profileAt(9600));
+    runner.service(transport);
+    runTransaction(transport);
+
+    const auto during = runner.report();
+    TEST_ASSERT_EQUAL(DriverCaptureStatus::Running, during.status);
+    TEST_ASSERT_EQUAL_size_t(0, during.frames.size());
+    // The counts stay at zero too, for the same reason: they are read off the tap when it is
+    // collected, not accumulated into the report as it goes.
+    TEST_ASSERT_EQUAL_UINT32(0, during.totalBytes);
+
+    transport.advanceClock(1000);
+    runner.service(transport);
+    TEST_ASSERT_TRUE(runner.report().frames.size() > 0);
+}
+
+/// The window is a window. This runner cannot stop the traffic when the deadline passes -- it
+/// only gets to unhook on its next visit to the bus task -- so the recorder itself has to
+/// refuse bytes that arrive after the window closed. Without that a 30 s capture would quietly
+/// include the poll that straddles the deadline.
+static void test_traffic_after_the_window_is_not_recorded() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    runner.request(windowOf(100), profileAt(9600));
+    runner.service(transport);
+    runTransaction(transport);
+
+    transport.advanceClock(500);  // the window has closed, but nobody has visited yet
+    runTransaction(transport);    // ...and the bridge polls again
+
+    runner.service(transport);
+    const auto report = runner.report();
+    TEST_ASSERT_EQUAL(DriverCaptureStatus::Done, report.status);
+    TEST_ASSERT_EQUAL_UINT32(1, report.txFrames);
+    TEST_ASSERT_EQUAL_UINT32(1, report.rxFrames);
+}
+
+static void test_a_second_request_is_refused_while_one_is_running() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+
+    TEST_ASSERT_TRUE(runner.request(windowOf(1000), profileAt(9600)));
+    TEST_ASSERT_FALSE(runner.request(windowOf(1000), profileAt(9600)));
+    runner.service(transport);
+    TEST_ASSERT_FALSE(runner.request(windowOf(1000), profileAt(9600)));
+    TEST_ASSERT_TRUE(runner.busy());
+}
+
+static void test_a_new_request_discards_the_previous_report() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    runner.request(windowOf(100), profileAt(9600));
+    runner.service(transport);
+    runTransaction(transport);
+    transport.advanceClock(200);
+    runner.service(transport);
+    TEST_ASSERT_TRUE(runner.report().frames.size() > 0);
+
+    TEST_ASSERT_TRUE(runner.request(windowOf(100), profileAt(9600)));
+    TEST_ASSERT_EQUAL_size_t(0, runner.report().frames.size());
+    TEST_ASSERT_EQUAL_UINT32(0, runner.report().totalBytes);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_idle_gap_follows_the_baud_rate);
@@ -821,5 +974,12 @@ int main() {
     RUN_TEST(test_a_reply_delivered_in_chunks_is_still_one_record);
     RUN_TEST(test_removing_the_tap_stops_the_recording);
     RUN_TEST(test_a_device_that_never_answers_leaves_requests_only);
+    RUN_TEST(test_nothing_is_armed_until_something_is_requested);
+    RUN_TEST(test_arming_never_takes_the_bus);
+    RUN_TEST(test_a_poll_during_the_window_lands_in_the_report);
+    RUN_TEST(test_the_report_carries_no_frames_until_it_is_done);
+    RUN_TEST(test_traffic_after_the_window_is_not_recorded);
+    RUN_TEST(test_a_second_request_is_refused_while_one_is_running);
+    RUN_TEST(test_a_new_request_discards_the_previous_report);
     return UNITY_END();
 }

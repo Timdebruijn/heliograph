@@ -45,6 +45,14 @@ void BusTap::recordRx(const uint8_t* data, size_t len, uint64_t nowMs) {
 }
 
 void BusTap::feed(BusDirection direction, const uint8_t* data, size_t len, uint64_t nowMs) {
+    // The window is a window. Unlike the passive capture -- which sits in a loop it controls and
+    // simply stops looping -- this one is fed by whatever the driver happens to be doing, and
+    // the runner can only unhook it on its next visit to the bus task. Without this guard a
+    // 30 s capture would quietly keep recording through the poll that straddles the deadline.
+    // finish() still closes whatever was open, as WindowEnd.
+    if (nowMs - startMs_ >= config_.durationMs) {
+        return;
+    }
     if (len == 0 || data == nullptr) {
         // A read that timed out. It carries no direction -- nothing went on the wire -- so it
         // may only close an open record on silence, never on a direction change. Treating an
