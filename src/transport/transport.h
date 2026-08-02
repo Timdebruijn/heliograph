@@ -15,6 +15,10 @@
 
 namespace heliograph {
 
+namespace diag {
+class BusTap;
+}
+
 enum class TransportType : uint8_t { Rs485, Rs232, Can, Tcp, Mock };
 
 struct TransportStats {
@@ -50,12 +54,65 @@ public:
     /// never hold the bus lock indefinitely. See the receive loops in the drivers.
     virtual uint64_t nowMs() const = 0;
 
-    /// Exclusive access to the bus. Exactly one component may talk at a time; the raw TCP
-    /// bridge and discovery both go through this rather than touching the UART directly.
+    /// Exclusive access to the bus. Exactly one component may talk at a time: a driver's
+    /// transaction, a discovery probe, or a passive capture -- all through here, never touching
+    /// the UART directly.
+    ///
+    /// (This used to name a "raw TCP bridge" as one of the users. There has never been one in
+    /// this tree; the Modbus TCP server reads the cached register map and never sees a
+    /// Transport. Found by review, 2026-08-02, three lines above a facility that was being
+    /// extended on the strength of who takes this lock.)
     virtual bool lock(uint32_t timeoutMs) = 0;
     virtual void unlock() = 0;
 
     virtual const TransportStats& stats() const = 0;
+
+    /// Installs a recorder that sees every byte, with the direction it went. `nullptr` removes
+    /// it, which is the normal state.
+    ///
+    /// Concrete and non-virtual on purpose. A pure virtual would oblige every implementation to
+    /// grow a member it has no opinion about; this way an implementation opts in by calling the
+    /// two helpers below in its read/write, and one that never does is simply never tapped.
+    ///
+    /// THE TAP NEVER TAKES THE BUS LOCK. It runs inside a transaction whose caller already holds
+    /// it -- taking it again would deadlock, and taking it separately would defeat the whole
+    /// point, which is to watch traffic that is happening anyway rather than to stop it.
+    ///
+    /// Ownership stays with the caller, and so does the lifetime rule: whoever installs a tap
+    /// must remove it before the object dies, and must only install from the task that owns the
+    /// bus. There is no locking here because there is nothing to lock against -- one task reads
+    /// and writes, and the pointer changes only between its own transactions.
+    void setTap(diag::BusTap* tap) { tap_ = tap; }
+    bool tapped() const { return tap_ != nullptr; }
+
+protected:
+    /// Called by implementations from write()/read(). Pass what actually went on the wire, not
+    /// what was asked for -- a short write means the tail never left, and a recording that
+    /// showed it would be describing a frame the device never saw.
+    ///
+    /// The null check is inline and the work is not: when nothing is recording, which is almost
+    /// always, the cost in the RS485 hot path is one compare against a member already in cache.
+    void tapTx(const uint8_t* data, size_t len) {
+        if (tap_ != nullptr) {
+            tapTxImpl(data, len);
+        }
+    }
+    /// `len == 0` is a normal call and must not be skipped: a read that timed out is how the
+    /// recorder learns that time passed, and without it the last record before a quiet stretch
+    /// would never be closed.
+    void tapRx(const uint8_t* data, size_t len) {
+        if (tap_ != nullptr) {
+            tapRxImpl(data, len);
+        }
+    }
+
+private:
+    // Out of line so transport.h does not have to include the recorder's header, and so the
+    // inline part above stays a single branch.
+    void tapTxImpl(const uint8_t* data, size_t len);
+    void tapRxImpl(const uint8_t* data, size_t len);
+
+    diag::BusTap* tap_ = nullptr;
 };
 
 /// RAII helper for Transport::lock/unlock.

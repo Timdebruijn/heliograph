@@ -44,7 +44,22 @@ public:
         ++flushCalls;
     }
 
+    // The tap is fed here rather than inside the bodies below, which have several return points
+    // each. Same contract the real transport honours: what actually moved, and a zero-length
+    // read still reported so the recorder learns that time passed.
     size_t write(const uint8_t* data, size_t len) override {
+        const size_t n = writeImpl(data, len);
+        tapTx(data, n);
+        return n;
+    }
+
+    size_t read(uint8_t* buf, size_t len, uint32_t timeoutMs) override {
+        const size_t n = readImpl(buf, len, timeoutMs);
+        tapRx(buf, n);
+        return n;
+    }
+
+    size_t writeImpl(const uint8_t* data, size_t len) {
         writes.emplace_back(data, data + len);
         if (writeFails) {
             return 0;
@@ -67,7 +82,7 @@ public:
         return len;
     }
 
-    size_t read(uint8_t* buf, size_t len, uint32_t timeoutMs) override {
+    size_t readImpl(uint8_t* buf, size_t len, uint32_t timeoutMs) {
         (void)timeoutMs;
         // A read advances the simulated clock so tests can drive an overall transaction
         // deadline: `msPerRead` models bytes that trickle in just under each read's own
@@ -103,6 +118,10 @@ public:
     }
 
     uint64_t nowMs() const override { return clockMs_; }
+    /// Moves the simulated clock forward without any I/O. For tests about what happens when time
+    /// passes BETWEEN transactions -- a capture window closing, say -- which msPerRead cannot
+    /// express because it only advances while somebody is reading.
+    void advanceClock(uint64_t ms) { clockMs_ += ms; }
     /// Milliseconds the simulated clock advances per read(). 0 (default) = time stands still.
     uint32_t msPerRead = 0;
     /// When set, every read() returns one noise byte and never a valid frame or silence.

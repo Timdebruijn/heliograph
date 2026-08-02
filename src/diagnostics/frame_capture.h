@@ -78,6 +78,18 @@ struct CaptureConfig {
 /// resolution it actually has, and the framing note above says what that costs.
 uint32_t idleGapMsFor(const SerialProfile& profile);
 
+/// The two checksum verdicts, shared by every recorder in this directory.
+///
+/// Public rather than file-local because BusTap needs exactly the same judgement on exactly the
+/// same kind of byte run, and two recorders disagreeing about whether a frame checks out would
+/// be worse than either answer: the counts are the number an operator reads first, and they have
+/// to mean the same thing in both reports.
+///
+/// Neither one decodes. They answer "do the bytes hold together as this family's frame", which
+/// is how you find out whether the line settings were right -- not what the frame says.
+bool modbusCrcHolds(const std::vector<uint8_t>& bytes);
+bool pmuFrameHolds(const std::vector<uint8_t>& bytes);
+
 /// Accumulates bytes into records. Pure: no UART, no clock of its own, every time value passed
 /// in. The reading loop lives in CaptureRunner, on the task that owns the bus.
 class FrameCapture {

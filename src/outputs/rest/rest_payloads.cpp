@@ -17,6 +17,25 @@ using json_util::finish;
 using json_util::writeDeviceStatus;
 using json_util::writeMeasurement;
 
+/// Uppercase, space-separated: the form every protocol document and every decoder example in
+/// docs/ uses, so a captured frame can be held next to one and compared by eye.
+///
+/// Shared by both capture reports. They differ in almost everything else, but a frame rendered
+/// two ways would defeat the one thing this format is for.
+std::string hexBytes(const std::vector<uint8_t>& bytes) {
+    static const char kDigits[] = "0123456789ABCDEF";
+    std::string       hex;
+    hex.reserve(bytes.size() * 3);
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        if (i != 0) {
+            hex.push_back(' ');
+        }
+        hex.push_back(kDigits[bytes[i] >> 4]);
+        hex.push_back(kDigits[bytes[i] & 0x0F]);
+    }
+    return hex;
+}
+
 }  // namespace
 
 bool buildErrorPayload(const ApiError& error, const std::string& requestId, std::string& out) {
@@ -657,17 +676,58 @@ bool buildCapturePayload(const CaptureReport& report, uint64_t nowMs, std::strin
         e["length"]         = f.bytes.size();
         e["modbus_crc_ok"]  = f.modbusCrcValid;
         e["aa55_ok"]        = f.pmuFrameValid;
-        // Uppercase, space-separated: the form every protocol document and every decoder
-        // example in docs/ uses, so a captured frame can be compared against one by eye.
-        std::string hex;
-        hex.reserve(f.bytes.size() * 3);
-        for (size_t i = 0; i < f.bytes.size(); ++i) {
-            static const char kDigits[] = "0123456789ABCDEF";
-            if (i != 0) hex.push_back(' ');
-            hex.push_back(kDigits[f.bytes[i] >> 4]);
-            hex.push_back(kDigits[f.bytes[i] & 0x0F]);
-        }
-        e["hex"] = hex;
+        e["hex"] = hexBytes(f.bytes);
+    }
+    return finish(doc, out, maxBytes);
+}
+
+bool buildDriverCapturePayload(const DriverCaptureReport& report, uint64_t nowMs, std::string& out,
+                               size_t maxBytes) {
+    JsonDocument doc;
+    doc["status"] = driverCaptureStatusName(report.status);
+
+    // The line the DRIVER is running at, not one the operator guessed. Echoed for the same
+    // reason it is in the passive report: the idle gap derives from it, and nobody can check
+    // this framing against a protocol document a day later without it.
+    JsonObject line     = doc["line"].to<JsonObject>();
+    line["baud_rate"]   = report.profile.baudRate;
+    line["parity"]      = parityName(report.profile.parity);
+    line["data_bits"]   = report.profile.dataBits;
+    line["stop_bits"]   = report.profile.stopBits;
+    line["idle_gap_ms"] = report.idleGapMs;
+
+    doc["requested_seconds"] = report.config.durationMs / 1000;
+    doc["max_frames"]        = report.config.maxFrames;
+    if (report.startedMs != 0) {
+        const uint64_t end = report.finishedMs != 0 ? report.finishedMs : nowMs;
+        doc["elapsed_ms"]  = end - report.startedMs;
+    }
+
+    JsonObject summary        = doc["summary"].to<JsonObject>();
+    summary["frames"]         = report.frames.size();
+    summary["bytes"]          = report.totalBytes;
+    // The pair that makes this report worth having. Requests with no replies is a diagnosis a
+    // passive capture cannot reach -- there the bridge is the silent one, so "nobody is talking"
+    // and "the device is not answering" look identical.
+    summary["sent"]           = report.txFrames;
+    summary["received"]       = report.rxFrames;
+    summary["modbus_crc_ok"]  = report.modbusFrames;
+    summary["aa55_frames_ok"] = report.pmuFrames;
+    summary["truncated"]      = report.truncated;
+
+    JsonArray frames = doc["frames"].to<JsonArray>();
+    for (const auto& f : report.frames) {
+        JsonObject e       = frames.add<JsonObject>();
+        e["direction"]     = diag::busDirectionName(f.direction);
+        e["offset_ms"]     = f.offsetMs;
+        e["gap_before_ms"] = f.gapBeforeMs;
+        e["length"]        = f.bytes.size();
+        e["modbus_crc_ok"] = f.modbusCrcValid;
+        e["aa55_ok"]       = f.pmuFrameValid;
+        // Which rule ended this record. Without it a reader cannot tell a boundary the protocol
+        // made from one the recorder imposed, and only the first kind means "one frame".
+        e["cut_by"]        = diag::cutReasonName(f.cutBy);
+        e["hex"]           = hexBytes(f.bytes);
     }
     return finish(doc, out, maxBytes);
 }

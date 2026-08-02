@@ -2,6 +2,7 @@
 // REST payloads, configuration redaction/validation and Prometheus output.
 
 #include <unity.h>
+#include <cstdio>
 
 #include <cstring>
 
@@ -1520,6 +1521,86 @@ static void test_capture_payload_echoes_the_line_it_listened_at() {
     TEST_ASSERT_FALSE(doc["summary"]["truncated"].as<bool>());
 }
 
+static DriverCaptureReport driverCaptureWithAnExchange() {
+    DriverCaptureReport report;
+    report.status            = DriverCaptureStatus::Done;
+    report.profile.baudRate  = 9600;
+    report.config.durationMs = 30000;
+    report.config.maxFrames  = 64;
+    report.idleGapMs         = 4;
+    report.startedMs         = 1000;
+    report.finishedMs        = 31000;
+    report.totalBytes        = 13;
+    report.txFrames          = 1;
+    report.rxFrames          = 1;
+    report.modbusFrames      = 2;
+
+    diag::TappedFrame request;
+    request.direction      = diag::BusDirection::Tx;
+    request.offsetMs       = 5;
+    request.bytes          = {0x03, 0x03, 0x00, 0x00};
+    request.modbusCrcValid = true;
+    request.cutBy          = diag::CutReason::DirectionChange;
+    report.frames.push_back(request);
+
+    diag::TappedFrame reply;
+    reply.direction      = diag::BusDirection::Rx;
+    reply.offsetMs       = 47;
+    reply.gapBeforeMs    = 42;
+    reply.bytes          = {0x03, 0x03, 0x02, 0x00, 0x7B};
+    reply.modbusCrcValid = true;
+    reply.cutBy          = diag::CutReason::WindowEnd;
+    report.frames.push_back(reply);
+    return report;
+}
+
+/// Direction is the entire reason this report exists, so it is per frame and spelled out rather
+/// than implied by ordering -- an exchange that lost a reply would otherwise renumber silently.
+static void test_driver_capture_payload_labels_each_frame_with_its_direction() {
+    std::string body;
+    TEST_ASSERT_TRUE(
+        rest::buildDriverCapturePayload(driverCaptureWithAnExchange(), 31000, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_EQUAL_STRING("tx", doc["frames"][0]["direction"]);
+    TEST_ASSERT_EQUAL_STRING("rx", doc["frames"][1]["direction"]);
+    TEST_ASSERT_EQUAL_STRING("03 03 00 00", doc["frames"][0]["hex"]);
+    // The device's response time, which is what a driver's read timeout has to cover.
+    TEST_ASSERT_EQUAL_INT(42, doc["frames"][1]["gap_before_ms"].as<int>());
+}
+
+/// Which rule ended a record. A reader cannot otherwise tell a boundary the protocol made from
+/// one the recorder imposed, and only the first kind means "these bytes are one frame".
+static void test_driver_capture_payload_says_what_ended_each_record() {
+    std::string body;
+    TEST_ASSERT_TRUE(
+        rest::buildDriverCapturePayload(driverCaptureWithAnExchange(), 31000, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_EQUAL_STRING("direction_change", doc["frames"][0]["cut_by"]);
+    TEST_ASSERT_EQUAL_STRING("window_end", doc["frames"][1]["cut_by"]);
+}
+
+/// Requests against replies. This is the diagnosis a passive capture structurally cannot make --
+/// there the bridge is the silent one, so "nothing is talking" and "the device is not answering"
+/// produce the same empty report.
+static void test_driver_capture_payload_counts_requests_against_replies() {
+    std::string body;
+    TEST_ASSERT_TRUE(
+        rest::buildDriverCapturePayload(driverCaptureWithAnExchange(), 31000, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_EQUAL_STRING("done", doc["status"]);
+    TEST_ASSERT_EQUAL_INT(1, doc["summary"]["sent"].as<int>());
+    TEST_ASSERT_EQUAL_INT(1, doc["summary"]["received"].as<int>());
+    TEST_ASSERT_EQUAL_INT(2, doc["summary"]["modbus_crc_ok"].as<int>());
+    // The line is reported even though the operator did not choose it: the idle gap derives
+    // from it, and the framing cannot be checked against a document without it.
+    TEST_ASSERT_EQUAL_INT(9600, doc["line"]["baud_rate"].as<int>());
+    TEST_ASSERT_EQUAL_INT(4, doc["line"]["idle_gap_ms"].as<int>());
+    TEST_ASSERT_EQUAL_INT(30000, doc["elapsed_ms"].as<int>());
+}
+
 /// A failure has to carry its reason. "failed" alone leaves the operator unable to tell a busy
 /// bus from line settings the UART refused.
 static void test_a_failed_capture_carries_its_reason() {
@@ -2847,6 +2928,9 @@ int main(int, char**) {
     RUN_TEST(test_status_payload_reports_clock_sync_state);
     RUN_TEST(test_capture_payload_renders_hex_the_way_the_docs_do);
     RUN_TEST(test_capture_payload_echoes_the_line_it_listened_at);
+    RUN_TEST(test_driver_capture_payload_labels_each_frame_with_its_direction);
+    RUN_TEST(test_driver_capture_payload_says_what_ended_each_record);
+    RUN_TEST(test_driver_capture_payload_counts_requests_against_replies);
     RUN_TEST(test_a_failed_capture_carries_its_reason);
     RUN_TEST(test_a_capture_filled_to_its_byte_ceiling_fits_in_the_response);
     RUN_TEST(test_restore_preview_carries_the_file_and_the_changes);

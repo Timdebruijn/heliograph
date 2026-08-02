@@ -8,14 +8,21 @@
 #include <vector>
 
 #include "app/capture_runner.h"
+#include "app/driver_capture_runner.h"
+#include "diagnostics/bus_tap.h"
 #include "diagnostics/frame_capture.h"
+#include "protocols/modbus/modbus_client.h"
 #include "protocols/modbus/modbus_rtu.h"
 #include "protocols/pmu/pmu_protocol.h"
 #include "support/mock_transport.h"
 
 using namespace heliograph;
+using heliograph::diag::BusDirection;
+using heliograph::diag::BusTap;
 using heliograph::diag::CaptureConfig;
+using heliograph::diag::CutReason;
 using heliograph::diag::FrameCapture;
+using heliograph::diag::TapConfig;
 using heliograph::test::MockTransport;
 
 void setUp() {}
@@ -433,6 +440,549 @@ static void test_a_new_capture_discards_the_previous_result() {
     TEST_ASSERT_EQUAL_UINT32(0, runner.report().totalBytes);
 }
 
+// ---------------------------------------------------------------------------------------
+// BusTap: the same recording problem with one extra fact available -- which way the bytes
+// went. Everything below is about what that fact buys and where it does not apply.
+// ---------------------------------------------------------------------------------------
+
+static TapConfig tapConfig() {
+    TapConfig c;
+    c.idleGapMs = 4;
+    return c;
+}
+
+static void tx(BusTap& t, const std::vector<uint8_t>& bytes, uint64_t at) {
+    t.recordTx(bytes.data(), bytes.size(), at);
+}
+
+static void rx(BusTap& t, const std::vector<uint8_t>& bytes, uint64_t at) {
+    t.recordRx(bytes.data(), bytes.size(), at);
+}
+
+/// The whole point of the feature: a request and its reply come out as two records, labelled,
+/// with no silence needed between them to tell them apart.
+static void test_a_request_and_its_reply_are_two_labelled_records() {
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(0);
+
+    tx(tap, modbusFrame(1), 0);
+    // One millisecond later -- far inside the 4 ms idle gap, so silence could not have cut this.
+    rx(tap, modbusFrame(1), 1);
+    tap.finish(2);
+
+    TEST_ASSERT_EQUAL_size_t(2, tap.frames().size());
+    TEST_ASSERT_EQUAL(BusDirection::Tx, tap.frames()[0].direction);
+    TEST_ASSERT_EQUAL(BusDirection::Rx, tap.frames()[1].direction);
+    TEST_ASSERT_EQUAL(CutReason::DirectionChange, tap.frames()[0].cutBy);
+    TEST_ASSERT_EQUAL_UINT32(1, tap.txFrames());
+    TEST_ASSERT_EQUAL_UINT32(1, tap.rxFrames());
+}
+
+/// A driver's read loop returns short reads. Those are one reply, not three.
+static void test_a_reply_read_in_pieces_is_one_record() {
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(0);
+
+    rx(tap, {0xAA, 0x55}, 0);
+    rx(tap, {0x01, 0x02}, 1);
+    rx(tap, {0x03}, 2);
+    tap.finish(3);
+
+    TEST_ASSERT_EQUAL_size_t(1, tap.frames().size());
+    TEST_ASSERT_EQUAL_size_t(5, tap.frames()[0].bytes.size());
+}
+
+/// The read that came back empty is how time advances, and it must not be mistaken for the
+/// conversation turning around: a driver polls its read in a loop and gets nothing on most
+/// iterations, so treating an empty read as a direction change would cut every reply to pieces.
+static void test_a_read_that_timed_out_does_not_cut_a_reply() {
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(0);
+
+    rx(tap, {0xAA, 0x55}, 0);
+    tap.recordRx(nullptr, 0, 1);  // the read loop, coming back empty
+    tap.recordRx(nullptr, 0, 2);
+    rx(tap, {0x01}, 3);
+    tap.finish(4);
+
+    TEST_ASSERT_EQUAL_size_t(1, tap.frames().size());
+    TEST_ASSERT_EQUAL_size_t(3, tap.frames()[0].bytes.size());
+}
+
+/// The case that actually exercises the rule, and the one a mutation found missing: the empty
+/// read comes straight after a REQUEST, so its nominal direction differs from the open record's.
+/// If an empty read were allowed to count as a turn-around, every request would be closed by the
+/// driver's first fruitless read rather than by the reply -- with the wrong reason on it, and
+/// with the reply's gapBeforeMs measured from the wrong point. Nothing went on the wire, so
+/// nothing turned around.
+static void test_an_empty_read_after_a_request_does_not_close_it() {
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(0);
+
+    tx(tap, modbusFrame(1), 0);
+    tap.recordRx(nullptr, 0, 1);  // the driver starts reading; nothing has arrived yet
+    rx(tap, modbusFrame(1), 2);
+    tap.finish(3);
+
+    TEST_ASSERT_EQUAL_size_t(2, tap.frames().size());
+    TEST_ASSERT_EQUAL(CutReason::DirectionChange, tap.frames()[0].cutBy);
+    TEST_ASSERT_EQUAL_UINT32(2, tap.frames()[1].gapBeforeMs);
+}
+
+/// ...but an empty read may still close a record once the silence is long enough. Without this
+/// the last record before a quiet stretch would stay open until the window ended.
+static void test_a_long_enough_silence_closes_a_record_on_empty_reads() {
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(0);
+
+    rx(tap, {0xAA, 0x55}, 0);
+    tap.recordRx(nullptr, 0, 10);  // past the 4 ms gap
+
+    TEST_ASSERT_EQUAL_size_t(1, tap.frames().size());
+    TEST_ASSERT_EQUAL(CutReason::IdleGap, tap.frames()[0].cutBy);
+}
+
+/// When a device answers after a long pause both rules apply. Only one of them is exact, and
+/// that is the one the record has to name -- the turn-around is a fact, the gap is a threshold
+/// that happens to have been crossed.
+static void test_a_turnaround_after_a_pause_is_reported_as_a_turnaround() {
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(0);
+
+    tx(tap, modbusFrame(1), 0);
+    rx(tap, modbusFrame(1), 200);  // fifty times the idle gap
+    tap.finish(201);
+
+    TEST_ASSERT_EQUAL_size_t(2, tap.frames().size());
+    TEST_ASSERT_EQUAL(CutReason::DirectionChange, tap.frames()[0].cutBy);
+    // And the pause is kept, because it is the device's response time -- the number that says
+    // whether a driver's read timeout is generous enough for this inverter.
+    TEST_ASSERT_EQUAL_UINT32(200, tap.frames()[1].gapBeforeMs);
+}
+
+/// Two replies in a row, with real silence between them: no direction change to lean on, so the
+/// idle gap is still doing the work it does in the passive capture.
+static void test_silence_still_cuts_when_the_direction_does_not_change() {
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(0);
+
+    rx(tap, modbusFrame(1), 0);
+    rx(tap, modbusFrame(2), 50);
+    tap.finish(51);
+
+    TEST_ASSERT_EQUAL_size_t(2, tap.frames().size());
+    TEST_ASSERT_EQUAL(CutReason::IdleGap, tap.frames()[0].cutBy);
+    TEST_ASSERT_EQUAL(BusDirection::Rx, tap.frames()[1].direction);
+}
+
+/// A cut the protocol did not make is labelled as such, so nobody reads the two halves as two
+/// frames. The gap reads zero because no time passed -- that is the honest value, not a missing
+/// one.
+static void test_a_record_split_on_its_byte_bound_says_so() {
+    TapConfig config   = tapConfig();
+    config.maxFrameBytes = 4;
+    BusTap tap(config, profileAt(9600));
+    tap.begin(0);
+
+    rx(tap, {1, 2, 3, 4, 5, 6}, 0);
+    tap.finish(1);
+
+    TEST_ASSERT_EQUAL_size_t(2, tap.frames().size());
+    TEST_ASSERT_EQUAL(CutReason::ByteCap, tap.frames()[0].cutBy);
+    TEST_ASSERT_EQUAL_UINT32(0, tap.frames()[1].gapBeforeMs);
+    TEST_ASSERT_EQUAL(CutReason::WindowEnd, tap.frames()[1].cutBy);
+}
+
+/// The bounds are the passive capture's bounds, for the same no-PSRAM reason. "Stops" means
+/// stops: the assertions check that nothing more is recorded afterwards, not merely that a
+/// counter reached its ceiling.
+static void test_the_byte_ceiling_stops_the_tap() {
+    TapConfig config     = tapConfig();
+    config.maxTotalBytes = 6;
+    BusTap tap(config, profileAt(9600));
+    tap.begin(0);
+
+    rx(tap, {1, 2, 3, 4}, 0);
+    rx(tap, {5, 6, 7, 8}, 50);
+    const size_t afterTheCap = tap.frames().size();
+    // Two more attempts, one in each direction, well inside the window.
+    rx(tap, {9, 10}, 100);
+    tx(tap, {11, 12}, 150);
+    tap.finish(200);
+
+    TEST_ASSERT_EQUAL_UINT32(6, tap.totalBytes());
+    TEST_ASSERT_TRUE(tap.truncated());
+    TEST_ASSERT_TRUE(tap.done(1));
+    TEST_ASSERT_EQUAL_size_t(afterTheCap, tap.frames().size());
+}
+
+/// A record that stopped growing because the capture ran out of room must say so. Leaving it
+/// open until finish() would label it WindowEnd -- a false account when the budget ran out with
+/// most of the window still to go, and the report-level `truncated` flag cannot say WHICH
+/// record it happened to. Found by review, 2026-08-02.
+static void test_running_out_of_room_is_not_reported_as_the_window_ending() {
+    TapConfig config     = tapConfig();
+    config.maxTotalBytes = 10;
+    config.durationMs    = 1000;
+    BusTap tap(config, profileAt(9600));
+    tap.begin(0);
+
+    tx(tap, {1, 2, 3, 4, 5, 6, 7, 8}, 10);
+    // The budget runs out inside this write, with 980 ms of window still to go.
+    tx(tap, {9, 10, 11, 12}, 12);
+    tap.finish(1000);
+
+    TEST_ASSERT_EQUAL_size_t(1, tap.frames().size());
+    TEST_ASSERT_EQUAL(CutReason::CaptureFull, tap.frames()[0].cutBy);
+    TEST_ASSERT_EQUAL_size_t(10, tap.frames()[0].bytes.size());
+    TEST_ASSERT_TRUE(tap.truncated());
+}
+
+/// The boundary the first version of that fix missed: a write whose LAST byte lands exactly on
+/// the budget. The loop then ends normally instead of breaking out, so a flag set only on the
+/// early-exit path never fires -- the record stayed open, finish() called it WindowEnd, and
+/// truncated() said false while nothing further could ever be recorded. Found by review,
+/// 2026-08-02, on the fix for the case one byte past this one.
+static void test_a_budget_filled_exactly_is_still_a_full_capture() {
+    TapConfig config     = tapConfig();
+    config.maxTotalBytes = 8;
+    config.durationMs    = 1000;
+    BusTap tap(config, profileAt(9600));
+    tap.begin(0);
+
+    tx(tap, {1, 2, 3, 4}, 10);
+    tx(tap, {5, 6, 7, 8}, 12);  // exactly fills it; not one byte over
+    tap.finish(1000);
+
+    TEST_ASSERT_EQUAL_size_t(1, tap.frames().size());
+    TEST_ASSERT_EQUAL(CutReason::CaptureFull, tap.frames()[0].cutBy);
+    TEST_ASSERT_TRUE(tap.truncated());
+    TEST_ASSERT_TRUE(tap.done(20));
+}
+
+/// A recording with requests and no replies is the most informative shape this can produce: it
+/// separates "the bridge is talking and nothing answers" from "the bus is dead", which a passive
+/// capture cannot do because in that mode the bridge is the silent one.
+static void test_requests_with_no_replies_are_visible_as_such() {
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(0);
+
+    tx(tap, modbusFrame(1), 0);
+    tx(tap, modbusFrame(1), 1000);
+    tx(tap, modbusFrame(1), 2000);
+    tap.finish(2001);
+
+    TEST_ASSERT_EQUAL_UINT32(3, tap.txFrames());
+    TEST_ASSERT_EQUAL_UINT32(0, tap.rxFrames());
+}
+
+/// Both recorders must judge the same bytes the same way. They share one helper precisely so
+/// that the count an operator reads first cannot mean two different things depending on which
+/// mode produced the report.
+static void test_the_checksum_verdicts_agree_with_the_passive_capture() {
+    const std::vector<uint8_t> good = modbusFrame(7);
+    std::vector<uint8_t>       bad  = good;
+    bad.back() ^= 0xFF;
+
+    CaptureConfig captureConfig;
+    captureConfig.idleGapMs = 4;
+    FrameCapture capture(captureConfig, profileAt(9600));
+    capture.begin(0);
+    feed(capture, good, 0);
+    feed(capture, bad, 50);
+    capture.finish(51);
+
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(0);
+    rx(tap, good, 0);
+    rx(tap, bad, 50);
+    tap.finish(51);
+
+    TEST_ASSERT_EQUAL_size_t(2, capture.frames().size());
+    TEST_ASSERT_EQUAL_size_t(2, tap.frames().size());
+    TEST_ASSERT_EQUAL(capture.frames()[0].modbusCrcValid, tap.frames()[0].modbusCrcValid);
+    TEST_ASSERT_EQUAL(capture.frames()[1].modbusCrcValid, tap.frames()[1].modbusCrcValid);
+    TEST_ASSERT_TRUE(tap.frames()[0].modbusCrcValid);
+    TEST_ASSERT_FALSE(tap.frames()[1].modbusCrcValid);
+    TEST_ASSERT_EQUAL_UINT32(capture.modbusFrames(), tap.modbusFrames());
+}
+
+// ---------------------------------------------------------------------------------------
+// The tap on a transport, driven by a REAL transaction rather than by hand-fed bytes. This is
+// the claim the feature rests on: a driver that knows nothing about recording produces a
+// legible request/reply pair, because the transport is the one place every driver passes
+// through.
+// ---------------------------------------------------------------------------------------
+
+/// A well-formed reply to modbusFrame(): two input registers, CRC and all.
+static std::vector<uint8_t> modbusReply(uint8_t unit, uint16_t a, uint16_t b) {
+    std::vector<uint8_t> f{unit, 0x03, 0x04,
+                           static_cast<uint8_t>(a >> 8), static_cast<uint8_t>(a & 0xFF),
+                           static_cast<uint8_t>(b >> 8), static_cast<uint8_t>(b & 0xFF)};
+    const uint16_t crc = modbus::crc16(f.data(), f.size());
+    f.push_back(static_cast<uint8_t>(crc & 0xFF));
+    f.push_back(static_cast<uint8_t>(crc >> 8));
+    return f;
+}
+
+static void test_a_real_transaction_is_recorded_as_a_request_and_a_reply() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        reply = modbusReply(request[0], 0x1234, 0x5678);
+        return true;
+    });
+
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(transport.nowMs());
+    transport.setTap(&tap);
+
+    uint16_t   regs[2] = {0, 0};
+    const auto outcome = modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2,
+                                               regs, 2);
+    transport.setTap(nullptr);
+    tap.finish(transport.nowMs());
+
+    // The transaction itself still worked -- the tap changed nothing about it.
+    TEST_ASSERT_EQUAL(modbus::ReadStatus::Ok, outcome.status);
+    TEST_ASSERT_EQUAL_UINT16(0x1234, regs[0]);
+
+    // And it was recorded, in two directions, without the driver or the protocol layer knowing.
+    TEST_ASSERT_EQUAL_UINT32(1, tap.txFrames());
+    TEST_ASSERT_EQUAL_UINT32(1, tap.rxFrames());
+    TEST_ASSERT_EQUAL(BusDirection::Tx, tap.frames()[0].direction);
+    TEST_ASSERT_EQUAL(CutReason::DirectionChange, tap.frames()[0].cutBy);
+    // Both halves check out as Modbus, which is the verdict that tells an operator the line
+    // settings were right rather than that the device was silent.
+    TEST_ASSERT_TRUE(tap.frames()[0].modbusCrcValid);
+    TEST_ASSERT_TRUE(tap.frames()[1].modbusCrcValid);
+    TEST_ASSERT_EQUAL_UINT32(2, tap.modbusFrames());
+}
+
+/// A reply arriving a few bytes per read -- which is what really happens on a UART -- must come
+/// back as one record, not as one record per read.
+static void test_a_reply_delivered_in_chunks_is_still_one_record() {
+    MockTransport transport;
+    transport.chunkSize = 2;
+    // Time has to actually pass between the chunks, or this proves nothing: with a standing
+    // clock the idle gap can never fire and the test would pass against broken gap logic. One
+    // millisecond per read, against a 4 ms gap -- close enough to be a real question.
+    transport.msPerRead = 1;
+    transport.setResponder([](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        reply = modbusReply(request[0], 1, 2);
+        return true;
+    });
+
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(transport.nowMs());
+    transport.setTap(&tap);
+
+    uint16_t regs[2] = {0, 0};
+    modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2, regs, 2);
+    transport.setTap(nullptr);
+    tap.finish(transport.nowMs());
+
+    TEST_ASSERT_EQUAL_UINT32(1, tap.rxFrames());
+    TEST_ASSERT_EQUAL_size_t(9, tap.frames()[1].bytes.size());
+    TEST_ASSERT_TRUE(tap.frames()[1].modbusCrcValid);
+}
+
+/// Removing the tap has to actually stop the recording. Otherwise a finished capture would keep
+/// growing against a report nobody is reading, on a bridge that polls every few seconds.
+static void test_removing_the_tap_stops_the_recording() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        reply = modbusReply(request[0], 1, 2);
+        return true;
+    });
+
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(transport.nowMs());
+    transport.setTap(&tap);
+    uint16_t regs[2] = {0, 0};
+    modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2, regs, 2);
+    transport.setTap(nullptr);
+    tap.finish(transport.nowMs());
+
+    const size_t recorded = tap.frames().size();
+    TEST_ASSERT_TRUE(recorded > 0);
+    TEST_ASSERT_FALSE(transport.tapped());
+
+    modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2, regs, 2);
+    TEST_ASSERT_EQUAL_size_t(recorded, tap.frames().size());
+}
+
+/// The bridge talking to nothing. A passive capture cannot tell this apart from a dead bus,
+/// because in that mode the bridge is the silent one; here it is the whole diagnosis.
+static void test_a_device_that_never_answers_leaves_requests_only() {
+    MockTransport transport;  // no responder: every read times out
+
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(transport.nowMs());
+    transport.setTap(&tap);
+
+    uint16_t   regs[2] = {0, 0};
+    const auto outcome = modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2,
+                                               regs, 2, {50, 10});
+    transport.setTap(nullptr);
+    tap.finish(transport.nowMs());
+
+    TEST_ASSERT_EQUAL(modbus::ReadStatus::Timeout, outcome.status);
+    TEST_ASSERT_EQUAL_UINT32(1, tap.txFrames());
+    TEST_ASSERT_EQUAL_UINT32(0, tap.rxFrames());
+}
+
+// ---------------------------------------------------------------------------------------
+// DriverCaptureRunner: the arm/collect handover. The passive runner's tests are about what it
+// does with an iteration of the bus task; these are about it NOT taking one.
+// ---------------------------------------------------------------------------------------
+
+static uint64_t testClock() { return g_clock; }
+
+static diag::TapConfig windowOf(uint32_t ms) {
+    diag::TapConfig c;
+    c.durationMs = ms;
+    c.idleGapMs  = 4;
+    return c;
+}
+
+static void runTransaction(MockTransport& transport) {
+    uint16_t regs[2] = {0, 0};
+    modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2, regs, 2);
+}
+
+static void answerNormally(MockTransport& transport) {
+    transport.setResponder([](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        reply = modbusReply(request[0], 1, 2);
+        return true;
+    });
+}
+
+static void test_nothing_is_armed_until_something_is_requested() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+
+    TEST_ASSERT_EQUAL(DriverCaptureService::Idle, runner.service(transport));
+    TEST_ASSERT_FALSE(transport.tapped());
+    TEST_ASSERT_EQUAL(DriverCaptureStatus::Idle, runner.report().status);
+}
+
+/// The claim the whole design rests on, tested rather than asserted in a comment: arming does
+/// not take the bus. If it did, the driver could not poll, and there would be nothing to record
+/// -- which is the bug this feature exists to fix.
+static void test_arming_never_takes_the_bus() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    TEST_ASSERT_TRUE(runner.request(windowOf(1000), profileAt(9600)));
+    TEST_ASSERT_EQUAL(DriverCaptureService::Armed, runner.service(transport));
+
+    TEST_ASSERT_TRUE(transport.tapped());
+    TEST_ASSERT_EQUAL_UINT32(0, transport.lockCalls);
+    TEST_ASSERT_FALSE(transport.locked);
+    // And it does not touch the line either, so there is nothing to put back afterwards.
+    TEST_ASSERT_EQUAL_UINT32(0, transport.configureCalls);
+}
+
+/// The end-to-end shape: arm, let the bridge poll as it normally would, collect.
+static void test_a_poll_during_the_window_lands_in_the_report() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    runner.request(windowOf(1000), profileAt(9600));
+    runner.service(transport);
+    runTransaction(transport);
+
+    // Still inside the window: the bus task keeps visiting, and keeps polling.
+    TEST_ASSERT_EQUAL(DriverCaptureService::Recording, runner.service(transport));
+
+    transport.advanceClock(1000);
+    TEST_ASSERT_EQUAL(DriverCaptureService::Collected, runner.service(transport));
+
+    const auto report = runner.report();
+    TEST_ASSERT_EQUAL(DriverCaptureStatus::Done, report.status);
+    TEST_ASSERT_EQUAL_UINT32(1, report.txFrames);
+    TEST_ASSERT_EQUAL_UINT32(1, report.rxFrames);
+    TEST_ASSERT_EQUAL_UINT32(2, report.modbusFrames);
+    // Unhooked, so the next poll costs nothing and cannot grow a report nobody is reading.
+    TEST_ASSERT_FALSE(transport.tapped());
+}
+
+/// While it runs, the frame list belongs to the bus task. Handing out a copy mid-flight would
+/// mean reading a vector another task is appending to; the page gets status and timing instead.
+static void test_the_report_carries_no_frames_until_it_is_done() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    runner.request(windowOf(1000), profileAt(9600));
+    runner.service(transport);
+    runTransaction(transport);
+
+    const auto during = runner.report();
+    TEST_ASSERT_EQUAL(DriverCaptureStatus::Running, during.status);
+    TEST_ASSERT_EQUAL_size_t(0, during.frames.size());
+    // The counts stay at zero too, for the same reason: they are read off the tap when it is
+    // collected, not accumulated into the report as it goes.
+    TEST_ASSERT_EQUAL_UINT32(0, during.totalBytes);
+
+    transport.advanceClock(1000);
+    runner.service(transport);
+    TEST_ASSERT_TRUE(runner.report().frames.size() > 0);
+}
+
+/// The window is a window. This runner cannot stop the traffic when the deadline passes -- it
+/// only gets to unhook on its next visit to the bus task -- so the recorder itself has to
+/// refuse bytes that arrive after the window closed. Without that a 30 s capture would quietly
+/// include the poll that straddles the deadline.
+static void test_traffic_after_the_window_is_not_recorded() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    runner.request(windowOf(100), profileAt(9600));
+    runner.service(transport);
+    runTransaction(transport);
+
+    transport.advanceClock(500);  // the window has closed, but nobody has visited yet
+    runTransaction(transport);    // ...and the bridge polls again
+
+    runner.service(transport);
+    const auto report = runner.report();
+    TEST_ASSERT_EQUAL(DriverCaptureStatus::Done, report.status);
+    TEST_ASSERT_EQUAL_UINT32(1, report.txFrames);
+    TEST_ASSERT_EQUAL_UINT32(1, report.rxFrames);
+}
+
+static void test_a_second_request_is_refused_while_one_is_running() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+
+    TEST_ASSERT_TRUE(runner.request(windowOf(1000), profileAt(9600)));
+    TEST_ASSERT_FALSE(runner.request(windowOf(1000), profileAt(9600)));
+    runner.service(transport);
+    TEST_ASSERT_FALSE(runner.request(windowOf(1000), profileAt(9600)));
+    TEST_ASSERT_TRUE(runner.busy());
+}
+
+static void test_a_new_request_discards_the_previous_report() {
+    MockTransport       transport;
+    DriverCaptureRunner runner(testClock);
+    answerNormally(transport);
+
+    runner.request(windowOf(100), profileAt(9600));
+    runner.service(transport);
+    runTransaction(transport);
+    transport.advanceClock(200);
+    runner.service(transport);
+    TEST_ASSERT_TRUE(runner.report().frames.size() > 0);
+
+    TEST_ASSERT_TRUE(runner.request(windowOf(100), profileAt(9600)));
+    TEST_ASSERT_EQUAL_size_t(0, runner.report().frames.size());
+    TEST_ASSERT_EQUAL_UINT32(0, runner.report().totalBytes);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_idle_gap_follows_the_baud_rate);
@@ -460,5 +1010,29 @@ int main() {
     RUN_TEST(test_line_settings_that_will_not_apply_fail_rather_than_record_nothing);
     RUN_TEST(test_the_tick_callback_fires_throughout_the_window);
     RUN_TEST(test_a_new_capture_discards_the_previous_result);
+    RUN_TEST(test_a_request_and_its_reply_are_two_labelled_records);
+    RUN_TEST(test_a_reply_read_in_pieces_is_one_record);
+    RUN_TEST(test_a_read_that_timed_out_does_not_cut_a_reply);
+    RUN_TEST(test_an_empty_read_after_a_request_does_not_close_it);
+    RUN_TEST(test_a_long_enough_silence_closes_a_record_on_empty_reads);
+    RUN_TEST(test_a_turnaround_after_a_pause_is_reported_as_a_turnaround);
+    RUN_TEST(test_silence_still_cuts_when_the_direction_does_not_change);
+    RUN_TEST(test_a_record_split_on_its_byte_bound_says_so);
+    RUN_TEST(test_the_byte_ceiling_stops_the_tap);
+    RUN_TEST(test_running_out_of_room_is_not_reported_as_the_window_ending);
+    RUN_TEST(test_a_budget_filled_exactly_is_still_a_full_capture);
+    RUN_TEST(test_requests_with_no_replies_are_visible_as_such);
+    RUN_TEST(test_the_checksum_verdicts_agree_with_the_passive_capture);
+    RUN_TEST(test_a_real_transaction_is_recorded_as_a_request_and_a_reply);
+    RUN_TEST(test_a_reply_delivered_in_chunks_is_still_one_record);
+    RUN_TEST(test_removing_the_tap_stops_the_recording);
+    RUN_TEST(test_a_device_that_never_answers_leaves_requests_only);
+    RUN_TEST(test_nothing_is_armed_until_something_is_requested);
+    RUN_TEST(test_arming_never_takes_the_bus);
+    RUN_TEST(test_a_poll_during_the_window_lands_in_the_report);
+    RUN_TEST(test_the_report_carries_no_frames_until_it_is_done);
+    RUN_TEST(test_traffic_after_the_window_is_not_recorded);
+    RUN_TEST(test_a_second_request_is_refused_while_one_is_running);
+    RUN_TEST(test_a_new_request_discards_the_previous_report);
     return UNITY_END();
 }

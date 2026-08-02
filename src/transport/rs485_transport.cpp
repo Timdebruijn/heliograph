@@ -88,6 +88,9 @@ size_t Rs485Transport::write(const uint8_t* data, size_t len) {
     // reads what actually goes onto the bus, without the transport learning any protocol. The
     // bus carries no secrets.
     log::traceHex("RS485 TX", data, n);
+    // `n`, not `len`: a short write means the tail never reached the wire, and recording it
+    // would describe a frame the device never saw.
+    tapTx(data, n);
     return n;
 }
 
@@ -119,6 +122,12 @@ size_t Rs485Transport::read(uint8_t* buf, size_t len, uint32_t timeoutMs) {
     // the bounded in-memory ring the REST log serves, where it evicted all surrounding
     // context (2026-07-20). The driver traces the assembled buffer once per transaction,
     // together with the outcome, which is the level a reader actually reasons at.
+    //
+    // The recorder is fed regardless, INCLUDING when got == 0. That is the opposite decision to
+    // the tracing above and for the opposite reason: a timed-out read is exactly how a recorder
+    // learns that time passed, and it reassembles the pieces itself instead of emitting one
+    // entry per read.
+    tapRx(buf, got);
     return got;
 }
 

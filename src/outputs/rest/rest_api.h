@@ -36,6 +36,7 @@ class AsyncWebServerRequest;
 #include "diagnostics/diagnostics.h"
 #include "app/capture_runner.h"
 #include "app/discovery_runner.h"
+#include "app/driver_capture_runner.h"
 #include "drivers/driver_registry.h"
 #include "rest_payloads.h"
 #include "state/state_store.h"
@@ -85,6 +86,13 @@ struct RestContext {
     std::function<bool(const diag::CaptureConfig&, const SerialProfile&)> requestCapture;
     /// The current capture report, for the wizard to poll and then download.
     std::function<CaptureReport()> captureReport;
+    /// Start a capture of the driver's own conversation. No SerialProfile argument, and that is
+    /// the point: there is a working driver, so the line is a fact about the bridge rather than
+    /// a guess the operator supplies. Returns false when anything else is using the bus.
+    std::function<bool(const diag::TapConfig&)> requestDriverCapture;
+    /// The current driver-capture report. Carries frames only once it is done -- while it runs,
+    /// the bus task is still appending to them.
+    std::function<DriverCaptureReport()> driverCaptureReport;
     /// Wipes stored configuration including credentials, then reboots into the setup portal.
     /// The same wipe the BOOT-hold performs, reached over the network instead of the button --
     /// which is what a user without physical access has when a config locks them out.

@@ -1073,9 +1073,10 @@ bool RestApi::begin() {
         request->send(202, kJson, "{\"status\":\"accepted\"}");
     });
 
-    // Raw bus capture, for a device discovery could not name. Every parameter travels in the
-    // query: they are four numbers and an enum, and a JSON body would need the whole
-    // collectBody dance for that.
+    // Bus capture, in either of its two modes: `passive` for a device discovery could not name,
+    // `driver` for one we already talk to. Every parameter travels in the query: they are a
+    // handful of numbers and two enums, and a JSON body would need the whole collectBody dance
+    // for that.
     g_server->on("/api/v1/actions/capture", HTTP_POST,
                  [this, authorised, rateLimited](AsyncWebServerRequest* request) {
         if (!authorised(request) || rateLimited(request)) {
@@ -1089,6 +1090,65 @@ bool RestApi::begin() {
             if (!request->hasParam(name)) return fallback;
             return std::strtol(request->getParam(name)->value().c_str(), nullptr, 10);
         };
+
+        // Which conversation to record. Default `passive` so every existing caller keeps its
+        // meaning: this endpoint has always recorded a bus the bridge was silent on.
+        const bool driverMode =
+            request->hasParam("mode") && request->getParam("mode")->value() == "driver";
+        if (request->hasParam("mode") && !driverMode &&
+            request->getParam("mode")->value() != "passive") {
+            sendError(request, {400, "invalid_parameter", "mode must be passive or driver"});
+            return;
+        }
+
+        if (driverMode) {
+            if (context_.requestDriverCapture == nullptr) {
+                sendError(request, {404, "no_capture", "this build cannot capture"});
+                return;
+            }
+            // Refused, not ignored. There is a working driver here, so the line is a fact about
+            // the bridge -- accepting a baud rate and then recording at a different one would
+            // put a number in the report that the capture never ran at, which is worse than
+            // any error message.
+            for (const char* param : {"baud", "parity", "data_bits", "stop_bits"}) {
+                if (request->hasParam(param)) {
+                    sendError(request, {400, "invalid_parameter",
+                                        std::string("mode=driver records the line the driver is "
+                                                    "already using; remove '") +
+                                            param + "'"});
+                    return;
+                }
+            }
+            diag::TapConfig tap;
+            const long      seconds = number("seconds", 30);
+            if (seconds < 1 || seconds > static_cast<long>(kMaxDriverCaptureSeconds)) {
+                sendError(request, {400, "invalid_parameter",
+                                    "seconds must be between 1 and " +
+                                        std::to_string(kMaxDriverCaptureSeconds)});
+                return;
+            }
+            tap.durationMs    = static_cast<uint32_t>(seconds) * 1000u;
+            const long frames = number("frames", 64);
+            // Lower than the passive mode's 256, and refused rather than silently clamped: this
+            // report carries a direction and a cut reason per record, and above ~160 records it
+            // no longer fits the response bound. A capture that completes and can only ever
+            // answer 500 has spent real bus time for a report nobody can fetch.
+            if (frames < 1 || frames > kMaxDriverCaptureFrames) {
+                sendError(request, {400, "invalid_parameter",
+                                    "frames must be between 1 and " +
+                                        std::to_string(kMaxDriverCaptureFrames) +
+                                        " in mode=driver"});
+                return;
+            }
+            tap.maxFrames = static_cast<size_t>(frames);
+            if (!context_.requestDriverCapture(tap)) {
+                sendError(request, {409, "bus_busy",
+                                    "a capture or discovery run is already using the bus"});
+                return;
+            }
+            request->send(202, kJson, "{\"status\":\"accepted\"}");
+            return;
+        }
 
         diag::CaptureConfig config;
         const long seconds = number("seconds", 30);
@@ -1152,6 +1212,26 @@ bool RestApi::begin() {
         }
         std::string body;
         if (!buildCapturePayload(context_.captureReport(), context_.clock(), body)) {
+            sendError(request, {500, "payload_too_large", "the capture exceeded its bound"});
+            return;
+        }
+        request->send(200, kJson, body.c_str());
+    });
+
+    // Its own route rather than a mode on the one above, because the two reports are not the
+    // same document: every frame here carries a direction and the rule that ended it, and the
+    // summary counts requests against replies. One route would have to decide which of two
+    // independent last-reports to hand back, and a consumer would have to branch on a mode field
+    // anyway -- with half the fields absent, which reads as missing data rather than as a
+    // different kind of report.
+    g_server->on("/api/v1/capture/driver", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        context_.diagnostics->recordRestRequest();
+        if (context_.driverCaptureReport == nullptr) {
+            sendError(request, {404, "no_capture", "this build cannot capture"});
+            return;
+        }
+        std::string body;
+        if (!buildDriverCapturePayload(context_.driverCaptureReport(), context_.clock(), body)) {
             sendError(request, {500, "payload_too_large", "the capture exceeded its bound"});
             return;
         }

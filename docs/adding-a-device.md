@@ -244,7 +244,22 @@ worked for the EverSolar driver:
    only show on real hardware over days (our sunrise-recovery saga is the cautionary
    tale), so plan for a soak-test phase.
 
-## 6. Capturing an unknown device
+## 6. Capturing the bus
+
+There are **two** recordings, and picking the wrong one wastes an afternoon. The question is
+whether this build already has a driver for the device:
+
+| | No driver yet | A driver we ship |
+|---|---|---|
+| Use | **passive** — the rest of this section | **driver mode** — [below](#65-recording-a-driver-we-already-have) |
+| Where | the discovery wizard, "Record the raw bus" | Health → "Record the driver's own conversation" |
+| The bridge | stays silent and listens | keeps polling, and that traffic is the recording |
+
+Point the passive recording at an inverter that already works and it captures **nothing**: the
+driver that would produce the traffic is the very thing it pauses. That is not a bug in it, and
+it is why the second mode exists.
+
+### 6.1 Recording a device nothing can identify
 
 When the discovery wizard finishes and names nothing, it offers **"Record the raw bus"**.
 That is this feature, and it needs no working driver — which is the point, because the
@@ -285,6 +300,57 @@ A text file you can attach to an issue directly:
        0       0    8  modbus    01 03 00 00 00 0A C5 CD
       41      33   25  modbus    01 03 14 00 00 09 C4 ... 
 ```
+
+## 6.5 Recording a driver we already have
+
+**Health → "Record the driver's own conversation."** Nothing is interrupted: the bridge polls
+exactly as it always does, and that traffic *is* the recording. No line settings to choose —
+there is a working driver, so the bridge knows the line, and the API refuses the parameters
+rather than recording at something other than what you asked for.
+
+Three jobs this does that the passive recording cannot:
+
+- **Check a shipped driver against its protocol document**, on real hardware, without a
+  USB-RS485 tap and a laptop in the meter cupboard.
+- **Turn "works for me / not for me" into bytes.** A reporter with no tap can still attach the
+  actual exchange.
+- **Tell "nobody is talking" apart from "the device is not answering."** Requests with no
+  replies is a diagnosis; a passive capture cannot reach it, because there the bridge is the
+  silent one and both look like an empty report.
+
+### Reading it
+
+Each record carries a **direction** and the rule that ended it:
+
+| Column | Meaning |
+|---|---|
+| **→** | the bridge asking |
+| **←** | the device answering |
+| gap on a **←** | the device's response time — what a driver's read timeout has to cover |
+| `turn` | the conversation turned around. Exact at any baud rate |
+| `silence` | the same t3.5 idle gap the passive mode uses throughout |
+| `split` | the record hit its byte limit — **a cut the protocol did not make**, so these bytes and the next row's may belong together. The recording carries on |
+| `full` | the recording ran out of room here. Also not a protocol boundary, and unlike `split` **nothing after it was recorded**, however much of the window was left |
+| `end` | the window closed with this record still open |
+
+Only `turn` and `silence` mean "these bytes are one frame". Because the direction boundary is
+exact, this mode does not carry the passive mode's approximation above 19200 baud.
+
+The text file names its own mode, so the two cannot be confused in an issue:
+
+```
+# Heliograph driver capture (the bridge kept polling throughout)
+# line: 9600 baud, none parity, 8 data bits, 1 stop bits
+# 14 records, 182 bytes, 7 sent, 7 received, 14 valid Modbus CRC, 0 valid AA55
+#
+# dir  time_ms  gap_ms  len  checksum  cut_by            bytes
+->        12      12    8  modbus    direction_change  01 03 00 00 00 0A C5 CD
+<-        54      42   25  modbus    idle_gap          01 03 14 00 00 09 C4 ...
+```
+
+Discovery is refused while this runs, and it has to be: a probe sweep re-registers every
+inverter and walks eight addresses, so the recording would show something no driver ever does,
+under a heading claiming to be the driver's own conversation.
 
 **Write down what the device is and what was talking to it while this ran.** That context
 is the one part nobody can recover from the bytes, and it is the difference between a
