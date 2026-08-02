@@ -24,6 +24,8 @@
 # a runner image that stops shipping Chrome shows up as a red check rather than as a layout
 # check that quietly stopped rendering anything.
 
+import concurrent.futures
+import os
 import pathlib
 import re
 import subprocess
@@ -648,6 +650,10 @@ const tick=setInterval(async()=>{
 """
 
 
+# Ceiling on concurrent browsers. See the note at the call site.
+kMaxRenderWorkers = 4
+
+
 def build_page(stripped: str, stub: str, battery: str, extra_js: str) -> str:
     """The served page with the stub attached, and the assertions after it.
 
@@ -672,6 +678,11 @@ def render(
             "--headless",
             "--disable-gpu",
             "--no-sandbox",
+            # NO --user-data-dir here, and that is a measured decision rather than an omission.
+            # These renders run concurrently, so a shared profile directory looked like the
+            # obvious hazard -- but pointing each one at its own directory made Chrome hang until
+            # the 120 s timeout, every time. Headless already gives each process a throwaway
+            # profile; naming one asks for a real profile to be initialised instead.
             f"--window-size={width},900",
             "--virtual-time-budget=6000",
             "--dump-dom",
@@ -708,12 +719,23 @@ def main() -> int:
         print("dashboard layout: FAIL (no Chrome/Chromium on PATH to render with)")
         return 1
 
-    status = 0
+    # Every scenario is built first and rendered afterwards, because they are independent: a
+    # separate process, a separate page file, no shared state. Rendering them one at a time was
+    # sixteen Chrome starts in series, and the process churn -- not the rendering -- was most of
+    # the wall time (9.6 s of system time against 14.5 s of user time on a 34 s run).
+    #
+    # `jobs` keeps the ORDER the scenarios were written in, and the report loop walks it, so the
+    # output is identical to the serial version. A layout failure has to be findable by reading
+    # down the list; interleaving it by completion time would trade the whole saving for that.
+    jobs: list[tuple[str, str, int, str]] = []  # (label, page, width, tag)
+
+    def plan(label: str, page: str, width: int, tag: str) -> None:
+        jobs.append((label, page, width, tag))
+
     with tempfile.TemporaryDirectory(prefix="heliograph-layout-") as scratch:
         page = build_page(stripped, stub, "{soc:68,power:-1240}", ASSERT_JS)
         for width in WIDTHS:
-            verdict, _ = render(chrome, page, width, scratch, str(width))
-            status |= report(f"dashboard layout @{width}px", verdict)
+            plan(f"dashboard layout @{width}px", page, width, str(width))
 
         for label, soc, power, wanted, unwanted in BATTERY_CASES:
             # The DOM itself is the subject here, so the assertions read it as text rather than
@@ -732,44 +754,70 @@ def main() -> int:
                 "    document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';}\n"
                 "},25);})();"
             )
-            page = build_page(stripped, stub, f"{{soc:{soc},power:{power}}}", js)
-            verdict, _ = render(chrome, page, 1000, scratch, label)
-            status |= report(f"battery {label}", verdict)
+            plan(
+                f"battery {label}",
+                build_page(stripped, stub, f"{{soc:{soc},power:{power}}}", js),
+                1000,
+                label,
+            )
 
         # The tab that takes input rather than only showing it.
-        page = build_page(stripped, stub, "{soc:68,power:-1240}", INVERTERS_JS)
-        verdict, _ = render(chrome, page, 1000, scratch, "inverters")
-        status |= report("inverters tab interaction", verdict)
+        plan(
+            "inverters tab interaction",
+            build_page(stripped, stub, "{soc:68,power:-1240}", INVERTERS_JS),
+            1000,
+            "inverters",
+        )
 
         # And the state every owner passes through exactly once, on a different stub: a bridge
         # that has just been provisioned and has never been told what it is wired to.
         fresh = (ROOT / "tools" / "fresh_bridge.js").read_text(encoding="utf-8")
         page = build_web.inject_before_script(stripped, fresh)
         page = page.replace("</body>", f"<script>{FRESH_BRIDGE_JS}</script></body>", 1)
-        verdict, _ = render(chrome, page, 1000, scratch, "fresh")
-        status |= report("first run, nothing configured", verdict)
+        plan("first run, nothing configured", page, 1000, "fresh")
 
         # The mirror image, and the reason the config alone is not the question: driver.id is
         # equally empty here, but the inverter it auto-picked is answering.
         auto = (ROOT / "tools" / "autopick_bridge.js").read_text(encoding="utf-8")
         page = build_web.inject_before_script(stripped, auto)
         page = page.replace("</body>", f"<script>{AUTOPICK_JS}</script></body>", 1)
-        verdict, _ = render(chrome, page, 1000, scratch, "autopick")
-        status |= report("auto-picked driver, answering", verdict)
+        plan("auto-picked driver, answering", page, 1000, "autopick")
 
         # Data keeps moving; the page around it does not get rebuilt.
-        page = build_page(stripped, stub, "{soc:68,power:-1240}", BRIDGE_JS)
-        verdict, _ = render(chrome, page, 1000, scratch, "bridge")
-        status |= report("bridge tab keeps what you typed", verdict)
+        plan(
+            "bridge tab keeps what you typed",
+            build_page(stripped, stub, "{soc:68,power:-1240}", BRIDGE_JS),
+            1000,
+            "bridge",
+        )
+        plan(
+            "health keeps your place in the log",
+            build_page(stripped, stub, "{soc:68,power:-1240}", HEALTH_JS),
+            1000,
+            "health",
+        )
+        plan(
+            "integrations still reports what changed",
+            build_page(stripped, stub, "{soc:68,power:-1240}", INTEGRATIONS_JS),
+            1000,
+            "int",
+        )
 
-        page = build_page(stripped, stub, "{soc:68,power:-1240}", HEALTH_JS)
-        verdict, _ = render(chrome, page, 1000, scratch, "health")
-        status |= report("health keeps your place in the log", verdict)
+        # Bounded, and not by "how many can we start". Each worker is a whole browser; on a
+        # two-core CI runner sixteen at once would swap rather than render, and a layout check
+        # that fails on memory pressure is worse than a slow one -- it fails on the machine
+        # rather than on the page. Four is the point where the process churn stops dominating.
+        workers = min(kMaxRenderWorkers, len(jobs), (os.cpu_count() or 1) * 2)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            verdicts = list(
+                pool.map(
+                    lambda job: render(chrome, job[1], job[2], scratch, job[3])[0], jobs
+                )
+            )
 
-        page = build_page(stripped, stub, "{soc:68,power:-1240}", INTEGRATIONS_JS)
-        verdict, _ = render(chrome, page, 1000, scratch, "int")
-        status |= report("integrations still reports what changed", verdict)
-
+    status = 0
+    for (label, _, _, _), verdict in zip(jobs, verdicts, strict=True):
+        status |= report(label, verdict)
     return status
 
 
