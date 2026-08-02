@@ -9,8 +9,8 @@ namespace heliograph::diag {
 
 const char* busDirectionName(BusDirection direction) {
     switch (direction) {
-        case BusDirection::Tx: return "tx";
-        case BusDirection::Rx: return "rx";
+        case BusDirection::Tx: return "rx";
+        case BusDirection::Rx: return "tx";
     }
     return "unknown";
 }
