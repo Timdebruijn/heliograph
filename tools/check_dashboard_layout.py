@@ -31,6 +31,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from typing import NamedTuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build_web
@@ -651,7 +652,22 @@ const tick=setInterval(async()=>{
 
 
 # Ceiling on concurrent browsers. See the note at the call site.
-kMaxRenderWorkers = 4
+MAX_RENDER_WORKERS = 4
+
+
+class Scenario(NamedTuple):
+    """One thing to render and the name it answers to.
+
+    Named rather than a bare tuple because the fields are three strings and an int in an order
+    nobody can infer -- and the renderer is now called through a mapping function, where a
+    positional mix-up would silently render the wrong page at the wrong width under the right
+    label. The failure would read as a real layout bug.
+    """
+
+    label: str
+    page: str
+    width: int
+    tag: str
 
 
 def build_page(stripped: str, stub: str, battery: str, extra_js: str) -> str:
@@ -727,10 +743,10 @@ def main() -> int:
     # `jobs` keeps the ORDER the scenarios were written in, and the report loop walks it, so the
     # output is identical to the serial version. A layout failure has to be findable by reading
     # down the list; interleaving it by completion time would trade the whole saving for that.
-    jobs: list[tuple[str, str, int, str]] = []  # (label, page, width, tag)
+    jobs: list[Scenario] = []
 
     def plan(label: str, page: str, width: int, tag: str) -> None:
-        jobs.append((label, page, width, tag))
+        jobs.append(Scenario(label, page, width, tag))
 
     with tempfile.TemporaryDirectory(prefix="heliograph-layout-") as scratch:
         page = build_page(stripped, stub, "{soc:68,power:-1240}", ASSERT_JS)
@@ -807,17 +823,20 @@ def main() -> int:
         # two-core CI runner sixteen at once would swap rather than render, and a layout check
         # that fails on memory pressure is worse than a slow one -- it fails on the machine
         # rather than on the page. Four is the point where the process churn stops dominating.
-        workers = min(kMaxRenderWorkers, len(jobs), (os.cpu_count() or 1) * 2)
+        workers = min(MAX_RENDER_WORKERS, len(jobs), (os.cpu_count() or 1) * 2)
+
+        def verdict_for(scenario: Scenario) -> str:
+            return render(chrome, scenario.page, scenario.width, scratch, scenario.tag)[
+                0
+            ]
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            verdicts = list(
-                pool.map(
-                    lambda job: render(chrome, job[1], job[2], scratch, job[3])[0], jobs
-                )
-            )
+            # pool.map yields in the order it was given, not the order things finished.
+            verdicts = list(pool.map(verdict_for, jobs))
 
     status = 0
-    for (label, _, _, _), verdict in zip(jobs, verdicts, strict=True):
-        status |= report(label, verdict)
+    for scenario, verdict in zip(jobs, verdicts, strict=True):
+        status |= report(scenario.label, verdict)
     return status
 
 
