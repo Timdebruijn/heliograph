@@ -635,6 +635,29 @@ static void test_running_out_of_room_is_not_reported_as_the_window_ending() {
     TEST_ASSERT_EQUAL_size_t(1, tap.frames().size());
     TEST_ASSERT_EQUAL(CutReason::CaptureFull, tap.frames()[0].cutBy);
     TEST_ASSERT_EQUAL_size_t(10, tap.frames()[0].bytes.size());
+    TEST_ASSERT_TRUE(tap.truncated());
+}
+
+/// The boundary the first version of that fix missed: a write whose LAST byte lands exactly on
+/// the budget. The loop then ends normally instead of breaking out, so a flag set only on the
+/// early-exit path never fires -- the record stayed open, finish() called it WindowEnd, and
+/// truncated() said false while nothing further could ever be recorded. Found by review,
+/// 2026-08-02, on the fix for the case one byte past this one.
+static void test_a_budget_filled_exactly_is_still_a_full_capture() {
+    TapConfig config     = tapConfig();
+    config.maxTotalBytes = 8;
+    config.durationMs    = 1000;
+    BusTap tap(config, profileAt(9600));
+    tap.begin(0);
+
+    tx(tap, {1, 2, 3, 4}, 10);
+    tx(tap, {5, 6, 7, 8}, 12);  // exactly fills it; not one byte over
+    tap.finish(1000);
+
+    TEST_ASSERT_EQUAL_size_t(1, tap.frames().size());
+    TEST_ASSERT_EQUAL(CutReason::CaptureFull, tap.frames()[0].cutBy);
+    TEST_ASSERT_TRUE(tap.truncated());
+    TEST_ASSERT_TRUE(tap.done(20));
 }
 
 /// A recording with requests and no replies is the most informative shape this can produce: it
@@ -997,6 +1020,7 @@ int main() {
     RUN_TEST(test_a_record_split_on_its_byte_bound_says_so);
     RUN_TEST(test_the_byte_ceiling_stops_the_tap);
     RUN_TEST(test_running_out_of_room_is_not_reported_as_the_window_ending);
+    RUN_TEST(test_a_budget_filled_exactly_is_still_a_full_capture);
     RUN_TEST(test_requests_with_no_replies_are_visible_as_such);
     RUN_TEST(test_the_checksum_verdicts_agree_with_the_passive_capture);
     RUN_TEST(test_a_real_transaction_is_recorded_as_a_request_and_a_reply);

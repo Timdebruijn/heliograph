@@ -90,11 +90,8 @@ void BusTap::feed(BusDirection direction, const uint8_t* data, size_t len, uint6
         open_.gapBeforeMs = static_cast<uint32_t>(nowMs - lastByteMs_);
         openHasBytes_     = true;
     }
-    bool ranOutOfRoom = false;
     for (size_t i = 0; i < len; ++i) {
         if (totalBytes_ >= config_.maxTotalBytes) {
-            truncated_   = true;
-            ranOutOfRoom = true;
             break;
         }
         if (open_.bytes.size() >= config_.maxFrameBytes) {
@@ -115,12 +112,18 @@ void BusTap::feed(BusDirection direction, const uint8_t* data, size_t len, uint6
     }
     lastByteMs_ = nowMs;
 
-    // Closed HERE rather than left open for finish() to deal with. Left open, the record
-    // survives to the end of the window and finish() labels it WindowEnd -- which is a false
+    // Asked AFTER the loop, on the state, rather than flagged inside it -- and that distinction
+    // IS the bug this replaced. A flag set only on the loop's early exit misses the write whose
+    // last byte lands exactly on the budget: that loop ends normally, so the record stayed open,
+    // finish() later called it WindowEnd, and truncated() said false while nothing further could
+    // ever be recorded. Every subsequent feed() is refused by the cap check above, so "the
+    // budget is gone" is the whole condition, however the loop happened to leave.
+    //
+    // Closed here rather than left for finish() for the same reason: WindowEnd is a false
     // account when the budget ran out with most of the window still to go, and cut_by exists
-    // precisely so a reader does not have to guess at that. Every later feed() is refused by
-    // the cap check above, so nothing would have been added to it anyway.
-    if (ranOutOfRoom) {
+    // precisely so a reader does not have to guess at that.
+    if (totalBytes_ >= config_.maxTotalBytes) {
+        truncated_ = true;
         closeFrame(CutReason::CaptureFull);
     }
 }

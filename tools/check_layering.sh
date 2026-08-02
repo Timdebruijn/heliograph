@@ -264,11 +264,30 @@ def slug(heading: str) -> str:
 
 
 def anchors_in(path: pathlib.Path) -> set:
-    return {
-        slug(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.startswith("#")
-    }
+    """Heading slugs, skipping fenced code blocks.
+
+    A hash inside a fenced block is a shell comment, not a heading. This project's own docs are
+    full of them -- the capture examples start with "# Heliograph driver capture ..." -- and
+    counting those as anchors makes the check fail OPEN: a link to a heading that no longer
+    exists could match one of these phantoms and be waved through. A checker with false
+    negatives is worse than none, because it is trusted. There were 13 such phantoms across two
+    documents when this was added.
+
+    The fence marker is built rather than written out. A literal backtick run inside this
+    heredoc breaks the SHELL parser -- the heredoc sits in a $(...) substitution, where bash
+    still tracks backticks as legacy command substitution even though the delimiter is quoted.
+    It cost a run of this script to find out.
+    """
+    fence = chr(96) * 3
+    found = set()
+    fenced = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith(fence):
+            fenced = not fenced
+            continue
+        if not fenced and line.startswith("#"):
+            found.add(slug(line))
+    return found
 
 
 for doc in sorted(pathlib.Path(".").rglob("*.md")):
