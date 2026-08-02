@@ -10,6 +10,7 @@
 #include "app/capture_runner.h"
 #include "diagnostics/bus_tap.h"
 #include "diagnostics/frame_capture.h"
+#include "protocols/modbus/modbus_client.h"
 #include "protocols/modbus/modbus_rtu.h"
 #include "protocols/pmu/pmu_protocol.h"
 #include "support/mock_transport.h"
@@ -654,6 +655,130 @@ static void test_the_checksum_verdicts_agree_with_the_passive_capture() {
     TEST_ASSERT_EQUAL_UINT32(capture.modbusFrames(), tap.modbusFrames());
 }
 
+// ---------------------------------------------------------------------------------------
+// The tap on a transport, driven by a REAL transaction rather than by hand-fed bytes. This is
+// the claim the feature rests on: a driver that knows nothing about recording produces a
+// legible request/reply pair, because the transport is the one place every driver passes
+// through.
+// ---------------------------------------------------------------------------------------
+
+/// A well-formed reply to modbusFrame(): two input registers, CRC and all.
+static std::vector<uint8_t> modbusReply(uint8_t unit, uint16_t a, uint16_t b) {
+    std::vector<uint8_t> f{unit, 0x03, 0x04,
+                           static_cast<uint8_t>(a >> 8), static_cast<uint8_t>(a & 0xFF),
+                           static_cast<uint8_t>(b >> 8), static_cast<uint8_t>(b & 0xFF)};
+    const uint16_t crc = modbus::crc16(f.data(), f.size());
+    f.push_back(static_cast<uint8_t>(crc & 0xFF));
+    f.push_back(static_cast<uint8_t>(crc >> 8));
+    return f;
+}
+
+static void test_a_real_transaction_is_recorded_as_a_request_and_a_reply() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        reply = modbusReply(request[0], 0x1234, 0x5678);
+        return true;
+    });
+
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(transport.nowMs());
+    transport.setTap(&tap);
+
+    uint16_t   regs[2] = {0, 0};
+    const auto outcome = modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2,
+                                               regs, 2);
+    transport.setTap(nullptr);
+    tap.finish(transport.nowMs());
+
+    // The transaction itself still worked -- the tap changed nothing about it.
+    TEST_ASSERT_EQUAL(modbus::ReadStatus::Ok, outcome.status);
+    TEST_ASSERT_EQUAL_UINT16(0x1234, regs[0]);
+
+    // And it was recorded, in two directions, without the driver or the protocol layer knowing.
+    TEST_ASSERT_EQUAL_UINT32(1, tap.txFrames());
+    TEST_ASSERT_EQUAL_UINT32(1, tap.rxFrames());
+    TEST_ASSERT_EQUAL(BusDirection::Tx, tap.frames()[0].direction);
+    TEST_ASSERT_EQUAL(CutReason::DirectionChange, tap.frames()[0].cutBy);
+    // Both halves check out as Modbus, which is the verdict that tells an operator the line
+    // settings were right rather than that the device was silent.
+    TEST_ASSERT_TRUE(tap.frames()[0].modbusCrcValid);
+    TEST_ASSERT_TRUE(tap.frames()[1].modbusCrcValid);
+    TEST_ASSERT_EQUAL_UINT32(2, tap.modbusFrames());
+}
+
+/// A reply arriving a few bytes per read -- which is what really happens on a UART -- must come
+/// back as one record, not as one record per read.
+static void test_a_reply_delivered_in_chunks_is_still_one_record() {
+    MockTransport transport;
+    transport.chunkSize = 2;
+    // Time has to actually pass between the chunks, or this proves nothing: with a standing
+    // clock the idle gap can never fire and the test would pass against broken gap logic. One
+    // millisecond per read, against a 4 ms gap -- close enough to be a real question.
+    transport.msPerRead = 1;
+    transport.setResponder([](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        reply = modbusReply(request[0], 1, 2);
+        return true;
+    });
+
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(transport.nowMs());
+    transport.setTap(&tap);
+
+    uint16_t regs[2] = {0, 0};
+    modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2, regs, 2);
+    transport.setTap(nullptr);
+    tap.finish(transport.nowMs());
+
+    TEST_ASSERT_EQUAL_UINT32(1, tap.rxFrames());
+    TEST_ASSERT_EQUAL_size_t(9, tap.frames()[1].bytes.size());
+    TEST_ASSERT_TRUE(tap.frames()[1].modbusCrcValid);
+}
+
+/// Removing the tap has to actually stop the recording. Otherwise a finished capture would keep
+/// growing against a report nobody is reading, on a bridge that polls every few seconds.
+static void test_removing_the_tap_stops_the_recording() {
+    MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        reply = modbusReply(request[0], 1, 2);
+        return true;
+    });
+
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(transport.nowMs());
+    transport.setTap(&tap);
+    uint16_t regs[2] = {0, 0};
+    modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2, regs, 2);
+    transport.setTap(nullptr);
+    tap.finish(transport.nowMs());
+
+    const size_t recorded = tap.frames().size();
+    TEST_ASSERT_TRUE(recorded > 0);
+    TEST_ASSERT_FALSE(transport.tapped());
+
+    modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2, regs, 2);
+    TEST_ASSERT_EQUAL_size_t(recorded, tap.frames().size());
+}
+
+/// The bridge talking to nothing. A passive capture cannot tell this apart from a dead bus,
+/// because in that mode the bridge is the silent one; here it is the whole diagnosis.
+static void test_a_device_that_never_answers_leaves_requests_only() {
+    MockTransport transport;  // no responder: every read times out
+
+    BusTap tap(tapConfig(), profileAt(9600));
+    tap.begin(transport.nowMs());
+    transport.setTap(&tap);
+
+    uint16_t   regs[2] = {0, 0};
+    const auto outcome = modbus::readRegisters(transport, 3, modbus::kReadHoldingRegisters, 0, 2,
+                                               regs, 2, {50, 10});
+    transport.setTap(nullptr);
+    tap.finish(transport.nowMs());
+
+    TEST_ASSERT_EQUAL(modbus::ReadStatus::Timeout, outcome.status);
+    TEST_ASSERT_EQUAL_UINT32(1, tap.txFrames());
+    TEST_ASSERT_EQUAL_UINT32(0, tap.rxFrames());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_idle_gap_follows_the_baud_rate);
@@ -692,5 +817,9 @@ int main() {
     RUN_TEST(test_the_byte_ceiling_stops_the_tap);
     RUN_TEST(test_requests_with_no_replies_are_visible_as_such);
     RUN_TEST(test_the_checksum_verdicts_agree_with_the_passive_capture);
+    RUN_TEST(test_a_real_transaction_is_recorded_as_a_request_and_a_reply);
+    RUN_TEST(test_a_reply_delivered_in_chunks_is_still_one_record);
+    RUN_TEST(test_removing_the_tap_stops_the_recording);
+    RUN_TEST(test_a_device_that_never_answers_leaves_requests_only);
     return UNITY_END();
 }
