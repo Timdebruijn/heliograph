@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <utility>  // std::move in invalid(); reaching it transitively is luck, not a contract
 
 namespace heliograph::rest {
 namespace {
