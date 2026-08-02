@@ -24,6 +24,10 @@
 #include "drivers/eversolar_legacy/eversolar_driver.h"
 #include "drivers/mock/mock_driver.h"
 #include "outputs/prometheus/prometheus_metrics.h"
+#include <map>
+#include <optional>
+
+#include "outputs/rest/capture_request.h"
 #include "outputs/rest/rest_payloads.h"
 #include "state/state_store.h"
 #include "support/fake_eversolar_device.h"
@@ -1601,6 +1605,157 @@ static void test_driver_capture_payload_counts_requests_against_replies() {
     TEST_ASSERT_EQUAL_INT(30000, doc["elapsed_ms"].as<int>());
 }
 
+// ---------------------------------------------------------------------------------------
+// The capture endpoint's query rules.
+//
+// These had no tests at all until now, and not by oversight: rest_api.cpp is almost entirely
+// inside `#if defined(ESP32)`, so on this build it is a stub and every bound in that handler
+// was unreachable. The rules moved into parseCaptureRequest so they can be asked questions.
+// ---------------------------------------------------------------------------------------
+
+/// A query, as the handler sees it: present-with-a-value, or absent.
+using Query = std::map<std::string, std::string>;
+
+static rest::QueryParam queryOf(const Query& q) {
+    return [&q](const char* name) -> const char* {
+        const auto it = q.find(name);
+        return it == q.end() ? nullptr : it->second.c_str();
+    };
+}
+
+static std::optional<rest::ApiError> parseQuery(const Query& q, rest::CaptureRequest& out) {
+    return rest::parseCaptureRequest(queryOf(q), out);
+}
+
+/// No parameters at all is a valid request, and the defaults are part of the contract: this is
+/// what the "Start recording" button sends before anyone touches a field.
+static void test_an_empty_capture_query_is_the_documented_default() {
+    rest::CaptureRequest r;
+    TEST_ASSERT_FALSE(parseQuery({}, r).has_value());
+    TEST_ASSERT_FALSE(r.driverMode);
+    TEST_ASSERT_EQUAL_UINT32(30000, r.config.durationMs);
+    TEST_ASSERT_EQUAL_size_t(64, r.config.maxFrames);
+    TEST_ASSERT_EQUAL_UINT32(9600, r.profile.baudRate);
+    TEST_ASSERT_EQUAL_UINT8(8, r.profile.dataBits);
+    TEST_ASSERT_EQUAL_UINT8(1, r.profile.stopBits);
+}
+
+/// Absent mode means passive, which is what keeps every caller written before the second mode
+/// existed meaning what it meant.
+static void test_mode_defaults_to_passive_and_only_two_values_are_accepted() {
+    rest::CaptureRequest r;
+    TEST_ASSERT_FALSE(parseQuery({{"mode", "passive"}}, r).has_value());
+    TEST_ASSERT_FALSE(r.driverMode);
+    TEST_ASSERT_FALSE(parseQuery({{"mode", "driver"}}, r).has_value());
+    TEST_ASSERT_TRUE(r.driverMode);
+
+    // Case-sensitive, and an empty value is a value the operator typed rather than an absence.
+    for (const char* bad : {"DRIVER", "", "both", "active"}) {
+        const auto error = parseQuery({{"mode", bad}}, r);
+        TEST_ASSERT_TRUE(error.has_value());
+        TEST_ASSERT_EQUAL_INT(400, error->httpStatus);
+        TEST_ASSERT_EQUAL_STRING("invalid_parameter", error->code.c_str());
+    }
+}
+
+/// The rule that matters most in driver mode: the line is a fact about the bridge, so a supplied
+/// line setting is REFUSED rather than ignored. Accepting a baud rate and recording at another
+/// would put a number in the report the capture never ran at.
+static void test_driver_mode_refuses_every_line_parameter_by_name() {
+    for (const char* name : {"baud", "parity", "data_bits", "stop_bits"}) {
+        rest::CaptureRequest r;
+        const auto error = parseQuery({{"mode", "driver"}, {name, "9600"}}, r);
+        TEST_ASSERT_TRUE(error.has_value());
+        TEST_ASSERT_EQUAL_INT(400, error->httpStatus);
+        // The message names the offending parameter, so the caller knows which one to drop
+        // rather than being told to remove "a line setting".
+        TEST_ASSERT_TRUE(error->message.find(name) != std::string::npos);
+    }
+}
+
+/// ...and the same parameters are perfectly legal in passive mode, where there is no driver to
+/// ask. A guard that refused them everywhere would have broken the mode it was added beside.
+static void test_the_same_line_parameters_are_accepted_in_passive_mode() {
+    rest::CaptureRequest r;
+    const Query q{{"baud", "19200"}, {"parity", "even"}, {"data_bits", "7"}, {"stop_bits", "2"}};
+    TEST_ASSERT_FALSE(parseQuery(q, r).has_value());
+    TEST_ASSERT_EQUAL_UINT32(19200, r.profile.baudRate);
+    TEST_ASSERT_EQUAL(SerialParity::Even, r.profile.parity);
+    TEST_ASSERT_EQUAL_UINT8(7, r.profile.dataBits);
+    TEST_ASSERT_EQUAL_UINT8(2, r.profile.stopBits);
+}
+
+/// Both modes bound the window, and the boundary values themselves are the interesting part:
+/// off-by-one here is the difference between a legal request and a 400.
+static void test_the_window_bounds_hold_at_their_edges() {
+    rest::CaptureRequest r;
+    for (const char* mode : {"passive", "driver"}) {
+        TEST_ASSERT_FALSE(parseQuery({{"mode", mode}, {"seconds", "1"}}, r).has_value());
+        TEST_ASSERT_EQUAL_UINT32(1000, mode[0] == 'd' ? r.tap.durationMs : r.config.durationMs);
+        TEST_ASSERT_FALSE(parseQuery({{"mode", mode}, {"seconds", "300"}}, r).has_value());
+        TEST_ASSERT_TRUE(parseQuery({{"mode", mode}, {"seconds", "0"}}, r).has_value());
+        TEST_ASSERT_TRUE(parseQuery({{"mode", mode}, {"seconds", "301"}}, r).has_value());
+        TEST_ASSERT_TRUE(parseQuery({{"mode", mode}, {"seconds", "-1"}}, r).has_value());
+    }
+}
+
+/// The frame ceilings DIFFER by mode, and that asymmetry is load-bearing: the driver report
+/// carries two extra fields per record and stops fitting the response bound past ~160.
+static void test_driver_mode_has_a_lower_frame_ceiling_than_passive() {
+    rest::CaptureRequest r;
+    TEST_ASSERT_FALSE(parseQuery({{"frames", "256"}}, r).has_value());
+    TEST_ASSERT_EQUAL_size_t(256, r.config.maxFrames);
+    TEST_ASSERT_TRUE(parseQuery({{"frames", "257"}}, r).has_value());
+
+    TEST_ASSERT_FALSE(parseQuery({{"mode", "driver"}, {"frames", "128"}}, r).has_value());
+    TEST_ASSERT_EQUAL_size_t(128, r.tap.maxFrames);
+    const auto error = parseQuery({{"mode", "driver"}, {"frames", "129"}}, r);
+    TEST_ASSERT_TRUE(error.has_value());
+    // Says which mode's limit was hit, because 129 is legal in the other one.
+    TEST_ASSERT_TRUE(error->message.find("driver") != std::string::npos);
+}
+
+static void test_the_line_bounds_are_enforced() {
+    rest::CaptureRequest r;
+    TEST_ASSERT_FALSE(parseQuery({{"baud", "300"}}, r).has_value());
+    TEST_ASSERT_FALSE(parseQuery({{"baud", "921600"}}, r).has_value());
+    TEST_ASSERT_TRUE(parseQuery({{"baud", "299"}}, r).has_value());
+    TEST_ASSERT_TRUE(parseQuery({{"baud", "921601"}}, r).has_value());
+    TEST_ASSERT_TRUE(parseQuery({{"parity", "mark"}}, r).has_value());
+    TEST_ASSERT_TRUE(parseQuery({{"data_bits", "4"}}, r).has_value());
+    TEST_ASSERT_TRUE(parseQuery({{"data_bits", "9"}}, r).has_value());
+    TEST_ASSERT_TRUE(parseQuery({{"stop_bits", "0"}}, r).has_value());
+    TEST_ASSERT_TRUE(parseQuery({{"stop_bits", "3"}}, r).has_value());
+}
+
+/// Unparseable numbers land on 0 and are then caught by the range check rather than by a parse
+/// error. Recorded as the behaviour it is: the caller gets a 400 either way, and the endpoint
+/// has read numbers this way since it existed.
+static void test_a_number_that_is_not_a_number_is_refused_by_its_range() {
+    rest::CaptureRequest r;
+    for (const char* junk : {"abc", "", "  "}) {
+        const auto error = parseQuery({{"seconds", junk}}, r);
+        TEST_ASSERT_TRUE(error.has_value());
+        TEST_ASSERT_EQUAL_INT(400, error->httpStatus);
+    }
+    // The one lenient case, stated rather than discovered: a trailing tail is ignored.
+    TEST_ASSERT_FALSE(parseQuery({{"seconds", "30abc"}}, r).has_value());
+    TEST_ASSERT_EQUAL_UINT32(30000, r.config.durationMs);
+}
+
+/// A rejected request must not leave half-filled settings behind for a caller that ignores the
+/// error -- and a second parse must not inherit anything from the first.
+static void test_a_refused_request_leaves_nothing_behind() {
+    rest::CaptureRequest r;
+    TEST_ASSERT_FALSE(parseQuery({{"mode", "driver"}, {"frames", "99"}}, r).has_value());
+    TEST_ASSERT_TRUE(r.driverMode);
+
+    // The second parse resets everything: no leftover driverMode, and no leftover 99.
+    TEST_ASSERT_TRUE(parseQuery({{"baud", "1"}}, r).has_value());
+    TEST_ASSERT_FALSE(r.driverMode);
+    TEST_ASSERT_NOT_EQUAL(99u, r.tap.maxFrames);
+}
+
 /// A failure has to carry its reason. "failed" alone leaves the operator unable to tell a busy
 /// bus from line settings the UART refused.
 static void test_a_failed_capture_carries_its_reason() {
@@ -2931,6 +3086,15 @@ int main(int, char**) {
     RUN_TEST(test_driver_capture_payload_labels_each_frame_with_its_direction);
     RUN_TEST(test_driver_capture_payload_says_what_ended_each_record);
     RUN_TEST(test_driver_capture_payload_counts_requests_against_replies);
+    RUN_TEST(test_an_empty_capture_query_is_the_documented_default);
+    RUN_TEST(test_mode_defaults_to_passive_and_only_two_values_are_accepted);
+    RUN_TEST(test_driver_mode_refuses_every_line_parameter_by_name);
+    RUN_TEST(test_the_same_line_parameters_are_accepted_in_passive_mode);
+    RUN_TEST(test_the_window_bounds_hold_at_their_edges);
+    RUN_TEST(test_driver_mode_has_a_lower_frame_ceiling_than_passive);
+    RUN_TEST(test_the_line_bounds_are_enforced);
+    RUN_TEST(test_a_number_that_is_not_a_number_is_refused_by_its_range);
+    RUN_TEST(test_a_refused_request_leaves_nothing_behind);
     RUN_TEST(test_a_failed_capture_carries_its_reason);
     RUN_TEST(test_a_capture_filled_to_its_byte_ceiling_fits_in_the_response);
     RUN_TEST(test_restore_preview_carries_the_file_and_the_changes);
