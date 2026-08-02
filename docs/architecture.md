@@ -33,13 +33,18 @@ The hard rule: **brand-specific knowledge exists exclusively in `src/drivers/<dr
 No output module knows the word "EverSolar", except in one place: the string in
 `DeviceIdentity::manufacturer`, which comes from the driver and is passed through as data.
 
-This is mechanically enforceable and is checked by `tools/check_layering.sh`:
+This is mechanically enforceable, and `tools/check_layering.sh` is what enforces it — rules 1
+and 2:
 
 ```
 1. Brand names do not appear outside src/drivers/  — not even in comments
 2. The host-testable core does not include any Arduino/ESP-IDF headers
-3. The fixtures are in sync with their generator
 ```
+
+The script has since grown past those two, one rule per class of mistake that reached the tree
+unnoticed. **Run it for the list**; it prints every rule by name. This page deliberately does not
+repeat them, because a copy of a list is a copy that goes stale — this block itself stopped at
+three while the script was at nine.
 
 **This check must be run in full.** Its last line is `RESULT: PASS` or
 `RESULT: FAIL`. Earlier versions ended with the "OK" of the final sub-check, so that

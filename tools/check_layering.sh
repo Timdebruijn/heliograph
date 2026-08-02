@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 #
-# Enforces the two architectural invariants from docs/architecture.md that are cheap to
-# check mechanically. Run in CI and before every phase hand-off.
+# Enforces the invariants that are cheap to check mechanically. It started as the two layering
+# rules from docs/architecture.md and has grown one rule per class of mistake that reached the
+# tree unnoticed -- each numbered check below carries the story of the one that caused it.
+# Run in CI and before every phase hand-off.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
