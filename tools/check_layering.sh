@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 #
-# Enforces the two architectural invariants from docs/architecture.md that are cheap to
-# check mechanically. Run in CI and before every phase hand-off.
+# Enforces the invariants that are cheap to check mechanically. It started as the two layering
+# rules from docs/architecture.md and has grown one rule per class of mistake that reached the
+# tree unnoticed -- each numbered check below carries the story of the one that caused it.
+# Run in CI and before every phase hand-off.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
@@ -272,6 +274,31 @@ else
     echo "FAIL: documentation links to files that are not in the repository:"
     echo "$link_report"
     status=1
+fi
+
+echo "==> 10. The ESP32 platform version is written the way the release tag is written"
+# pioarduino zero-pads the middle component: 55.03.39, 55.03.311. That is the release tag, and
+# it is also the `version` in the platform's own platform.json, so it is what the download URL
+# needs and what `pio pkg list` prints. Drop the zero and you get a string that matches nothing:
+# no tag, no package, a 404 for anyone who pastes it into the URL.
+#
+# It happened. Four occurrences across platformio.ini and docs/decisions.md sat in the tree
+# through a full review round, mixed in with correctly written ones in the same paragraph --
+# which is why a human diff does not catch this and a grep does.
+#
+# Deliberately matches the SHAPE (55.<one digit>.<digit>) and not a list of known-bad versions, so
+# the next release is covered without editing this rule.
+#
+# The leading guard is not decoration. Without it the pattern matches the tail of every IPv4
+# netmask in the tree -- 255.0.0.0 contains "55.0." -- and the first run of this rule failed on
+# five lines of ipv4.h and its tests. A digit or a dot in front means it is part of a longer
+# number, not a platform version.
+if padding=$(git grep -nE '(^|[^0-9.])55\.[0-9]\.[0-9]' -- ':!:.pio' 2>/dev/null) && [ -n "$padding" ]; then
+    echo "FAIL: platform version is missing the zero padding pioarduino's tags use:"
+    echo "$padding"
+    status=1
+else
+    echo "OK"
 fi
 
 echo
