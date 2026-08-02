@@ -4,6 +4,8 @@
 
 #include "rest_api.h"
 
+#include "capture_request.h"
+
 #if defined(ESP32)
 
 #include <ESPAsyncWebServer.h>
@@ -1082,66 +1084,37 @@ bool RestApi::begin() {
         if (!authorised(request) || rateLimited(request)) {
             return;
         }
-        if (context_.requestCapture == nullptr) {
+        // Every bound and every refusal lives in parseCaptureRequest, which is compiled on the
+        // host and has tests. This file is inside `#if defined(ESP32)`, so anything written
+        // inline here can only ever be verified by reading it.
+        //
+        // `value()` returns a reference owned by the request, so the pointer stays good for the
+        // whole call.
+        const rest::QueryParam param = [request](const char* name) -> const char* {
+            return request->hasParam(name) ? request->getParam(name)->value().c_str() : nullptr;
+        };
+        rest::CaptureRequest parsed;
+        if (const auto error = rest::parseCaptureRequest(param, parsed)) {
+            sendError(request, *error);
+            return;
+        }
+
+        // The capability check comes AFTER validation now, and asks about the mode that was
+        // actually requested. It used to be one unconditional check of requestCapture ahead of
+        // everything -- which answered "this build cannot capture" to a driver-mode request on a
+        // hypothetical build that had the driver hook and not the passive one. Unreachable
+        // today, since main wires both at the same place, but it was checking the wrong
+        // capability. The cost of the reorder is that a malformed request to a build with no
+        // capture support now gets 400 rather than 404, which describes it at least as well.
+        const bool available = parsed.driverMode ? context_.requestDriverCapture != nullptr
+                                                 : context_.requestCapture != nullptr;
+        if (!available) {
             sendError(request, {404, "no_capture", "this build cannot capture"});
             return;
         }
-        const auto number = [request](const char* name, long fallback) -> long {
-            if (!request->hasParam(name)) return fallback;
-            return std::strtol(request->getParam(name)->value().c_str(), nullptr, 10);
-        };
 
-        // Which conversation to record. Default `passive` so every existing caller keeps its
-        // meaning: this endpoint has always recorded a bus the bridge was silent on.
-        const bool driverMode =
-            request->hasParam("mode") && request->getParam("mode")->value() == "driver";
-        if (request->hasParam("mode") && !driverMode &&
-            request->getParam("mode")->value() != "passive") {
-            sendError(request, {400, "invalid_parameter", "mode must be passive or driver"});
-            return;
-        }
-
-        if (driverMode) {
-            if (context_.requestDriverCapture == nullptr) {
-                sendError(request, {404, "no_capture", "this build cannot capture"});
-                return;
-            }
-            // Refused, not ignored. There is a working driver here, so the line is a fact about
-            // the bridge -- accepting a baud rate and then recording at a different one would
-            // put a number in the report that the capture never ran at, which is worse than
-            // any error message.
-            for (const char* param : {"baud", "parity", "data_bits", "stop_bits"}) {
-                if (request->hasParam(param)) {
-                    sendError(request, {400, "invalid_parameter",
-                                        std::string("mode=driver records the line the driver is "
-                                                    "already using; remove '") +
-                                            param + "'"});
-                    return;
-                }
-            }
-            diag::TapConfig tap;
-            const long      seconds = number("seconds", 30);
-            if (seconds < 1 || seconds > static_cast<long>(kMaxDriverCaptureSeconds)) {
-                sendError(request, {400, "invalid_parameter",
-                                    "seconds must be between 1 and " +
-                                        std::to_string(kMaxDriverCaptureSeconds)});
-                return;
-            }
-            tap.durationMs    = static_cast<uint32_t>(seconds) * 1000u;
-            const long frames = number("frames", 64);
-            // Lower than the passive mode's 256, and refused rather than silently clamped: this
-            // report carries a direction and a cut reason per record, and above ~160 records it
-            // no longer fits the response bound. A capture that completes and can only ever
-            // answer 500 has spent real bus time for a report nobody can fetch.
-            if (frames < 1 || frames > kMaxDriverCaptureFrames) {
-                sendError(request, {400, "invalid_parameter",
-                                    "frames must be between 1 and " +
-                                        std::to_string(kMaxDriverCaptureFrames) +
-                                        " in mode=driver"});
-                return;
-            }
-            tap.maxFrames = static_cast<size_t>(frames);
-            if (!context_.requestDriverCapture(tap)) {
+        if (parsed.driverMode) {
+            if (!context_.requestDriverCapture(parsed.tap)) {
                 sendError(request, {409, "bus_busy",
                                     "a capture or discovery run is already using the bus"});
                 return;
@@ -1150,53 +1123,7 @@ bool RestApi::begin() {
             return;
         }
 
-        diag::CaptureConfig config;
-        const long seconds = number("seconds", 30);
-        if (seconds < 1 || seconds > static_cast<long>(kMaxCaptureSeconds)) {
-            // Bounded because a capture holds the bus for its whole window: this is also the
-            // longest one authenticated request can stop the inverter being polled.
-            sendError(request, {400, "invalid_parameter",
-                                "seconds must be between 1 and " +
-                                    std::to_string(kMaxCaptureSeconds)});
-            return;
-        }
-        config.durationMs = static_cast<uint32_t>(seconds) * 1000u;
-        const long frames = number("frames", 64);
-        if (frames < 1 || frames > 256) {
-            sendError(request, {400, "invalid_parameter", "frames must be between 1 and 256"});
-            return;
-        }
-        config.maxFrames = static_cast<size_t>(frames);
-
-        // The line to listen at. There is no driver to ask -- that is the whole situation this
-        // endpoint exists for -- so the operator supplies it, and a wrong guess shows up in the
-        // report as bytes with no valid checksums rather than as silence.
-        SerialProfile profile;
-        const long    baud = number("baud", 9600);
-        if (baud < 300 || baud > 921600) {
-            sendError(request, {400, "invalid_parameter", "baud must be between 300 and 921600"});
-            return;
-        }
-        profile.baudRate = static_cast<uint32_t>(baud);
-        if (request->hasParam("parity")) {
-            SerialParity parity{};
-            if (!parseParity(request->getParam("parity")->value().c_str(), parity)) {
-                sendError(request, {400, "invalid_parameter", "parity must be none, even or odd"});
-                return;
-            }
-            profile.parity = parity;
-        }
-        const long dataBits = number("data_bits", 8);
-        const long stopBits = number("stop_bits", 1);
-        if (dataBits < 5 || dataBits > 8 || stopBits < 1 || stopBits > 2) {
-            sendError(request, {400, "invalid_parameter",
-                                "data_bits must be 5-8 and stop_bits 1 or 2"});
-            return;
-        }
-        profile.dataBits = static_cast<uint8_t>(dataBits);
-        profile.stopBits = static_cast<uint8_t>(stopBits);
-
-        if (!context_.requestCapture(config, profile)) {
+        if (!context_.requestCapture(parsed.config, parsed.profile)) {
             sendError(request, {409, "bus_busy",
                                 "a capture or discovery run is already using the bus"});
             return;
