@@ -43,7 +43,7 @@ platform = https://github.com/pioarduino/platform-espressif32/releases/download/
 
 > This block used to end in `/stable/`, and that is a trap worth naming rather than quietly
 > editing away. `stable` moves. On 2026-07-31 it was found to have moved without anyone
-> noticing: a developer machine was still on 55.3.39 (Arduino core 3.3.9) while CI had been on
+> noticing: a developer machine was still on 55.03.39 (Arduino core 3.3.9) while CI had been on
 > 55.03.311 (core 3.3.11) since 2026-07-24 — so release v0.25.0 shipped from a toolchain nobody
 > had booted, and no commit recorded the change because from the repository's side nothing had
 > changed. Anyone following this file verbatim would reintroduce exactly that. The pin is a
@@ -129,7 +129,7 @@ ESP32 environments compile and link cleanly.
 
 | What | Outcome |
 |---|---|
-| pioarduino | `espressif32@55.3.39` → Arduino core **3.3.9** on **ESP-IDF 5.5.4** ✔ as researched |
+| pioarduino | `espressif32@55.03.39` → Arduino core **3.3.9** on **ESP-IDF 5.5.4** ✔ as researched |
 | Toolchain | `xtensa-esp-elf@14.2.0` |
 | Board/PSRAM | `esp32-s3-devkitc-1` + `qio_opi` + `BOARD_HAS_PSRAM` ✔ |
 | Firmware image | `Flash size: 16MB`, `Chip ID: 9 (ESP32-S3)` ✔ |
