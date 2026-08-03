@@ -526,15 +526,55 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
         const char* deviceClass;
         const char* stateClass;
         const char* unit;
+        /// The field can be absent or null in a valid payload, so the template has to guard.
+        ///
+        /// Two different reasons, one fix. poll_duration_* is OMITTED until a poll has
+        /// succeeded (json_util.h emits nothing rather than a zero: the mock driver polls in
+        /// 0 ms, so zero is a real measurement and cannot double as "no data"). The stack and
+        /// PSRAM fields are present but NULL until sampled, or on a board with no PSRAM.
+        ///
+        /// Both reach Jinja the same way: an unguarded `{{ value_json.x }}` renders the string
+        /// "None" for a null and errors on an absent key, and Home Assistant would take "None"
+        /// as the state of a numeric sensor. Rendering EMPTY instead tells it to skip the
+        /// update and leave the entity unknown, which is what "not measured yet" means.
+        bool optional;
     };
     static const Spec kSpecs[] = {
-        {"wifi_rssi", "WiFi Signal", "wifi_rssi_dbm", "signal_strength", "measurement", "dBm"},
-        {"uptime", "Uptime", "uptime_seconds", "duration", "total_increasing", "s"},
-        {"free_heap", "Free Heap", "free_heap_bytes", "data_size", "measurement", "B"},
-        {"poll_success", "Polls Succeeded", "poll_success_total", nullptr, "total_increasing", nullptr},
-        {"poll_failure", "Polls Failed", "poll_failure_total", nullptr, "total_increasing", nullptr},
-        {"checksum_errors", "Checksum Errors", "checksum_error_total", nullptr, "total_increasing", nullptr},
-        {"rs485_timeouts", "RS485 Timeouts", "rs485_timeout_total", nullptr, "total_increasing", nullptr},
+        {"wifi_rssi", "WiFi Signal", "wifi_rssi_dbm", "signal_strength", "measurement", "dBm", false},
+        {"uptime", "Uptime", "uptime_seconds", "duration", "total_increasing", "s", false},
+        {"free_heap", "Free Heap", "free_heap_bytes", "data_size", "measurement", "B", false},
+        {"poll_success", "Polls Succeeded", "poll_success_total", nullptr, "total_increasing", nullptr, false},
+        {"poll_failure", "Polls Failed", "poll_failure_total", nullptr, "total_increasing", nullptr, false},
+        {"checksum_errors", "Checksum Errors", "checksum_error_total", nullptr, "total_increasing", nullptr, false},
+        {"rs485_timeouts", "RS485 Timeouts", "rs485_timeout_total", nullptr, "total_increasing", nullptr, false},
+
+        // --- added 2026-08-03 -------------------------------------------------------------
+        // The payload has carried thirty-eight fields for a while; seven of them were
+        // announced, so the rest were on the bus and invisible in Home Assistant. These ten
+        // are the ones worth their own recorder stream -- each answers a question that is
+        // asked over time and therefore wants a graph. Everything else rides along as
+        // attributes on the "Diagnostics" entity below, which costs one stream instead of
+        // twenty.
+        //
+        // Poll duration is the pair that caught the toolchain question: ewma moves within a
+        // minute of a load change, max keeps the worst case a moving average would hide.
+        {"poll_duration_ewma", "Poll Duration (average)", "poll_duration_ewma_ms", "duration", "measurement", "ms", true},
+        {"poll_duration_max", "Poll Duration (max)", "poll_duration_max_ms", "duration", "measurement", "ms", true},
+        // Stack headroom only ever falls. A bridge that reboots overnight without a coredump
+        // is usually this, and without a graph there is nothing to look at afterwards.
+        {"rs485_stack_free", "RS485 Task Stack Free", "rs485_stack_free_bytes", "data_size", "measurement", "B", true},
+        {"loop_stack_free", "Loop Task Stack Free", "loop_stack_free_bytes", "data_size", "measurement", "B", true},
+        {"psram_free", "PSRAM Free", "psram_free_bytes", "data_size", "measurement", "B", true},
+        // The quiet failure paths. A publish refused by a wedged client used to be
+        // indistinguishable from a delivered one; a reconnect counter that climbs while
+        // everything looks connected is the same shape of problem.
+        {"mqtt_publish_failures", "MQTT Publishes Refused", "mqtt_publish_failure_total", nullptr, "total_increasing", nullptr, false},
+        {"mqtt_reconnects", "MQTT Reconnects", "mqtt_reconnect_total", nullptr, "total_increasing", nullptr, false},
+        {"wifi_reconnects", "WiFi Reconnects", "wifi_reconnect_total", nullptr, "total_increasing", nullptr, false},
+        {"invalid_frames", "Invalid Frames", "invalid_frame_total", nullptr, "total_increasing", nullptr, false},
+        // Measurement, NOT total_increasing: this one resets to zero on every success, and a
+        // total_increasing sensor that drops is treated by Home Assistant as a counter reset.
+        {"consecutive_poll_failures", "Consecutive Poll Failures", "consecutive_poll_failures", nullptr, "measurement", nullptr, false},
     };
 
     std::vector<DiscoveryEntity> entities;
@@ -545,7 +585,11 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
         e["object_id"]      = bridge.bridgeId + "_" + spec.slug;
         e["name"]           = spec.name;
         e["state_topic"]    = topics.diagnostics();
-        e["value_template"] = std::string("{{ value_json.") + spec.jsonKey + " }}";
+        e["value_template"] =
+            spec.optional
+                ? std::string("{% if value_json.") + spec.jsonKey + " is defined and value_json." +
+                      spec.jsonKey + " is not none %}{{ value_json." + spec.jsonKey + " }}{% endif %}"
+                : std::string("{{ value_json.") + spec.jsonKey + " }}";
         e["availability_topic"] = topics.availability();
         e["entity_category"]    = "diagnostic";
         if (spec.deviceClass) {
@@ -563,6 +607,70 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
         entity.uniqueId = e["unique_id"].as<std::string>();
         entity.configTopic =
             discoveryPrefix + "/sensor/" + bridge.bridgeId + "/" + spec.slug + "/config";
+        if (serialise(doc, entity.payload)) {
+            entities.push_back(std::move(entity));
+        }
+    }
+
+    // A stored coredump is a STATE, not a measurement: it survives the reboot that produced it
+    // and stays true until it is cleared. device_class "problem" puts it in Home Assistant's
+    // own problem handling rather than leaving it as a number nobody has an automation for.
+    {
+        JsonDocument doc;
+        JsonObject   e     = doc.to<JsonObject>();
+        e["unique_id"]     = bridge.bridgeId + "_coredump";
+        e["object_id"]     = bridge.bridgeId + "_coredump";
+        e["name"]          = "Coredump Stored";
+        e["state_topic"]   = topics.diagnostics();
+        // coredump_present is a JSON bool; Jinja renders those as True/False, which is neither
+        // payload_on nor payload_off. Mapped explicitly rather than relying on the spelling.
+        e["value_template"]     = "{{ 'ON' if value_json.coredump_present else 'OFF' }}";
+        e["payload_on"]         = "ON";
+        e["payload_off"]        = "OFF";
+        e["device_class"]       = "problem";
+        e["availability_topic"] = topics.availability();
+        e["entity_category"]    = "diagnostic";
+        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true, bridge.bridgeId);
+
+        DiscoveryEntity entity;
+        entity.uniqueId    = e["unique_id"].as<std::string>();
+        entity.configTopic =
+            discoveryPrefix + "/binary_sensor/" + bridge.bridgeId + "/coredump/config";
+        if (serialise(doc, entity.payload)) {
+            entities.push_back(std::move(entity));
+        }
+    }
+
+    // Everything else in the payload, as ATTRIBUTES on one entity rather than as entities.
+    //
+    // The payload carries thirty-eight fields. Announcing each as its own sensor would give
+    // Home Assistant thirty-eight recorder streams per bridge, each writing every
+    // diagnosticsIntervalMs (60 s by default) -- around fifty-five thousand rows a day, per
+    // bridge, for numbers that are read when something is wrong and ignored the rest of the
+    // time. json_attributes_topic puts the whole document on ONE entity: templatable, visible
+    // in the UI, and one stream to exclude from the recorder if even that is too much.
+    //
+    // The state is the firmware version, which makes the entity itself worth having and
+    // changes only on an update -- so the row that gets written is mostly attribute churn on a
+    // stable state, not a new value every minute.
+    {
+        JsonDocument doc;
+        JsonObject   e             = doc.to<JsonObject>();
+        e["unique_id"]             = bridge.bridgeId + "_diagnostics";
+        e["object_id"]             = bridge.bridgeId + "_diagnostics";
+        e["name"]                  = "Diagnostics";
+        e["state_topic"]           = topics.diagnostics();
+        e["value_template"]        = "{{ value_json.firmware_version }}";
+        e["json_attributes_topic"] = topics.diagnostics();
+        e["availability_topic"]    = topics.availability();
+        e["entity_category"]       = "diagnostic";
+        e["icon"]                  = "mdi:stethoscope";
+        addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true, bridge.bridgeId);
+
+        DiscoveryEntity entity;
+        entity.uniqueId    = e["unique_id"].as<std::string>();
+        entity.configTopic =
+            discoveryPrefix + "/sensor/" + bridge.bridgeId + "/diagnostics/config";
         if (serialise(doc, entity.payload)) {
             entities.push_back(std::move(entity));
         }

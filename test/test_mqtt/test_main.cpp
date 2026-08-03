@@ -855,6 +855,151 @@ static void test_bridge_diagnostic_entities() {
     TEST_ASSERT_EQUAL_STRING("Waveshare ESP32-S3-RS485-CAN", doc["device"]["model"]);
 }
 
+// --- bridge diagnostics reaching Home Assistant ----------------------------------------------
+//
+// The payload has carried thirty-eight fields since well before these entities existed. Seven
+// were announced, so the rest sat on the retained diagnostics topic and were invisible in Home
+// Assistant -- readable with an MQTT client, absent from the place anyone actually looks.
+
+/// Every `value_json.<key>` a discovery entity refers to, from its value_template.
+static std::vector<std::string> announcedJsonKeys(const std::vector<DiscoveryEntity>& entities) {
+    std::vector<std::string> keys;
+    for (const auto& e : entities) {
+        if (e.payload.empty()) {
+            continue;
+        }
+        auto doc = parse(e.payload);
+        for (const char* field : {"value_template", "json_attributes_template"}) {
+            if (!doc[field].is<const char*>()) {
+                continue;
+            }
+            const std::string t = doc[field].as<std::string>();
+            size_t            i = 0;
+            while ((i = t.find("value_json.", i)) != std::string::npos) {
+                i += 11;
+                size_t j = i;
+                while (j < t.size() && (isalnum(static_cast<unsigned char>(t[j])) || t[j] == '_')) {
+                    ++j;
+                }
+                keys.push_back(t.substr(i, j - i));
+                i = j;
+            }
+        }
+    }
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    return keys;
+}
+
+static void test_every_announced_field_exists_in_the_diagnostics_payload() {
+    // The invariant that would have caught the original gap from the other side: an entity may
+    // only point at a key the payload actually emits. Rename a field in json_util.h without
+    // touching discovery and Home Assistant gets a sensor that is forever unknown, with nothing
+    // failing anywhere.
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildBridgeDiagnosticEntities(bridge, topics, kDefaultDiscoveryPrefix);
+
+    DiagnosticsSnapshot d;
+    d.pollDurationCount = 1;  // the poll_duration_* keys are absent until a poll has succeeded
+    std::string payload;
+    TEST_ASSERT_TRUE(buildDiagnosticsPayload(d, bridge, payload));
+    auto doc = parse(payload);
+
+    for (const auto& key : announcedJsonKeys(entities)) {
+        // Present is what matters, not non-null: psram_free_bytes is a legitimate null on a
+        // board without PSRAM, and the entity's own guard handles that. An ABSENT key is the
+        // failure -- it means discovery is pointing at a field the payload no longer emits.
+        TEST_ASSERT_TRUE_MESSAGE(doc.containsKey(key), key.c_str());
+    }
+}
+
+static void test_the_debugging_metrics_are_announced_not_only_published() {
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildBridgeDiagnosticEntities(bridge, topics, kDefaultDiscoveryPrefix);
+
+    // The ones added because they answer a question asked over time.
+    for (const char* slug : {"poll_duration_ewma", "poll_duration_max", "rs485_stack_free",
+                             "loop_stack_free", "psram_free", "mqtt_publish_failures",
+                             "mqtt_reconnects", "wifi_reconnects", "invalid_frames",
+                             "consecutive_poll_failures"}) {
+        const std::string id = std::string("heliograph-a1b2c3_") + slug;
+        TEST_ASSERT_NOT_NULL_MESSAGE(findEntity(entities, id), slug);
+    }
+}
+
+static void test_a_field_that_can_be_missing_renders_empty_rather_than_none() {
+    // poll_duration_* is omitted until a poll has succeeded; the stack and PSRAM fields are
+    // null until sampled. An unguarded template renders the string "None", which Home Assistant
+    // would store as the state of a numeric sensor.
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildBridgeDiagnosticEntities(bridge, topics, kDefaultDiscoveryPrefix);
+
+    for (const char* slug : {"poll_duration_ewma", "rs485_stack_free", "psram_free"}) {
+        const auto* e = findEntity(entities, std::string("heliograph-a1b2c3_") + slug);
+        TEST_ASSERT_NOT_NULL_MESSAGE(e, slug);
+        const std::string tmpl = parse(e->payload)["value_template"].as<std::string>();
+        TEST_ASSERT_TRUE_MESSAGE(tmpl.find("is defined") != std::string::npos, slug);
+        TEST_ASSERT_TRUE_MESSAGE(tmpl.find("is not none") != std::string::npos, slug);
+    }
+    // A field that is always present must NOT carry the guard -- it would be noise suggesting
+    // the value is optional when it is not.
+    const auto* always = findEntity(entities, "heliograph-a1b2c3_mqtt_reconnects");
+    TEST_ASSERT_NOT_NULL(always);
+    TEST_ASSERT_EQUAL_STRING("{{ value_json.mqtt_reconnect_total }}",
+                             parse(always->payload)["value_template"]);
+}
+
+static void test_consecutive_failures_is_a_measurement_not_a_rising_total() {
+    // It resets to zero on every success. Announced as total_increasing, Home Assistant reads
+    // each reset as a counter rollover and the statistics become nonsense.
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildBridgeDiagnosticEntities(bridge, topics, kDefaultDiscoveryPrefix);
+    const auto* e = findEntity(entities, "heliograph-a1b2c3_consecutive_poll_failures");
+    TEST_ASSERT_NOT_NULL(e);
+    TEST_ASSERT_EQUAL_STRING("measurement", parse(e->payload)["state_class"]);
+}
+
+static void test_a_stored_coredump_is_a_problem_not_a_number() {
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildBridgeDiagnosticEntities(bridge, topics, kDefaultDiscoveryPrefix);
+    const auto* e = findEntity(entities, "heliograph-a1b2c3_coredump");
+    TEST_ASSERT_NOT_NULL(e);
+    auto doc = parse(e->payload);
+    TEST_ASSERT_EQUAL_STRING("problem", doc["device_class"]);
+    TEST_ASSERT_EQUAL_STRING("ON", doc["payload_on"]);
+    TEST_ASSERT_EQUAL_STRING("OFF", doc["payload_off"]);
+    // A JSON bool renders as True/False in Jinja, which matches neither payload. The template
+    // has to map it.
+    const std::string tmpl = doc["value_template"].as<std::string>();
+    TEST_ASSERT_TRUE(tmpl.find("'ON'") != std::string::npos);
+    TEST_ASSERT_TRUE(tmpl.find("'OFF'") != std::string::npos);
+    TEST_ASSERT_TRUE_MESSAGE(e->configTopic.find("/binary_sensor/") != std::string::npos,
+                             "a state belongs on a binary_sensor, not a sensor");
+}
+
+static void test_the_rest_of_the_payload_rides_along_as_attributes() {
+    // One entity carrying the whole document, instead of an entity per field. Thirty-eight
+    // recorder streams per bridge at a 60 s interval is around fifty-five thousand rows a day
+    // for numbers that are read when something is wrong and ignored the rest of the time.
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildBridgeDiagnosticEntities(bridge, topics, kDefaultDiscoveryPrefix);
+    const auto* e = findEntity(entities, "heliograph-a1b2c3_diagnostics");
+    TEST_ASSERT_NOT_NULL(e);
+    auto doc = parse(e->payload);
+    TEST_ASSERT_EQUAL_STRING("heliograph/heliograph-a1b2c3/diagnostics",
+                             doc["json_attributes_topic"]);
+    TEST_ASSERT_EQUAL_STRING("diagnostic", doc["entity_category"]);
+    // The state is the firmware version: worth having on its own, and it changes on an update
+    // rather than every minute.
+    TEST_ASSERT_EQUAL_STRING("{{ value_json.firmware_version }}", doc["value_template"]);
+}
+
 static void test_relay_entities_follow_count_and_enabled() {
     auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
@@ -1396,6 +1541,12 @@ int main(int, char**) {
     RUN_TEST(test_discovery_signature_changes_when_writable_flips_with_unchanged_bounds);
     RUN_TEST(test_the_mock_hybrid_gets_battery_and_phase_entities_for_free);
     RUN_TEST(test_bridge_diagnostic_entities);
+    RUN_TEST(test_every_announced_field_exists_in_the_diagnostics_payload);
+    RUN_TEST(test_the_debugging_metrics_are_announced_not_only_published);
+    RUN_TEST(test_a_field_that_can_be_missing_renders_empty_rather_than_none);
+    RUN_TEST(test_consecutive_failures_is_a_measurement_not_a_rising_total);
+    RUN_TEST(test_a_stored_coredump_is_a_problem_not_a_number);
+    RUN_TEST(test_the_rest_of_the_payload_rides_along_as_attributes);
     RUN_TEST(test_relay_entities_follow_count_and_enabled);
     RUN_TEST(test_drm_select_and_role_names_follow_the_roles);
     RUN_TEST(test_sanitize_id);
