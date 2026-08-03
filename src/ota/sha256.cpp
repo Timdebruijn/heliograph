@@ -120,7 +120,7 @@ void Sha256::update(const uint8_t* data, size_t len) {
     }
 }
 
-void Sha256::finish(uint8_t out[32]) {
+void Sha256::finish(Digest& out) {
     // Padding: a 1 bit, zeroes, then the 64-bit big-endian length. When the length will not fit
     // in the current block, one more block is emitted -- the case a naive implementation gets
     // wrong for messages of 56..63 bytes mod 64, which is why the tests include one.
@@ -161,12 +161,12 @@ std::string toHex(const uint8_t* data, size_t len) {
 }
 
 std::string Sha256::finishHex() {
-    uint8_t digest[32];
+    Digest digest{};
     finish(digest);
-    return toHex(digest, sizeof(digest));
+    return toHex(digest.data(), digest.size());
 }
 
-bool hexDigestEquals(const std::string& expectedHex, const uint8_t digest[32]) {
+bool hexDigestEquals(const std::string& expectedHex, const Digest& digest) {
     if (expectedHex.size() != 64) {
         return false;
     }

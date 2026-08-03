@@ -56,8 +56,8 @@ bool readUtc(time_t& out) {
     if (!g_present) {
         return false;
     }
-    uint8_t r[7];
-    if (!readRegs(kRegSeconds, r, sizeof(r))) {
+    Registers r{};
+    if (!readRegs(kRegSeconds, r.data(), r.size())) {
         return false;
     }
     // Everything past the I2C read is pure and lives in rtc_time.cpp, where it is host-tested:
@@ -70,7 +70,7 @@ bool writeUtc(time_t t) {
     if (!g_present || t <= 0) {
         return false;
     }
-    uint8_t r[7];
+    Registers r{};
     encodeRegisters(t, r);  // weekday included; see rtc_time.cpp
 
     Wire.beginTransmission(board::kRtcI2cAddress);

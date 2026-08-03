@@ -20,11 +20,21 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 
 namespace heliograph::ota {
+
+/// A SHA-256 digest: exactly 32 bytes, and the type says so.
+///
+/// `uint8_t out[32]` in a parameter list decays to a pointer, which makes the 32 a comment. That
+/// matters more here than almost anywhere else in this firmware: finish() and hexDigestEquals()
+/// sit on either side of the check that decides whether an update is accepted, and if they ever
+/// disagreed about the length, the disagreement would be a buffer overrun on one side and a
+/// silently short comparison on the other -- neither of which the build would notice.
+using Digest = std::array<uint8_t, 32>;
 
 /// Feed it the image as it arrives; ask for the digest at the end.
 class Sha256 {
@@ -35,7 +45,7 @@ public:
     void update(const uint8_t* data, size_t len);
 
     /// Writes the 32-byte digest. The object must not be updated afterwards without reset().
-    void finish(uint8_t out[32]);
+    void finish(Digest& out);
 
     /// Lowercase hex, the form every tool prints and the form latest.json carries.
     std::string finishHex();
@@ -60,6 +70,6 @@ std::string toHex(const uint8_t* data, size_t len);
 /// expectation is a refusal rather than a comparison that happens to fail. Constant-time is
 /// deliberately NOT attempted: this compares a public checksum, not a secret, and pretending
 /// otherwise would be security theatre.
-bool hexDigestEquals(const std::string& expectedHex, const uint8_t digest[32]);
+bool hexDigestEquals(const std::string& expectedHex, const Digest& digest);
 
 }  // namespace heliograph::ota
