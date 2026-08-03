@@ -4,6 +4,8 @@
 
 #include <unity.h>
 
+#include <algorithm>
+
 #include <ArduinoJson.h>
 
 #include <cstring>
@@ -378,16 +380,42 @@ static void test_diff_never_renders_a_password_value() {
     TEST_ASSERT_EQUAL_STRING("(not set)", admin->after.c_str());
 }
 
-static void test_diff_reports_a_changed_list_as_one_entry() {
-    Configuration after  = populated();
-    after.relays.roles   = {"drm1", "drm2"};
+static void test_diff_reports_a_changed_list_position_by_position() {
+    // Was "as one entry", and reported ["drm0","none"] -> ["drm1","drm2"] on a single row. That
+    // is readable for two short strings and stops being readable the moment the elements are
+    // objects: one added device rendered as a hundred characters of JSON on the row somebody is
+    // meant to read before applying a restore.
+    //
+    // Position is what an anonymous array can honestly report. Both roles changed here, so both
+    // are listed; only role 0 changing would list only role 0.
+    Configuration after = populated();
+    after.relays.roles  = {"drm1", "drm2"};
 
     std::vector<ConfigDiffEntry> diff;
     TEST_ASSERT_TRUE(diffConfigurations(populated(), after, diff));
-    const ConfigDiffEntry* roles = find(diff, "relays.roles");
-    TEST_ASSERT_NOT_NULL(roles);
-    TEST_ASSERT_EQUAL_STRING("[\"drm0\",\"none\"]", roles->before.c_str());
-    TEST_ASSERT_EQUAL_STRING("[\"drm1\",\"drm2\"]", roles->after.c_str());
+    TEST_ASSERT_NULL_MESSAGE(find(diff, "relays.roles"), "the whole-array row must be gone");
+
+    const ConfigDiffEntry* first = find(diff, "relays.roles[0]");
+    TEST_ASSERT_NOT_NULL(first);
+    TEST_ASSERT_EQUAL_STRING("drm0", first->before.c_str());
+    TEST_ASSERT_EQUAL_STRING("drm1", first->after.c_str());
+
+    const ConfigDiffEntry* second = find(diff, "relays.roles[1]");
+    TEST_ASSERT_NOT_NULL(second);
+    TEST_ASSERT_EQUAL_STRING("none", second->before.c_str());
+    TEST_ASSERT_EQUAL_STRING("drm2", second->after.c_str());
+}
+
+static void test_an_unchanged_list_position_is_not_reported() {
+    // The point of walking positions is that only what moved shows up. Reporting every index of
+    // a list because one of them changed would be the same wall of text in a different shape.
+    Configuration after = populated();
+    after.relays.roles  = {"drm0", "drm2"};  // index 0 unchanged
+
+    std::vector<ConfigDiffEntry> diff;
+    TEST_ASSERT_TRUE(diffConfigurations(populated(), after, diff));
+    TEST_ASSERT_NULL(find(diff, "relays.roles[0]"));
+    TEST_ASSERT_NOT_NULL(find(diff, "relays.roles[1]"));
 }
 
 /// A restore that REMOVES a device is a change the operator needs to see. Walking only the
@@ -408,13 +436,46 @@ static void test_diff_reports_a_driver_option_the_restore_drops() {
     TEST_ASSERT_EQUAL_STRING("(absent)", dropped->after.c_str());
 }
 
-static void test_diff_reports_a_removed_extra_device() {
+static void test_diff_reports_a_removed_extra_device_field_by_field() {
+    // The case that prompted this: removing a device and previewing the backup that restores it
+    // showed one row of serialised JSON. Field by field says WHICH device and on which unit,
+    // which is the question being asked before pressing apply.
     Configuration after = populated();
     after.additionalDevices.clear();
 
     std::vector<ConfigDiffEntry> diff;
     TEST_ASSERT_TRUE(diffConfigurations(populated(), after, diff));
-    TEST_ASSERT_NOT_NULL(find(diff, "additional_devices"));
+    TEST_ASSERT_NULL_MESSAGE(find(diff, "additional_devices"), "no blob row");
+
+    const ConfigDiffEntry* driver = find(diff, "additional_devices[0].driver_id");
+    TEST_ASSERT_NOT_NULL(driver);
+    TEST_ASSERT_EQUAL_STRING("(absent)", driver->after.c_str());
+    TEST_ASSERT_TRUE_MESSAGE(!driver->before.empty() && driver->before != "(absent)",
+                             "the removed device must name itself");
+}
+
+static void test_an_added_device_is_reported_field_by_field() {
+    // The direction the screenshot showed: restoring a backup onto a bridge the device was
+    // deleted from. Nested options must descend too -- unit_id is the field that says which
+    // device on the bus this is.
+    Configuration before = populated();
+    before.additionalDevices.clear();
+
+    std::vector<ConfigDiffEntry> diff;
+    TEST_ASSERT_TRUE(diffConfigurations(before, populated(), diff));
+    TEST_ASSERT_NULL_MESSAGE(find(diff, "additional_devices"), "no blob row");
+
+    const ConfigDiffEntry* driver = find(diff, "additional_devices[0].driver_id");
+    TEST_ASSERT_NOT_NULL(driver);
+    TEST_ASSERT_EQUAL_STRING("(absent)", driver->before.c_str());
+    TEST_ASSERT_TRUE(!driver->after.empty() && driver->after != "(absent)");
+
+    // Whatever options the fixture device carries, they must arrive as their own rows rather
+    // than as a nested blob inside the element.
+    const bool nestedOption = std::any_of(diff.begin(), diff.end(), [](const ConfigDiffEntry& e) {
+        return e.field.rfind("additional_devices[0].options.", 0) == 0;
+    });
+    TEST_ASSERT_TRUE_MESSAGE(nestedOption, "options must descend, not render as one value");
 }
 
 /// What the preview actually previews: the merged result, not the file. With a redacted backup
@@ -490,9 +551,11 @@ int main() {
     RUN_TEST(test_identical_configurations_have_an_empty_diff);
     RUN_TEST(test_diff_names_the_field_and_both_values);
     RUN_TEST(test_diff_never_renders_a_password_value);
-    RUN_TEST(test_diff_reports_a_changed_list_as_one_entry);
+    RUN_TEST(test_diff_reports_a_changed_list_position_by_position);
+    RUN_TEST(test_an_unchanged_list_position_is_not_reported);
     RUN_TEST(test_diff_reports_a_driver_option_the_restore_drops);
-    RUN_TEST(test_diff_reports_a_removed_extra_device);
+    RUN_TEST(test_diff_reports_a_removed_extra_device_field_by_field);
+    RUN_TEST(test_an_added_device_is_reported_field_by_field);
     RUN_TEST(test_preview_of_a_redacted_restore_shows_no_credential_change);
     RUN_TEST(test_timestamp_is_iso_utc);
     RUN_TEST(test_an_unsynced_clock_produces_no_timestamp);
