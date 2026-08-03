@@ -429,7 +429,12 @@ namespace {
 // rest_api.cpp inside `#if defined(ESP32)` and the host build compiles a stub. (Counts left out
 // deliberately: they would be wrong within a month and would make a still-true paragraph read
 // as stale.) check_layering.sh rule 11 covers the part of this a machine can check.
-#define HELIOGRAPH_VERSION_PATCH 1
+// 0.26.2 changes NO behaviour. It exists so a binary has a name: main had moved sixteen source
+// files past v0.26.1 while still declaring 0.26.1, and SerialProfile lost a byte in the process,
+// so two different images both called themselves 0.26.1. That only mattered because the
+// Relay-1CH has never booted 0.26.x -- validating a board against an untagged build says
+// nothing about which build was validated.
+#define HELIOGRAPH_VERSION_PATCH 2
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
