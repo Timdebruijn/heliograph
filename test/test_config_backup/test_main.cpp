@@ -4,6 +4,8 @@
 
 #include <unity.h>
 
+#include "outputs/rest/rest_payloads.h"
+
 #include <algorithm>
 
 #include <ArduinoJson.h>
@@ -380,6 +382,44 @@ static void test_diff_never_renders_a_password_value() {
     TEST_ASSERT_EQUAL_STRING("(not set)", admin->after.c_str());
 }
 
+/// The preview is capped at kMaxRestorePreviewBytes and answers 500 when it does not fit, so
+/// the cost of expanding arrays into one row per field is a budget question, not a taste one.
+///
+/// Measured rather than reasoned about: everything different AND the device list full comes to
+/// 67 rows and 5000 bytes, under a third of the 16 KB bound. Before arrays were expanded the
+/// same restore was a few hundred bytes smaller, so this change spends real budget -- just not
+/// much of it.
+///
+/// The assertion is the BOUND, not the byte count. Pinning 5000 would fail on any harmless
+/// wording change; what must not happen is a preview that grows until the operator gets an
+/// error instead of the diff they are about to apply.
+static void test_the_worst_case_preview_still_fits_its_bound() {
+    Configuration before;                  // defaults: every field differs
+    Configuration after = populated();
+    after.additionalDevices.clear();
+    for (int i = 0; i < 7; ++i) {          // kMaxDevices is 8, one of them the primary
+        DriverSettings d;
+        d.id      = "modbus_profile";
+        d.options = {{"unit_id", std::to_string(i + 2)}, {"profile", "mic_tl_x"}};
+        after.additionalDevices.push_back(d);
+    }
+
+    std::vector<ConfigDiffEntry> diff;
+    TEST_ASSERT_TRUE(diffConfigurations(before, after, diff));
+    TEST_ASSERT_TRUE_MESSAGE(diff.size() > 40, "the fixture must actually be a large diff");
+
+    BackupContents bc;
+    bc.formatVersion   = 1;
+    bc.firmwareVersion = "0.26.3";
+    bc.exportedAt      = "2026-08-03T19:36:04Z";
+    std::string out;
+    TEST_ASSERT_TRUE_MESSAGE(
+        heliograph::rest::buildRestorePreviewPayload(bc, diff, true, true, out),
+        "the worst-case preview must not exceed kMaxRestorePreviewBytes");
+    TEST_ASSERT_TRUE_MESSAGE(out.size() < heliograph::rest::kMaxRestorePreviewBytes,
+                             "and must fit with room to spare, not exactly");
+}
+
 static void test_diff_reports_a_changed_list_position_by_position() {
     // Was "as one entry", and reported ["drm0","none"] -> ["drm1","drm2"] on a single row. That
     // is readable for two short strings and stops being readable the moment the elements are
@@ -551,6 +591,7 @@ int main() {
     RUN_TEST(test_identical_configurations_have_an_empty_diff);
     RUN_TEST(test_diff_names_the_field_and_both_values);
     RUN_TEST(test_diff_never_renders_a_password_value);
+    RUN_TEST(test_the_worst_case_preview_still_fits_its_bound);
     RUN_TEST(test_diff_reports_a_changed_list_position_by_position);
     RUN_TEST(test_an_unchanged_list_position_is_not_reported);
     RUN_TEST(test_diff_reports_a_driver_option_the_restore_drops);
