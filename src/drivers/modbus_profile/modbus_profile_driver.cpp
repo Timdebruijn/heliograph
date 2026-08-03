@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "diagnostics/logger.h"
+#include "drivers/modbus_profile/register_dump.h"
 #include "protocols/modbus/modbus_client.h"
 #include "protocols/modbus/modbus_rtu.h"
 
@@ -27,37 +28,17 @@ void traceBlock(uint8_t unitId, RegSpace space, uint16_t start, uint16_t count,
     if (!log::enabled(LogLevel::Trace)) {
         return;
     }
-    const char* spaceName = space == RegSpace::Input ? "in" : "hold";
     constexpr uint16_t perLine = 8;
     for (uint16_t i = 0; i < count; i += perLine) {
-        // Zero-initialised because a failed snprintf leaves the array's contents indeterminate.
-        // It never writes past the size it was given, so a pre-zeroed buffer stays NUL-terminated
-        // whatever happens below, and the trace call at the end always has a string to print.
-        char line[128] = {};
-        int  pos       = snprintf(line, sizeof(line), "MODBUS unit %u %s %u:",
-                                  static_cast<unsigned>(unitId), spaceName,
-                                  static_cast<unsigned>(start + i));
-        if (pos < 0) {
-            continue;  // encoding error: there is nothing trustworthy to say about this block
-        }
-        for (uint16_t j = 0; j < perLine && i + j < count; ++j) {
-            // snprintf returns what it WOULD have written, not what it did, so `pos` can run
-            // past the buffer -- and then `sizeof(line) - pos` underflows to a huge size_t and
-            // becomes the next call's buffer size. Stopping while pos is still inside the
-            // buffer makes that subtraction unconditionally safe. Unreachable at today's
-            // constants (a ~27-char prefix plus eight 5-char registers against 128), which is
-            // exactly why it is worth a line: nothing else here would notice a wider format.
-            if (static_cast<size_t>(pos) >= sizeof(line)) {
-                break;
-            }
-            const int written =
-                snprintf(line + pos, sizeof(line) - static_cast<size_t>(pos), " %04X",
-                         values[i + j]);
-            if (written < 0) {
-                break;  // keep pos non-negative; print the registers that did format
-            }
-            pos += written;
-        }
+        const size_t remaining = static_cast<size_t>(count - i);
+        const size_t n         = remaining < perLine ? remaining : perLine;
+        // 128 leaves room to spare: the prefix is at most 27 characters and eight registers add
+        // 40. The line-renderer is bounded by this size rather than by that arithmetic, so the
+        // margin is a comfort, not a load-bearing assumption -- see register_dump.h for why the
+        // bound is a parameter and not a constant.
+        char line[128];
+        formatRegisterLine(line, sizeof(line), unitId, space, static_cast<uint16_t>(start + i),
+                           values + i, n);
         log::trace("%s", line);
     }
 }
