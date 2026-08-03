@@ -14,6 +14,7 @@
 
 #include "ota/sha256.h"
 
+using heliograph::ota::Digest;
 using heliograph::ota::hexDigestEquals;
 using heliograph::ota::Sha256;
 
@@ -140,7 +141,7 @@ static void test_hex_renders_every_byte_as_two_lowercase_characters() {
 static void test_a_matching_hex_digest_compares_equal() {
     Sha256 h;
     h.update(reinterpret_cast<const uint8_t*>("abc"), 3);
-    uint8_t digest[32];
+    Digest  digest{};
     h.finish(digest);
     TEST_ASSERT_TRUE(hexDigestEquals(
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", digest));
@@ -154,7 +155,7 @@ static void test_a_matching_hex_digest_compares_equal() {
 static void test_a_malformed_expectation_is_refused() {
     Sha256 h;
     h.update(reinterpret_cast<const uint8_t*>("abc"), 3);
-    uint8_t digest[32];
+    Digest  digest{};
     h.finish(digest);
 
     TEST_ASSERT_FALSE(hexDigestEquals("", digest));
@@ -170,7 +171,7 @@ static void test_a_malformed_expectation_is_refused() {
 static void test_one_wrong_bit_is_refused() {
     Sha256 h;
     h.update(reinterpret_cast<const uint8_t*>("abc"), 3);
-    uint8_t digest[32];
+    Digest  digest{};
     h.finish(digest);
     // Last nibble changed: the case that matters, because a comparison that stopped early
     // would accept it.

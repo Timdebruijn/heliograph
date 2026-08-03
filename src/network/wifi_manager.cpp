@@ -25,11 +25,9 @@ namespace {
 /// MQTT topic root and the Home Assistant device identifier -- all of which must be stable
 /// from the first line of setup() and unique per board. esp_read_mac() reads efuse directly
 /// and works before WiFi exists.
-void readFactoryMac(uint8_t mac[6]) {
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
-        for (int i = 0; i < 6; ++i) {
-            mac[i] = 0;
-        }
+void readFactoryMac(MacAddress& mac) {
+    if (esp_read_mac(mac.data(), ESP_MAC_WIFI_STA) != ESP_OK) {
+        mac.fill(0);
     }
 }
 
@@ -37,7 +35,7 @@ void readFactoryMac(uint8_t mac[6]) {
 
 std::string WifiManager::bridgeId() const {
     static const std::string id = [] {
-        uint8_t mac[6] = {};
+        MacAddress mac{};
         readFactoryMac(mac);
         char buf[32];
         snprintf(buf, sizeof(buf), "heliograph-%02x%02x%02x", mac[3], mac[4], mac[5]);
@@ -61,7 +59,7 @@ void WifiManager::startPortal() {
     if (portalActive_) {
         return;
     }
-    uint8_t mac[6] = {};
+    MacAddress mac{};
     readFactoryMac(mac);
     apSsid_ = setupApSsid(mac);
 

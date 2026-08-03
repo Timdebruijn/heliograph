@@ -43,7 +43,7 @@ uint32_t retryDelayMs(const ProvisioningPolicy& policy, uint32_t attempt) {
     return delay > policy.maxRetryMs ? policy.maxRetryMs : static_cast<uint32_t>(delay);
 }
 
-std::string setupApSsid(const uint8_t mac[6]) {
+std::string setupApSsid(const MacAddress& mac) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "Heliograph-Setup-%02X%02X", mac[4], mac[5]);
     return std::string(buf);

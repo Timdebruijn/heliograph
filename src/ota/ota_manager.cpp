@@ -24,9 +24,9 @@ const char* otaResultName(OtaResult result) {
 }
 
 OtaResult OtaManager::finishHash() {
-    uint8_t digest[32];
+    Digest digest{};
     hasher_.finish(digest);
-    writtenSha256_ = toHex(digest, sizeof(digest));
+    writtenSha256_ = toHex(digest.data(), digest.size());
     if (expectedSha_.empty()) {
         return OtaResult::Ok;  // nothing was promised; a hand-picked file has nothing to check
     }

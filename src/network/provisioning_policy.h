@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -56,9 +57,16 @@ ProvisioningState decideState(const ProvisioningPolicy& policy, bool hasCredenti
 /// Back-off delay for attempt N (1-based). Doubles, capped at maxRetryMs.
 uint32_t retryDelayMs(const ProvisioningPolicy& policy, uint32_t attempt);
 
+/// The factory MAC, as a type that carries its own length.
+///
+/// `uint8_t mac[6]` in a parameter list is documentation, not a check: it decays to a plain
+/// pointer, so a caller passing a shorter buffer compiles silently and the reads run past its
+/// end. std::array keeps the six in the type, where the compiler can see it.
+using MacAddress = std::array<uint8_t, 6>;
+
 /// SSID for the setup access point, e.g. "Heliograph-Setup-A1B2".
 ///
 /// Derived from the MAC so two bridges being provisioned in one room stay distinguishable.
-std::string setupApSsid(const uint8_t mac[6]);
+std::string setupApSsid(const MacAddress& mac);
 
 }  // namespace heliograph

@@ -985,8 +985,8 @@ static void test_retry_backoff_is_bounded() {
 }
 
 static void test_setup_ssid_is_stable_and_distinguishable() {
-    const uint8_t a[6] = {0x24, 0x6F, 0x28, 0x11, 0xA1, 0xB2};
-    const uint8_t b[6] = {0x24, 0x6F, 0x28, 0x11, 0xC3, 0xD4};
+    const MacAddress a{0x24, 0x6F, 0x28, 0x11, 0xA1, 0xB2};
+    const MacAddress b{0x24, 0x6F, 0x28, 0x11, 0xC3, 0xD4};
     TEST_ASSERT_EQUAL_STRING("Heliograph-Setup-A1B2", setupApSsid(a).c_str());
     // Two bridges being provisioned in one room must not present the same SSID.
     TEST_ASSERT_EQUAL_STRING("Heliograph-Setup-C3D4", setupApSsid(b).c_str());

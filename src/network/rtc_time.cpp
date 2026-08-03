@@ -45,7 +45,7 @@ void civilFromDays(int64_t z, int& y, int& m, int& d) {
     y = static_cast<int>(yoe + era * 400) + (m <= 2);
 }
 
-bool decodeRegisters(const uint8_t regs[7], time_t& out) {
+bool decodeRegisters(const Registers& regs, time_t& out) {
     if ((regs[0] & kOsFlag) != 0) {
         return false;  // oscillator stopped since the last write: time is untrustworthy
     }
@@ -80,7 +80,7 @@ bool decodeRegisters(const uint8_t regs[7], time_t& out) {
     return true;
 }
 
-void encodeRegisters(time_t utc, uint8_t regs[7]) {
+void encodeRegisters(time_t utc, Registers& regs) {
     const int64_t days = static_cast<int64_t>(utc) / 86400;
     int32_t       rem  = static_cast<int32_t>(static_cast<int64_t>(utc) - days * 86400);
     const int     hour = rem / 3600;

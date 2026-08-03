@@ -16,7 +16,7 @@ void tearDown() {}
 namespace {
 
 /// Registers in chip order: sec, min, hour, day, weekday, month, year-2000. All BCD.
-void regs(uint8_t out[7], uint8_t s, uint8_t mi, uint8_t h, uint8_t d, uint8_t mo, uint8_t y) {
+void regs(Registers& out, uint8_t s, uint8_t mi, uint8_t h, uint8_t d, uint8_t mo, uint8_t y) {
     out[0] = s;
     out[1] = mi;
     out[2] = h;
@@ -29,7 +29,7 @@ void regs(uint8_t out[7], uint8_t s, uint8_t mi, uint8_t h, uint8_t d, uint8_t m
 }  // namespace
 
 static void test_a_normal_time_decodes() {
-    uint8_t r[7];
+    Registers r{};
     regs(r, 0x30, 0x45, 0x12, 0x25, 0x07, 0x26);  // 2026-07-25 12:45:30 UTC
     time_t t = 0;
     TEST_ASSERT_TRUE(decodeRegisters(r, t));
@@ -38,7 +38,7 @@ static void test_a_normal_time_decodes() {
 }
 
 static void test_a_round_trip_survives() {
-    uint8_t r[7];
+    Registers r{};
     const time_t original = 1784983530;
     encodeRegisters(original, r);
     time_t back = 0;
@@ -47,7 +47,7 @@ static void test_a_round_trip_survives() {
 }
 
 static void test_the_oscillator_stopped_flag_refuses_the_read() {
-    uint8_t r[7];
+    Registers r{};
     regs(r, 0x30 | 0x80, 0x45, 0x12, 0x25, 0x07, 0x26);  // OS bit set
     time_t t = 0;
     TEST_ASSERT_FALSE(decodeRegisters(r, t));
@@ -57,7 +57,7 @@ static void test_the_oscillator_stopped_flag_refuses_the_read() {
 // TimeManager::synced() only guards the low side, so that reads as "the clock is set". It then
 // stamps every log line, every payload, and gets written back into the chip on the next sync.
 static void test_a_garbled_year_is_refused_rather_than_becoming_2165() {
-    uint8_t r[7];
+    Registers r{};
     regs(r, 0x30, 0x45, 0x12, 0x25, 0x07, 0xFF);
     time_t t = 0;
     TEST_ASSERT_FALSE(decodeRegisters(r, t));
@@ -65,7 +65,7 @@ static void test_a_garbled_year_is_refused_rather_than_becoming_2165() {
 
 // ...and a merely legal-but-implausible year, which is not garbled BCD at all.
 static void test_a_year_outside_the_plausible_range_is_refused() {
-    uint8_t r[7];
+    Registers r{};
     regs(r, 0x30, 0x45, 0x12, 0x25, 0x07, 0x99);  // 2099 is the chip's ceiling: accepted
     time_t t = 0;
     TEST_ASSERT_TRUE(decodeRegisters(r, t));
@@ -79,7 +79,7 @@ static void test_a_year_outside_the_plausible_range_is_refused() {
 // A byte that is not valid BCD can still decode to something in range. 0x1A -> 20 is a
 // perfectly plausible minute, so the range checks alone would wave it through.
 static void test_a_non_bcd_byte_is_refused_even_when_it_decodes_in_range() {
-    uint8_t r[7];
+    Registers r{};
     regs(r, 0x30, 0x1A, 0x12, 0x25, 0x07, 0x26);  // minutes = 0x1A
     time_t t = 0;
     TEST_ASSERT_FALSE(decodeRegisters(r, t));
@@ -89,7 +89,7 @@ static void test_a_non_bcd_byte_is_refused_even_when_it_decodes_in_range() {
 }
 
 static void test_out_of_range_fields_are_refused() {
-    uint8_t r[7];
+    Registers r{};
     time_t  t = 0;
     regs(r, 0x60, 0x45, 0x12, 0x25, 0x07, 0x26);  // 60 seconds
     TEST_ASSERT_FALSE(decodeRegisters(r, t));
@@ -106,7 +106,7 @@ static void test_out_of_range_fields_are_refused() {
 // February 31st passes every field-range check and silently becomes March 3rd. A plausible
 // date that is not the one on the chip is exactly what this file exists to refuse.
 static void test_a_date_that_does_not_exist_is_refused() {
-    uint8_t r[7];
+    Registers r{};
     time_t  t = 0;
     regs(r, 0x00, 0x00, 0x12, 0x31, 0x02, 0x26);  // 31 February
     TEST_ASSERT_FALSE(decodeRegisters(r, t));
@@ -123,7 +123,7 @@ static void test_a_date_that_does_not_exist_is_refused() {
 // was the one piece of arithmetic no test could see, in the file split out precisely to stop
 // that -- and deleting the caller's line as redundant would have stored every write as Sunday.
 static void test_the_weekday_register_is_filled() {
-    uint8_t r[7];
+    Registers r{};
     encodeRegisters(1784983530, r);  // 2026-07-25 was a Saturday
     TEST_ASSERT_EQUAL_UINT8(6, r[4]);
     encodeRegisters(1835395200, r);  // 2028-02-29 was a Tuesday
@@ -131,7 +131,7 @@ static void test_the_weekday_register_is_filled() {
 }
 
 static void test_a_leap_day_is_handled() {
-    uint8_t r[7];
+    Registers r{};
     regs(r, 0x00, 0x00, 0x00, 0x29, 0x02, 0x28);  // 2028-02-29T00:00:00Z
     time_t t = 0;
     TEST_ASSERT_TRUE(decodeRegisters(r, t));

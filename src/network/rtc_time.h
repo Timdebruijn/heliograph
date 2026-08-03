@@ -9,10 +9,19 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <ctime>
 
 namespace heliograph::rtc {
+
+/// The chip's seven time registers, in chip order from Seconds: sec, min, hour, day, weekday,
+/// month, year-2000. All BCD.
+///
+/// A named type rather than `uint8_t regs[7]` in each signature, because that form decays to a
+/// pointer: the seven is a comment the compiler does not read, and decode and encode could drift
+/// apart on it without anything failing to build. Here the length is checked at every call.
+using Registers = std::array<uint8_t, 7>;
 
 /// The RTC counts a two-digit year from 2000, so 2000-2099 is everything it can express. The
 /// lower bound is deliberately "before this firmware existed", and it deliberately matches
@@ -40,9 +49,9 @@ void    civilFromDays(int64_t z, int& y, int& m, int& d);
 ///   - The year had no bound, and 0xFF decodes to 165 -> the year 2165. Because
 ///     TimeManager::synced() only guards the low side, that reads as "the clock is set", and on
 ///     a bridge that never reaches NTP it stays that way forever.
-bool decodeRegisters(const uint8_t regs[7], time_t& out);
+bool decodeRegisters(const Registers& regs, time_t& out);
 
 /// The inverse, for the write-back after an NTP sync. Fills seven registers starting at Seconds.
-void encodeRegisters(time_t utc, uint8_t regs[7]);
+void encodeRegisters(time_t utc, Registers& regs);
 
 }  // namespace heliograph::rtc
