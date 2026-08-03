@@ -4,8 +4,10 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "configuration_store.h"
 
@@ -91,6 +93,49 @@ std::string renderValue(JsonVariantConst v) {
 }
 
 void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& prefix,
+              std::vector<ConfigDiffEntry>& out);
+
+/// Arrays element by element, `prefix[i]`, descending into each one exactly as objects already
+/// were.
+///
+/// Before this, an array fell through to renderValue() and became one serialised blob -- a
+/// restore that added a single device rendered as a hundred-odd characters of JSON on one row,
+/// which is the shape somebody is supposed to read before deciding whether to apply it. The
+/// truncation guard above was written FOR that case ("additional_devices with eight entries
+/// would otherwise dominate the table") and it does bound the damage, but bounding an
+/// unreadable row does not make it readable.
+///
+/// Indexed by POSITION, which is the honest thing an anonymous array can say. Insert a device at
+/// the front and every following index reports a change; that is what happened, even if a human
+/// would call it a move. Matching elements by some identifying field would read better in that
+/// one case and would require this walker to know what identifies a device -- exactly the
+/// hand-written per-field knowledge that diffConfigurations was built to avoid.
+void walkDiffArray(JsonArrayConst before, JsonArrayConst after, const std::string& prefix,
+                   std::vector<ConfigDiffEntry>& out) {
+    const size_t count = std::max(before.size(), after.size());
+    for (size_t i = 0; i < count; ++i) {
+        const std::string path = prefix + "[" + std::to_string(i) + "]";
+        JsonVariantConst  a    = i < before.size() ? before[i] : JsonVariantConst();
+        JsonVariantConst  b    = i < after.size() ? after[i] : JsonVariantConst();
+        // Either side being an object is enough: walkDiff renders the missing side's fields as
+        // "(absent)", which is what an added or removed element should look like field by field.
+        if (a.is<JsonObjectConst>() || b.is<JsonObjectConst>()) {
+            walkDiff(a.as<JsonObjectConst>(), b.as<JsonObjectConst>(), path, out);
+            continue;
+        }
+        if (a.is<JsonArrayConst>() || b.is<JsonArrayConst>()) {
+            walkDiffArray(a.as<JsonArrayConst>(), b.as<JsonArrayConst>(), path, out);
+            continue;
+        }
+        const std::string sa = renderValue(a);
+        const std::string sb = renderValue(b);
+        if (sa != sb) {
+            out.push_back({path, sa, sb});
+        }
+    }
+}
+
+void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& prefix,
               std::vector<ConfigDiffEntry>& out) {
     // Driven by `after`, then swept for keys only `before` had. Iterating one side alone would
     // miss a setting the restore REMOVES, which is a change like any other.
@@ -109,8 +154,12 @@ void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& 
             }
             continue;
         }
-        if (kv.value().is<JsonObjectConst>() && old.is<JsonObjectConst>()) {
+        if (kv.value().is<JsonObjectConst>() || old.is<JsonObjectConst>()) {
             walkDiff(old.as<JsonObjectConst>(), kv.value().as<JsonObjectConst>(), path, out);
+            continue;
+        }
+        if (kv.value().is<JsonArrayConst>() || old.is<JsonArrayConst>()) {
+            walkDiffArray(old.as<JsonArrayConst>(), kv.value().as<JsonArrayConst>(), path, out);
             continue;
         }
         const std::string a = renderValue(old);
@@ -125,6 +174,13 @@ void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& 
                                                 : prefix + "." + kv.key().c_str();
         if (isSecretKey(kv.key().c_str())) {
             out.push_back({path, "(set)", "(not set)"});
+        } else if (kv.value().is<JsonObjectConst>()) {
+            // A whole section the restore drops still reports field by field. Rendering it as
+            // one blob here would have been the same unreadable row the array case had, just
+            // reached from the other direction.
+            walkDiff(kv.value().as<JsonObjectConst>(), JsonObjectConst(), path, out);
+        } else if (kv.value().is<JsonArrayConst>()) {
+            walkDiffArray(kv.value().as<JsonArrayConst>(), JsonArrayConst(), path, out);
         } else {
             out.push_back({path, renderValue(kv.value()), "(absent)"});
         }
