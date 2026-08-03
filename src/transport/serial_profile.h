@@ -18,7 +18,6 @@ struct SerialProfile {
     uint8_t      dataBits          = 8;
     uint8_t      stopBits          = 1;
     uint32_t     responseTimeoutMs = 1000;
-    uint8_t      retries           = 3;
 
     friend bool operator==(const SerialProfile& a, const SerialProfile& b) {
         return a.baudRate == b.baudRate && a.parity == b.parity && a.dataBits == b.dataBits &&

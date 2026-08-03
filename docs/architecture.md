@@ -155,7 +155,6 @@ struct SerialProfile {
     uint8_t       dataBits          = 8;
     uint8_t       stopBits          = 1;
     uint32_t      responseTimeoutMs = 1000;
-    uint8_t       retries           = 3;
 };
 
 class Transport {

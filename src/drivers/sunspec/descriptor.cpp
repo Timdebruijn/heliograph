@@ -24,8 +24,8 @@ const DriverDescriptor& descriptor() {
         x.supportedTransports = {TransportType::Rs485, TransportType::Mock};
         // SunSpec does not mandate a line speed; 9600 and 19200 are both common, so both are
         // offered and discovery tries them in order.
-        x.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3},
-                                       SerialProfile{19200, SerialParity::None, 8, 1, 1000, 3}};
+        x.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000},
+                                       SerialProfile{19200, SerialParity::None, 8, 1, 1000}};
         x.supportLevel              = DriverSupportLevel::Experimental;
         // Above the vendor Modbus driver: the "SunS" marker is a far stronger fingerprint than
         // any register-shape heuristic, so when a device answers it, it is not a guess.

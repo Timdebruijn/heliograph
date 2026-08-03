@@ -623,7 +623,7 @@ static void test_a_profile_declared_serial_overrides_the_descriptor_default() {
         nullptr, 0,
         /*supportsRtu=*/true, /*supportsTcp=*/false, /*tcpPort=*/0,
         /*hasSerial=*/true,
-        SerialProfile{115200, SerialParity::None, 8, 1, 1000, 3},
+        SerialProfile{115200, SerialParity::None, 8, 1, 1000},
     };
     MockTransport  transport;
     ProfileOptions options;
