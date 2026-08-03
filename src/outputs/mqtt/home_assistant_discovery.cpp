@@ -540,7 +540,13 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
         bool optional;
     };
     static const Spec kSpecs[] = {
-        {"wifi_rssi", "WiFi Signal", "wifi_rssi_dbm", "signal_strength", "measurement", "dBm", false},
+        // optional, and it always should have been: json_util.h nulls wifi_rssi_dbm whenever the
+        // bridge is not associated, because 0 dBm would read as an excellent signal. It shipped
+        // unguarded for as long as this entity has existed. Narrow window -- the payload only
+        // travels while MQTT is up, which needs WiFi -- but the rule this file now applies is
+        // "nullable means guarded", and applying it to five fields while leaving the sixth is
+        // how the next reader concludes the rule is decorative.
+        {"wifi_rssi", "WiFi Signal", "wifi_rssi_dbm", "signal_strength", "measurement", "dBm", true},
         {"uptime", "Uptime", "uptime_seconds", "duration", "total_increasing", "s", false},
         {"free_heap", "Free Heap", "free_heap_bytes", "data_size", "measurement", "B", false},
         {"poll_success", "Polls Succeeded", "poll_success_total", nullptr, "total_increasing", nullptr, false},
@@ -549,9 +555,12 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
         {"rs485_timeouts", "RS485 Timeouts", "rs485_timeout_total", nullptr, "total_increasing", nullptr, false},
 
         // --- added 2026-08-03 -------------------------------------------------------------
-        // The payload has carried thirty-eight fields for a while; seven of them were
-        // announced, so the rest were on the bus and invisible in Home Assistant. These ten
-        // are the ones worth their own recorder stream -- each answers a question that is
+        // The payload has carried between thirty-five and forty-two fields for a while --
+        // measured, not counted by eye: two groups are conditional, the poll_duration quintet
+        // (absent until a poll succeeds) and ntp_server/ntp_server_source (absent until the
+        // clock syncs, via an early return in addClockFields). Seven were announced, so the
+        // rest were on the bus and invisible in Home Assistant. These ten are the ones worth
+        // their own recorder stream -- each answers a question that is
         // asked over time and therefore wants a graph. Everything else rides along as
         // attributes on the "Diagnostics" entity below, which costs one stream instead of
         // twenty.
@@ -643,8 +652,8 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
 
     // Everything else in the payload, as ATTRIBUTES on one entity rather than as entities.
     //
-    // The payload carries thirty-eight fields. Announcing each as its own sensor would give
-    // Home Assistant thirty-eight recorder streams per bridge, each writing every
+    // The payload carries up to forty-two fields. Announcing each as its own sensor would give
+    // Home Assistant that many recorder streams per bridge, each writing every
     // diagnosticsIntervalMs (60 s by default) -- around fifty-five thousand rows a day, per
     // bridge, for numbers that are read when something is wrong and ignored the rest of the
     // time. json_attributes_topic puts the whole document on ONE entity: templatable, visible
