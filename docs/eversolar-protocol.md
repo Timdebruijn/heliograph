@@ -253,10 +253,38 @@ Two explanations, and we don't yet know which one is correct:
 #### What the TL3000-20 actually sends — hypothesis refuted (2026-07-19)
 
 The real 1-string TL3000-20 sends **44 bytes**: the 14 single-string words followed by an
-8-word tail of zeros and `0xFFFF`, meaning unknown. Not 28. The values in the first 14
+8-word tail, meaning unknown. Not 28. The values in the first 14
 words have been verified against reality (38.6°C, 346.4 V × 2.0 A DC ≈ 655 W AC,
 50.03 Hz, 35,445.9 kWh lifetime — mutually consistent and physically plausible; frame stored
 as `kRespNormalInfoCaptured` in the fixtures).
+
+##### The tail, read off the wire (2026-08-03)
+
+This paragraph used to describe that tail as "zeros and `0xFFFF`". It is not only those two
+values. Three consecutive replies, captured on the production bridge, carry the same eight words
+byte for byte:
+
+```
+word   14   15   16   17   18   19   20   21
+     0000 0000 FFFF 0000 0000 0000 FF00 0000
+```
+
+Word 20 is `FF00` — neither zero nor `0xFFFF`, and stable across all three frames, so it is a
+constant rather than noise. Still unknown, and still not decoded: nothing here reads past word
+13. What changed is only that the description now matches the bytes.
+
+How this was found is the point worth recording. The 2026-07-19 entry above needed a USB-RS485
+tap and a laptop at the inverter — which is why the tail got a one-line summary and no
+transcript. This came from the bridge itself: a **driver capture** (`mode=driver`, 30 s) records
+the driver's own request/response pairs while polling continues, so checking this document
+against the wire no longer needs any hardware beyond the bridge that is already there. Three
+request/reply pairs, six frames, all six with a valid AA55 checksum, decoded by hand and
+cross-checked against the same bridge's published measurements — 333.9 V × 5.2 A DC against
+1671 W AC is 96.3% efficiency, which is what a string inverter does.
+
+That feature exists because the older PASSIVE capture cannot do this: it takes the bus away from
+the driver for the whole window, so pointing it at a working inverter records nothing at all.
+See [adding-a-device.md § 6.5](adding-a-device.md#65-recording-a-driver-we-already-have).
 
 That resolves the question about the config option in the reference: `eversolar.pl` indexes
 words and ignores everything after them, so the payload length was never relevant to the
