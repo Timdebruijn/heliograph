@@ -8,12 +8,16 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "device/device_state.h"
+#include "diagnostics/log_buffer.h"
+#include "diagnostics/logger.h"
 #include "drivers/modbus_profile/modbus_profile_driver.h"
 #include "drivers/modbus_profile/profile_tables.h"
+#include "drivers/modbus_profile/register_dump.h"
 #include "protocols/modbus/modbus_rtu.h"
 #include "support/mock_transport.h"
 #include "support/modbus_frame.h"
@@ -1923,6 +1927,255 @@ static void test_the_mic_power_limit_write_row_is_declared_but_dormant() {
     TEST_ASSERT_EQUAL(CommandResult::Unsupported, driver.execute(command));
 }
 
+// --- the TRACE register dump ----------------------------------------------------------------
+//
+// This is the bring-up tool: with a register map still unconfirmed, these lines are read against
+// the inverter's own display to find the right addresses and scaling. A dump that misnames a
+// register, or shows half of one, sends somebody down the wrong path with a plausible-looking
+// number -- which is worse than no dump at all.
+//
+// It used to be untestable. traceBlock() lives in an anonymous namespace behind
+// `if (!log::enabled(Trace))`, and its buffer was a fixed 128 bytes against a worst case of 67,
+// so the truncation guard could not be reached from anywhere. Making the size a parameter is
+// what makes the last four of these tests possible.
+
+static void test_a_line_names_the_register_it_shows() {
+    const uint16_t regs[] = {0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008};
+    char           line[128];
+    const size_t   n = formatRegisterLine(line, sizeof(line), 1, RegSpace::Input, 40000, regs, 8);
+    TEST_ASSERT_EQUAL_size_t(8, n);
+    TEST_ASSERT_EQUAL_STRING("MODBUS unit 1 in 40000: 0001 0002 0003 0004 0005 0006 0007 0008",
+                             line);
+}
+
+static void test_the_register_number_is_absolute_not_an_offset() {
+    // The driver advances `start` and `values` together, so the second line of a block must name
+    // register 40008, not 8 and not 0. Get this wrong and every number after the first line
+    // points at the wrong address -- silently, because they all still look like addresses.
+    const uint16_t regs[] = {0x00AA, 0x00BB};
+    char           line[128];
+    formatRegisterLine(line, sizeof(line), 3, RegSpace::Input, 40008, regs, 2);
+    TEST_ASSERT_EQUAL_STRING("MODBUS unit 3 in 40008: 00AA 00BB", line);
+}
+
+static void test_the_two_register_spaces_are_distinguishable_in_the_dump() {
+    // Input 40000 and Holding 40000 are different registers on the same device. A dump that did
+    // not say which one it read would be unusable for exactly the job it exists for.
+    const uint16_t regs[] = {0x1234};
+    char           in[128];
+    char           hold[128];
+    formatRegisterLine(in, sizeof(in), 2, RegSpace::Input, 100, regs, 1);
+    formatRegisterLine(hold, sizeof(hold), 2, RegSpace::Holding, 100, regs, 1);
+    TEST_ASSERT_EQUAL_STRING("MODBUS unit 2 in 100: 1234", in);
+    TEST_ASSERT_EQUAL_STRING("MODBUS unit 2 hold 100: 1234", hold);
+}
+
+static void test_registers_are_uppercase_and_zero_padded_to_four_digits() {
+    // Fixed width and one case, so a column of these lines up when read against a display and a
+    // protocol document -- both of which write hex this way.
+    const uint16_t regs[] = {0x0000, 0x000A, 0x00FF, 0xABCD, 0xFFFF};
+    char           line[128];
+    formatRegisterLine(line, sizeof(line), 1, RegSpace::Holding, 0, regs, 5);
+    TEST_ASSERT_EQUAL_STRING("MODBUS unit 1 hold 0: 0000 000A 00FF ABCD FFFF", line);
+}
+
+static void test_a_short_block_renders_only_the_registers_it_has() {
+    // The last line of a block that is not a multiple of eight. Reading past `count` here would
+    // print whatever the read buffer happened to hold and present it as device data.
+    const uint16_t regs[] = {0x0011, 0x0022, 0x0033};
+    char           line[128];
+    const size_t   n = formatRegisterLine(line, sizeof(line), 7, RegSpace::Input, 5, regs, 3);
+    TEST_ASSERT_EQUAL_size_t(3, n);
+    TEST_ASSERT_EQUAL_STRING("MODBUS unit 7 in 5: 0011 0022 0033", line);
+}
+
+static void test_a_block_with_no_registers_is_still_a_usable_line() {
+    const uint16_t regs[] = {0xDEAD};
+    char           line[128];
+    const size_t   n = formatRegisterLine(line, sizeof(line), 1, RegSpace::Input, 42, regs, 0);
+    TEST_ASSERT_EQUAL_size_t(0, n);
+    TEST_ASSERT_EQUAL_STRING("MODBUS unit 1 in 42:", line);
+}
+
+static void test_a_full_line_fits_the_buffer_the_driver_gives_it() {
+    // The driver's own case, at its widest: three-digit unit, "hold", five-digit register, eight
+    // registers. This is the arithmetic the old comment asserted (27 + 40 against 128) and that
+    // nothing checked. If a future format widens past the buffer, this fails here rather than
+    // truncating a dump on a device during bring-up.
+    const uint16_t regs[] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
+    char           line[128];
+    const size_t   n = formatRegisterLine(line, sizeof(line), 255, RegSpace::Holding, 65535, regs, 8);
+    TEST_ASSERT_EQUAL_size_t(8, n);
+    TEST_ASSERT_EQUAL_STRING(
+        "MODBUS unit 255 hold 65535: FFFF FFFF FFFF FFFF FFFF FFFF FFFF FFFF", line);
+    TEST_ASSERT_TRUE_MESSAGE(strlen(line) < sizeof(line) - 1, "the widest line must not fill the buffer");
+}
+
+static void test_a_buffer_that_runs_out_cuts_back_to_a_whole_register() {
+    // THE case the guard exists for, and the one that was unreachable while the size was a
+    // constant. A partially rendered register would be read as a real value.
+    const uint16_t regs[] = {0x0001, 0x0002, 0x0003};
+    char           line[30];
+    const size_t   n = formatRegisterLine(line, sizeof(line), 1, RegSpace::Input, 40000, regs, 3);
+    // "MODBUS unit 1 in 40000:" is 23 chars; one " 0001" fits in the remaining 7, a second
+    // does not.
+    TEST_ASSERT_EQUAL_size_t(1, n);
+    TEST_ASSERT_EQUAL_STRING("MODBUS unit 1 in 40000: 0001", line);
+    TEST_ASSERT_TRUE_MESSAGE(strlen(line) < sizeof(line), "must stay inside the buffer");
+}
+
+static void test_a_buffer_too_small_for_the_prefix_still_yields_a_string() {
+    // snprintf reports what it WOULD have written, so `pos` lands past the end here. That is the
+    // value the underflow bug was built on: outSize - pos would wrap to a huge size_t and become
+    // the next call's buffer size.
+    const uint16_t regs[] = {0x0001};
+    char           line[10];
+    const size_t   n = formatRegisterLine(line, sizeof(line), 1, RegSpace::Input, 40000, regs, 1);
+    TEST_ASSERT_EQUAL_size_t(0, n);
+    TEST_ASSERT_EQUAL_STRING("MODBUS un", line);
+    TEST_ASSERT_TRUE_MESSAGE(strlen(line) < sizeof(line), "must stay inside the buffer");
+}
+
+static void test_a_zero_sized_buffer_is_refused_without_writing() {
+    const uint16_t regs[] = {0x0001};
+    char           guard[4] = {'k', 'e', 'e', 'p'};
+    const size_t   n = formatRegisterLine(guard, 0, 1, RegSpace::Input, 0, regs, 1);
+    TEST_ASSERT_EQUAL_size_t(0, n);
+    // Not even a NUL: with no byte to spare there is nowhere to put one.
+    TEST_ASSERT_EQUAL_CHAR('k', guard[0]);
+}
+
+static void test_no_values_renders_the_prefix_rather_than_reading_the_pointer() {
+    char         line[128];
+    const size_t n = formatRegisterLine(line, sizeof(line), 9, RegSpace::Holding, 7, nullptr, 4);
+    TEST_ASSERT_EQUAL_size_t(0, n);
+    TEST_ASSERT_EQUAL_STRING("MODBUS unit 9 hold 7:", line);
+}
+
+/// Answers any read with `count` registers whose value is their own address, so every dumped
+/// number can be checked against the address the line claims to show.
+static heliograph::test::Responder addressEchoResponder() {
+    return [](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 6) {
+            return false;
+        }
+        const uint16_t start = static_cast<uint16_t>((req[2] << 8) | req[3]);
+        const uint16_t count = static_cast<uint16_t>((req[4] << 8) | req[5]);
+        reply.push_back(req[0]);
+        reply.push_back(req[1]);
+        reply.push_back(static_cast<uint8_t>(count * 2));
+        for (uint16_t i = 0; i < count; ++i) {
+            const uint16_t v = static_cast<uint16_t>(start + i);
+            reply.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+            reply.push_back(static_cast<uint8_t>(v & 0xFF));
+        }
+        test::appendModbusCrc(reply);
+        return true;
+    };
+}
+
+/// Every "MODBUS unit ..." line a full poll emitted, at the given level.
+static std::vector<std::string> dumpLinesAtLevel(LogLevel level) {
+    MockTransport transport;
+    transport.setResponder(addressEchoResponder());
+    ModbusProfileDriver driver(transport);
+    driver.begin(transport);
+
+    DeviceState state;
+    state.lastPollAttemptMs = 5000;
+    log::clearLines();
+    const auto previous = log::level();
+    log::setLevel(level);
+    driver.poll(state);
+    log::setLevel(previous);
+
+    std::vector<std::string> dump;
+    for (const auto& l : log::recentLines(64)) {
+        if (l.find("MODBUS unit") != std::string::npos) {
+            dump.push_back(l);
+        }
+    }
+    return dump;
+}
+
+/// Pulls the register number out of "... in <start>: AAAA BBBB ..." plus the words after it.
+static bool parseDumpLine(const std::string& line, unsigned& start,
+                          std::vector<unsigned>& values) {
+    const size_t colon = line.find(':', line.find("MODBUS unit"));
+    if (colon == std::string::npos) {
+        return false;
+    }
+    const size_t space = line.rfind(' ', colon);
+    if (space == std::string::npos) {
+        return false;
+    }
+    start  = static_cast<unsigned>(std::stoul(line.substr(space + 1, colon - space - 1)));
+    values.clear();
+    size_t i = colon + 1;
+    while (i + 4 <= line.size()) {
+        while (i < line.size() && line[i] == ' ') ++i;
+        if (i + 4 > line.size() || line.compare(i, 4, "    ") == 0) break;
+        const std::string word = line.substr(i, 4);
+        if (word.find_first_not_of("0123456789ABCDEF") != std::string::npos) break;
+        values.push_back(static_cast<unsigned>(std::stoul(word, nullptr, 16)));
+        i += 4;
+    }
+    return true;
+}
+
+static void test_every_dumped_register_sits_under_the_address_it_names() {
+    // The invariant the whole dump rests on: the Nth value on a line belongs to the line's start
+    // address plus N. traceBlock advances `start` and `values` together; advancing one without
+    // the other prints real numbers under wrong addresses -- readable, plausible, and wrong,
+    // which is precisely the mistake this tool is used to avoid.
+    const auto lines = dumpLinesAtLevel(LogLevel::Trace);
+    TEST_ASSERT_TRUE_MESSAGE(lines.size() >= 2, "a full poll should dump more than one line");
+    for (const auto& line : lines) {
+        unsigned              start = 0;
+        std::vector<unsigned> values;
+        TEST_ASSERT_TRUE_MESSAGE(parseDumpLine(line, start, values), line.c_str());
+        TEST_ASSERT_TRUE_MESSAGE(!values.empty(), line.c_str());
+        for (size_t i = 0; i < values.size(); ++i) {
+            TEST_ASSERT_EQUAL_UINT_MESSAGE(start + i, values[i], line.c_str());
+        }
+    }
+}
+
+static void test_the_dump_advances_eight_registers_per_line() {
+    const auto lines = dumpLinesAtLevel(LogLevel::Trace);
+    unsigned              previousStart = 0;
+    std::vector<unsigned> previousValues;
+    bool                  havePrevious = false;
+    for (const auto& line : lines) {
+        unsigned              start = 0;
+        std::vector<unsigned> values;
+        TEST_ASSERT_TRUE(parseDumpLine(line, start, values));
+        TEST_ASSERT_TRUE_MESSAGE(values.size() <= 8, "never more than eight per line");
+        if (havePrevious && start == previousStart + previousValues.size()) {
+            // Consecutive lines of one block: the earlier one must have been full, or the block
+            // would have ended there.
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(8, previousValues.size(),
+                                             "a line followed by more of its block must be full");
+        }
+        previousStart  = start;
+        previousValues = values;
+        havePrevious   = true;
+    }
+}
+
+static void test_the_dump_stays_silent_below_trace() {
+    // Raw bus contents must never reach the log ring of a bridge running at DEBUG or above.
+    //
+    // What this does NOT prove, established by mutation: deleting traceBlock's own
+    // `if (!log::enabled(Trace)) return;` leaves this test green, because log::trace() gates on
+    // the level again inside emit(). Two gates guard this property and only the logger's is
+    // load-bearing for silence. traceBlock's is a cost guard -- it skips the formatting work
+    // whose result emit() would discard -- and a cost guard is not something an assertion about
+    // output can see. Kept as-is: the property is worth locking down even though one of its two
+    // enforcers is invisible from here.
+    TEST_ASSERT_EQUAL_size_t(0, dumpLinesAtLevel(LogLevel::Debug).size());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_soc_is_decoded_as_a_plain_percent);
@@ -1995,5 +2248,19 @@ int main(int, char**) {
     RUN_TEST(test_a_row_needing_write_multiple_is_refused_not_faked);
     RUN_TEST(test_a_device_that_refuses_is_rejected_not_reported_as_a_fault);
     RUN_TEST(test_the_mic_power_limit_write_row_is_declared_but_dormant);
+    RUN_TEST(test_a_line_names_the_register_it_shows);
+    RUN_TEST(test_the_register_number_is_absolute_not_an_offset);
+    RUN_TEST(test_the_two_register_spaces_are_distinguishable_in_the_dump);
+    RUN_TEST(test_registers_are_uppercase_and_zero_padded_to_four_digits);
+    RUN_TEST(test_a_short_block_renders_only_the_registers_it_has);
+    RUN_TEST(test_a_block_with_no_registers_is_still_a_usable_line);
+    RUN_TEST(test_a_full_line_fits_the_buffer_the_driver_gives_it);
+    RUN_TEST(test_a_buffer_that_runs_out_cuts_back_to_a_whole_register);
+    RUN_TEST(test_a_buffer_too_small_for_the_prefix_still_yields_a_string);
+    RUN_TEST(test_a_zero_sized_buffer_is_refused_without_writing);
+    RUN_TEST(test_no_values_renders_the_prefix_rather_than_reading_the_pointer);
+    RUN_TEST(test_every_dumped_register_sits_under_the_address_it_names);
+    RUN_TEST(test_the_dump_advances_eight_registers_per_line);
+    RUN_TEST(test_the_dump_stays_silent_below_trace);
     return UNITY_END();
 }
