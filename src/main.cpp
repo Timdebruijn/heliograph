@@ -431,9 +431,16 @@ namespace {
 // as stale.) check_layering.sh rule 11 covers the part of this a machine can check.
 // 0.26.2 changed NO behaviour. It existed so a binary had a name: main had moved sixteen source
 // files past v0.26.1 while still declaring 0.26.1, and SerialProfile lost a byte in the process,
-// so two different images both called themselves 0.26.1. That only mattered because the
-// Relay-1CH has never booted 0.26.x -- validating a board against an untagged build says
-// nothing about which build was validated.
+// so two different images both called themselves 0.26.1. That mattered because validating a
+// board against an untagged build says nothing about which build was validated.
+//
+// The reason given at the time was that "the Relay-1CH has never booted 0.26.x". THAT WAS
+// FALSE, and it is worth leaving here rather than deleting. The board answers the question in
+// one GET -- it reports previous_firmware 0.26.2 with previous_uptime_ms 1542767, about
+// twenty-six minutes -- and nobody asked it. The claim came out of a notes file, was repeated
+// through a working session, and was carried into two tag messages, and every one of those
+// repetitions was cheaper than the check would have been. The argument for tagging held
+// anyway; the fact supporting it did not.
 //
 // 0.26.3 DOES change behaviour, which is the difference from the release before it. Home
 // Assistant now hears about twelve diagnostic entities it was never told existed: the payload
