@@ -15,6 +15,7 @@
 #include "protocols/modbus/modbus_rtu.h"
 #include "protocols/pmu/pmu_protocol.h"
 #include "support/mock_transport.h"
+#include "support/modbus_frame.h"
 
 using namespace heliograph;
 using heliograph::diag::BusDirection;
@@ -37,9 +38,7 @@ static SerialProfile profileAt(uint32_t baud) {
 /// A well-formed Modbus RTU read request, CRC and all.
 static std::vector<uint8_t> modbusFrame(uint8_t unit) {
     std::vector<uint8_t> f{unit, 0x03, 0x00, 0x00, 0x00, 0x02};
-    const uint16_t       crc = modbus::crc16(f.data(), f.size());
-    f.push_back(static_cast<uint8_t>(crc & 0xFF));
-    f.push_back(static_cast<uint8_t>(crc >> 8));
+    test::appendModbusCrc(f);
     return f;
 }
 
@@ -719,9 +718,7 @@ static std::vector<uint8_t> modbusReply(uint8_t unit, uint16_t a, uint16_t b) {
     std::vector<uint8_t> f{unit, 0x03, 0x04,
                            static_cast<uint8_t>(a >> 8), static_cast<uint8_t>(a & 0xFF),
                            static_cast<uint8_t>(b >> 8), static_cast<uint8_t>(b & 0xFF)};
-    const uint16_t crc = modbus::crc16(f.data(), f.size());
-    f.push_back(static_cast<uint8_t>(crc & 0xFF));
-    f.push_back(static_cast<uint8_t>(crc >> 8));
+    test::appendModbusCrc(f);
     return f;
 }
 

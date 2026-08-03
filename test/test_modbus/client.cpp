@@ -12,6 +12,7 @@
 
 #include "protocols/modbus/modbus_client.h"
 #include "support/mock_transport.h"
+#include "support/modbus_frame.h"
 
 using namespace heliograph;
 using namespace heliograph::modbus;
@@ -30,17 +31,13 @@ std::vector<uint8_t> goodReply(uint8_t unit, uint8_t fn, const std::vector<uint1
         f.push_back(static_cast<uint8_t>(v >> 8));
         f.push_back(static_cast<uint8_t>(v & 0xFF));
     }
-    const uint16_t crc = crc16(f.data(), f.size());
-    f.push_back(static_cast<uint8_t>(crc & 0xFF));
-    f.push_back(static_cast<uint8_t>(crc >> 8));
+    test::appendModbusCrc(f);
     return f;
 }
 
 std::vector<uint8_t> exceptionReply(uint8_t unit, uint8_t fn, uint8_t code) {
     std::vector<uint8_t> f{unit, static_cast<uint8_t>(fn | 0x80), code};
-    const uint16_t       crc = crc16(f.data(), f.size());
-    f.push_back(static_cast<uint8_t>(crc & 0xFF));
-    f.push_back(static_cast<uint8_t>(crc >> 8));
+    test::appendModbusCrc(f);
     return f;
 }
 
