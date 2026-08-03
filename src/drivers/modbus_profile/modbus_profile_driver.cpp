@@ -35,7 +35,17 @@ void traceBlock(uint8_t unitId, RegSpace space, uint16_t start, uint16_t count,
                             static_cast<unsigned>(unitId), spaceName,
                             static_cast<unsigned>(start + i));
         for (uint16_t j = 0; j < perLine && i + j < count; ++j) {
-            pos += snprintf(line + pos, sizeof(line) - pos, " %04X", values[i + j]);
+            // snprintf returns what it WOULD have written, not what it did, so `pos` can run
+            // past the buffer -- and then `sizeof(line) - pos` underflows to a huge size_t and
+            // becomes the next call's buffer size. Stopping while pos is still inside the
+            // buffer makes that subtraction unconditionally safe. Unreachable at today's
+            // constants (a ~27-char prefix plus eight 5-char registers against 128), which is
+            // exactly why it is worth a line: nothing else here would notice a wider format.
+            if (pos < 0 || static_cast<size_t>(pos) >= sizeof(line)) {
+                break;
+            }
+            pos += snprintf(line + pos, sizeof(line) - static_cast<size_t>(pos), " %04X",
+                            values[i + j]);
         }
         log::trace("%s", line);
     }
