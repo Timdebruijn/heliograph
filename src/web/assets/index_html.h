@@ -2099,7 +2099,7 @@ async function applyRestore(){
   rsPending=null;
   say('#rs_msg','ok','Restored '+esc(d.changed_fields||0)+' setting(s).'+
     (d.reboot_required?' The bridge is restarting — reload this page in ~30 seconds.':' No restart needed.')+
-    (d.rollback_stored?' You can undo this below.':' No undo was stored — the flash was full.'));
+    (d.rollback_stored?' To go back, reopen Backup after the restart and press “Undo the last restore”.':' No undo was stored — the flash was full.'));
 }
 async function undoRestore(){
   if(!confirm('Go back to the configuration this bridge had before the last restore?'))return;
