@@ -2,20 +2,16 @@
 // REST payloads, configuration redaction/validation and Prometheus output.
 
 #include <unity.h>
-#include <cstdio>
-
-#include <cstring>
-
-#include "diagnostics/breadcrumbs.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <string>
 
 #include <ArduinoJson.h>
 
-#include <string>
-
 #include "config/configuration.h"
+#include "diagnostics/breadcrumbs.h"
 #include "diagnostics/coredump.h"
 #include "diagnostics/logger.h"
 #include "outputs/modbus_tcp/modbus_tcp_server.h"

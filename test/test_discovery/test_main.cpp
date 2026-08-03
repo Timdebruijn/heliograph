@@ -99,7 +99,7 @@ static DriverDescriptor desc(const std::string& id, int priority, bool autoDetec
     d.id                    = id;
     d.displayName           = id;
     d.supportedTransports   = {TransportType::Mock};
-    d.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3}};
+    d.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000}};
     d.probePriority         = priority;
     d.supportsAutoDetection = autoDetect;
     return d;
@@ -414,8 +414,8 @@ static void test_the_remaining_profiles_are_not_swept_once_one_answers() {
     AddressBus     bus;
     bus.occupied            = {"3"};
     DriverDescriptor d      = addressedDesc("two_speed", "1");
-    d.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3},
-                                   SerialProfile{115200, SerialParity::None, 8, 1, 1000, 3}};
+    d.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000},
+                                   SerialProfile{115200, SerialParity::None, 8, 1, 1000}};
     addAddressedDriver(reg, d, &bus);
 
     DiscoveryEngine e(reg, t);
@@ -700,8 +700,8 @@ static void test_a_device_on_the_second_profile_is_still_found() {
     s.bus                = &t;
 
     auto d = desc("two_rates", 10);
-    d.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3},
-                                   SerialProfile{115200, SerialParity::None, 8, 1, 1000, 3}};
+    d.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000},
+                                   SerialProfile{115200, SerialParity::None, 8, 1, 1000}};
     addDriver(reg, d, &s);
 
     DiscoveryEngine e(reg, t);

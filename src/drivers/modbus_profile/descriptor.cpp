@@ -80,8 +80,8 @@ const DriverDescriptor& descriptor() {
         // specifies; 115200 stays because some units genuinely ship that way, and guessing wrong
         // on a live bus just looks like silence.
         x.recommendedSerialProfiles = {
-            SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3},
-            SerialProfile{115200, SerialParity::None, 8, 1, 1000, 3},
+            SerialProfile{9600, SerialParity::None, 8, 1, 1000},
+            SerialProfile{115200, SerialParity::None, 8, 1, 1000},
         };
         // Experimental as a driver-level floor: every profile is transcribed from documentation
         // or community maps, and none has yet been confirmed against the device it describes.

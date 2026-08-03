@@ -822,7 +822,7 @@ def generate(
             w("     /*hasSerial=*/true,")
             w(
                 f"     SerialProfile{{{s['baud']}, SerialParity::{PARITIES[s['parity']]}, "
-                f"8, {s['stop_bits']}, 1000, 3}},"
+                f"8, {s['stop_bits']}, 1000}},"
             )
         else:
             w("     /*hasSerial=*/false, SerialProfile{},")

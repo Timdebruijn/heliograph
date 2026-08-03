@@ -203,9 +203,13 @@ struct SecuritySettings {
 /// begin(), which means at boot AND after a discovery run -- missing the second one silently
 /// undid the override on a running bridge.
 ///
-/// responseTimeoutMs and retries within `profile` are carried but unused: read deadlines are
-/// per-driver compile-time constants, and Rs485Transport::read() takes its timeout from the
-/// caller. Exposing them would have been a control that changes nothing.
+/// responseTimeoutMs within `profile` is carried but does not govern anything: it reaches
+/// uart_.setTimeout() in Rs485Transport::configure(), and that setting only bounds readBytes(),
+/// which read() calls exclusively when the bytes are already available. Read deadlines are
+/// per-driver compile-time constants and read() takes its timeout from the caller. Exposing it
+/// would have been a control that changes nothing. (A sibling `retries` field was carried the
+/// same way with nothing reading it at all, and was removed rather than left to look like a
+/// setting.)
 struct SerialOverride {
     bool          enabled = false;
     SerialProfile profile{};

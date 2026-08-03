@@ -18,7 +18,7 @@ const DriverDescriptor& descriptor() {
         x.supportedTransports = {TransportType::Rs485, TransportType::Mock};
         // 9600 8N1 is hardcoded in the reference implementation and is the only profile
         // known to work. Offering more would be guessing on a live bus.
-        x.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3}};
+        x.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000}};
         // Beta from 2026-07-19: Phase 3 exit criteria met against a real TL3000-20 -- stable
         // reads over hours, values matching eversolar-monitor within the documented tolerance
         // (energy.total exactly +HI*0.1 kWh, hours/status/impedance/serial exact), and both

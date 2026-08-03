@@ -20,7 +20,7 @@ const DriverDescriptor& descriptor() {
             "hardware.";
         x.supportedTransports = {TransportType::Rs485, TransportType::Mock};
         // One documented line speed for the whole family.
-        x.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000, 3}};
+        x.recommendedSerialProfiles = {SerialProfile{9600, SerialParity::None, 8, 1, 1000}};
         x.supportLevel              = DriverSupportLevel::Experimental;
         // Below the sibling PMU driver (10): the two speak the same framing, so both may
         // answer a probe of the same physical device. The margin rule in discovery then

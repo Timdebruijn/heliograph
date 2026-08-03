@@ -170,12 +170,6 @@ public:
         rx_.insert(rx_.end(), bytes.begin(), bytes.end());
     }
 
-    void clearScript() {
-        replies_.clear();
-        rx_.clear();
-        writes.clear();
-    }
-
     size_t pendingReplies() const { return replies_.size(); }
     const SerialProfile& profile() const { return profile_; }
 
