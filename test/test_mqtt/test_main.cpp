@@ -930,26 +930,128 @@ static void test_the_debugging_metrics_are_announced_not_only_published() {
 }
 
 static void test_a_field_that_can_be_missing_renders_empty_rather_than_none() {
-    // poll_duration_* is omitted until a poll has succeeded; the stack and PSRAM fields are
-    // null until sampled. An unguarded template renders the string "None", which Home Assistant
-    // would store as the state of a numeric sensor.
+    // Asserts the EXACT template, not that it contains "is defined" somewhere.
+    //
+    // The first version of this test checked for those substrings, which made it a spelling
+    // check: a template with a dropped {% endif %}, or one that guards on field A and then
+    // renders field B, contains them just as happily and would have passed. Pinning the whole
+    // string also closes the key-swap hole -- the payload-invariant test below proves every
+    // referenced key EXISTS, not that this entity points at the right one, so two specs could
+    // trade json keys and both tests would stay green.
+    //
+    // What no test here can do is RENDER it. There is no Jinja engine in this suite, so the
+    // claim that an empty result makes Home Assistant skip the update rests on Home Assistant's
+    // documentation, not on anything executed here. That is a real limit of this test and the
+    // reason the template is pinned character for character instead.
     const auto bridge = makeBridge();
     const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
     const auto entities = buildBridgeDiagnosticEntities(bridge, topics, kDefaultDiscoveryPrefix);
 
-    for (const char* slug : {"poll_duration_ewma", "rs485_stack_free", "psram_free"}) {
-        const auto* e = findEntity(entities, std::string("heliograph-a1b2c3_") + slug);
-        TEST_ASSERT_NOT_NULL_MESSAGE(e, slug);
-        const std::string tmpl = parse(e->payload)["value_template"].as<std::string>();
-        TEST_ASSERT_TRUE_MESSAGE(tmpl.find("is defined") != std::string::npos, slug);
-        TEST_ASSERT_TRUE_MESSAGE(tmpl.find("is not none") != std::string::npos, slug);
+    struct Expected {
+        const char* slug;
+        const char* key;
+    };
+    // Every field json_util.h can emit as null or omit entirely, and therefore every field whose
+    // entity must carry the guard.
+    static const Expected kGuarded[] = {
+        {"poll_duration_ewma", "poll_duration_ewma_ms"},
+        {"poll_duration_max", "poll_duration_max_ms"},
+        {"rs485_stack_free", "rs485_stack_free_bytes"},
+        {"loop_stack_free", "loop_stack_free_bytes"},
+        {"psram_free", "psram_free_bytes"},
+        {"wifi_rssi", "wifi_rssi_dbm"},
+    };
+    for (const auto& g : kGuarded) {
+        const auto* e = findEntity(entities, std::string("heliograph-a1b2c3_") + g.slug);
+        TEST_ASSERT_NOT_NULL_MESSAGE(e, g.slug);
+        const std::string want = std::string("{% if value_json.") + g.key +
+                                 " is defined and value_json." + g.key +
+                                 " is not none %}{{ value_json." + g.key + " }}{% endif %}";
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(want.c_str(),
+                                         parse(e->payload)["value_template"].as<std::string>().c_str(),
+                                         g.slug);
     }
-    // A field that is always present must NOT carry the guard -- it would be noise suggesting
-    // the value is optional when it is not.
+
+    // A field that is always present must NOT carry the guard -- it would suggest the value is
+    // optional when it is not.
     const auto* always = findEntity(entities, "heliograph-a1b2c3_mqtt_reconnects");
     TEST_ASSERT_NOT_NULL(always);
     TEST_ASSERT_EQUAL_STRING("{{ value_json.mqtt_reconnect_total }}",
                              parse(always->payload)["value_template"]);
+}
+
+static void test_every_new_sensor_declares_the_unit_it_reports() {
+    // Existence is not correctness. Without this, a sensor could be announced with the wrong
+    // device_class or unit -- Home Assistant would accept it, draw a graph, and label the axis
+    // wrongly -- and every other test here would stay green.
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildBridgeDiagnosticEntities(bridge, topics, kDefaultDiscoveryPrefix);
+
+    struct Expected {
+        const char* slug;
+        const char* jsonKey;       // the payload field this entity must read
+        const char* deviceClass;   // nullptr = must be absent
+        const char* stateClass;
+        const char* unit;          // nullptr = must be absent
+    };
+    static const Expected kExpected[] = {
+        {"poll_duration_ewma", "poll_duration_ewma_ms", "duration", "measurement", "ms"},
+        {"poll_duration_max", "poll_duration_max_ms", "duration", "measurement", "ms"},
+        {"rs485_stack_free", "rs485_stack_free_bytes", "data_size", "measurement", "B"},
+        {"loop_stack_free", "loop_stack_free_bytes", "data_size", "measurement", "B"},
+        {"psram_free", "psram_free_bytes", "data_size", "measurement", "B"},
+        {"mqtt_publish_failures", "mqtt_publish_failure_total", nullptr, "total_increasing", nullptr},
+        {"mqtt_reconnects", "mqtt_reconnect_total", nullptr, "total_increasing", nullptr},
+        {"wifi_reconnects", "wifi_reconnect_total", nullptr, "total_increasing", nullptr},
+        {"invalid_frames", "invalid_frame_total", nullptr, "total_increasing", nullptr},
+        {"consecutive_poll_failures", "consecutive_poll_failures", nullptr, "measurement", nullptr},
+    };
+    for (const auto& x : kExpected) {
+        const auto* e = findEntity(entities, std::string("heliograph-a1b2c3_") + x.slug);
+        TEST_ASSERT_NOT_NULL_MESSAGE(e, x.slug);
+        auto doc = parse(e->payload);
+        // The entity must read the field it is named after. Without this, two specs could trade
+        // json keys and every other test here would stay green: the payload-invariant test only
+        // proves each referenced key EXISTS, not that this entity points at the right one.
+        const std::string tmpl = doc["value_template"].as<std::string>();
+        TEST_ASSERT_TRUE_MESSAGE(tmpl.find(std::string("value_json.") + x.jsonKey) != std::string::npos,
+                                 x.slug);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(x.stateClass, doc["state_class"], x.slug);
+        if (x.deviceClass) {
+            TEST_ASSERT_EQUAL_STRING_MESSAGE(x.deviceClass, doc["device_class"], x.slug);
+        } else {
+            TEST_ASSERT_FALSE_MESSAGE(doc["device_class"].is<const char*>(), x.slug);
+        }
+        if (x.unit) {
+            TEST_ASSERT_EQUAL_STRING_MESSAGE(x.unit, doc["unit_of_measurement"], x.slug);
+        } else {
+            TEST_ASSERT_FALSE_MESSAGE(doc["unit_of_measurement"].is<const char*>(), x.slug);
+        }
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("diagnostic", doc["entity_category"], x.slug);
+    }
+}
+
+static void test_a_disconnected_bridge_does_not_report_a_signal_strength() {
+    // wifi_rssi_dbm is null while unassociated -- 0 dBm would read as an excellent signal. The
+    // entity shipped unguarded for as long as it has existed; this pins both halves, the
+    // producer's null and the consumer's guard, so they cannot drift apart again.
+    auto bridge = makeBridge();
+    bridge.wifiConnected = false;
+    DiagnosticsSnapshot d;
+    std::string payload;
+    TEST_ASSERT_TRUE(buildDiagnosticsPayload(d, bridge, payload));
+    auto doc = parse(payload);
+    TEST_ASSERT_TRUE_MESSAGE(doc.containsKey("wifi_rssi_dbm"), "the key must stay, as null");
+    TEST_ASSERT_TRUE_MESSAGE(doc["wifi_rssi_dbm"].isNull(), "0 dBm would look like a great signal");
+
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildBridgeDiagnosticEntities(bridge, topics, kDefaultDiscoveryPrefix);
+    const auto* e = findEntity(entities, "heliograph-a1b2c3_wifi_rssi");
+    TEST_ASSERT_NOT_NULL(e);
+    TEST_ASSERT_TRUE_MESSAGE(
+        parse(e->payload)["value_template"].as<std::string>().find("is not none") != std::string::npos,
+        "a nullable field needs the guard, or Home Assistant stores the string \"None\"");
 }
 
 static void test_consecutive_failures_is_a_measurement_not_a_rising_total() {
@@ -1544,6 +1646,8 @@ int main(int, char**) {
     RUN_TEST(test_every_announced_field_exists_in_the_diagnostics_payload);
     RUN_TEST(test_the_debugging_metrics_are_announced_not_only_published);
     RUN_TEST(test_a_field_that_can_be_missing_renders_empty_rather_than_none);
+    RUN_TEST(test_every_new_sensor_declares_the_unit_it_reports);
+    RUN_TEST(test_a_disconnected_bridge_does_not_report_a_signal_strength);
     RUN_TEST(test_consecutive_failures_is_a_measurement_not_a_rising_total);
     RUN_TEST(test_a_stored_coredump_is_a_problem_not_a_number);
     RUN_TEST(test_the_rest_of_the_payload_rides_along_as_attributes);
