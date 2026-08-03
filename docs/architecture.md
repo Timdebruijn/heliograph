@@ -243,7 +243,7 @@ EverSolar:
   .manufacturer = "Ever-Solar",
   .protocol = "EverSolar PMU RS485",
   .supportedTransports = { TransportType::Rs485, TransportType::Mock },
-  .recommendedSerialProfiles = { { 9600, SerialParity::None, 8, 1, 1000, 3 } },  // only one known
+  .recommendedSerialProfiles = { { 9600, SerialParity::None, 8, 1, 1000 } },  // only one known
   .supportLevel = DriverSupportLevel::Experimental,   // → Beta after Phase 3, Stable after Phase 9
   .probePriority = 10,
   .supportsAutoDetection = true,
