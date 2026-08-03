@@ -26,51 +26,23 @@
 #include "outputs/rest/capture_request.h"
 #include "outputs/rest/rest_payloads.h"
 #include "state/state_store.h"
-#include "support/fake_eversolar_device.h"
-#include "fixtures/eversolar_frames.h"
-#include "support/mock_transport.h"
 #include "support/configured_device.h"
+#include "support/eversolar_rig.h"
+#include "support/fake_eversolar_device.h"
+#include "support/mock_transport.h"
+#include "fixtures/eversolar_frames.h"
 
 using namespace heliograph;
+using test::clockFn;
 using test::FakeEversolarDevice;
+using test::g_now;
+using test::makeBridge;
 using test::MockTransport;
+using test::Rig;
 namespace fx = heliograph::fixtures;
-
-static uint64_t g_now = 0;
-static uint64_t clockFn() { return g_now; }
 
 void setUp() { g_now = 100000; }
 void tearDown() {}
-
-static BridgeInfo makeBridge() {
-    BridgeInfo b;
-    b.bridgeId        = "heliograph-a1b2c3";
-    b.bridgeOnline    = true;
-    b.wifiConnected   = true;
-    b.wifiRssiDbm     = -57;
-    b.uptimeSeconds   = 86400;
-    b.freeHeapBytes   = 180000;
-    b.firmwareVersion = "0.1.0";
-    return b;
-}
-
-struct Rig {
-    MockTransport              transport;
-    FakeEversolarDevice        device;
-    eversolar::EversolarDriver driver{transport};
-    StateStore                 store;
-    Diagnostics                diagnostics;
-
-    Rig() {
-        device.installOn(transport);
-        driver.begin(transport);
-    }
-    DeviceState poll() {
-        DeviceContext ctx(driver, store, diagnostics, clockFn);
-        ctx.pollOnce();
-        return *store.snapshot();
-    }
-};
 
 static JsonDocument parse(const std::string& json) {
     JsonDocument doc;

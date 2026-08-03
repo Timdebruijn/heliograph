@@ -16,6 +16,7 @@
 #include "drivers/modbus_profile/profile_tables.h"
 #include "protocols/modbus/modbus_rtu.h"
 #include "support/mock_transport.h"
+#include "support/modbus_frame.h"
 
 using namespace heliograph;
 using namespace heliograph::profile;
@@ -280,9 +281,7 @@ static heliograph::test::Responder sphResponder() {
             reply.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
             reply.push_back(static_cast<uint8_t>(v & 0xFF));
         }
-        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
-        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
-        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        test::appendModbusCrc(reply);
         return true;
     };
 }
@@ -316,9 +315,7 @@ static heliograph::test::Responder alwaysException() {
         reply.push_back(req[0]);
         reply.push_back(static_cast<uint8_t>(req[1] | modbus::kExceptionFlag));
         reply.push_back(0x02);  // illegal data address
-        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
-        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
-        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        test::appendModbusCrc(reply);
         return true;
     };
 }
@@ -361,9 +358,7 @@ static void test_one_refused_block_does_not_sink_the_poll() {
                 reply.push_back(static_cast<uint8_t>(v & 0xFF));
             }
         }
-        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
-        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
-        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        test::appendModbusCrc(reply);
         return true;
     });
     ModbusProfileDriver driver(transport);
@@ -387,9 +382,7 @@ static void test_a_refused_block_outranks_a_timeout_in_the_outcome() {
         reply.push_back(req[0]);
         reply.push_back(static_cast<uint8_t>(req[1] | modbus::kExceptionFlag));
         reply.push_back(0x02);
-        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
-        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
-        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        test::appendModbusCrc(reply);
         return true;
     });
     ModbusProfileDriver driver(transport);
@@ -483,9 +476,7 @@ static void test_a_silent_probe_block_moves_no_bus_counter() {
         for (uint16_t i = 0; i < count * 2; ++i) {
             reply.push_back(0x00);
         }
-        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
-        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
-        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        test::appendModbusCrc(reply);
         return true;
     });
     ModbusProfileDriver driver(transport);
@@ -517,9 +508,7 @@ static void test_a_silent_mapped_block_is_still_counted() {
         for (uint16_t i = 0; i < count * 2; ++i) {
             reply.push_back(0x00);
         }
-        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
-        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
-        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        test::appendModbusCrc(reply);
         return true;
     });
     ModbusProfileDriver driver(transport);
@@ -558,9 +547,7 @@ static void test_an_intact_reply_from_another_unit_is_not_a_checksum_error() {
         reply.push_back(2);
         reply.push_back(0x00);
         reply.push_back(0x2A);
-        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
-        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
-        reply.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+        test::appendModbusCrc(reply);
         return true;
     });
     ModbusProfileDriver driver(transport);
@@ -844,9 +831,7 @@ void echoWrites(MockTransport& t) {
             return false;
         }
         reply.assign(req.begin(), req.begin() + 6);
-        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
-        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
-        reply.push_back(static_cast<uint8_t>(crc >> 8));
+        test::appendModbusCrc(reply);
         return true;
     });
 }
@@ -1881,9 +1866,7 @@ static void test_a_device_that_refuses_is_rejected_not_reported_as_a_fault() {
             return false;
         }
         reply = {req[0], static_cast<uint8_t>(req[1] | 0x80), 0x02};  // illegal data address
-        const uint16_t crc = modbus::crc16(reply.data(), reply.size());
-        reply.push_back(static_cast<uint8_t>(crc & 0xFF));
-        reply.push_back(static_cast<uint8_t>(crc >> 8));
+        test::appendModbusCrc(reply);
         return true;
     });
     DeviceProfile profile = profileWith(kTestWrites, 1);
