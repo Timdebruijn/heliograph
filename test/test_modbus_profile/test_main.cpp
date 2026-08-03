@@ -2089,8 +2089,18 @@ static std::vector<std::string> dumpLinesAtLevel(LogLevel level) {
     driver.poll(state);
     log::setLevel(previous);
 
+    // The ring holds kLogBufferLines and overwrites its oldest. clearLines() zeroes the total
+    // too, so this compares one poll's output against one poll's capacity: today that is 26
+    // dump lines plus a handful of others, against 64. A profile with larger blocks could pass
+    // that, and then these tests would quietly be checking a suffix of the dump instead of the
+    // dump -- passing while seeing less, which is the failure mode worth spending two lines on.
+    const auto lines = log::recentLines(log::kLogBufferLines);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(static_cast<uint32_t>(lines.size()), log::totalLines(),
+                                     "log ring overflowed: these tests are no longer seeing the "
+                                     "whole dump");
+
     std::vector<std::string> dump;
-    for (const auto& l : log::recentLines(64)) {
+    for (const auto& l : lines) {
         if (l.find("MODBUS unit") != std::string::npos) {
             dump.push_back(l);
         }
