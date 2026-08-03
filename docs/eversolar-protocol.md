@@ -169,6 +169,45 @@ The reference repeats steps 2-4 every minute to find new inverters (`:1037-1040`
 a volatile bus address, which the inverter itself forgets when it loses power. This procedure
 is therefore safe as a probe (see `docs/architecture.md`, discovery).
 
+### What our own registration looks like on the wire (2026-08-03)
+
+Everything above is read from `eversolar.pl`. This is what **this firmware** actually sends,
+captured on a Relay-6CH with **no inverter attached at all** — a driver capture needs no device
+to answer, which is what makes the outgoing half of a handshake characterisable on a desk.
+
+```
+t (ms)     gap      bytes                              decoded
+  5052    5052    AA 55 01 00 00 00 10 00 00 01 10    10 00  offline query -> broadcast
+  6063    1011    AA 55 01 00 00 00 10 04 00 01 14    10 04  re-register
+  6075      12    AA 55 01 00 00 00 10 04 00 01 14    10 04
+  6086      11    AA 55 01 00 00 00 10 04 00 01 14    10 04
+  6098      12    AA 55 01 00 00 00 10 00 00 01 10    10 00  offline query -> broadcast
+ 65070   58972    ... the same five frames again
+```
+
+Three things worth having written down:
+
+**The re-register runs three times, not eight.** `kReRegisterRepeats = 3` in
+`eversolar_driver.cpp`, chosen because `eversolar.pl`'s own comment says "3 times as per
+protocol specs" while its code sends 8 — see the note in the sequence above. That decision was
+made from a comment in a Perl script; this is the first evidence that what leaves the UART
+matches it.
+
+**An attempt is five frames in ~1 s, and attempts are ~60 s apart.** The three re-registers sit
+11-12 ms apart, and the whole cycle repeats a minute later. That matches the reference repeating
+steps 2-4 every minute (`:1037-1040`).
+
+**A driver that never registers is nearly silent, and that is a diagnostic trap.** Ten frames in
+two minutes, and between attempts the poll loop short-circuits on `not_registered` without
+touching the bus at all. A 30-second capture on a bus with nothing on it can therefore land
+entirely in a gap and record **zero frames** — which looks exactly like a broken capture and is
+not one. Read `rs485_timeout_total` before and after the window: if it did not move, nothing was
+transmitted and there was nothing to record.
+
+No response is expected to any of these, so every record here is `tx` and every one is cut by
+`idle_gap` rather than by a direction change. On a bus where an inverter does answer, the same
+frames appear cut by `direction_change` instead — the reply is what ends them.
+
 ## Measurement data — `QUERY_NORMAL_INFO` (`11 02` → `11 82`)
 
 The payload is an array of **16-bit big-endian words** (`parse_packet()`, `:766-777`):
