@@ -2008,7 +2008,7 @@ static void test_a_full_line_fits_the_buffer_the_driver_gives_it() {
     TEST_ASSERT_EQUAL_size_t(8, n);
     TEST_ASSERT_EQUAL_STRING(
         "MODBUS unit 255 hold 65535: FFFF FFFF FFFF FFFF FFFF FFFF FFFF FFFF", line);
-    TEST_ASSERT_TRUE_MESSAGE(strlen(line) < sizeof(line) - 1, "the widest line must not fill the buffer");
+    TEST_ASSERT_TRUE_MESSAGE(std::strlen(line) < sizeof(line) - 1, "the widest line must not fill the buffer");
 }
 
 static void test_a_buffer_that_runs_out_cuts_back_to_a_whole_register() {
@@ -2021,7 +2021,7 @@ static void test_a_buffer_that_runs_out_cuts_back_to_a_whole_register() {
     // does not.
     TEST_ASSERT_EQUAL_size_t(1, n);
     TEST_ASSERT_EQUAL_STRING("MODBUS unit 1 in 40000: 0001", line);
-    TEST_ASSERT_TRUE_MESSAGE(strlen(line) < sizeof(line), "must stay inside the buffer");
+    TEST_ASSERT_TRUE_MESSAGE(std::strlen(line) < sizeof(line), "must stay inside the buffer");
 }
 
 static void test_a_buffer_too_small_for_the_prefix_still_yields_a_string() {
@@ -2033,7 +2033,7 @@ static void test_a_buffer_too_small_for_the_prefix_still_yields_a_string() {
     const size_t   n = formatRegisterLine(line, sizeof(line), 1, RegSpace::Input, 40000, regs, 1);
     TEST_ASSERT_EQUAL_size_t(0, n);
     TEST_ASSERT_EQUAL_STRING("MODBUS un", line);
-    TEST_ASSERT_TRUE_MESSAGE(strlen(line) < sizeof(line), "must stay inside the buffer");
+    TEST_ASSERT_TRUE_MESSAGE(std::strlen(line) < sizeof(line), "must stay inside the buffer");
 }
 
 static void test_a_zero_sized_buffer_is_refused_without_writing() {

@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <string>
 #include <vector>
@@ -878,7 +879,8 @@ static std::vector<std::string> announcedJsonKeys(const std::vector<DiscoveryEnt
             while ((i = t.find("value_json.", i)) != std::string::npos) {
                 i += 11;
                 size_t j = i;
-                while (j < t.size() && (isalnum(static_cast<unsigned char>(t[j])) || t[j] == '_')) {
+                while (j < t.size() &&
+                       (std::isalnum(static_cast<unsigned char>(t[j])) || t[j] == '_')) {
                     ++j;
                 }
                 keys.push_back(t.substr(i, j - i));
