@@ -429,12 +429,28 @@ namespace {
 // rest_api.cpp inside `#if defined(ESP32)` and the host build compiles a stub. (Counts left out
 // deliberately: they would be wrong within a month and would make a still-true paragraph read
 // as stale.) check_layering.sh rule 11 covers the part of this a machine can check.
-// 0.26.2 changes NO behaviour. It exists so a binary has a name: main had moved sixteen source
+// 0.26.2 changed NO behaviour. It existed so a binary had a name: main had moved sixteen source
 // files past v0.26.1 while still declaring 0.26.1, and SerialProfile lost a byte in the process,
 // so two different images both called themselves 0.26.1. That only mattered because the
 // Relay-1CH has never booted 0.26.x -- validating a board against an untagged build says
 // nothing about which build was validated.
-#define HELIOGRAPH_VERSION_PATCH 2
+//
+// 0.26.3 DOES change behaviour, which is the difference from the release before it. Home
+// Assistant now hears about twelve diagnostic entities it was never told existed: the payload
+// has carried between thirty-five and forty-two fields for a long time and discovery announced
+// seven, so poll duration, stack headroom, PSRAM and the quiet failure counters were on the bus
+// and invisible in the place anyone looks. A stored coredump became a binary_sensor, and the
+// remainder rides along as attributes on one entity rather than as thirty more recorder streams.
+//
+// Also fixed here: wifi_rssi_dbm is null while unassociated, and its entity had shipped with an
+// unguarded template since the day it was written, so Home Assistant would store the string
+// "None" as a signal strength.
+//
+// NOT PROVEN BY ANYTHING IN THIS REPOSITORY: that Home Assistant renders these templates the way
+// the tests assume. There is no Jinja engine in the suite; the guarded-template behaviour rests
+// on Home Assistant's documentation. This release is the first chance to find out on hardware,
+// which is the same seam that hid the capture routing bug until 0.26.1 was flashed.
+#define HELIOGRAPH_VERSION_PATCH 3
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
