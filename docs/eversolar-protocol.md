@@ -470,8 +470,17 @@ The reference does `sleep 1` after each request and then blindly reads 256 bytes
 (`:430-446`). That is crude but proves that the inverter responds well within a second.
 
 Our transport layer does it properly: read until the frame is complete (length follows from
-byte 8), with a response timeout of **1000 ms** and **3** retries. These values are set in the
-driver's `SerialProfile` and are configurable.
+byte 8), with a response timeout of **1000 ms** and a **3000 ms** ceiling on the whole
+transaction, so a device that trickles bytes forever still ends. Both are compile-time constants
+in `src/protocols/pmu/pmu_transaction.h` (`kResponseTimeoutMs`, `kTransactionDeadlineMs`), shared
+with the other PMU-family driver.
+
+**There are no retries at this layer.** An earlier version of this paragraph said "3 retries,
+set in the driver's `SerialProfile` and configurable", which was wrong in all three parts: no
+retry loop exists in the poll path, the `SerialProfile::retries` field it named was never read by
+anything (it has since been removed), and nothing ever exposed it as a setting. A failed
+transaction is counted and the next poll comes round on its own schedule; recovery is per-poll,
+not per-transaction.
 
 ## Several inverters on one bus
 
