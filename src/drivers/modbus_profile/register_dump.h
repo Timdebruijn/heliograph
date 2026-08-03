@@ -30,8 +30,17 @@ namespace heliograph::profile {
 ///
 /// Writes at most `outSize - 1` characters plus a NUL and never reads past `values[count - 1]`.
 /// Returns the number of registers actually rendered, which is below `count` only when the
-/// buffer ran out. `out` is left a valid NUL-terminated string in every case, including
-/// outSize == 0 being refused outright and a formatting failure part-way through.
+/// buffer ran out.
+///
+/// GIVEN AT LEAST ONE BYTE, `out` comes back a valid NUL-terminated string: on a full line, on a
+/// line cut short because the buffer ran out, and on a formatting failure part-way through.
+///
+/// `outSize == 0` IS THE ONE EXCEPTION and the caller owns it. Nothing is written -- there is
+/// nowhere to put a terminator -- so `out` is left exactly as it was and the return is 0. An
+/// earlier version of this paragraph promised termination "in every case, including
+/// outSize == 0", which the code never did and which its own test contradicts:
+/// test_a_zero_sized_buffer_is_refused_without_writing asserts the buffer is untouched. A
+/// postcondition a caller cannot rely on is worse than one that is absent.
 size_t formatRegisterLine(char* out, size_t outSize, uint8_t unitId, RegSpace space,
                           uint16_t start, const uint16_t* values, size_t count);
 
