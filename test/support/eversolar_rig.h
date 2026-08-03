@@ -3,11 +3,12 @@
 // The real EverSolar driver against the simulated inverter, plus the BridgeInfo that goes with
 // it -- the fixture the MQTT and REST suites both poll to get a populated DeviceState.
 //
-// These forty-six lines were byte-for-byte identical in test_mqtt and test_rest, including five
-// literal bridge values (id, RSSI, uptime, heap, firmware version). Those literals are what made
-// it worth extracting rather than tolerating: the two suites assert on the SAME payload builders
-// reading the SAME BridgeInfo, so the day one copy's uptime or version drifted, one suite would
-// have started describing a bridge the other did not, with nothing to say which was right.
+// Thirty-five lines were byte-for-byte identical in test_mqtt and test_rest -- the whole fixture
+// block bar one doc comment that only test_mqtt carried -- including five literal bridge values
+// (id, RSSI, uptime, heap, firmware version). Those literals are what made it worth extracting
+// rather than tolerating: the two suites assert on the SAME payload builders reading the SAME
+// BridgeInfo, so the day one copy's uptime or version drifted, one suite would have started
+// describing a bridge the other did not, with nothing to say which was right.
 //
 // The fake clock lives here too, because Rig::poll() feeds it to DeviceContext. It keeps the
 // name `g_now` deliberately: the two suites reference it about ninety times between them, and
