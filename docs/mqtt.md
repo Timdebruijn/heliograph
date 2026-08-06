@@ -294,13 +294,33 @@ Assistant, clutter on the broker.
 
 ### `mqtt.discovery_prefix`
 
-Here the configs really do move. The old ones stay retained, so Home Assistant keeps a full set
-of stale entities beside the new ones — reporting online forever with their last value, because
-availability is bridge-scoped and nothing publishes to the old tree any more.
+Here the configs really do move, and the old ones stay retained under the prefix nobody writes
+to any more.
 
-**Deleting the device in Home Assistant does not fix this.** The retained config is still on the
-broker, so it is rediscovered on the next Home Assistant restart. It has to be cleared at the
-broker.
+What that costs depends on Home Assistant, which subscribes to exactly **one** discovery prefix
+(its own setting, default `homeassistant`). So there are two outcomes, and neither is the one you
+might expect:
+
+- **Home Assistant still points at the old prefix.** It keeps reading the old configs, and those
+  configs still work — `state_topic` and `availability_topic` are built from the base topic and
+  the bridge id, not from the discovery prefix, so nothing about them moved and the bridge is
+  still publishing to them every poll. Your entities carry on as if nothing happened, and the
+  bridge's new configs are announced into a prefix nothing is listening to. The change silently
+  did nothing.
+- **You moved Home Assistant's prefix too.** It reads the new configs and never subscribes to the
+  old ones, so they produce no entities at all. They sit on the broker as retained bytes that
+  come back the moment anything points at that prefix again — a second Home Assistant, or you
+  switching back to compare.
+
+**Entities that report *online* forever with a stale value need the state tree to be abandoned as
+well**, which takes a base-topic change on top of this one. A discovery-prefix change alone
+cannot produce them: the topics those configs name are the ones still being written.
+
+What Home Assistant does with entities already in its registry when *its own* prefix setting
+changes is not stated in its documentation, and is not asserted here. What is documented is that
+an empty payload on a config topic removes the component — which is what the cleanup below does,
+and it is the reason deleting the device inside Home Assistant is not enough on its own: the
+retained config survives on the broker and is rediscovered whenever that prefix is read again.
 
 ### Clearing it
 
@@ -308,7 +328,9 @@ The bridge logs the old and new prefixes when it notices the change, so the tree
 named in the boot log rather than left for you to work out.
 
 Retained messages are deleted by publishing an empty payload to the same topic with the retain
-flag set. With mosquitto's tools, for a base topic that moved:
+flag set. With mosquitto's tools, for a base topic that moved (add `-u USER -P PASS` to both
+commands if your broker wants credentials — Home Assistant's own Mosquitto add-on does by
+default, and without them these fail with nothing useful on stdout):
 
 ```bash
 mosquitto_sub -h BROKER -t 'OLD_BASE/BRIDGE_ID/#' -v --retained-only -W 2 \
@@ -341,7 +363,10 @@ Check what would be deleted before deleting it: drop the `xargs` line and read t
 An automatic sweep on boot has to get the distinction above exactly right, and the failure mode
 of getting it wrong is deleting the discovery configs that were just correctly rewritten —
 turning broker clutter into a device that vanishes from someone's dashboard, unattended. No
-comparable project does this in firmware either: ESPHome ships `esphome clean-mqtt` and Tasmota
-points at Tasmota Device Manager, both host-side tools a human runs deliberately.
+comparable project does this in firmware either. ESPHome ships `esphome clean-mqtt` as a
+first-party subcommand; Tasmota has no equivalent of its own and its documentation points at
+Tasmota Device Manager, a separately maintained community tool. Both are host-side and both are
+run deliberately by a human, which is the part that matters here — but they are not the same kind
+of thing, and citing them as a matched pair overstated the second one.
 
 Tracked in [#41](https://github.com/Timdebruijn/heliograph/issues/41).
