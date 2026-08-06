@@ -457,7 +457,15 @@ namespace {
 // the tests assume. There is no Jinja engine in the suite; the guarded-template behaviour rests
 // on Home Assistant's documentation. This release is the first chance to find out on hardware,
 // which is the same seam that hid the capture routing bug until 0.26.1 was flashed.
-#define HELIOGRAPH_VERSION_PATCH 3
+// 0.26.4 is the backup-and-restore round, and it is small on purpose. Two things a person sees:
+// the restore preview breaks a changed list into one row per field instead of serialising the
+// whole array onto one row, and the message after a restore names the undo control instead of
+// pointing at where it is not.
+//
+// Six commits touched src/ since v0.26.3 and only two of them change behaviour; the other four
+// are comment corrections -- verified by diffing each one with comment lines stripped, rather
+// than by reading the subjects. Worth doing before writing a release note that says "small".
+#define HELIOGRAPH_VERSION_PATCH 4
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
