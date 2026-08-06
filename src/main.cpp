@@ -1269,8 +1269,9 @@ void reconcileAnnouncedDevices(const BridgeInfo& bridge) {
     // include it, so those configs are OVERWRITTEN in place rather than orphaned. An automatic
     // sweep that gets that distinction wrong deletes a working device from someone's dashboard
     // while nobody is watching, which is why no comparable project does this in firmware either
-    // (ESPHome ships `esphome clean-mqtt`, Tasmota points at its Device Manager -- both host-side
-    // tools a human runs). What the bridge CAN do that an external script cannot is know where
+    // (ESPHome ships `esphome clean-mqtt` as a first-party subcommand; Tasmota has none of its
+    // own and points at Tasmota Device Manager, a community tool -- both host-side, both run
+    // deliberately by a human). What the bridge CAN do that an external script cannot is know where
     // its own topics used to be, so it names them. See docs/mqtt.md and issue #41.
     if (previous.prefixesKnown()) {
         if (previous.baseTopic != g_config.mqtt.baseTopic) {
