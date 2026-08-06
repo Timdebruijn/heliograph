@@ -83,54 +83,13 @@ the bookkeeping rather than being recorded as cleared. Not covered:
 - **A boot where a configured device did not start.** Nothing is cleared that boot: a device
   skipped for a duplicate address or a driver that is not compiled in is still configured, and
   its id cannot be known without its driver. Fix the configuration and reboot. The log says so.
-- **A changed base topic or discovery prefix**, which the bridge reports rather than clears —
-  see the section below for what is actually left behind and how to remove it.
+- **A changed base topic or discovery prefix**, which the bridge reports rather than clears.
+  See [Changing the base topic or the discovery prefix](#changing-the-base-topic-or-the-discovery-prefix)
+  for which of the two costs you anything and how to clear what is left.
 - **A factory reset**, which erases the bookkeeping along with everything else, and a
   bookkeeping entry that cannot be read back.
 - **A bridge that ran a build from before this existed.** Its orphans have to be cleared by
   hand (`mosquitto_pub -r -n -t <topic>`) or deleted in Home Assistant.
-
-### Changing the base topic or the discovery prefix
-
-The bridge **names what it left behind and does not delete it.** The bookkeeping records the
-topic tree each announcement went to, so on the first boot after a change the log says which
-prefix the old payloads are under. Clearing them is a one-line job you run; the firmware does not
-do it for you, for the reason at the end of this section.
-
-The two settings fail differently, and it is worth knowing which one you changed.
-
-**Changing only `mqtt.base_topic` costs you nothing in Home Assistant.** A discovery config's
-topic is `<discovery_prefix>/<component>/<unique_id>/config`, and `unique_id` is derived from the
-bridge id and the device id — the base topic appears nowhere in it. So every config is rewritten
-*in place* with a `state_topic` pointing at the new tree, and the entities follow, history
-intact. What stays behind is the old `state`, `identity` and `capabilities` payloads: retained
-bytes on your broker that nothing reads any more. Litter, not zombies.
-
-**Changing `mqtt.discovery_prefix` is the one that leaves entities behind.** The old configs are
-at a path the bridge no longer writes to, so Home Assistant keeps reading them, pointing at a
-`state_topic` that is no longer updated. Availability is bridge-scoped by design, so those
-entities never go unavailable — they report *online* forever with their last value, and any
-template or automation summing your inverters keeps counting them.
-
-To see what is there, and then remove it:
-
-```bash
-mosquitto_sub -h <broker> -v -t 'OLD_PREFIX/#' --retained-only -W 2
-mosquitto_pub -h <broker> -r -n -t 'OLD_PREFIX/sensor/<unique_id>/config'
-```
-
-An empty retained payload (`-r -n`) is what deletes a retained topic, and for a discovery config
-it is also what tells Home Assistant to drop the entity. Deleting the entities in Home Assistant
-works too, but leaves the retained configs on the broker to come back on the next restart.
-
-**Why the firmware does not sweep this itself.** Getting the distinction above wrong deletes a
-working device from someone's dashboard while nobody is watching. The bridge would have to be
-certain which of the two settings moved and which configs are consequently live — and a
-single-character typo in a prefix, corrected a minute later, would have it clearing a tree it is
-about to use again. No comparable project does this in firmware either: ESPHome ships
-`esphome clean-mqtt` and Tasmota points at its Device Manager, both host-side tools a human runs
-deliberately. What the bridge can do that an external script cannot is know where its own topics
-used to be, so it says so. See issue #41.
 
 > **Which device is "first" comes from the configuration, not from boot order.** It is the
 > `driver` entry. If it fails to start, no device takes over the bridge-scoped topics — that is
