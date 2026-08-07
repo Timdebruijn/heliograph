@@ -549,14 +549,34 @@ Otherwise: show candidates in the web interface, user confirms. In the MVP, de f
 one real driver is registered, so the second condition is trivial — but the logic is tested
 with a mock registry containing two competing drivers.
 
-### Forbidden during discovery — enforced
+### Forbidden during discovery — and how far that is enforced
 
 Writing, Modbus FC5/6/15/16, broadcast writes, start/stop, power limits, address changes,
 setting time, factory reset, firmware update, brute-forcing.
 
-This is not only documented but enforced: the discovery engine calls **exclusively**
-`driver->probe()`, never `execute()`. `probe()` receives a `ProbeContext` with a `readOnly`
-transport wrapper that refuses write actions outside the driver's whitelist.
+**What is enforced:** the discovery engine calls **exclusively** `driver->probe()`, never
+`execute()`. Every command the firmware can issue goes through `execute()`, so none of them is
+reachable from a discovery run. That is a property of the call site, and
+`test_discovery_never_executes_a_command` holds it in place.
+
+**What is not enforced, and used to be claimed here.** This section previously said `probe()`
+receives a `ProbeContext` with a `readOnly` transport wrapper that refuses writes outside a
+per-driver whitelist. No such type exists, in `src/` or anywhere else — the sentence described a
+design that was never built. A driver's `probe()` holds the same `Transport&` it was handed in
+`begin()`, and nothing structurally stops it from writing.
+
+Building the wrapper as described turns out not to be possible at the transport layer: on RS485
+every request is a transmission, so a byte-level guard cannot tell a Modbus read from a Modbus
+write without protocol knowledge — and protocol knowledge in the transport is what the layering
+rule exists to prevent. The distinction is only available one layer up, at
+`modbus::writeSingleRegister()` and at the PMU control codes. That remains possible to build; it
+is not built.
+
+**And one write during discovery is unavoidable.** The AA55/PMU family registers a device by
+assigning it a bus address, so `EversolarDriver::probe()` transmits `kReRegister` and
+`kSendAddress` by design. There is no read-only way to discover such an inverter. A guard would
+have to permit it explicitly rather than forbid all writes — which is why the whitelist appeared
+in the sentence above, and why deleting the sentence is not the same as deleting the idea.
 
 Modes: **Quick** (only drivers with `supportsAutoDetection`, recommended profile, 1 round),
 **Extended** (all profiles, multiple rounds — can only be started manually), **Manual**.
