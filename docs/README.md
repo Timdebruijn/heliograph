@@ -85,6 +85,7 @@ them as guidance — a "next step" in one of them may have happened months ago.
 | [esp32s3-hardware-audit.md](esp32s3-hardware-audit.md) | Hardware audit against v0.13.2, 2026-07-26. |
 | [solar-assistant-source.md](solar-assistant-source.md) | Notes on a comparable product's MQTT structure. |
 | [passive-decode-plan-2026-08-07.md](passive-decode-plan-2026-08-07.md) | **A plan, not a feature.** Turning a passive bus capture into a readable transaction list. Nothing in it is built, and one number it depends on is unmeasured. |
+| [grid-source-and-control-plan-2026-08-08.md](grid-source-and-control-plan-2026-08-08.md) | **A design, not a feature.** Reading the household grid figure, and eventually acting on it locally. Nothing in it is built and most of it is deliberately deferred; three numbers it depends on are unmeasured. |
 
 ---
 
