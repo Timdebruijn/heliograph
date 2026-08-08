@@ -12,8 +12,9 @@ reasoning does not have to be derived a second time. Read it as intent, not as d
 That order matters more than anything else here: the control layer in sections 6 and 7 is
 designed but **not next**. See [Three tracks](#three-tracks).
 
-**Three numbers in it are unmeasured.** They are listed under [Open questions](#open-questions),
-and two of them gate decisions rather than follow from them.
+**Three things in it are unmeasured or unconfirmed**, and only one of them is a number. They are
+listed under [Open questions](#open-questions), and each gates a decision rather than following
+from one.
 
 ## Why
 
@@ -179,6 +180,10 @@ The capture side of this comparison is measured; the heap figures for TLS are no
 **MQTT is weakest exactly where the freshness gate leans.** Retained messages mean a value hours
 old can arrive looking current, and broker liveness says nothing about meter liveness. Usable if
 the payload carries its own timestamp; otherwise it is observe-grade.
+
+That is a limit, not a disqualification. Where observing is the whole job — see the battery under
+[Open questions](#open-questions) — observe-grade is exactly the right tool, and it beats
+rebuilding a protocol something else already speaks.
 
 **Push is safer, not merely tidier.** Polling learns a source is gone after N timeouts — three
 seconds at a one-second interval, half a minute at ten. A dropped socket is immediate. The price
@@ -521,10 +526,25 @@ write-back verification after every command. If it works, the battery becomes a 
 participant, which makes priority between it and a charger enforceable and gives track C its
 second participant, over a path independent of the dormant Modbus write path.
 
-**But the open question is whether it answers at all.** That project lists the AEG Solarcube as
-only partially supported, and the issue that prompted this section is a Solarcube that accepts a
-connection on 8080 and returns nothing usable. **One test from a laptop settles it, and nothing
-should be built before it does.**
+**Probing the unit on this network settled two things.** Port **502 is closed** — there is no
+Modbus TCP on this device, so the profile pipeline route does not reach it. And port 8080 accepts
+a connection and then returns **nothing**: three well-formed requests, a listen-only session, and
+both line terminators each produced zero bytes, while rapid reconnections drew a reset.
+
+That silence is not the device being broken. **The community integration reads and controls this
+battery successfully today** — the probe was wrong, not the unit. Two explanations remain: either
+the serial number filters the request (it was sent as zero), or **the device serves one client at
+a time and Home Assistant holds it.** The reset under rapid reconnection points at the second.
+
+**If it is one client at a time, a codec in this firmware would break a working integration in
+order to duplicate it.** So the decision is to take the battery from Home Assistant over MQTT
+instead: no codec, no socket, no serial number in configuration, and no contention for the only
+session. The price is a dependency on Home Assistant, which is acceptable here because this serves
+the *secondary* goal — observing the battery and accounting for it in the budget — and not the
+primary one.
+
+What is still genuinely open is much smaller than the original question: **which entities that
+integration publishes, and whether they are enough for the accounting** described in section 8.
 
 **The TLS heap on this board is unmeasured.** The figure that matters is a single session's cost
 against roughly 130 KB minimum free heap. The library defaults suggest tens of kilobytes, but that
