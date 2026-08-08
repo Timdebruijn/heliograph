@@ -100,9 +100,12 @@ Checked rather than assumed: of the eleven rules in `tools/check_layering.sh`, *
 appears in exactly one** — rule 8, "no comment cites a line number in our own source". So the
 decoder may name a function but must not pin one to a line number.
 
-(Rule 8 caught this file on its first run: an earlier draft spelled such a reference out as an
-example of what not to write, and the rule cannot tell an example from the real thing. It is
-right not to try — the line would have drifted either way.)
+(Stated precisely, because an earlier draft of this paragraph got it wrong and claimed the rule
+had caught this file. It cannot have: rule 8 scans `src/`, `test/` and `tools/*.py`, and **not**
+`docs/`. Checked by putting a line reference in a markdown file and watching the rule pass. So the
+constraint binds the decoder script, which lives in `tools/`; it does not bind this note. Naming a
+function rather than a line is still the right habit here — the line drifts either way — but that
+is a convention, not something the build enforces.)
 
 Rule 1 (brand knowledge only in `src/drivers/`) does not reach `tools/`, and would not fire
 anyway: function codes 03 and 04 are the Modbus standard, not brand knowledge. That is the same
