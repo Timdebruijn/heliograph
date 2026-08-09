@@ -18,6 +18,7 @@
 #endif
 #if ENABLE_DRIVER_SUNSPEC
 #include "sunspec/sunspec_driver.h"
+#include "solarmax/solarmax_driver.h"
 #endif
 #if ENABLE_DRIVER_MOCK
 #include "mock/mock_driver.h"
@@ -179,6 +180,7 @@ void registerBuiltinDrivers(DriverRegistry& registry) {
 #endif
 #if ENABLE_DRIVER_SUNSPEC
     registry.registerDriver(sunspec::descriptor(), sunspec::factory);
+    registry.registerDriver(solarmax::descriptor(), solarmax::factory);
 #endif
 #if ENABLE_DRIVER_MOCK
     registry.registerDriver(mock::readOnlyDescriptor(), mock::readOnlyFactory);
