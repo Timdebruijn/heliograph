@@ -1,6 +1,6 @@
 # Documentation
 
-Thirty-one documents, grouped by **why you are here** rather than by what they are about. Start
+Thirty-two documents, grouped by **why you are here** rather than by what they are about. Start
 in the row that matches what you are trying to do.
 
 New to the project? [The README](../README.md) answers "what is this and does it work with my
@@ -39,6 +39,7 @@ and why.
 | [deye-sun-xk-sg-protocol.md](deye-sun-xk-sg-protocol.md) · [solis-rhi-protocol.md](solis-rhi-protocol.md) · [sungrow-sh-protocol.md](sungrow-sh-protocol.md) | Single-phase hybrids with a battery port. |
 | [huawei-sun2000-protocol.md](huawei-sun2000-protocol.md) · [goodwe-et-protocol.md](goodwe-et-protocol.md) | Huawei SUN2000 (± LUNA2000); GoodWe ET/EH/BT/BH. **GoodWe ships at unit id 247, not 1.** |
 | [solax-x1-protocol.md](solax-x1-protocol.md) | SolaX X1. Read this **before buying or wiring** — the first attempt on real hardware returned nothing at all. |
+| [solarmax-protocol.md](solarmax-protocol.md) | SolarMax, via the MaxTalk ASCII protocol. The vendor is gone; this is the only way these units report anything. **No SolarMax has ever answered it** — and DC voltage is left unmapped because the sources disagree. |
 | [sunspec.md](sunspec.md) | The vendor-neutral standard. One driver for any inverter that implements it. |
 
 > **Every Modbus register map here is `experimental`** — transcribed from documents, never
@@ -86,7 +87,7 @@ them as guidance — a "next step" in one of them may have happened months ago.
 | [solar-assistant-source.md](solar-assistant-source.md) | Notes on a comparable product's MQTT structure. |
 | [passive-decode-plan-2026-08-07.md](passive-decode-plan-2026-08-07.md) | **A plan, not a feature.** Turning a passive bus capture into a readable transaction list. Nothing in it is built, and one number it depends on is unmeasured. |
 | [grid-source-and-control-plan-2026-08-08.md](grid-source-and-control-plan-2026-08-08.md) | **A design, not a feature.** Reading the household grid figure, and eventually acting on it locally. Nothing in it is built and most of it is deliberately deferred; three things it depends on are still unmeasured or unconfirmed. |
-| [solarmax-maxtalk-plan-2026-08-09.md](solarmax-maxtalk-plan-2026-08-09.md) | **Protocol notes, not a driver.** SolarMax MaxTalk over RS485: frame format, codes and scaling, and how a driver would fit. Nothing is built, nobody here owns the hardware, and the two sources disagree on one scaling factor. |
+| [solarmax-maxtalk-plan-2026-08-09.md](solarmax-maxtalk-plan-2026-08-09.md) | The desk research behind the SolarMax driver, and which claim came from which source. **Superseded as guidance by** [solarmax-protocol.md](solarmax-protocol.md), which describes what was actually built; this is kept for the reasoning. |
 
 ---
 
