@@ -363,6 +363,7 @@ const MEAS=[
   ['battery.energy_discharged','Energy discharged','Battery',2],
   ['grid.import_power','Importing','Grid',0],
   ['grid.export_power','Exporting','Grid',0],
+  ['grid.power','Net flow','Grid',0],
   ['load.power','House load','Grid',0],
   ['inverter.temperature','Temperature','Device',1],
   ['inverter.operating_hours','Operating hours','Device',0],

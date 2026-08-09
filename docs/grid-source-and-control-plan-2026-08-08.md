@@ -89,7 +89,7 @@ The model already solved this exact problem once, for the battery: a signed `bat
 alongside `battery.charge_power` and `battery.discharge_power`, justified as *"the raw rails, for
 a device that reads them separately and a consumer that wants them apart"*. Grid is structurally
 identical. **A signed channel plus the existing rails is therefore consistency, not novelty**, and
-it unblocks the two stuck profiles as a side effect.
+it unblocks one of the two stuck profiles as a side effect. **Only one** — checked while implementing it: the Deye map is blocked on the rail shape and a signed channel frees it, but the Solis map is blocked on two sources disagreeing by a factor of a thousand about the meter registers, which no vocabulary change can settle.
 
 Precedence, which the battery channels never had to answer: **the signed channel wins for
 control, the rails are informational.** A controller must never arbitrate between two sources of
@@ -440,7 +440,7 @@ Three things that break and need fixing before this works:
 Not a sequence. Two of these are independent.
 
 **Track A — the integrations. Not blocked, start here.** Fill the grid channels and every output
-lights up with no output change; the signed channel unblocks two stuck profiles; MBAP framing
+lights up with no output change; the signed channel unblocks one stuck profile (Deye; Solis is blocked on a source conflict instead); MBAP framing
 opens a whole device class as data files; mDNS makes them findable. None of it touches the write
 path, none needs hardware verification, all of it is host-testable. If nothing else in this note
 happens, this is a good release on its own — and it makes the HA-driven mode better, because more

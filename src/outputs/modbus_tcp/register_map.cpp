@@ -308,6 +308,8 @@ void RegisterMap::update(const DeviceState& state, const BridgeInfo& bridge,
                        ValidityBit::GridImportPower);
     publishMeasurement(state, measurement_id::kGridExportPower, reg::kGridExportPower,
                        ValidityBit::GridExportPower);
+    publishMeasurement(state, measurement_id::kGridPower, reg::kGridPower,
+                       ValidityBit::GridPower);
 
     // --- capabilities ---
     writeBitset64(reg::kCapabilitiesRead, state.capabilities.read);

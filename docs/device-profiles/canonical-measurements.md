@@ -50,6 +50,7 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `battery.discharge_power` | W | Discharge rail, ditto |
 | `grid.import_power` | W | Power drawn from the grid, for a hybrid with a meter |
 | `grid.export_power` | W | Power fed back to the grid |
+| `grid.power` | W | **Net grid flow, signed**: positive = importing, negative = exporting. Prefer this where a device reports one bidirectional register; the two rails above are for devices that publish them separately. Where both exist, this one is what a controller acts on. |
 | `load.power` | W | What the house is drawing, as the inverter measures it — **positive = consuming** |
 
 ## Conventions
