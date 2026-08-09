@@ -34,7 +34,18 @@ fi
 # Keep this list in step with profiles/: two vendors were added to the tree while this grep
 # still listed only the older ones, so the rule it enforces had a hole exactly where the
 # newest brand knowledge was most likely to leak.
-if hits=$(grep -rniE 'eversolar|zeversolar|growatt|solax|deye|sunsynk|solis|goodwe|sungrow|huawei' \
+#
+# It happened again, and the second time proves the first was not bad luck. A comment in the
+# canonical model explained the grid sign convention by naming three meter brands -- exactly what
+# the note above forbids -- and this grep passed it, because none of the three make inverters and
+# none had a profile yet. A reviewer caught it; the gate could not.
+#
+# So the list now runs AHEAD of profiles/ rather than behind it. Everything below the inverter
+# vendors is a brand this project has researched, planned for, or has hardware from, with no
+# profile yet -- meters, batteries and network devices included. The cost of a name that never
+# arrives is nothing; the cost of one that arrives first in a comment is a rule that quietly
+# stopped applying.
+if hits=$(grep -rniE 'eversolar|zeversolar|growatt|solax|deye|sunsynk|solis|goodwe|sungrow|huawei|homewizard|shelly|eastron|chint|solarmax|sputnik|omnik|trannergy|aeg|solarcube' \
         src/ --exclude-dir=drivers 2>/dev/null | grep -v 'LEGACY-CONFIG-ID'); then
     echo "FAIL: manufacturer names found outside src/drivers/:"
     echo "$hits"

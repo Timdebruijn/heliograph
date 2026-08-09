@@ -178,10 +178,12 @@ inline constexpr const char* kGridExportPower = "grid.export_power";
 /// than left to the first controller to rediscover: whoever wires the first consumer has to
 /// implement the rule, not assume the vocabulary carries it.
 ///
-/// Sign follows the meters themselves (HomeWizard, Shelly, Eastron all report import positive)
-/// rather than battery.power's "into the thing being measured" reading, which would point the
-/// other way. Where a convention already exists in the field, matching it beats being internally
-/// tidy: every mapping of a real device would otherwise carry a negation nobody can see.
+/// Sign follows the prevailing convention among grid meters, which report import positive, rather
+/// than battery.power's "into the thing being measured" reading, which would point the other way.
+/// Where a convention already exists in the field, matching it beats being internally tidy: every
+/// mapping of a real device would otherwise carry a negation nobody can see. The survey that
+/// established which way round the field actually goes is in the grid-source design note under
+/// docs/, which is where naming specific products belongs.
 inline constexpr const char* kGridPower = "grid.power";
 /// What the house is drawing, as the inverter measures it. Positive = consuming.
 ///
