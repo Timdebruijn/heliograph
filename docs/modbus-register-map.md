@@ -117,7 +117,7 @@ the registers in question. Both mechanisms are always consistent.
 | 100-199 | AC phases |
 | 200-299 | DC/MPPT channels |
 | 300-399 | Battery (empty for EverSolar) |
-| 400-499 | House flows: grid import/export, load (empty for EverSolar) |
+| 400-499 | House flows: grid import/export, load, net grid power (empty for EverSolar) |
 | 500-599 | Status and errors |
 | 600-699 | Capabilities + validity bitmap |
 | 700-799 | Identity strings |
@@ -221,6 +221,7 @@ profile-driven hybrid populates whichever of these its register map declares.
 | 400 | 2 | float32 | `grid.import_power` |
 | 402 | 2 | float32 | `grid.export_power` |
 | 404 | 2 | float32 | `load.power` — what the house is drawing, positive = consuming |
+| 406 | 2 | float32 | `grid.power` — net grid flow, **signed**: positive = importing, negative = exporting |
 
 `load.power` sits here rather than in a region of its own: it is a house-level flow like the two
 grid rails above, and it is appended after them so no published address moves. It is **not**

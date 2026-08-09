@@ -157,6 +157,27 @@ inline constexpr const char* kBatteryDischargePower = "battery.discharge_power";
 /// House-level flows, for hybrids with a meter. Also long-standing Modbus registers.
 inline constexpr const char* kGridImportPower = "grid.import_power";
 inline constexpr const char* kGridExportPower = "grid.export_power";
+/// Net grid flow, signed: positive = importing from the grid, negative = exporting to it.
+///
+/// The rails above are two unsigned channels; almost every meter and every hybrid register that
+/// reports this at all reports ONE SIGNED NUMBER. Splitting that into two rails needs arithmetic,
+/// which a profile cannot do -- so a device whose only grid register is signed had nowhere to
+/// publish it, and shipped without grid data it could actually read.
+///
+/// The battery channels solved exactly this shape already: signed battery.power alongside the raw
+/// charge/discharge rails, for the same reason and with the same division of labour. This is that
+/// arrangement applied to the grid, not a new pattern.
+///
+/// PRECEDENCE, which the battery channels never had to state: where a device publishes both, this
+/// signed channel is the one to act on and the rails are informational. A consumer must never
+/// arbitrate between two sources of one quantity, and if they disagree that is a fault to report
+/// rather than an average to take.
+///
+/// Sign follows the meters themselves (HomeWizard, Shelly, Eastron all report import positive)
+/// rather than battery.power's "into the thing being measured" reading, which would point the
+/// other way. Where a convention already exists in the field, matching it beats being internally
+/// tidy: every mapping of a real device would otherwise carry a negation nobody can see.
+inline constexpr const char* kGridPower = "grid.power";
 /// What the house is drawing, as the inverter measures it. Positive = consuming.
 ///
 /// Distinct from the grid rails above: on a hybrid the house can be fed by PV, by the battery,
@@ -193,6 +214,7 @@ inline constexpr const char* kAll[] = {
     kTemperature,    kOperatingHours, kBatterySoc,     kBatteryPower,   kBatteryVoltage,
     kBatteryCurrent, kBatteryTemperature, kBatteryEnergyCharged, kBatteryEnergyDischarged,
     kBatteryChargePower, kBatteryDischargePower, kGridImportPower, kGridExportPower,
+    kGridPower,
     kLoadPower,
     kActivePowerLimitPct, kActivePowerLimitEnabled,
 };

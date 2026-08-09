@@ -94,6 +94,12 @@ inline constexpr uint16_t kGridExportPower = 402;  // float32
 /// House load. In this region rather than a new one: it is a house-level flow like the two
 /// above, and 400-499 has room. Appended at the end of the used range so nothing moves.
 inline constexpr uint16_t kLoadPower       = 404;  // float32
+/// Net grid flow, signed (positive = import). Appended for the same reason kLoadPower was: a
+/// client reading 400-405 today keeps reading exactly what it read before.
+///
+/// float32 carries the sign for free, which is why this region can take a signed value at all --
+/// the uint16 registers elsewhere in the map could not have without picking an offset encoding.
+inline constexpr uint16_t kGridPower       = 406;  // float32
 
 // --- status (500-599) ---
 inline constexpr uint16_t kStatusCodeMirror   = 500;  // uint16
@@ -200,6 +206,7 @@ enum class ValidityBit : uint8_t {
     DcMppt5Current = 37,
     DcMppt5Power   = 38,
     LoadPower      = 39,
+    GridPower      = 40,
     _Count
 };
 

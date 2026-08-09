@@ -637,6 +637,81 @@ static void test_house_load_is_published_separately_from_the_grid_rails() {
     TEST_ASSERT_TRUE(reg::kLoadPower >= reg::kGridExportPower + 2);
 }
 
+// The whole reason this channel exists is that it carries a sign, so that is what gets asserted:
+// a negative value has to survive the round trip through two 16-bit registers unchanged.
+//
+// An unsigned rail cannot express export at all, which is why a device whose only grid register is
+// signed had nowhere to publish it. If this channel ever lost its sign on the way out it would
+// silently report an exporting house as importing the same amount -- a reading that looks entirely
+// plausible and is exactly backwards.
+static void test_net_grid_power_carries_its_sign_through_the_registers() {
+    Diagnostics diag;
+    BridgeInfo  bridge;
+
+    // Exporting: negative.
+    {
+        RegisterMap map;
+        DeviceState state;
+        state.measurements.declare(measurement_id::kGridPower, MeasurementType::Power, Unit::Watt,
+                                   "Grid power");
+        state.measurements.set(measurement_id::kGridPower, -2150.0, g_now);
+        state.lastSuccessfulPollMs = g_now;
+        state.dataValid            = true;
+        map.update(state, bridge, diag.snapshot(), g_now);
+
+        TEST_ASSERT_EQUAL_UINT16(406, reg::kGridPower);
+        TEST_ASSERT_FLOAT_WITHIN(0.01f, -2150.0f, decodeFloat(map, reg::kGridPower));
+        TEST_ASSERT_TRUE(map.validityBit(ValidityBit::GridPower));
+    }
+
+    // Importing: positive, same channel.
+    {
+        RegisterMap map;
+        DeviceState state;
+        state.measurements.declare(measurement_id::kGridPower, MeasurementType::Power, Unit::Watt,
+                                   "Grid power");
+        state.measurements.set(measurement_id::kGridPower, 940.0, g_now);
+        state.lastSuccessfulPollMs = g_now;
+        state.dataValid            = true;
+        map.update(state, bridge, diag.snapshot(), g_now);
+
+        TEST_ASSERT_FLOAT_WITHIN(0.01f, 940.0f, decodeFloat(map, reg::kGridPower));
+    }
+}
+
+// Publishing the net figure must not invent the rails, and vice versa. They are separate readings
+// from separate registers on real devices, and deriving one from the other would put a number in
+// front of an operator that no meter ever produced.
+static void test_net_grid_power_and_the_rails_do_not_infer_each_other() {
+    Diagnostics diag;
+    RegisterMap map;
+    BridgeInfo  bridge;
+
+    DeviceState state;
+    state.measurements.declare(measurement_id::kGridPower, MeasurementType::Power, Unit::Watt,
+                               "Grid power");
+    state.measurements.set(measurement_id::kGridPower, -800.0, g_now);
+    state.lastSuccessfulPollMs = g_now;
+    state.dataValid            = true;
+
+    map.update(state, bridge, diag.snapshot(), g_now);
+
+    // Assert the net channel arrived FIRST. Without this the rest of the test passes just as
+    // happily when nothing is published at all -- everything is NaN then, including the rails it
+    // is checking, so "the rails were not inferred" would be true for the wrong reason. Found by
+    // deleting the publish call and watching this test stay green.
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, -800.0f, decodeFloat(map, reg::kGridPower));
+    TEST_ASSERT_TRUE(map.validityBit(ValidityBit::GridPower));
+
+    TEST_ASSERT_TRUE(std::isnan(decodeFloat(map, reg::kGridImportPower)));
+    TEST_ASSERT_TRUE(std::isnan(decodeFloat(map, reg::kGridExportPower)));
+    TEST_ASSERT_FALSE(map.validityBit(ValidityBit::GridImportPower));
+    TEST_ASSERT_FALSE(map.validityBit(ValidityBit::GridExportPower));
+
+    // Appended past load at 404, so a client reading 400-405 sees exactly what it saw before.
+    TEST_ASSERT_TRUE(reg::kGridPower >= reg::kLoadPower + 2);
+}
+
 static void test_validity_bits_fit_the_reserved_space() {
     // 8 registers = 128 bits at reg::kValidityBitmap.
     TEST_ASSERT_TRUE(static_cast<size_t>(ValidityBit::_Count) <= 128);
@@ -675,6 +750,8 @@ int main(int, char**) {
     RUN_TEST(test_validity_bitmap_and_nan_always_agree);
     RUN_TEST(test_strings_three_to_five_land_in_their_own_slots);
     RUN_TEST(test_house_load_is_published_separately_from_the_grid_rails);
+    RUN_TEST(test_net_grid_power_carries_its_sign_through_the_registers);
+    RUN_TEST(test_net_grid_power_and_the_rails_do_not_infer_each_other);
     RUN_TEST(test_validity_bits_fit_the_reserved_space);
     RUN_TEST(test_relay_registers_use_the_sentinel_without_hardware);
     RUN_TEST(test_firmware_version_registers_report_the_running_version);
