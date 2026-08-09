@@ -173,6 +173,11 @@ inline constexpr const char* kGridExportPower = "grid.export_power";
 /// arbitrate between two sources of one quantity, and if they disagree that is a fault to report
 /// rather than an average to take.
 ///
+/// NOTHING ENFORCES THAT RULE YET, because nothing consumes these channels together -- no code in
+/// this tree sums, derives or arbitrates between grid readings today. It is written here rather
+/// than left to the first controller to rediscover: whoever wires the first consumer has to
+/// implement the rule, not assume the vocabulary carries it.
+///
 /// Sign follows the meters themselves (HomeWizard, Shelly, Eastron all report import positive)
 /// rather than battery.power's "into the thing being measured" reading, which would point the
 /// other way. Where a convention already exists in the field, matching it beats being internally
