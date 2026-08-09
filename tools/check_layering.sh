@@ -68,6 +68,8 @@ core_paths=(
     src/protocols/pmu/pmu_protocol.cpp
     src/protocols/pmu/pmu_transaction.h
     src/protocols/pmu/pmu_transaction.cpp
+    src/protocols/maxtalk/maxtalk.h
+    src/protocols/maxtalk/maxtalk.cpp
     src/network/rtc_time.h
     src/network/rtc_time.cpp
     src/drivers/eversolar_legacy/eversolar_parser.h

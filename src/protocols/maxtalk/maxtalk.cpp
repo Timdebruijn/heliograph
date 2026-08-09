@@ -152,8 +152,10 @@ ParseResult parseReply(const char* frame, size_t length, uint8_t expectedSender,
     if (frame == nullptr || length == 0) return ParseResult::Incomplete;
     if (frame[0] != kOpen) return ParseResult::NotAFrame;
     if (frame[length - 1] != kClose) return ParseResult::Incomplete;
-    // '{' + 2 + ';' + 2 + ';' + 2 + "|64:" + '|' + 4 + '}' with an empty payload.
-    if (length < 18) return ParseResult::Malformed;
+    // '{' + 2 + ';' + 2 + ';' + 2 + "|64:" + '|' + 4 + '}' is 19 with an empty payload, and an
+    // empty payload is itself malformed. Stated exactly rather than one short: a bound that is
+    // loose by one is only harmless by accident of what the later checks happen to reject.
+    if (length < 19) return ParseResult::Malformed;
 
     // Header: sender;recipient;length
     uint32_t sender = 0, recipient = 0, declared = 0;

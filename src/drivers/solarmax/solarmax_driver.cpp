@@ -240,7 +240,10 @@ ProbeResult SolarmaxDriver::probe() {
         out.evidence.push_back("a well-formed frame arrived from another address");
         return out;
     }
-    if (result != maxtalk::ParseResult::Ok) {
+    // TooManyReadings counts as usable here, as it does in poll(): the readings that arrived
+    // before the buffer filled are valid, and an identification query asking for two codes has
+    // no business discarding them.
+    if (result != maxtalk::ParseResult::Ok && result != maxtalk::ParseResult::TooManyReadings) {
         out.sawTraffic = true;
         out.evidence.push_back(std::string("reply rejected: ") + maxtalk::parseResultName(result));
         return out;
