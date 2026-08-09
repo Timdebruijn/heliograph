@@ -96,9 +96,10 @@ On a device that reports per-string values (`UD01`/`ID01`) nothing is lost. On o
 only the totals, **DC voltage and current will be missing entirely.** That is the honest outcome
 rather than a plausible wrong one, and it is the first thing a hardware session should settle.
 
-**Four energy codes have no home yet**: `KMT`, `KLM`, `KYR`, `KLY` — this month, last month, this
-year, last year. There is no canonical id for them. That is a vocabulary decision, not a driver
-one, so they are read but not published.
+**Four energy codes are not asked for at all**: `KMT`, `KLM`, `KYR`, `KLY` — this month, last
+month, this year, last year. There is no canonical id for them, and a code with nowhere to go is
+payload spent for nothing on a shared bus. Giving them a home is a vocabulary decision rather
+than a driver one; until it is taken, the driver does not query them.
 
 **Nothing is writable.** Neither source documents a write or control command for this protocol, so
 the driver declares no write capability at all and the dispatcher refuses any command before it

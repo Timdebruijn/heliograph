@@ -209,12 +209,49 @@ static void test_frame_length_finds_the_boundary_in_a_longer_buffer() {
 }
 
 static void test_a_malformed_payload_is_refused_rather_than_half_decoded() {
-    // A pair with no '=' at all.
-    const char* bad = "{05;FB;16|64:CAC|0000}";
-    maxtalk::Reading readings[4];
-    size_t           count = 0;
-    const auto r = maxtalk::parseReply(bad, std::strlen(bad), 0x05, readings, 4, count);
-    TEST_ASSERT_TRUE(r == maxtalk::ParseResult::Malformed || r == maxtalk::ParseResult::BadChecksum);
+    // The frame must be otherwise PERFECT -- correct length, correct checksum -- or the parser
+    // rejects it earlier and the payload logic is never reached. An earlier version of this test
+    // used a placeholder checksum and therefore asserted nothing about the payload at all:
+    // deleting the pair validation entirely would not have failed it. Found by review.
+    struct Case {
+        const char* payload;
+        const char* what;
+    };
+    const Case cases[] = {
+        {"CAC", "a code with no '=' and no value"},
+        {"CAC=", "a code with '=' and nothing after it"},
+        {"=1F3E", "a value with no code"},
+        {"CAC=1F3E;", "a trailing separator with nothing after it"},
+        {";", "a lone separator"},
+        {"TOOLONG=1", "a code longer than the protocol allows"},
+    };
+
+    for (const auto& c : cases) {
+        char         frame[maxtalk::kMaxFrame];
+        const size_t total = 9 + (std::strlen(c.payload) + 5) + 5;
+        int          w     = 0;
+        frame[w++] = '{';
+        frame[w++] = '0'; frame[w++] = '5'; frame[w++] = ';';
+        frame[w++] = 'F'; frame[w++] = 'B'; frame[w++] = ';';
+        frame[w++] = static_cast<char>(total / 16 < 10 ? '0' + total / 16 : 'A' + total / 16 - 10);
+        frame[w++] = static_cast<char>(total % 16 < 10 ? '0' + total % 16 : 'A' + total % 16 - 10);
+        std::memcpy(frame + w, "|64:", 4);
+        w += 4;
+        std::memcpy(frame + w, c.payload, std::strlen(c.payload));
+        w += static_cast<int>(std::strlen(c.payload));
+        frame[w++] = '|';
+        const uint16_t sum = maxtalk::checksum(frame + 1, static_cast<size_t>(w) - 1);
+        for (int i = 0; i < 4; ++i) {
+            const uint8_t nib = (sum >> (12 - 4 * i)) & 0xF;
+            frame[w++] = static_cast<char>(nib < 10 ? '0' + nib : 'A' + nib - 10);
+        }
+        frame[w++] = '}';
+
+        maxtalk::Reading readings[4];
+        size_t           count = 0;
+        const auto r = maxtalk::parseReply(frame, static_cast<size_t>(w), 0x05, readings, 4, count);
+        TEST_ASSERT_EQUAL_MESSAGE(maxtalk::ParseResult::Malformed, r, c.what);
+    }
 }
 
 // The readings written before the buffer filled stay valid: a caller that asked for more than it
