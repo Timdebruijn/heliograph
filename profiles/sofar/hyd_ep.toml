@@ -17,15 +17,6 @@
 #
 # WHAT IS NOT MAPPED, and why it matters more than what is:
 #
-#   0x0488 ActivePower_PCC_Total -- power at the grid connection point, and the obvious candidate
-#   for grid.power. NOT MAPPED. The vendor row's remark is "Totall [sic] PCC active power," and stops
-#   there: no sign convention. Its neighbour 0x048A (apparent power) does say "positive to fed
-#   [sic] into the grid, negative to draw", but that is a different register, and carrying a
-#   convention across from one is precisely the inference this project refuses. Source B reads the register
-#   and states no direction either. A grid figure with the sign backwards reports an exporting
-#   house as importing the same amount -- entirely plausible on a dashboard, and exactly wrong.
-#   One hardware session settles it; until then the channel stays empty.
-#
 #   0x0688/0x068C/0x0690 Load, Purchase and Selling energy counters -- these are ENERGY (kWh),
 #   and the canonical grid channels are instantaneous power. Same reason the Solis map leaves
 #   them out.
@@ -81,6 +72,11 @@ count = 5
 space = "holding"
 start = 1668        # 0x0684-0x0687 -- PV generation today and total, both 32-bit
 count = 4
+
+[[block]]
+space = "holding"
+start = 1284        # 0x0504 -- house load power
+count = 1
 
 # --- AC side ------------------------------------------------------------------------------
 
@@ -273,3 +269,42 @@ address = 1670
 type = "u32"
 scale = 0.1
 unit = "kWh"
+
+# 0x0488 ActivePower_PCC_Total -- power at the grid connection point.
+#
+# SCALE IS NEGATIVE, and that is the whole story of this row. The vendor reports positive when
+# power is FED INTO the grid; grid.power is positive when IMPORTING. scale = -10 does both jobs at
+# once: 0.01 kW to watts, and the sign flip.
+#
+# This register was left unmapped in the first version of this profile, on the stated grounds that
+# the vendor gave no sign convention. That was wrong, and wrong in an avoidable way: the remark
+# cell WRAPS onto a second line in the vendor table, and the extraction I read showed only the
+# first half ("Totall [sic] PCC active power,"). The continuation says "positive to fed [sic] into
+# the grid, negative to draw from the grid" -- I saw that text on the neighbouring apparent-power
+# row and concluded it belonged only there. Re-reading the page with the table layout preserved
+# shows it belongs to both.
+#
+# Recorded rather than quietly fixed, because the failure was not misreading a number: it was
+# treating a truncated extraction as if it were the document.
+[[register]]
+measurement = "grid.power"
+display_name = "Grid power"
+space = "holding"
+address = 1160
+type = "s16"
+scale = -10
+unit = "W"
+
+# 0x0504 ActivePower_Load_Total. The vendor states this one plainly -- "Consumed by load is
+# positive, Feedback from load is negative" -- which is exactly what load.power means, so no sign
+# work is needed here.
+#
+# VENDOR ONLY: source B does not read it.
+[[register]]
+measurement = "load.power"
+display_name = "House load"
+space = "holding"
+address = 1284
+type = "s16"
+scale = 10
+unit = "W"
