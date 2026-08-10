@@ -1,8 +1,9 @@
 # Sofar Solar HYD 3…6K-EP — Modbus RTU
 
 **Experimental**, like every register map here — but better sourced than most. Two independent
-sources agree on **every mapped register**: address, width, signedness and scale. One of them is a
-published configuration running against a real HYD-3600-EP.
+sources agree on **sixteen of the eighteen mapped registers**: address, width, signedness and
+scale. One of them is a published configuration running against a real HYD-3600-EP. The two
+exceptions are the energy counters, marked *vendor only* in the table below.
 
 That is not the same as this bridge having talked to one. Nobody on this project owns a Sofar.
 
