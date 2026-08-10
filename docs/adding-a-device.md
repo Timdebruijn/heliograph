@@ -394,7 +394,8 @@ forum post. So the schema treats writes as *research to record*, not behavior to
   an unreviewed device writable is not a feature but a liability, which is why this gate is
   in the data and not only in the code.
 - The driver's write path itself exists (one holding register, FC06, echo verified). What it
-  deliberately **cannot** do — 32-bit setpoints, FC16, enum modes such as a battery work mode
+  deliberately **cannot** do — 32-bit setpoints, FC16, and a mode packed into part of a shared
+  register
   — is in [write-path.md](device-profiles/write-path.md). Read it before writing a row: some
   perfectly valid-looking rows can never be dispatched, and it is better to know that before
   you go looking for the register.

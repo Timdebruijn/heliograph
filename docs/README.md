@@ -53,7 +53,7 @@ and why.
 |---|---|
 | [mqtt.md](mqtt.md) | Topics, payloads, Home Assistant auto-discovery, what the bridge subscribes to, and the publish-on-change deadbands. |
 | [rest-api.md](rest-api.md) | Every endpoint, its auth, and its payload. Also SSE, backup/restore and firmware upload. |
-| [prometheus.md](prometheus.md) | All 52 metrics, which appear only conditionally, and why unknown is absent rather than zero. |
+| [prometheus.md](prometheus.md) | All 53 metrics, which appear only conditionally, and why unknown is absent rather than zero. |
 | [modbus-register-map.md](modbus-register-map.md) | The bridge as a Modbus TCP *server* on port 502: register layout, validity bitmap, one unit id per inverter. |
 
 ## I want to add my inverter

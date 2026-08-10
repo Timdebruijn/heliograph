@@ -454,7 +454,7 @@ Details: [docs/architecture.md](docs/architecture.md).
 
 ## All the documentation
 
-Twenty-nine documents, and **[docs/README.md](docs/README.md) groups them by what you are trying
+Thirty-three documents, and **[docs/README.md](docs/README.md) groups them by what you are trying
 to do** — get it working, fix it when it does not, check whether your inverter is supported,
 connect your own tooling, add a new inverter, or understand how it is built. It also marks which
 documents are dated records rather than instructions, so nobody follows a "next step" that
@@ -463,7 +463,7 @@ happened months ago.
 ## Development
 
 ```bash
-pio test -e native          # 442 host tests, no hardware needed
+pio test -e native          # 1000+ host tests, no hardware needed
 ./tools/check_layering.sh   # architectural invariants
 pio check -e native         # static analysis (cppcheck)
 ruff check tools/           # lint for the Python tooling
@@ -489,7 +489,7 @@ framing, checksums and timing still need real hardware.
 
 All inverter drivers are **read-only**, and that is not in tension with the curtailment above:
 no driver ever writes to your inverter over its protocol. Sending a setpoint would need a
-hardware-verified register map and a deliberate write path, and neither is enabled today (see
+hardware-verified register map and a write row marked verified, and no shipped profile has one (see
 [docs/device-profiles/schema.md](docs/device-profiles/schema.md) for how write support is
 staged). Curtailment works the other way round — a potential-free contact on the bridge closing
 a circuit the inverter already offers for exactly that purpose, with no protocol write at all.
