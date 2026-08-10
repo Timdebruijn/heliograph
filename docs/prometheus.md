@@ -190,6 +190,7 @@ battery's.
 |---|---|
 | `heliograph_grid_import_power_watts` | W |
 | `heliograph_grid_export_power_watts` | W |
+| `heliograph_grid_power_watts` | Net grid flow. **Signed**: positive means importing, negative exporting. Present only when a device publishes `grid.power`. |
 | `heliograph_load_power_watts` | W, what the house is drawing |
 
 Which of these appear depends on the inverter: a driver only reports what its device actually

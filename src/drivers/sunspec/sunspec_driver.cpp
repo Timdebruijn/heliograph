@@ -191,7 +191,16 @@ bool SunspecDriver::walkChain(PollResult& outFailure) {
 
 bool SunspecDriver::readModel(const ChainEntry& entry, std::vector<uint16_t>& out,
                               PollResult& outFailure) {
-    const uint16_t total = static_cast<uint16_t>(kHeaderRegisters + entry.length);
+    // uint32 for the sum, like walkChain() does with the same two values. entry.length comes
+    // straight off the bus and is not bounded there, so a device reporting 65534 wraps this to 0
+    // in uint16 and the read silently becomes a no-op. Not exploitable -- the loop and the
+    // decoders agree on the wrapped value and refuse it -- but it is a stale failure mode thirty
+    // lines below the place that guards against exactly it.
+    const uint32_t span = static_cast<uint32_t>(kHeaderRegisters) + entry.length;
+    if (span > 0xFFFF) {
+        return false;
+    }
+    const uint16_t total = static_cast<uint16_t>(span);
     out.assign(total, 0);
     uint16_t done = 0;
     while (done < total) {

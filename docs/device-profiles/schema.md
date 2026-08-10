@@ -15,7 +15,7 @@ Validate without building:
 
 ```console
 $ python3 tools/gen_profiles.py --check
-gen_profiles.py: 1 profile(s) valid: sph
+gen_profiles.py: 10 profile(s) valid: deye_sun_xk_sg, goodwe_et_hybrid, mic_tl_x, ...
 ```
 
 Files whose name starts with `_` (like the template) are skipped.

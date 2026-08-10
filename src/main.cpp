@@ -601,10 +601,19 @@ uint64_t nowMs() { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
 
 /// The crash dump the previous boot left behind, read ONCE in setup().
 ///
-/// Not per request: reading it verifies a checksum over the whole stored image. It also cannot
-/// change while we run -- a new dump is only written by a panic, and a panic does not come back
-/// here -- so a cached copy is not merely an optimisation, it is the accurate model. Cleared in
-/// place when the erase action succeeds, which is the one thing that CAN change it.
+/// Not per request: reading it verifies a checksum over the whole stored image. A new dump is
+/// only written by a panic, and a panic does not come back here, so a cached copy is not merely
+/// an optimisation -- it is the accurate model.
+///
+/// One thing DOES change it: the erase action clears it in place. That makes it exactly the
+/// hazard g_configMutex was written for, and it went unguarded for the same reason it was easy to
+/// miss -- the sentence above named the mutation and then reasoned about the common case.
+///
+/// The erase runs on the AsyncTCP task; bridgeInfo() reads taskName (a std::string) and the
+/// backtrace from loop(), rs485Task AND the AsyncTCP task. Assigning over a std::string while
+/// another core copies it is not a stale read, it is a use-after-free waiting for the two to
+/// line up -- and bridgeInfo() runs about four times a second, so the window is not narrow.
+std::mutex            g_coredumpMutex;
 diag::CoredumpSummary g_coredump;
 
 /// The bridge's DRM relays (empty on boards without them). Commands arrive on two tasks
@@ -776,16 +785,20 @@ BridgeInfo bridgeInfo() {
     info.ntpServer        = ntpSource.server;
     info.ntpFromDhcp      = ntpSource.fromDhcp;
     info.otaImageState    = ota::imageStateName();
-    info.coredumpPresent  = g_coredump.present;
-    info.coredumpTask     = g_coredump.taskName;
-    info.coredumpPc       = g_coredump.programCounter;
-    info.coredumpCause        = g_coredump.exceptionCause;
-    info.coredumpFaultAddress = g_coredump.faultAddress;
-    info.coredumpCauseKnown        = g_coredump.causeKnown;
-    info.coredumpFaultAddressKnown = g_coredump.faultAddressKnown;
-    info.coredumpBacktrace.assign(g_coredump.backtrace,
-                                  g_coredump.backtrace + g_coredump.backtraceDepth);
-    info.coredumpBacktraceCorrupted = g_coredump.backtraceCorrupted;
+    {
+        // Same reason as g_config above: the AsyncTCP task can clear this while we copy it.
+        std::lock_guard<std::mutex> lock(g_coredumpMutex);
+        info.coredumpPresent  = g_coredump.present;
+        info.coredumpTask     = g_coredump.taskName;
+        info.coredumpPc       = g_coredump.programCounter;
+        info.coredumpCause        = g_coredump.exceptionCause;
+        info.coredumpFaultAddress = g_coredump.faultAddress;
+        info.coredumpCauseKnown        = g_coredump.causeKnown;
+        info.coredumpFaultAddressKnown = g_coredump.faultAddressKnown;
+        info.coredumpBacktrace.assign(g_coredump.backtrace,
+                                      g_coredump.backtrace + g_coredump.backtraceDepth);
+        info.coredumpBacktraceCorrupted = g_coredump.backtraceCorrupted;
+    }
     if (g_relays.count() > 0) {
         {
             std::lock_guard<std::mutex> lock(g_relayMutex);
@@ -1251,7 +1264,10 @@ void startRestApi() {
         if (!diag::eraseCoredump()) {
             return false;
         }
-        g_coredump = {};
+        {
+            std::lock_guard<std::mutex> lock(g_coredumpMutex);
+            g_coredump = {};
+        }
         return true;
     };
     ctx.portalActive        = [] { return g_wifi.portalActive(); };
