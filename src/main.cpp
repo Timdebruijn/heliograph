@@ -375,7 +375,7 @@ namespace {
 // implement. A wrong map can report a wrong number; it cannot put a device into an untested
 // state.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 26
+#define HELIOGRAPH_VERSION_MINOR 27
 //
 // 0.26.0 can record a conversation it is having, not just one it is overhearing.
 //
@@ -462,10 +462,40 @@ namespace {
 // whole array onto one row, and the message after a restore names the undo control instead of
 // pointing at where it is not.
 //
-// Six commits touched src/ since v0.26.3 and only two of them change behaviour; the other four
-// are comment corrections -- verified by diffing each one with comment lines stripped, rather
-// than by reading the subjects. Worth doing before writing a release note that says "small".
-#define HELIOGRAPH_VERSION_PATCH 4
+// 0.27.0 speaks to a brand whose maker is gone, and finally knows which way the grid is
+// flowing.
+//
+// A NEW PROTOCOL FAMILY. MaxTalk is ASCII over RS485, brace-delimited, and it belongs to
+// inverters whose vendor went bankrupt in 2014 and took the monitoring portal with it. The
+// framing lives in src/protocols/maxtalk/ and names no brand, like the PMU family beside it;
+// the driver is read-only, because neither published source documents a write.
+//
+// Two things about that family make it easier than what came before: a frame ends at a closing
+// brace, so nothing depends on inter-character timing, and there is NO REGISTRATION HANDSHAKE --
+// the address lives in the inverter's own menu, which makes a probe genuinely read-only and lets
+// discovery treat it without the exception the AA55 drivers need.
+//
+// A SIGNED GRID CHANNEL. grid.power joins the two unsigned rails, positive meaning importing.
+// Almost every meter reports one signed number, and splitting that into two rails needs
+// arithmetic a profile cannot do -- so a device whose only grid register is signed had nowhere
+// to publish it. Not a new pattern: battery.power has sat beside its raw charge/discharge rails
+// for the same reason since the battery channels existed. It reaches Modbus register 406, a
+// Prometheus gauge and a dashboard row.
+//
+// A NEW BRAND, two profiles. Sofar HYD, single- and three-phase, and they are the first maps
+// here with a second source that ran on real hardware -- which settled a question the vendor
+// document leaves open, namely which of three temperature registers an operator should read.
+//
+// WHAT THE REVIEW ROUNDS COST, AND WHY IT WAS WORTH IT. Four defects that shipped past me and
+// were caught before merge: a codec line no test could fail on, a driver that hung the suite
+// rather than failing it (bounded only by a clock the host mock holds still, WHILE HOLDING THE
+// BUS LOCK), a driver registration that landed inside another driver's #if and vanished from a
+// build, and a grid register left unmapped on the strength of a vendor remark I had read only
+// half of, because the table cell wrapped.
+//
+// That last one is the one to remember. Careful reasoning on an unverified input produces
+// confident wrong output, and it looks exactly like diligence.
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
