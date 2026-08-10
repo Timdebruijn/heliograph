@@ -1,0 +1,274 @@
+# Sofar Solar HYD 3…6K-EP — single-phase hybrid.
+#
+# SOURCES, and this map is better sourced than most here:
+#
+#   A. The vendor's own "SOFAR Modbus Protocol - General, valid for HYD 5…20K-3PH and
+#      HYD3…6K-EP", last updated 23.11.2020. A complete register list with types, scales and
+#      units.
+#   B. An independent ESPHome configuration published as working against a real HYD-3600-EP.
+#
+# EVERY REGISTER BELOW APPEARS IN BOTH, with the same address, the same width, the same
+# signedness and the same scale. Source B is the reason several choices here are not guesses --
+# see the temperature note. What source B does not carry is marked per row.
+#
+# Function code 3 (holding) throughout; addresses are the protocol addresses the vendor document
+# gives, converted from hex to decimal. Device address 1-247, factory default 1.
+#
+# WHAT IS NOT MAPPED, and why it matters more than what is:
+#
+#   0x0488 ActivePower_PCC_Total -- power at the grid connection point, and the obvious candidate
+#   for grid.power. NOT MAPPED. The vendor row's remark is "Totall PCC active power," and stops
+#   there: no sign convention. Its neighbour 0x048A (apparent power) does say "positive to fed
+#   into the grid, negative to draw", but that is a different register, and carrying a convention
+#   across from one is precisely the inference this project refuses. Source B reads the register
+#   and states no direction either. A grid figure with the sign backwards reports an exporting
+#   house as importing the same amount -- entirely plausible on a dashboard, and exactly wrong.
+#   One hardware session settles it; until then the channel stays empty.
+#
+#   0x0688/0x068C/0x0690 Load, Purchase and Selling energy counters -- these are ENERGY (kWh),
+#   and the canonical grid channels are instantaneous power. Same reason the Solis map leaves
+#   them out.
+#
+#   PV3-PV6, phases S and T -- present in the vendor list because it covers the three-phase
+#   siblings too. This profile is the single-phase EP, and source B's hardware has one phase and
+#   two strings. Mapping registers this model does not populate would publish zeroes as readings.
+
+[profile]
+driver = "modbus_profile"
+id = "sofar_hyd_ep"
+display_name = "Sofar HYD 3…6K-EP hybrid (single phase)"
+manufacturer = "Sofar Solar"
+status = "experimental"
+default = false
+phases = 1
+mppts = 2
+battery = true
+transports = ["rtu"]
+
+# 9600 8N1 is the factory default for this family. The vendor document specifies the framing but
+# not a fixed rate; source B runs 9600, which is also what every other Sofar integration found
+# uses, so it is the rate offered here rather than a sweep.
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# Blocks are kept tight around what is actually mapped. The vendor's address space is sparse and
+# runs to 0x06xx; reading it whole would be several hundred registers per poll for the fifteen
+# values below.
+[[block]]
+space = "holding"
+start = 1056        # 0x0420 -- inverter temperature, on its own
+count = 1
+
+[[block]]
+space = "holding"
+start = 1156        # 0x0484-0x048E -- frequency, output power, phase R voltage and current
+count = 11
+
+[[block]]
+space = "holding"
+start = 1412        # 0x0584-0x0589 -- PV1 and PV2 voltage, current, power
+count = 6
+
+[[block]]
+space = "holding"
+start = 1540        # 0x0604-0x0608 -- battery voltage, current, power, temperature, SOC
+count = 5
+
+[[block]]
+space = "holding"
+start = 1668        # 0x0684-0x0687 -- PV generation today and total, both 32-bit
+count = 4
+
+# --- AC side ------------------------------------------------------------------------------
+
+# 0x0485. Signed in both sources, 0.01 kW, so scale 10 to reach watts.
+#
+# ONE DISCREPANCY WORTH KNOWING: the vendor row's remark reads "Charge is positive, Discharge is
+# negative", which is battery language on a register named ActivePower_Output_Total. Neighbouring
+# rows carry the same sentence, so it looks like boilerplate rather than a statement about this
+# register -- but "looks like" is not a source. Both sources agree on address, width, signedness
+# and scale; only the DIRECTION is unverified. Producing should read positive.
+[[register]]
+measurement = "ac.power.total"
+display_name = "AC output power"
+space = "holding"
+address = 1157
+type = "s16"
+scale = 10
+unit = "W"
+
+[[register]]                    # 0x0484, both sources, identical
+measurement = "ac.frequency"
+display_name = "Grid frequency"
+space = "holding"
+address = 1156
+type = "u16"
+scale = 0.01
+unit = "Hz"
+
+[[register]]                    # 0x048D, both sources, identical
+measurement = "ac.phase_l1.voltage"
+display_name = "Grid voltage"
+space = "holding"
+address = 1165
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # 0x048E, both sources, identical
+measurement = "ac.phase_l1.current"
+display_name = "Output current"
+space = "holding"
+address = 1166
+type = "u16"
+scale = 0.01
+unit = "A"
+
+# --- PV strings ---------------------------------------------------------------------------
+
+[[register]]                    # 0x0584, both sources, identical
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 voltage"
+space = "holding"
+address = 1412
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # 0x0585, both sources, identical
+measurement = "dc.mppt_1.current"
+display_name = "PV1 current"
+space = "holding"
+address = 1413
+type = "u16"
+scale = 0.01
+unit = "A"
+
+[[register]]                    # 0x0586, both sources; 0.01 kW -> W
+measurement = "dc.mppt_1.power"
+display_name = "PV1 power"
+space = "holding"
+address = 1414
+type = "u16"
+scale = 10
+unit = "W"
+
+[[register]]                    # 0x0587, both sources, identical
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 voltage"
+space = "holding"
+address = 1415
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # 0x0588, both sources, identical
+measurement = "dc.mppt_2.current"
+display_name = "PV2 current"
+space = "holding"
+address = 1416
+type = "u16"
+scale = 0.01
+unit = "A"
+
+[[register]]                    # 0x0589, both sources; 0.01 kW -> W
+measurement = "dc.mppt_2.power"
+display_name = "PV2 power"
+space = "holding"
+address = 1417
+type = "u16"
+scale = 10
+unit = "W"
+
+# --- Battery ------------------------------------------------------------------------------
+
+[[register]]                    # 0x0604, both sources, identical
+measurement = "battery.voltage"
+display_name = "Battery voltage"
+space = "holding"
+address = 1540
+type = "u16"
+scale = 0.1
+unit = "V"
+
+# 0x0605. Signed, and the vendor states the direction explicitly here: charge positive, discharge
+# negative. That matches the canonical convention, so no sign work is needed.
+[[register]]
+measurement = "battery.current"
+display_name = "Battery current"
+space = "holding"
+address = 1541
+type = "s16"
+scale = 0.01
+unit = "A"
+
+# 0x0606. Same explicit convention, and it agrees with battery.power's own definition (positive =
+# charging). This is the register the sign rule was written for, and it happens to already point
+# the right way -- unlike the PCC register above, where nobody says.
+[[register]]
+measurement = "battery.power"
+display_name = "Battery power"
+space = "holding"
+address = 1542
+type = "s16"
+scale = 10
+unit = "W"
+
+[[register]]                    # 0x0607, both sources, identical
+measurement = "battery.temperature"
+display_name = "Battery temperature"
+space = "holding"
+address = 1543
+type = "s16"
+scale = 1
+unit = "°C"
+
+[[register]]                    # 0x0608, both sources, identical
+measurement = "battery.soc"
+display_name = "Battery state of charge"
+space = "holding"
+address = 1544
+type = "u16"
+scale = 1
+unit = "%"
+
+# --- Temperature and energy -----------------------------------------------------------------
+
+# 0x0420. THIS ROW IS WHY A SECOND SOURCE IS WORTH THE TROUBLE. The vendor list offers three
+# plausible candidates for "the inverter's temperature" -- Temperature_Env1 at 0x0418,
+# Temperature_HeatSink1 at 0x041A and Temperature_Inv1 at 0x0420 -- and says nothing about which
+# an operator should look at. Source B, running on real hardware, publishes 0x0420 as the
+# inverter temperature. That is a choice made by something that could see the readings, which is
+# worth more than picking the first row that matches the word.
+[[register]]
+measurement = "inverter.temperature"
+display_name = "Inverter temperature"
+space = "holding"
+address = 1056
+type = "s16"
+scale = 1
+unit = "°C"
+
+# 0x0684 and 0x0686, 32-bit. VENDOR DOCUMENT ONLY -- source B reads generation TIME today
+# (0x0426, minutes) rather than generation energy, so these two are single-sourced. Note the
+# scales differ between them in the vendor list, which is easy to mistype: today is 0.01 kWh and
+# the lifetime total is 0.1 kWh.
+[[register]]
+measurement = "energy.today"
+display_name = "Energy today"
+space = "holding"
+address = 1668
+type = "u32"
+scale = 0.01
+unit = "kWh"
+
+[[register]]
+measurement = "energy.total"
+display_name = "Energy total"
+space = "holding"
+address = 1670
+type = "u32"
+scale = 0.1
+unit = "kWh"
