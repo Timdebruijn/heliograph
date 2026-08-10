@@ -641,14 +641,14 @@ static void test_a_taken_slot_accepts_a_new_submission() {
 
 static void test_outcome_is_unknown_before_it_is_recorded() {
     CommandQueue q;
-    TEST_ASSERT_FALSE(q.outcomeFor("r1").has_value());
+    TEST_ASSERT_FALSE(q.outcomeFor("inv1", "r1").has_value());
 }
 
 static void test_a_recorded_outcome_is_readable_by_its_request_id() {
     CommandQueue q;
-    q.recordOutcome("r1", DispatchOutcome{CommandResult::Ok, "accepted"});
+    q.recordOutcome("inv1", "r1", DispatchOutcome{CommandResult::Ok, "accepted"});
 
-    auto outcome = q.outcomeFor("r1");
+    auto outcome = q.outcomeFor("inv1", "r1");
     TEST_ASSERT_TRUE(outcome.has_value());
     TEST_ASSERT_EQUAL(CommandResult::Ok, outcome->result);
     TEST_ASSERT_EQUAL_STRING("accepted", outcome->reason.c_str());
@@ -658,11 +658,28 @@ static void test_a_recorded_outcome_is_readable_by_its_request_id() {
 // about a request that has since been superseded gets "unknown", not a stale answer.
 static void test_a_later_outcome_supersedes_an_earlier_one() {
     CommandQueue q;
-    q.recordOutcome("first", DispatchOutcome{CommandResult::Ok, "accepted"});
-    q.recordOutcome("second", DispatchOutcome{CommandResult::RateLimited, "too many commands"});
+    q.recordOutcome("inv1", "first", DispatchOutcome{CommandResult::Ok, "accepted"});
+    q.recordOutcome("inv1", "second",
+                    DispatchOutcome{CommandResult::RateLimited, "too many commands"});
 
-    TEST_ASSERT_FALSE(q.outcomeFor("first").has_value());
-    TEST_ASSERT_TRUE(q.outcomeFor("second").has_value());
+    TEST_ASSERT_FALSE(q.outcomeFor("inv1", "first").has_value());
+    TEST_ASSERT_TRUE(q.outcomeFor("inv1", "second").has_value());
+}
+
+// A request id is the CALLER's to choose (REST and MQTT both accept one), so two devices can
+// legitimately carry the same id at the same time. Keyed on the id alone, asking about device A
+// returned device B's result -- the right answer to somebody else's question, which is worse than
+// no answer because it looks like one.
+//
+// Dispatch was never affected: that is scoped by deviceId in Request, so the correct device always
+// received the correct command. Only the report was wrong.
+static void test_an_outcome_is_not_readable_through_another_device() {
+    CommandQueue q;
+    q.recordOutcome("inverter_b", "shared-id",
+                    DispatchOutcome{CommandResult::Ok, "accepted"});
+
+    TEST_ASSERT_FALSE(q.outcomeFor("inverter_a", "shared-id").has_value());
+    TEST_ASSERT_TRUE(q.outcomeFor("inverter_b", "shared-id").has_value());
 }
 
 // --- commandTypeFromName / parseCommandRequest ----------------------------------------------
@@ -886,6 +903,7 @@ int main(int, char**) {
     RUN_TEST(test_outcome_is_unknown_before_it_is_recorded);
     RUN_TEST(test_a_recorded_outcome_is_readable_by_its_request_id);
     RUN_TEST(test_a_later_outcome_supersedes_an_earlier_one);
+    RUN_TEST(test_an_outcome_is_not_readable_through_another_device);
 
     RUN_TEST(test_command_type_from_name_round_trips_every_type);
     RUN_TEST(test_command_type_from_name_rejects_an_unknown_name);

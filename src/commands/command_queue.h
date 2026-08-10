@@ -42,16 +42,23 @@ public:
     /// Recorded by the bus owner once dispatch() has returned. Overwrites whatever the previous
     /// outcome was -- only the most recent request's outcome is kept, matching submit()'s
     /// one-slot rule.
-    void recordOutcome(const std::string& requestId, DispatchOutcome outcome);
+    /// Scoped by device as well as request id. A caller may choose its own request id, so two
+    /// devices can legitimately carry the same one; keyed on the id alone, polling device A
+    /// could return device B's result. Dispatch was never affected -- that is scoped by
+    /// deviceId in Request -- but the answer an operator reads was.
+    void recordOutcome(const std::string& deviceId, const std::string& requestId,
+                       DispatchOutcome outcome);
 
     /// The outcome of the most recently COMPLETED request with this id. Empty if that id was
     /// never submitted, is still pending, or has since been superseded by a later request's
     /// outcome.
-    std::optional<DispatchOutcome> outcomeFor(const std::string& requestId) const;
+    std::optional<DispatchOutcome> outcomeFor(const std::string& deviceId,
+                                             const std::string& requestId) const;
 
 private:
     mutable std::mutex             mutex_;
     std::optional<Request>         pending_;
+    std::string                    lastOutcomeDeviceId_;
     std::string                    lastOutcomeRequestId_;
     std::optional<DispatchOutcome> lastOutcome_;
 };

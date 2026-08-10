@@ -3,6 +3,10 @@
 #include "protocols/modbus/modbus_client.h"
 
 namespace heliograph::modbus {
+
+/// Same two seconds the PMU family waits. Long enough that a poll in progress finishes first,
+/// short enough that a stuck holder surfaces as a transport error rather than a hang.
+inline constexpr uint32_t kBusLockTimeoutMs = 2000;
 namespace {
 
 /// What a caller's parse step reports back.
@@ -32,6 +36,25 @@ template <typename ParseFn>
 TransactionOutcome runTransaction(Transport& transport, const uint8_t* req, size_t reqLen,
                                   const ReadTiming& timing, ParseFn parse) {
     TransactionOutcome outcome;
+
+    // The bus lock, taken here rather than per driver because every Modbus path -- profile
+    // driver, SunSpec driver, and both of their discovery probes -- funnels through this
+    // function. It was missing entirely: the PMU and MaxTalk families locked, the Modbus family
+    // did not, and CommandDispatcher's own comment described a two-second wait for a lock these
+    // drivers never asked for.
+    //
+    // Harmless today, because only rs485Task ever reaches a Transport and its one-activity-per-
+    // iteration rule already serialises everything. That is exactly why it was worth closing: the
+    // protection was an invariant nobody states at the call site, and the first second bus user
+    // would have found half the drivers guarded and half not.
+    //
+    // No nesting risk -- no caller of this function holds the lock (the four TransportLock sites
+    // are all on PMU, MaxTalk or capture paths, none of which route through here).
+    TransportLock lock(transport, kBusLockTimeoutMs);
+    if (!lock.held()) {
+        outcome.status = TransactionStatus::TransportError;
+        return outcome;
+    }
 
     transport.flushInput();
     if (transport.write(req, reqLen) != reqLen) {

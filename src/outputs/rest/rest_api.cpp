@@ -487,7 +487,7 @@ bool RestApi::begin() {
                           {404, "no_command_path", "no write path is wired for commands yet"});
                 return;
             }
-            const auto outcome = context_.commandOutcome(requestId);
+            const auto outcome = context_.commandOutcome(deviceId, requestId);
             if (!outcome.has_value()) {
                 sendError(request, {404, "unknown_request",
                                     "no completed command with this request id"});

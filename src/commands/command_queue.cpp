@@ -23,15 +23,18 @@ std::optional<CommandQueue::Request> CommandQueue::take() {
     return taken;
 }
 
-void CommandQueue::recordOutcome(const std::string& requestId, DispatchOutcome outcome) {
+void CommandQueue::recordOutcome(const std::string& deviceId, const std::string& requestId,
+                                 DispatchOutcome outcome) {
     std::lock_guard<std::mutex> lock(mutex_);
+    lastOutcomeDeviceId_  = deviceId;
     lastOutcomeRequestId_ = requestId;
     lastOutcome_          = std::move(outcome);
 }
 
-std::optional<DispatchOutcome> CommandQueue::outcomeFor(const std::string& requestId) const {
+std::optional<DispatchOutcome> CommandQueue::outcomeFor(const std::string& deviceId,
+                                                       const std::string& requestId) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (lastOutcomeRequestId_ != requestId) {
+    if (lastOutcomeDeviceId_ != deviceId || lastOutcomeRequestId_ != requestId) {
         return std::nullopt;
     }
     return lastOutcome_;

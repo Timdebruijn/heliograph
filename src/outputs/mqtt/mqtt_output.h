@@ -147,8 +147,8 @@ public:
     /// SAME function RestContext::commandOutcome reads from -- both transports observe the one
     /// CommandQueue. loop() polls this for whichever channel is awaiting a result and, once it
     /// resolves, publishes it to that channel's commandResult() topic (see loop()'s own note).
-    using CommandOutcomeFn =
-        std::function<std::optional<DispatchOutcome>(const std::string& requestId)>;
+    using CommandOutcomeFn = std::function<std::optional<DispatchOutcome>(
+        const std::string& deviceId, const std::string& requestId)>;
     void setCommandOutcomeProvider(CommandOutcomeFn provider) {
         commandOutcomeProvider_ = std::move(provider);
     }
