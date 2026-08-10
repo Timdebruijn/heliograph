@@ -20,6 +20,7 @@ driver must not promote a map nobody has confirmed.
 | `min_tl_x` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | · | · | · |
 | `sph` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | ✔ | · |
 | `huawei_sun2000` | Huawei | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | · |
+| `sofar_hyd_3ph` | Sofar Solar | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · |
 | `sofar_hyd_ep` | Sofar Solar | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · |
 | `solis_rhi_hybrid` | Solis | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ |
 | `sungrow_sh_hybrid` | Sungrow | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
@@ -54,6 +55,7 @@ the profile's own comments — see [Why a channel is missing](#why-a-channel-is-
 | `min_tl_x` | see profile header | see profile header | **no** |
 | `sph` | see profile header | see profile header | **no** |
 | `huawei_sun2000` | see profile header | see profile header | **no** |
+| `sofar_hyd_3ph` | see profile header | see profile header | **no** |
 | `sofar_hyd_ep` | see profile header | see profile header | **no** |
 | `solis_rhi_hybrid` | see profile header | see profile header | **no** |
 | `sungrow_sh_hybrid` | see profile header | see profile header | **no** |

@@ -12,10 +12,15 @@ That is not the same as this bridge having talked to one. Nobody on this project
 The vendor document covers **HYD 5…20K-3PH** (three-phase) and **HYD3…6K-EP** (single-phase).
 This profile is the **single-phase EP** only.
 
-The three-phase siblings share the register list but populate phases S and T and up to six PV
-strings, none of which the second source could confirm. A `sofar_hyd_3ph` profile is a
-straightforward addition for someone who can check it against hardware — the addresses are in the
-same vendor list.
+The three-phase siblings now have their own profile, **`sofar_hyd_3ph`**. It shares this map and
+adds phases S and T — and those two phases, the thing that makes it three-phase, are the part
+**no second source could confirm**: the hardware behind source B is a single-phase HYD-3600-EP,
+which has no S or T phase to check against. Everything the two profiles share carries the
+sourcing described here; what is new in the three-phase profile is vendor-document only.
+
+One trap worth naming for anyone extending it: **R, S and T are not evenly spaced.** They sit at
+0x048D, 0x0498 and 0x04A3, eleven registers apart, with other grid values in between. Assuming a
+stride is the obvious way to read the wrong register and get a plausible number back.
 
 **Sofar's protocol varies by product family**, and the serial number is what tells you which
 family a unit belongs to. A map from a different Sofar family is not a second opinion about this
