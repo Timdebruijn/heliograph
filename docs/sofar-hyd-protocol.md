@@ -73,8 +73,8 @@ by a factor of ten in the vendor list, and they are adjacent.
 **`0x0488 ActivePower_PCC_Total` — the grid figure — is deliberately absent.**
 
 It is the obvious candidate for `grid.power`, and it is signed. But the vendor's remark for that
-row is *"Totall PCC active power,"* and stops there: **no sign convention**. Its neighbour
-`0x048A` (apparent power) does state one — *"positive to fed into the grid, negative to draw"* —
+row is *"Totall [sic] PCC active power,"* and stops there: **no sign convention**. Its neighbour
+`0x048A` (apparent power) does state one — *"positive to fed [sic] into the grid, negative to draw"* —
 but that is a different register, and carrying a convention across from one register to another is
 exactly the inference this project refuses. The second source reads the register and states no
 direction either.
