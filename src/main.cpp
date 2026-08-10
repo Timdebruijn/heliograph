@@ -495,7 +495,30 @@ namespace {
 //
 // That last one is the one to remember. Careful reasoning on an unverified input produces
 // confident wrong output, and it looks exactly like diligence.
-#define HELIOGRAPH_VERSION_PATCH 0
+// 0.27.1 fixes what a four-agent review of the whole project turned up. No new capability --
+// two dormant traps closed, one live race, and five documentation claims that were false.
+//
+// THE LIVE ONE: g_coredump was read and written across three tasks with no lock. The erase
+// action clears it from the AsyncTCP task while bridgeInfo() copies its std::string and its
+// backtrace from loop(), rs485Task and AsyncTCP itself, about four times a second. Overwriting a
+// std::string while another core copies it is a use-after-free waiting for the two to line up.
+//
+// Worth recording HOW it survived: the declaration's own comment named the mutation -- "the one
+// thing that CAN change it" -- and then argued for three lines that the cached copy is accurate.
+// Thirty lines above sits g_configMutex, written for this exact hazard, with a comment describing
+// this exact shape. The reasoning stopped one step short of its own conclusion.
+//
+// TWO DORMANT TRAPS. The Modbus family never took the bus lock -- profile driver, SunSpec driver
+// and both their probes all route through one function that did not have it -- while the
+// dispatcher's comment described a two-second wait for a lock those drivers never asked for.
+// Harmless while only rs485Task touches a Transport, which is precisely why it was worth closing
+// rather than documenting away. And command outcomes were keyed on the request id alone, which
+// the caller chooses, so polling one device could return another's result. Dispatch was never
+// affected; the report was.
+//
+// The rest is documentation that had drifted, including an "enum modes cannot be expressed" that
+// the profile driver has implemented since July.
+#define HELIOGRAPH_VERSION_PATCH 1
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
