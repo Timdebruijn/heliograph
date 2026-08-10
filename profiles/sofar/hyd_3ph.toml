@@ -10,10 +10,16 @@
 #   strings, the whole battery block, inverter temperature -- carries the EP's sourcing: agreed by
 #   the vendor document AND an independent configuration published as working on real hardware.
 #
-#   The four registers that make this profile three-phase -- voltage and current on phases S and T
-#   (0x0498, 0x0499, 0x04A3, 0x04A4) -- and the two energy counters are VENDOR DOCUMENT ONLY. The hardware behind the second source is a single-phase
-#   HYD-3600-EP, which has no S or T phase to confirm. So the part that distinguishes this profile
+#   The four registers that make this profile three-phase, plus the two energy counters, are
+#   VENDOR DOCUMENT ONLY. The hardware behind the second source is a single-phase HYD-3600-EP,
+#   which has no second or third phase to confirm -- so the part that distinguishes this profile
 #   is precisely the part nothing has checked.
+#
+#   NAMING: the vendor calls the phases R, S and T; the canonical model calls them L1, L2 and L3,
+#   in that order. Every register comment below names the vendor's letter beside our id, so a
+#   reader comparing this file against the vendor document does not have to hold the mapping in
+#   their head. The four unconfirmed registers are S voltage and current (0x0498, 0x0499) and T
+#   voltage and current (0x04A3, 0x04A4).
 #
 #   That is not a reason to leave it out -- an unsourced channel and an absent one are both wrong
 #   for a three-phase owner, and one of them is at least testable. It is a reason to say so here
@@ -106,7 +112,7 @@ type = "u16"
 scale = 0.01
 unit = "Hz"
 
-[[register]]                    # 0x048D, both sources
+[[register]]                    # 0x048D, vendor phase R; both sources
 measurement = "ac.phase_l1.voltage"
 display_name = "L1 voltage"
 space = "holding"
@@ -115,7 +121,7 @@ type = "u16"
 scale = 0.1
 unit = "V"
 
-[[register]]                    # 0x048E, both sources
+[[register]]                    # 0x048E, vendor phase R; both sources
 measurement = "ac.phase_l1.current"
 display_name = "L1 current"
 space = "holding"
@@ -124,7 +130,7 @@ type = "u16"
 scale = 0.01
 unit = "A"
 
-# 0x0498. VENDOR ONLY -- the second source's hardware is single-phase.
+# 0x0498, vendor phase S. VENDOR ONLY -- the second source's hardware is single-phase.
 [[register]]
 measurement = "ac.phase_l2.voltage"
 display_name = "L2 voltage"
@@ -134,7 +140,7 @@ type = "u16"
 scale = 0.1
 unit = "V"
 
-[[register]]                    # 0x0499, vendor only
+[[register]]                    # 0x0499, vendor phase S; vendor only
 measurement = "ac.phase_l2.current"
 display_name = "L2 current"
 space = "holding"
@@ -143,7 +149,7 @@ type = "u16"
 scale = 0.01
 unit = "A"
 
-# 0x04A3. VENDOR ONLY, and note the address is NOT a continuation of the S block -- R, S and T sit
+# 0x04A3, vendor phase T. VENDOR ONLY, and the address is NOT a continuation of S -- R, S and T sit
 # eleven registers apart with other grid values between them. Assuming a stride here is the
 # obvious way to get this wrong.
 [[register]]
@@ -155,7 +161,7 @@ type = "u16"
 scale = 0.1
 unit = "V"
 
-[[register]]                    # 0x04A4, vendor only
+[[register]]                    # 0x04A4, vendor phase T; vendor only
 measurement = "ac.phase_l3.current"
 display_name = "L3 current"
 space = "holding"
