@@ -3,6 +3,7 @@
 #include "solarmax_driver.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include "diagnostics/logger.h"
@@ -259,7 +260,12 @@ ProbeResult SolarmaxDriver::probe() {
     out.detectedManufacturer  = "SolarMax";
 
     if (const auto* typ = maxtalk::find(readings, count, kCodeType)) {
-        out.detectedModel = "type 0x" + std::to_string(typ->value);
+        // Hex, and rendered as hex: the code arrives as hex on the wire and the sources quote it
+        // that way, so a decimal rendering behind an "0x" prefix would be a number that matches
+        // nothing anybody can look up. (It said 0x500 for 0x1F4 until review caught it.)
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "type 0x%X", static_cast<unsigned>(typ->value));
+        out.detectedModel = buf;
         identity_.model   = out.detectedModel;
     }
     if (const auto* swv = maxtalk::find(readings, count, kCodeFirmware)) {
@@ -286,18 +292,31 @@ PollResult SolarmaxDriver::poll(DeviceState& state) {
         case maxtalk::ParseResult::BadChecksum:
             return PollResult::ChecksumError;
         case maxtalk::ParseResult::WrongSender:
-            // Not our device. Reported as an invalid frame rather than a checksum error: the wire
-            // is fine, the answer simply belongs to someone else.
+        case maxtalk::ParseResult::WrongRecipient:
+            // Not our conversation. Reported as an invalid frame rather than a checksum error:
+            // the wire is fine, the answer simply belongs to someone else -- either another
+            // device answered, or ours answered a second querying host.
             return PollResult::InvalidFrame;
         default:
             return PollResult::InvalidFrame;
     }
 
-    // The contract: state is only touched on success, so a partially decoded reply can never
-    // surface as data.
-    declareChannels(state);
+    // Decide the verdict BEFORE touching state. The contract is that `state` is modified only
+    // when returning Ok, and an earlier version broke it: it declared channels, wrote status and
+    // capabilities, and only then discovered it had nothing to fill and returned InvalidFrame --
+    // leaving an empty set and a stale capability shape behind in the caller's retained state.
+    // Found by review.
+    size_t usable = 0;
+    for (size_t i = 0; i < kMappingCount; ++i) {
+        if (maxtalk::find(readings, count, kMappings[i].code) != nullptr) ++usable;
+    }
+    if (usable == 0) {
+        // The device answered something, but nothing this driver maps. Reporting Ok here would
+        // publish an empty measurement set as current data.
+        return PollResult::InvalidFrame;
+    }
 
-    size_t filled = 0;
+    declareChannels(state);
     for (size_t i = 0; i < kMappingCount; ++i) {
         const auto* r = maxtalk::find(readings, count, kMappings[i].code);
         if (r == nullptr) {
@@ -306,8 +325,8 @@ PollResult SolarmaxDriver::poll(DeviceState& state) {
             continue;
         }
         state.measurements.set(kMappings[i].measurementId,
-                               static_cast<double>(r->value) / kMappings[i].divisor, state.lastPollAttemptMs);
-        ++filled;
+                               static_cast<double>(r->value) / kMappings[i].divisor,
+                               state.lastPollAttemptMs);
     }
 
     if (const auto* sys = maxtalk::find(readings, count, kCodeStatus)) {
@@ -345,10 +364,7 @@ PollResult SolarmaxDriver::poll(DeviceState& state) {
     state.capabilities = capabilities_;
     state.identity     = identity_;
 
-    // A frame that parsed but carried none of the codes we map is not a successful poll: the
-    // device answered something, but nothing usable, and reporting Ok would publish an empty set
-    // as current data.
-    return filled > 0 ? PollResult::Ok : PollResult::InvalidFrame;
+    return PollResult::Ok;
 }
 
 BusErrorCounts SolarmaxDriver::busErrors() const { return busErrors_; }

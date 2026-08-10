@@ -216,6 +216,25 @@ static void test_a_reply_with_no_mapped_codes_is_not_a_successful_poll() {
 
 // The probe asks a question and changes nothing: no address is assigned, no mode is entered. That
 // is what lets discovery treat this family as read-only, unlike the AA55 drivers beside it.
+// The poll contract: state is modified ONLY when returning Ok. A reply carrying nothing this
+// driver maps must leave the caller's retained state exactly as it found it -- no declared
+// channels, no capability shape, no status word.
+static void test_an_unusable_reply_leaves_the_state_completely_untouched() {
+    MockTransport t;
+    solarmax::SolarmaxDriver d(t, solarmax::SolarmaxOptions{0x05});
+    d.begin(t);
+    respondWith(t, 0x05, "XYZ=1;ABC=2");
+
+    DeviceState s;
+    s.statusText = "untouched";
+    TEST_ASSERT_EQUAL(PollResult::InvalidFrame, d.poll(s));
+
+    TEST_ASSERT_EQUAL_size_t(0, s.measurements.size());
+    TEST_ASSERT_FALSE(s.statusCodeSupported);
+    TEST_ASSERT_FALSE(s.errorCodeSupported);
+    TEST_ASSERT_EQUAL_STRING("untouched", s.statusText.c_str());
+}
+
 static void test_the_probe_identifies_without_writing_anything_but_a_query() {
     MockTransport t;
     solarmax::SolarmaxDriver d(t, solarmax::SolarmaxOptions{0x05});
@@ -227,6 +246,8 @@ static void test_the_probe_identifies_without_writing_anything_but_a_query() {
     TEST_ASSERT_TRUE(r.checksumValid);
     TEST_ASSERT_EQUAL_STRING("SolarMax", r.detectedManufacturer.c_str());
     TEST_ASSERT_TRUE(r.confidenceScore > 0);
+    // Hex on the wire, hex in the label: "type 0x64", not the decimal 100.
+    TEST_ASSERT_EQUAL_STRING("type 0x64", r.detectedModel.c_str());
 
     // Exactly one frame went out, and it is a query: it opens with the host address and carries
     // the payload marker. Nothing in this protocol writes, and nothing here should.
@@ -292,6 +313,7 @@ int main() {
     RUN_TEST(test_silence_is_a_timeout_and_leaves_the_state_untouched);
     RUN_TEST(test_a_corrupted_reply_counts_against_the_wire_and_not_the_device);
     RUN_TEST(test_a_reply_with_no_mapped_codes_is_not_a_successful_poll);
+    RUN_TEST(test_an_unusable_reply_leaves_the_state_completely_untouched);
     RUN_TEST(test_the_probe_identifies_without_writing_anything_but_a_query);
     RUN_TEST(test_a_silent_bus_probes_as_no_device_rather_than_a_broken_one);
     RUN_TEST(test_another_devices_frame_during_a_probe_is_recorded_as_traffic);
