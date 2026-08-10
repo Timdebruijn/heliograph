@@ -137,7 +137,9 @@ struct RestContext {
     /// it is still pending, was never submitted, or has since been superseded by a later
     /// request -- only one outcome is remembered at a time, matching submitCommand's
     /// one-in-flight rule.
-    std::function<std::optional<DispatchOutcome>(const std::string& requestId)> commandOutcome;
+    std::function<std::optional<DispatchOutcome>(const std::string& deviceId,
+                                                 const std::string& requestId)>
+        commandOutcome;
 };
 
 class RestApi {

@@ -1113,7 +1113,9 @@ void startOutputs() {
         // transport a command arrived on.
         g_mqtt->setCommandHandler(submitCommand);
         g_mqtt->setCommandOutcomeProvider(
-            [](const std::string& requestId) { return g_commandQueue.outcomeFor(requestId); });
+            [](const std::string& deviceId, const std::string& requestId) {
+                return g_commandQueue.outcomeFor(deviceId, requestId);
+            });
         if (g_relays.count() > 0) {
             g_mqtt->setRelayCommandHandler([](uint8_t index, bool on) {
                 std::lock_guard<std::mutex> lock(g_relayMutex);
@@ -1275,8 +1277,8 @@ void startRestApi() {
     // Unconditional, unlike the relay handlers below: commands target inverters, not relays,
     // so they exist regardless of board. The same function MQTT's command topic is wired to.
     ctx.submitCommand  = submitCommand;
-    ctx.commandOutcome = [](const std::string& requestId) {
-        return g_commandQueue.outcomeFor(requestId);
+    ctx.commandOutcome = [](const std::string& deviceId, const std::string& requestId) {
+        return g_commandQueue.outcomeFor(deviceId, requestId);
     };
     if (g_relays.count() > 0) {
         // Behind the same mutex as the MQTT path: REST commands arrive on the AsyncTCP
@@ -1498,7 +1500,7 @@ void rs485Task(void* /*arg*/) {
                                       "unknown device id '" + request->deviceId + "'"};
             log::info("command %s on %s: %s", commandTypeName(request->command.type),
                       request->deviceId.c_str(), outcome.reason.c_str());
-            g_commandQueue.recordOutcome(request->command.requestId, outcome);
+            g_commandQueue.recordOutcome(request->deviceId, request->command.requestId, outcome);
             continue;
         }
         // At most ONE device per iteration, round-robin. Not a loop over all of them: the

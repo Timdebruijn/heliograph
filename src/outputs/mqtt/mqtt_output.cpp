@@ -418,7 +418,7 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
                 pending = channel.pendingCommandRequestId;
             }
             if (!pending.empty()) {
-                if (const auto outcome = commandOutcomeProvider_(pending)) {
+                if (const auto outcome = commandOutcomeProvider_(channel.id, pending)) {
                     std::string ack;
                     if (json_util::buildCommandOutcomePayload(pending, *outcome, ack)) {
                         publishTracked(channel.topics.commandResult().c_str(), 0, false,
