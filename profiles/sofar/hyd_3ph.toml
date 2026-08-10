@@ -10,8 +10,8 @@
 #   strings, the whole battery block, inverter temperature -- carries the EP's sourcing: agreed by
 #   the vendor document AND an independent configuration published as working on real hardware.
 #
-#   The four registers that make this profile three-phase, plus the two energy counters, are
-#   VENDOR DOCUMENT ONLY. The hardware behind the second source is a single-phase HYD-3600-EP,
+#   Eight rows are VENDOR DOCUMENT ONLY: the four that make this profile three-phase, the two
+#   energy counters, grid power and house load. The hardware behind the second source is a single-phase HYD-3600-EP,
 #   which has no second or third phase to confirm -- so the part that distinguishes this profile
 #   is precisely the part nothing has checked.
 #

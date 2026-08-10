@@ -7,9 +7,9 @@
 #      units.
 #   B. An independent ESPHome configuration published as working against a real HYD-3600-EP.
 #
-# SIXTEEN OF THE EIGHTEEN REGISTERS BELOW APPEAR IN BOTH, with the same address, the same width,
-# the same signedness and the same scale. The two exceptions are the energy counters, which only
-# the vendor document carries; they are marked as such at their own rows. Source B is the reason
+# SIXTEEN OF THE TWENTY REGISTERS BELOW APPEAR IN BOTH, with the same address, the same width,
+# the same signedness and the same scale. The four exceptions -- the two energy counters, grid
+# power and house load -- carry only the vendor document, and each says so at its own row. Source B is the reason
 # several choices here are not guesses -- see the temperature note.
 #
 # Function code 3 (holding) throughout; addresses are the protocol addresses the vendor document
@@ -46,7 +46,7 @@ parity = "none"
 stop_bits = 1
 
 # Blocks are kept tight around what is actually mapped. The vendor's address space is sparse and
-# runs to 0x06xx; reading it whole would be several hundred registers per poll for the eighteen
+# runs to 0x06xx; reading it whole would be several hundred registers per poll for the twenty
 # values below.
 [[block]]
 space = "holding"
