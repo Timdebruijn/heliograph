@@ -18,10 +18,10 @@
 # WHAT IS NOT MAPPED, and why it matters more than what is:
 #
 #   0x0488 ActivePower_PCC_Total -- power at the grid connection point, and the obvious candidate
-#   for grid.power. NOT MAPPED. The vendor row's remark is "Totall PCC active power," and stops
+#   for grid.power. NOT MAPPED. The vendor row's remark is "Totall [sic] PCC active power," and stops
 #   there: no sign convention. Its neighbour 0x048A (apparent power) does say "positive to fed
-#   into the grid, negative to draw", but that is a different register, and carrying a convention
-#   across from one is precisely the inference this project refuses. Source B reads the register
+#   [sic] into the grid, negative to draw", but that is a different register, and carrying a
+#   convention across from one is precisely the inference this project refuses. Source B reads the register
 #   and states no direction either. A grid figure with the sign backwards reports an exporting
 #   house as importing the same amount -- entirely plausible on a dashboard, and exactly wrong.
 #   One hardware session settles it; until then the channel stays empty.
