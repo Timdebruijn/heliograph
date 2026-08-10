@@ -1,9 +1,9 @@
 # Sofar Solar HYD 3…6K-EP — Modbus RTU
 
 **Experimental**, like every register map here — but better sourced than most. Two independent
-sources agree on **sixteen of the eighteen mapped registers**: address, width, signedness and
-scale. One of them is a published configuration running against a real HYD-3600-EP. The two
-exceptions are the energy counters, marked *vendor only* in the table below.
+sources agree on **sixteen of the twenty mapped registers**: address, width, signedness and scale.
+One of them is a published configuration running against a real HYD-3600-EP. The four exceptions —
+the two energy counters, the grid figure and house load — are marked *vendor only* below.
 
 That is not the same as this bridge having talked to one. Nobody on this project owns a Sofar.
 
@@ -60,6 +60,8 @@ equivalents.
 | `0x0420` | `inverter.temperature` | s16 | 1 °C | both |
 | `0x0684` | `energy.today` | u32 | 0.01 kWh | **vendor only** |
 | `0x0686` | `energy.total` | u32 | 0.1 kWh | **vendor only** |
+| `0x0488` | `grid.power` | s16 | **×−10** → W | **vendor only** |
+| `0x0504` | `load.power` | s16 | ×10 → W | **vendor only** |
 
 **Battery sign is stated by the vendor and already points the right way**: charge positive,
 discharge negative — which is what `battery.power` means. No sign work was needed.
@@ -73,20 +75,28 @@ the readings.
 **Watch the two energy scales**: today is 0.01 kWh and the lifetime total is 0.1 kWh. They differ
 by a factor of ten in the vendor list, and they are adjacent.
 
+## The grid figure, and a mistake worth keeping
+
+`0x0488 ActivePower_PCC_Total` is mapped to `grid.power` with a **negative scale**. The vendor
+reports positive when power is *fed into* the grid; `grid.power` is positive when *importing*. A
+`scale` of −10 does both jobs: 0.01 kW to watts, and the sign flip.
+
+**The first version of this profile left it unmapped**, on the stated grounds that the vendor gave
+no sign convention. That was wrong. The remark cell **wraps onto a second line** in the vendor
+table, and the extraction being read showed only the first half — *"Totall [sic] PCC active
+power,"*. The continuation reads *"positive to fed [sic] into the grid, negative to draw from the
+grid"*. That text was visible on the neighbouring apparent-power row, and it was concluded to
+belong only there.
+
+It is kept here rather than quietly corrected because the failure was not misreading a number. It
+was **treating a truncated extraction as if it were the document** — and the same class of error
+would silently swallow any wrapped cell in any vendor PDF.
+
+`0x0504 ActivePower_Load_Total` came out of the same re-read. The vendor states its direction
+plainly — *"Consumed by load is positive"* — which is already what `load.power` means, so it needs
+no sign work.
+
 ## What is not mapped, and why
-
-**`0x0488 ActivePower_PCC_Total` — the grid figure — is deliberately absent.**
-
-It is the obvious candidate for `grid.power`, and it is signed. But the vendor's remark for that
-row is *"Totall [sic] PCC active power,"* and stops there: **no sign convention**. Its neighbour
-`0x048A` (apparent power) does state one — *"positive to fed [sic] into the grid, negative to draw"* —
-but that is a different register, and carrying a convention across from one register to another is
-exactly the inference this project refuses. The second source reads the register and states no
-direction either.
-
-A grid reading with the sign inverted reports an exporting house as importing the same amount.
-That is entirely plausible on a dashboard and exactly wrong, and it would then feed anything that
-acts on the figure. One hardware session settles it; until then the channel stays empty.
 
 **The kWh grid counters** (`0x0688`, `0x068C`, `0x0690`) are energy, and the canonical grid
 channels are instantaneous power — the same reason the Solis map leaves them out.
@@ -104,9 +114,10 @@ Producing should read positive.
 
 ## What a hardware session should settle
 
-1. **`0x0488`'s sign**, which would give this family a grid channel.
+1. **`0x0488`'s sign in practice** — export should read negative. The vendor states it, but this
+   is the reading an installer can check in one glance and the one that matters most.
 2. **`0x0485`'s direction**, against the inverter's display while producing.
-3. **The two energy registers**, which only the vendor document carries.
+3. **The four vendor-only rows**: both energy registers, grid power and house load.
 4. Whether the same map holds for the **three-phase** siblings.
 
 Four answers and this map moves from `experimental` to `beta`.

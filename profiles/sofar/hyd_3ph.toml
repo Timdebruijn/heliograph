@@ -28,11 +28,6 @@
 # NOT MAPPED, for the same reasons as the EP profile and worth repeating rather than cross-
 # referencing, because a profile is read on its own:
 #
-#   0x0488 ActivePower_PCC_Total -- the grid figure. The vendor remark is "Totall [sic] PCC active
-#   power," and stops: no sign convention anywhere, for either family. A grid reading with the
-#   sign inverted calls an exporting house an importing one, which is plausible on a dashboard and
-#   exactly backwards.
-#
 #   The kWh grid counters (0x0688, 0x068C, 0x0690) are energy; the canonical grid channels are
 #   instantaneous power.
 #
@@ -87,6 +82,11 @@ count = 5
 space = "holding"
 start = 1668        # 0x0684-0x0687 -- energy today and total, both 32-bit
 count = 4
+
+[[block]]
+space = "holding"
+start = 1284        # 0x0504 -- house load power
+count = 1
 
 # --- AC side ------------------------------------------------------------------------------
 
@@ -308,3 +308,42 @@ address = 1670
 type = "u32"
 scale = 0.1
 unit = "kWh"
+
+# 0x0488 ActivePower_PCC_Total -- power at the grid connection point.
+#
+# SCALE IS NEGATIVE, and that is the whole story of this row. The vendor reports positive when
+# power is FED INTO the grid; grid.power is positive when IMPORTING. scale = -10 does both jobs at
+# once: 0.01 kW to watts, and the sign flip.
+#
+# This register was left unmapped in the first version of this profile, on the stated grounds that
+# the vendor gave no sign convention. That was wrong, and wrong in an avoidable way: the remark
+# cell WRAPS onto a second line in the vendor table, and the extraction I read showed only the
+# first half ("Totall [sic] PCC active power,"). The continuation says "positive to fed [sic] into
+# the grid, negative to draw from the grid" -- I saw that text on the neighbouring apparent-power
+# row and concluded it belonged only there. Re-reading the page with the table layout preserved
+# shows it belongs to both.
+#
+# Recorded rather than quietly fixed, because the failure was not misreading a number: it was
+# treating a truncated extraction as if it were the document.
+[[register]]
+measurement = "grid.power"
+display_name = "Grid power"
+space = "holding"
+address = 1160
+type = "s16"
+scale = -10
+unit = "W"
+
+# 0x0504 ActivePower_Load_Total. The vendor states this one plainly -- "Consumed by load is
+# positive, Feedback from load is negative" -- which is exactly what load.power means, so no sign
+# work is needed here.
+#
+# VENDOR ONLY: source B does not read it.
+[[register]]
+measurement = "load.power"
+display_name = "House load"
+space = "holding"
+address = 1284
+type = "s16"
+scale = 10
+unit = "W"
