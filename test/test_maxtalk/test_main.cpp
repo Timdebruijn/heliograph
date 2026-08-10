@@ -186,6 +186,28 @@ static void test_a_reply_from_another_device_is_not_decoded() {
     TEST_ASSERT_EQUAL_size_t(0, count);
 }
 
+// Our device, answering somebody ELSE. On a bus with a second querying host that frame is real
+// traffic from the right inverter -- and its numbers answer a question we did not ask.
+static void test_a_frame_addressed_to_another_host_is_not_decoded() {
+    char copy[128];
+    std::strcpy(copy, kCapturedReply);
+    copy[4] = 'A';  // recipient AB instead of FB
+    copy[5] = 'B';
+    // Re-checksum so the frame is otherwise perfect and the recipient check is what rejects it.
+    const size_t at = std::strlen(copy) - 5;
+    const uint16_t sum = maxtalk::checksum(copy + 1, at - 1);
+    for (int i = 0; i < 4; ++i) {
+        const uint8_t nib = (sum >> (12 - 4 * i)) & 0xF;
+        copy[at + i] = static_cast<char>(nib < 10 ? '0' + nib : 'A' + nib - 10);
+    }
+
+    maxtalk::Reading readings[16];
+    size_t           count = 0;
+    TEST_ASSERT_EQUAL(maxtalk::ParseResult::WrongRecipient,
+                      maxtalk::parseReply(copy, std::strlen(copy), 0x05, readings, 16, count));
+    TEST_ASSERT_EQUAL_size_t(0, count);
+}
+
 static void test_an_unterminated_frame_asks_for_more_bytes() {
     char partial[64];
     std::memcpy(partial, kCapturedReply, 40);
@@ -312,6 +334,7 @@ int main() {
     RUN_TEST(test_a_corrupted_frame_is_reported_as_a_checksum_error);
     RUN_TEST(test_a_header_that_lies_about_its_length_is_not_a_checksum_error);
     RUN_TEST(test_a_reply_from_another_device_is_not_decoded);
+    RUN_TEST(test_a_frame_addressed_to_another_host_is_not_decoded);
     RUN_TEST(test_an_unterminated_frame_asks_for_more_bytes);
     RUN_TEST(test_frame_length_finds_the_boundary_in_a_longer_buffer);
     RUN_TEST(test_a_malformed_payload_is_refused_rather_than_half_decoded);

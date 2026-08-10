@@ -60,6 +60,10 @@ enum class ParseResult : uint8_t {
     /// A well-formed frame from someone else. On a shared bus this is normal traffic, not an
     /// error, and a caller polling several devices must not count it as one.
     WrongSender,
+    /// A well-formed frame from the right device, addressed to a different host. Distinct from
+    /// WrongSender because it means something else is querying this bus: our device answered,
+    /// but it answered somebody else's question, and its numbers belong to that exchange.
+    WrongRecipient,
     /// The frame parsed but its payload does not follow `CODE=HEX` pairs.
     Malformed,
     /// More pairs than the caller made room for. The readings already written stay valid.

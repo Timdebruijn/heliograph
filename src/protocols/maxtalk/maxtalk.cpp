@@ -58,6 +58,7 @@ const char* parseResultName(ParseResult result) {
         case ParseResult::BadChecksum:     return "bad checksum";
         case ParseResult::LengthMismatch:  return "length mismatch";
         case ParseResult::WrongSender:     return "wrong sender";
+        case ParseResult::WrongRecipient:  return "addressed to another host";
         case ParseResult::Malformed:       return "malformed";
         case ParseResult::TooManyReadings: return "too many readings";
     }
@@ -185,7 +186,11 @@ ParseResult parseReply(const char* frame, size_t length, uint8_t expectedSender,
     // happens to carry someone else's address should be reported as corrupt, not as somebody
     // else's traffic.
     if (sender != expectedSender) return ParseResult::WrongSender;
-    (void)recipient;
+    // And it has to be addressed to US. Parsing this field and discarding it meant a frame our
+    // device sent in answer to a SECOND querying host would be decoded as though it answered our
+    // request -- plausible numbers from the right inverter, belonging to somebody else's
+    // question. Found by review.
+    if (recipient != kHostAddress) return ParseResult::WrongRecipient;
 
     const size_t payloadStart = markerAt + sizeof(kPayloadMarker) - 1;
     const size_t payloadEnd   = checksumAt - 1;  // the closing '|'
