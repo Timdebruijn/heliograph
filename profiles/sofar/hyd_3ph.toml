@@ -10,8 +10,8 @@
 #   strings, the whole battery block, inverter temperature -- carries the EP's sourcing: agreed by
 #   the vendor document AND an independent configuration published as working on real hardware.
 #
-#   The three registers that make this profile three-phase -- phases S and T -- and the two energy
-#   counters are VENDOR DOCUMENT ONLY. The hardware behind the second source is a single-phase
+#   The four registers that make this profile three-phase -- voltage and current on phases S and T
+#   (0x0498, 0x0499, 0x04A3, 0x04A4) -- and the two energy counters are VENDOR DOCUMENT ONLY. The hardware behind the second source is a single-phase
 #   HYD-3600-EP, which has no S or T phase to confirm. So the part that distinguishes this profile
 #   is precisely the part nothing has checked.
 #
