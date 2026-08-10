@@ -7,9 +7,10 @@
 #      units.
 #   B. An independent ESPHome configuration published as working against a real HYD-3600-EP.
 #
-# EVERY REGISTER BELOW APPEARS IN BOTH, with the same address, the same width, the same
-# signedness and the same scale. Source B is the reason several choices here are not guesses --
-# see the temperature note. What source B does not carry is marked per row.
+# SIXTEEN OF THE EIGHTEEN REGISTERS BELOW APPEAR IN BOTH, with the same address, the same width,
+# the same signedness and the same scale. The two exceptions are the energy counters, which only
+# the vendor document carries; they are marked as such at their own rows. Source B is the reason
+# several choices here are not guesses -- see the temperature note.
 #
 # Function code 3 (holding) throughout; addresses are the protocol addresses the vendor document
 # gives, converted from hex to decimal. Device address 1-247, factory default 1.
@@ -39,7 +40,7 @@ id = "sofar_hyd_ep"
 display_name = "Sofar HYD 3…6K-EP hybrid (single phase)"
 manufacturer = "Sofar Solar"
 status = "experimental"
-default = false
+default = false        # sph.toml holds the driver default
 phases = 1
 mppts = 2
 battery = true
@@ -54,7 +55,7 @@ parity = "none"
 stop_bits = 1
 
 # Blocks are kept tight around what is actually mapped. The vendor's address space is sparse and
-# runs to 0x06xx; reading it whole would be several hundred registers per poll for the fifteen
+# runs to 0x06xx; reading it whole would be several hundred registers per poll for the eighteen
 # values below.
 [[block]]
 space = "holding"

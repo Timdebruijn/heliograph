@@ -38,7 +38,7 @@ and why.
 | [growatt-sph-protocol.md](growatt-sph-protocol.md) · [growatt-mic-tl-x-protocol.md](growatt-mic-tl-x-protocol.md) | Growatt SPH hybrid; MIC and MIN TL-X string inverters. |
 | [deye-sun-xk-sg-protocol.md](deye-sun-xk-sg-protocol.md) · [solis-rhi-protocol.md](solis-rhi-protocol.md) · [sungrow-sh-protocol.md](sungrow-sh-protocol.md) | Single-phase hybrids with a battery port. |
 | [huawei-sun2000-protocol.md](huawei-sun2000-protocol.md) · [goodwe-et-protocol.md](goodwe-et-protocol.md) | Huawei SUN2000 (± LUNA2000); GoodWe ET/EH/BT/BH. **GoodWe ships at unit id 247, not 1.** |
-| [sofar-hyd-protocol.md](sofar-hyd-protocol.md) | Sofar HYD 3…6K-EP single-phase hybrid. **Better sourced than most** — two independent sources agree on every mapped register, one of them running on real hardware. The grid register is left out because nobody states its sign. |
+| [sofar-hyd-protocol.md](sofar-hyd-protocol.md) | Sofar HYD 3…6K-EP single-phase hybrid. **Better sourced than most** — two independent sources agree on sixteen of its eighteen registers, one of them running on real hardware. The grid register is left out because nobody states its sign. |
 | [solax-x1-protocol.md](solax-x1-protocol.md) | SolaX X1. Read this **before buying or wiring** — the first attempt on real hardware returned nothing at all. |
 | [solarmax-protocol.md](solarmax-protocol.md) | SolarMax, via the MaxTalk ASCII protocol. The vendor is gone; this is the only way these units report anything. **No SolarMax has ever answered it** — and DC voltage is left unmapped because the sources disagree. |
 | [sunspec.md](sunspec.md) | The vendor-neutral standard. One driver for any inverter that implements it. |
