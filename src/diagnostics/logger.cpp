@@ -2,6 +2,7 @@
 
 #include "logger.h"
 
+#include <algorithm>
 #include <cstdio>
 
 #include "log_buffer.h"
@@ -97,7 +98,7 @@ void traceHex(const char* prefix, const uint8_t* data, size_t len) {
     // Bounded per line and overall: a corrupted length byte must not turn into a megabyte of
     // output that itself takes the device down.
     constexpr size_t kMaxBytes = 64;
-    const size_t     n         = len < kMaxBytes ? len : kMaxBytes;
+    const size_t     n         = std::min(len, kMaxBytes);
     // Initialised, not merely written by the loop below: at len == 0 that loop does not run and
     // an uninitialised buffer would go to trace("%s"), printing stack bytes until it happened to
     // hit a NUL. Two of the three callers guard with `received > 0`, but Rs485Transport::write

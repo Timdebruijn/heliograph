@@ -2,6 +2,7 @@
 
 #include "log_buffer.h"
 
+#include <algorithm>
 #include <cstring>
 
 #if defined(ESP32)
@@ -64,7 +65,7 @@ void pushLine(const char* line) {
 
 std::vector<std::string> recentLines(size_t max) {
     Guard guard;
-    const size_t take = max < g_held ? max : g_held;
+    const size_t take = std::min(max, g_held);
     std::vector<std::string> out;
     out.reserve(take);
     // g_next points one past the newest line; walk back `take` and read forward from there so

@@ -10,7 +10,7 @@ RelayController::RelayController(ClockFn clock, RateLimitPolicy rateLimit)
     : clock_(std::move(clock)), limiter_(rateLimit) {}
 
 void RelayController::begin(uint8_t count, RelayApplyFn apply) {
-    count_ = count > kMaxRelays ? kMaxRelays : count;
+    count_ = std::min(count, kMaxRelays);
     apply_ = std::move(apply);
     allOff();
 }
