@@ -19,6 +19,23 @@ namespace diag {
 class BusTap;
 }
 
+/// Which physical medium a transport speaks.
+///
+/// THREE OF THESE ARE RESERVED, NOT IMPLEMENTED, and that distinction is the whole reason this
+/// comment exists -- a reader otherwise cannot tell an unfinished feature from a deliberate one.
+///
+///   Rs485  the only transport compiled into the firmware.
+///   Mock   the host-test double.
+///   Tcp    reserved. The profile schema already accepts `transports = ["tcp"]` and the SunSpec
+///          driver's own notes explain why it matters: most SunSpec devices in the field are
+///          reached over TCP. What is missing is a Modbus TCP *client*, not this enum value.
+///   Can    reserved, and not speculative -- the RS485-CAN board carries an isolated CAN
+///          interface that nothing in this firmware speaks yet.
+///   Rs232  reserved. No hardware here uses it; kept because the set reads as "which medium",
+///          and a medium list that omits the obvious sibling invites the question every time.
+///
+/// Reserved values cost nothing at runtime: an enumerator is a compile-time constant, not code.
+/// The cost of leaving them undocumented is that nobody can tell which ones work.
 enum class TransportType : uint8_t { Rs485, Rs232, Can, Tcp, Mock };
 
 struct TransportStats {

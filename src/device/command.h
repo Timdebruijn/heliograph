@@ -13,11 +13,21 @@
 
 namespace heliograph {
 
+/// Where a command came from. Provenance, not routing -- nothing dispatches on this.
+///
+/// It is set and, today, never read: two callers assign it and no consumer looks. It stays
+/// because Internal is the marker the grid-source design depends on -- a freshness gate has to
+/// tell a command derived from our own measurements apart from one an outside system decided,
+/// and only the originator knows which it is. That consumer does not exist yet.
+///
+/// Two values were removed in the 2026-08 cleanup rather than kept as reserved, because unlike
+/// the transport list above they had no future to reserve. `Web` was always the same path as
+/// `Rest`: the dashboard button sends an HTTP request and arrives as Rest. `ModbusTcp` was
+/// unreachable by construction -- that server refuses writes at three independent points, so no
+/// command can originate there while it stays a read-only view of the cached register map.
 enum class CommandSource : uint8_t {
     Mqtt,
     Rest,
-    ModbusTcp,
-    Web,
     Internal,
 };
 
