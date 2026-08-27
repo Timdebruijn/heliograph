@@ -518,7 +518,34 @@ namespace {
 //
 // The rest is documentation that had drifted, including an "enum modes cannot be expressed" that
 // the profile driver has implemented since July.
-#define HELIOGRAPH_VERSION_PATCH 1
+// 0.27.2 is a cleanup round, and its most useful result is what it did NOT have to change.
+//
+// The audit that opened it found zero warnings in src/ on all four boards, cppcheck clean at high
+// severity, ruff clean, and no duplication worth consolidating -- every candidate fell over on
+// inspection, including three that only looked like duplication because the word appeared in a
+// comment. Every dependency is on its newest published release, checked against the registry and
+// the GitHub releases rather than against `pio pkg outdated`, which respects our pins and can
+// therefore never report an exactly-pinned package as behind.
+//
+// So the work was mostly NAMING things rather than changing them. The four build warnings that do
+// exist are all inside eModbus and are now documented where the dependency is declared, with the
+// reason they will not go away: 1.7.4 is fourteen months old while that repository keeps
+// committing, the deprecation is not reported upstream, and neither build_src_filter nor
+// lib_ignore can reach the file. Three of the four come out of a translation unit this firmware
+// never uses, since we run the Modbus TCP server and not the client.
+//
+// Four enum values had no reference anywhere, and treating them as one category was the mistake.
+// TransportType::Can is not speculative -- the RS485-CAN board carries an isolated CAN interface
+// nothing here speaks yet -- and Tcp is the value the profile schema already accepts. An
+// enumerator is a compile-time constant, so deleting these buys no flash and costs a future; what
+// they actually cost was that a reader could not tell unfinished from deliberate, which is what
+// got fixed. CommandSource::Web and ModbusTcp went, because they had nothing to reserve: Web was
+// always the same path as Rest, and ModbusTcp cannot originate a command while that server
+// refuses writes at three independent points.
+//
+// And four ternaries became std::min, for +3 lines net once <algorithm> is counted -- the honest
+// arithmetic for a change made on clarity rather than size.
+#define HELIOGRAPH_VERSION_PATCH 2
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
