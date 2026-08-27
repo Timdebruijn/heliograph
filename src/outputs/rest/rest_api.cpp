@@ -8,6 +8,7 @@
 
 #if defined(ESP32)
 
+#include <algorithm>
 #include <ESPAsyncWebServer.h>
 #include <WiFi.h>  // softAPIP() for the captive-portal redirect target
 
@@ -255,7 +256,7 @@ bool RestApi::begin() {
             "text/html", htmlLen,
             [html, htmlLen](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
                 const size_t remaining = htmlLen - index;
-                const size_t n         = remaining < maxLen ? remaining : maxLen;
+                const size_t n         = std::min(remaining, maxLen);
                 std::memcpy(buffer, html + index, n);
                 return n;
             });
