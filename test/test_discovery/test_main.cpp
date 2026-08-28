@@ -613,7 +613,7 @@ static void test_two_devices_without_serial_numbers_are_not_folded_into_one() {
     DiscoveryEngine e(reg, t);
     const auto      out = e.run(DiscoveryMode::Extended);
 
-    TEST_ASSERT_EQUAL_UINT32(2, out.candidates.size());
+    TEST_ASSERT_EQUAL_size_t(2, out.candidates.size());
 }
 
 static void test_an_address_option_without_a_default_is_not_sweepable() {
@@ -709,7 +709,7 @@ static void test_two_different_drivers_reporting_one_serial_stay_two_candidates(
     DiscoveryEngine e(reg, t);
     const auto      out = e.run(DiscoveryMode::Quick);
 
-    TEST_ASSERT_EQUAL_UINT32(2, out.candidates.size());
+    TEST_ASSERT_EQUAL_size_t(2, out.candidates.size());
 }
 
 static void test_inconsistent_probes_halve_the_score_and_block_selection() {

@@ -287,8 +287,8 @@ static void test_a_lowercase_hex_value_decodes_the_same_as_uppercase() {
     size_t           cu = 0, cl = 0;
     TEST_ASSERT_EQUAL(maxtalk::ParseResult::Ok, maxtalk::parseReply(upper, nu, 0x05, ru, 4, cu));
     TEST_ASSERT_EQUAL(maxtalk::ParseResult::Ok, maxtalk::parseReply(lower, nl, 0x05, rl, 4, cl));
-    TEST_ASSERT_EQUAL_UINT32(1, cu);
-    TEST_ASSERT_EQUAL_UINT32(1, cl);
+    TEST_ASSERT_EQUAL_size_t(1, cu);
+    TEST_ASSERT_EQUAL_size_t(1, cl);
     TEST_ASSERT_EQUAL_UINT32(0x1F3E, ru[0].value);
     TEST_ASSERT_EQUAL_UINT32(ru[0].value, rl[0].value);
 }
