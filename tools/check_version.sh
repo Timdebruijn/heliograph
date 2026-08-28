@@ -72,6 +72,10 @@ if [ "$tag" = "--self-test" ]; then
     # positive the old name-shape guard existed to avoid, and it still must not happen.
     expect 0 branch "v-something"
     expect 0 branch "main"
+    # And with no ref type at all -- not Actions, or a runner that stopped setting it -- a
+    # v-shaped name is still checked rather than waved through.
+    expect 1 "" "vtest"
+    expect 0 "" ""
     if [ "$self_fail" -eq 0 ]; then
         echo "check_version self-test: OK"
     fi
@@ -83,8 +87,15 @@ fi
 # which let through every tag that was not v<digit>, unchecked, while release.yml triggers on
 # "v*". A tag of vtest, v-wip or a bare v built and published a release with no version check
 # at all, and release.yml names the release ${GITHUB_REF_NAME#v}, so vtest shipped as "test".
-if [ -z "$tag" ] && [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-    tag="${GITHUB_REF_NAME:-}"
+if [ -z "$tag" ]; then
+    case "${GITHUB_REF_TYPE:-}" in
+        tag) tag="${GITHUB_REF_NAME:-}" ;;
+        # Unset means this is not a GitHub Actions run -- or a runner that stopped providing
+        # the variable. Fall back to the old name-shape heuristic rather than to NO CHECK: a
+        # branch wrongly read as a version is a loud failure on a pull request, and a release
+        # that skips its version check is a silent one. Given the choice, be loud.
+        "")  case "${GITHUB_REF_NAME:-}" in v*) tag="$GITHUB_REF_NAME" ;; esac ;;
+    esac
 fi
 if [ -z "$tag" ]; then
     echo "$declared"
