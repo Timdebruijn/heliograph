@@ -87,14 +87,58 @@ def main() -> int:
 # taint-based: proving a given value is safe means reading code, and the pages are re-authored
 # from a design tool often enough that "someone will notice" is not a control. No exceptions --
 # a handler that needs a value takes it from data-*.
-HANDLER_WITH_CODE = re.compile(r"""\bon[a-z]+\s*=\s*("[^"]*\$\{|'[^']*\$\{)""")
+# Anchored to the HTML event-handler content attributes rather than to "a word starting with
+# on", because the latter matches `online=${f.online}` inside a template literal and this file
+# has one. The event names are a closed set; words beginning with "on" are not.
+HANDLER_NAMES = (
+    "abort|animationend|animationiteration|animationstart|auxclick|beforeinput|beforeunload|"
+    "blur|cancel|canplay|canplaythrough|change|click|close|contextmenu|copy|cuechange|cut|"
+    "dblclick|drag|dragend|dragenter|dragleave|dragover|dragstart|drop|durationchange|emptied|"
+    "ended|error|focus|focusin|focusout|formdata|hashchange|input|invalid|keydown|keypress|"
+    "keyup|load|loadeddata|loadedmetadata|loadstart|message|mousedown|mouseenter|mouseleave|"
+    "mousemove|mouseout|mouseover|mouseup|offline|online|pagehide|pageshow|paste|pause|play|"
+    "playing|pointercancel|pointerdown|pointerenter|pointerleave|pointermove|pointerout|"
+    "pointerover|pointerup|popstate|progress|ratechange|reset|resize|scroll|scrollend|search|"
+    "securitypolicyviolation|seeked|seeking|select|selectionchange|selectstart|slotchange|"
+    "stalled|storage|submit|suspend|timeupdate|toggle|touchcancel|touchend|touchmove|"
+    "touchstart|transitionend|unload|volumechange|waiting|wheel"
+)
+
+# Three shapes, not one. The first version of this check looked only for ${...} inside a quoted
+# value, which review showed was anchored to HOW the code is written rather than to whether a
+# dynamic value reaches a handler:
+#
+#   onclick="f('m:'+esc(id))"   -- string concatenation, identical vulnerability, no ${
+#   ONCLICK="..." / onDblClick  -- attribute names are case-insensitive to the browser
+#   onclick=f(${x})             -- an unquoted value is legal HTML
+#
+# So: the value must be a static literal. No interpolation, no concatenation, no backticks, and
+# it must be quoted. A quoted [^"]* also spans newlines, which covers an attribute wrapped
+# across lines.
+#
+# The lookbehind keeps JS property assignments out -- `dlg.onclose=()=>{...}` assigns a
+# function object and compiles no string, so it is not this defect and never was.
+HANDLER_ATTR = re.compile(
+    r"(?<![.\w$])on(?:"
+    + HANDLER_NAMES
+    + r')\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))',
+    re.IGNORECASE,
+)
+DYNAMIC = re.compile(r"\$\{|`|\+")
 
 
 def check_no_code_in_handlers(name, source):
     hits = []
-    for n, line in enumerate(source.splitlines(), 1):
-        if HANDLER_WITH_CODE.search(line):
-            hits.append((n, line.strip()[:100]))
+    for m in HANDLER_ATTR.finditer(source):
+        quoted = m.group(1) if m.group(1) is not None else m.group(2)
+        if quoted is None:
+            why = "the value is not quoted"
+        elif DYNAMIC.search(quoted):
+            why = "the value is built rather than literal"
+        else:
+            continue
+        line = source.count("\n", 0, m.start()) + 1
+        hits.append((line, why + ": " + m.group(0).strip()[:90]))
     print(
         f"{name}: inline handlers carry no interpolation: {'OK' if not hits else 'FAIL'}"
     )

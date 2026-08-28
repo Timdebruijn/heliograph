@@ -165,6 +165,13 @@ const $=s=>document.querySelector(s[0]==='#'||s[0]==='.'?s:'#'+s);
 const esc=s=>String(s??'').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
 // null must never render as 0 -- that is why the firmware sends null in the first place.
 const fmt=(v,d=1)=>v===null||v===undefined?'—':Number(v).toFixed(d);
+// esc() makes a URL safe to SIT in an attribute; it does not make it safe to FOLLOW.
+// javascript: and data: survive HTML-escaping intact and run on click. Only http(s)
+// is linked; anything else renders as plain text, which is the honest failure -- the
+// reader still sees what the feed offered without the page offering to run it.
+const safeUrl=u=>{if(!u)return null;  // String(null) would resolve to a link reading "null"
+  try{const p=new URL(String(u),location.href).protocol;
+  return p==='http:'||p==='https:'?String(u):null}catch(e){return null}};
 const sp=n=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,'\u2009');
 const up=s=>s<3600?Math.floor(s/60)+' m':s<86400?(s/3600).toFixed(1)+' h':Math.floor(s/86400)+' d '+Math.round(s%86400/3600)+' h';
 const kb=b=>b===null||b===undefined?'—':Math.round(b/1024)+' kB';
@@ -2202,7 +2209,7 @@ function updRender(){
     return;
   }
   box.innerHTML=`<div class="msg ok" style="display:block"><b>${esc(updLatest.version)}</b> is available. You are running ${esc(cur)}.
-      ${updLatest.notes_url?`<a href="${esc(updLatest.notes_url)}" target="_blank" rel="noopener noreferrer">Release notes</a>`:''}</div>
+      ${safeUrl(updLatest.notes_url)?`<a href="${esc(safeUrl(updLatest.notes_url))}" target="_blank" rel="noopener noreferrer">Release notes</a>`:''}</div>
     <div class="hint">${Math.round((asset.size||0)/1024)} kB. Your browser downloads it and hands it to the bridge, which checks it against the checksum from the release before writing anything. That proves the image arrived intact — it is not a signature, and does not prove who built it.</div>
     <div class="acts"><button id="upd_btn" onclick="installUpdate()">Install ${esc(updLatest.version)}</button></div>
     <div id="upd_prog" class="prog"><div></div></div>
