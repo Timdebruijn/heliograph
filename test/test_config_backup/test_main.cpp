@@ -418,6 +418,17 @@ static void test_the_worst_case_preview_still_fits_its_bound() {
         "the worst-case preview must not exceed kMaxRestorePreviewBytes");
     TEST_ASSERT_TRUE_MESSAGE(out.size() < heliograph::rest::kMaxRestorePreviewBytes,
                              "and must fit with room to spare, not exactly");
+
+    // AND THE BOUND ACTUALLY BITES. The assertion above only says this payload is small
+    // enough; it says nothing about whether anything would stop a larger one. Mutation
+    // testing deleted the `needed > maxBytes` check in json_limits::finish() -- the single
+    // choke point all 44 payload builders share -- and this test stayed green. Refusing at
+    // one byte under the measured size is self-calibrating: it cannot go vacuous when the
+    // payload grows.
+    std::string refused = "untouched";
+    TEST_ASSERT_FALSE(heliograph::rest::buildRestorePreviewPayload(bc, diff, true, true, refused,
+                                                                   out.size() - 1));
+    TEST_ASSERT_EQUAL_STRING("untouched", refused.c_str());
 }
 
 static void test_diff_reports_a_changed_list_position_by_position() {

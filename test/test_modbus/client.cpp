@@ -41,6 +41,18 @@ std::vector<uint8_t> exceptionReply(uint8_t unit, uint8_t fn, uint8_t code) {
     return f;
 }
 
+/// The echo a device sends back for 0x06: the address and the value it accepted, verbatim.
+std::vector<uint8_t> writeEcho(uint8_t unit, uint16_t address, uint16_t value) {
+    std::vector<uint8_t> f{unit,
+                           kWriteSingleRegister,
+                           static_cast<uint8_t>(address >> 8),
+                           static_cast<uint8_t>(address & 0xFF),
+                           static_cast<uint8_t>(value >> 8),
+                           static_cast<uint8_t>(value & 0xFF)};
+    test::appendModbusCrc(f);
+    return f;
+}
+
 }  // namespace
 
 static void test_a_good_reply_decodes() {
@@ -189,6 +201,67 @@ static void test_a_zero_length_read_is_refused() {
     TEST_ASSERT_TRUE(t.writes.empty());
 }
 
+// THE WRITE PATH HAD NO TESTS AT ALL. Every case below is new, and the reason they are worth
+// having is the one the header states: a write whose echo is not verified is a request, not a
+// setting. Mutation testing found this by replacing the echo comparison with `accepted = true`
+// and watching the whole suite stay green -- nothing here called writeSingleRegister, while two
+// production drivers do (modbus_profile and sunspec).
+static void test_a_write_that_echoes_what_was_sent_is_a_setting() {
+    MockTransport t;
+    t.replyWith(writeEcho(kUnit, 0x0410, 750));
+
+    const auto r = writeSingleRegister(t, kUnit, 0x0410, 750);
+
+    TEST_ASSERT_EQUAL(TransactionStatus::Ok, r.status);
+}
+
+// The two that matter. A device that answers about a DIFFERENT register, or with a different
+// value than the one asked for, has not done what was asked however well-formed the frame is.
+// Reported as Protocol -- "intact, but not what we asked for" -- and never as Ok, because on a
+// control register the difference is between an inverter that is limited and one everybody
+// believes is limited.
+static void test_a_write_echoing_another_address_is_not_a_setting() {
+    MockTransport t;
+    t.replyWith(writeEcho(kUnit, 0x0411, 750));  // neighbouring register
+
+    const auto r = writeSingleRegister(t, kUnit, 0x0410, 750);
+
+    TEST_ASSERT_EQUAL(TransactionStatus::Protocol, r.status);
+}
+
+static void test_a_write_echoing_another_value_is_not_a_setting() {
+    MockTransport t;
+    t.replyWith(writeEcho(kUnit, 0x0410, 1000));  // clamped by the device, or stale
+
+    const auto r = writeSingleRegister(t, kUnit, 0x0410, 750);
+
+    TEST_ASSERT_EQUAL(TransactionStatus::Protocol, r.status);
+}
+
+// A refusal is the ORDINARY answer to a control write -- read-only register, value out of
+// range, a device wanting an unlock first -- so it carries its code rather than collapsing
+// into a protocol error.
+static void test_a_refused_write_carries_its_exception_code() {
+    MockTransport t;
+    t.replyWith(exceptionReply(kUnit, kWriteSingleRegister, 0x04));  // slave device failure
+
+    const auto r = writeSingleRegister(t, kUnit, 0x0410, 750);
+
+    TEST_ASSERT_EQUAL(TransactionStatus::Exception, r.status);
+    TEST_ASSERT_EQUAL_UINT8(0x04, r.exceptionCode);
+}
+
+// Silence must never read as "written". This is the failure an unpowered or mis-addressed
+// device produces, and it is the one most likely to be met in the field.
+static void test_a_write_nobody_answers_is_a_timeout() {
+    MockTransport t;
+    t.replyWithSilence();
+
+    const auto r = writeSingleRegister(t, kUnit, 0x0410, 750);
+
+    TEST_ASSERT_EQUAL(TransactionStatus::Timeout, r.status);
+}
+
 void run_modbus_client() {
     RUN_TEST(test_a_good_reply_decodes);
     RUN_TEST(test_an_exception_reports_its_code);
@@ -200,4 +273,9 @@ void run_modbus_client() {
     RUN_TEST(test_a_reply_with_too_few_registers_is_refused);
     RUN_TEST(test_a_reply_with_exactly_the_requested_count_is_ok);
     RUN_TEST(test_a_zero_length_read_is_refused);
+    RUN_TEST(test_a_write_that_echoes_what_was_sent_is_a_setting);
+    RUN_TEST(test_a_write_echoing_another_address_is_not_a_setting);
+    RUN_TEST(test_a_write_echoing_another_value_is_not_a_setting);
+    RUN_TEST(test_a_refused_write_carries_its_exception_code);
+    RUN_TEST(test_a_write_nobody_answers_is_a_timeout);
 }
