@@ -235,6 +235,32 @@ static void test_an_unusable_reply_leaves_the_state_completely_untouched() {
     TEST_ASSERT_EQUAL_STRING("untouched", s.statusText.c_str());
 }
 
+// Every other test in this suite reads capabilities and identity off the DRIVER (d.capabilities(),
+// d.identity()). Nothing read them off the polled DeviceState -- which is the copy REST, MQTT,
+// Prometheus and the Modbus register map all publish from. Deleting both assignments at the end
+// of poll() therefore left the whole suite green, while a bridge would have reported a device
+// with no manufacturer, no protocol name and no capabilities at all.
+static void test_a_poll_publishes_the_identity_and_capabilities_into_the_state() {
+    MockTransport            t;
+    solarmax::SolarmaxDriver d(t, solarmax::SolarmaxOptions{0x05});
+    d.begin(t);
+    respondWith(t, 0x05, "PAC=1F4;UL1=8FC;IL1=64;TNF=1388;KDY=1F;KT0=3E8");
+
+    DeviceState s;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(s));
+
+    TEST_ASSERT_EQUAL_STRING("SolarMax", s.identity.manufacturer.c_str());
+    TEST_ASSERT_EQUAL_STRING("MaxTalk RS485", s.identity.protocolName.c_str());
+    TEST_ASSERT_EQUAL_STRING(d.identity().driverId.c_str(), s.identity.driverId.c_str());
+
+    TEST_ASSERT_TRUE(s.capabilities.has(InverterCapability::ReadAcPower));
+    TEST_ASSERT_EQUAL_UINT8(d.capabilities().phaseCount, s.capabilities.phaseCount);
+    TEST_ASSERT_EQUAL_UINT8(d.capabilities().mpptCount, s.capabilities.mpptCount);
+    // Read-only is what every output keys its control surface off, so it has to survive the
+    // copy rather than be inferred from the driver id downstream.
+    TEST_ASSERT_TRUE(s.capabilities.isReadOnly());
+}
+
 static void test_the_probe_identifies_without_writing_anything_but_a_query() {
     MockTransport t;
     solarmax::SolarmaxDriver d(t, solarmax::SolarmaxOptions{0x05});
@@ -245,7 +271,13 @@ static void test_the_probe_identifies_without_writing_anything_but_a_query() {
     TEST_ASSERT_TRUE(r.responded);
     TEST_ASSERT_TRUE(r.checksumValid);
     TEST_ASSERT_EQUAL_STRING("SolarMax", r.detectedManufacturer.c_str());
-    TEST_ASSERT_TRUE(r.confidenceScore > 0);
+    // The exact score, not merely "some confidence". Discovery ranks candidate drivers against
+    // each other by this number, so it is a position on a scale rather than a flag: 100 is a
+    // driver that read back a serial number (EverSolar, SolaX), 95 a SunSpec device that
+    // answered its identity block, 40 an ambiguous SunSpec match, 30 the mock. 70 says "the
+    // protocol answered and named a type, but this family has no serial to confirm it with".
+    // Asserting > 0 accepted any of those, and the ranking is the whole point.
+    TEST_ASSERT_EQUAL_INT(70, r.confidenceScore);
     // Hex on the wire, hex in the label: "type 0x64", not the decimal 100.
     TEST_ASSERT_EQUAL_STRING("type 0x64", r.detectedModel.c_str());
 
@@ -315,6 +347,7 @@ int main() {
     RUN_TEST(test_a_reply_with_no_mapped_codes_is_not_a_successful_poll);
     RUN_TEST(test_an_unusable_reply_leaves_the_state_completely_untouched);
     RUN_TEST(test_the_probe_identifies_without_writing_anything_but_a_query);
+    RUN_TEST(test_a_poll_publishes_the_identity_and_capabilities_into_the_state);
     RUN_TEST(test_a_silent_bus_probes_as_no_device_rather_than_a_broken_one);
     RUN_TEST(test_another_devices_frame_during_a_probe_is_recorded_as_traffic);
     RUN_TEST(test_the_driver_refuses_every_write);

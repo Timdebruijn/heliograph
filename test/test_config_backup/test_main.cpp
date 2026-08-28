@@ -319,6 +319,21 @@ static void test_a_configuration_that_fails_validation_is_refused() {
 static void test_an_oversized_file_is_refused_before_parsing() {
     BackupContents contents;
     std::string    detail;
+
+    // VALID JSON, and too big. The fixture used to be a wall of 'x', which deserializeJson
+    // rejects on its own -- so deleting the size ceiling entirely left this green and the
+    // test could not tell "refused for being oversized" from "refused for not being JSON".
+    // The ceiling exists to stop a large well-formed document reaching the parser at all, on
+    // a device where that memory is not available to lose.
+    std::string big = R"({"format_version":1,"configuration":{"note":")";
+    big.append(kMaxBackupBytes, 'a');
+    big += R"("}})";
+    TEST_ASSERT_TRUE_MESSAGE(big.size() > kMaxBackupBytes, "the fixture must exceed the ceiling");
+    TEST_ASSERT_EQUAL(BackupResult::NotJson, parseConfigBackup(big, contents, detail));
+    TEST_ASSERT_TRUE_MESSAGE(detail.find("larger") != std::string::npos,
+                             "and must say it was the SIZE, not the syntax");
+
+    // The original case still holds: not-JSON is also refused, for its own reason.
     TEST_ASSERT_EQUAL(BackupResult::NotJson,
                       parseConfigBackup(std::string(kMaxBackupBytes + 1, 'x'), contents, detail));
 }

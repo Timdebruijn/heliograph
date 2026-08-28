@@ -230,6 +230,69 @@ static void test_frame_length_finds_the_boundary_in_a_longer_buffer() {
     TEST_ASSERT_EQUAL_size_t(n, maxtalk::frameLength(buf, n + 7));
 }
 
+/// Builds an otherwise-perfect reply -- correct declared length, correct checksum -- around a
+/// caller-chosen marker and payload. Both callers below need to vary exactly one thing and keep
+/// every other check satisfied, or the parser refuses the frame before reaching what is under
+/// test. That is the failure this suite has already been bitten by once.
+static size_t buildReply(const char* marker, const char* payload, char* frame) {
+    const size_t total = 9 + (std::strlen(marker) + std::strlen(payload) + 1) + 5;
+    int          w     = 0;
+    frame[w++] = '{';
+    frame[w++] = '0'; frame[w++] = '5'; frame[w++] = ';';
+    frame[w++] = 'F'; frame[w++] = 'B'; frame[w++] = ';';
+    frame[w++] = static_cast<char>(total / 16 < 10 ? '0' + total / 16 : 'A' + total / 16 - 10);
+    frame[w++] = static_cast<char>(total % 16 < 10 ? '0' + total % 16 : 'A' + total % 16 - 10);
+    std::memcpy(frame + w, marker, std::strlen(marker));
+    w += static_cast<int>(std::strlen(marker));
+    std::memcpy(frame + w, payload, std::strlen(payload));
+    w += static_cast<int>(std::strlen(payload));
+    frame[w++] = '|';
+    const uint16_t sum = maxtalk::checksum(frame + 1, static_cast<size_t>(w) - 1);
+    for (int i = 0; i < 4; ++i) {
+        const uint8_t nib = (sum >> (12 - 4 * i)) & 0xF;
+        frame[w++] = static_cast<char>(nib < 10 ? '0' + nib : 'A' + nib - 10);
+    }
+    frame[w++] = '}';
+    return static_cast<size_t>(w);
+}
+
+// No test ever corrupted the "|64:" marker, so deleting the memcmp that checks it left the
+// suite green. A frame whose marker is garbled or shifted by a byte would then be parsed from
+// the wrong offset -- and everything after it is read as code=value pairs, so the failure is
+// not "no reading" but plausible readings taken from the wrong place in the frame.
+static void test_a_frame_whose_payload_marker_is_wrong_is_refused() {
+    const char* markers[] = {"|65:", "|64;", "@64:", "|640", "::::"};
+    for (const char* m : markers) {
+        char         frame[maxtalk::kMaxFrame];
+        const size_t n = buildReply(m, "CAC=1F3E", frame);
+
+        maxtalk::Reading readings[4];
+        size_t           count = 0;
+        TEST_ASSERT_EQUAL_MESSAGE(maxtalk::ParseResult::Malformed,
+                                  maxtalk::parseReply(frame, n, 0x05, readings, 4, count), m);
+    }
+}
+
+// The codec writes uppercase, so every fixture in this suite is uppercase and the lowercase
+// branch of hexValue() was never executed -- deleting it changed nothing. The vendor is gone
+// and there is no second implementation to compare against, so "our own encoder never emits
+// it" is not evidence about what a device emits. The branch exists; this is what it claims.
+static void test_a_lowercase_hex_value_decodes_the_same_as_uppercase() {
+    char         upper[maxtalk::kMaxFrame];
+    char         lower[maxtalk::kMaxFrame];
+    const size_t nu = buildReply("|64:", "CAC=1F3E", upper);
+    const size_t nl = buildReply("|64:", "CAC=1f3e", lower);
+
+    maxtalk::Reading ru[4], rl[4];
+    size_t           cu = 0, cl = 0;
+    TEST_ASSERT_EQUAL(maxtalk::ParseResult::Ok, maxtalk::parseReply(upper, nu, 0x05, ru, 4, cu));
+    TEST_ASSERT_EQUAL(maxtalk::ParseResult::Ok, maxtalk::parseReply(lower, nl, 0x05, rl, 4, cl));
+    TEST_ASSERT_EQUAL_UINT32(1, cu);
+    TEST_ASSERT_EQUAL_UINT32(1, cl);
+    TEST_ASSERT_EQUAL_UINT32(0x1F3E, ru[0].value);
+    TEST_ASSERT_EQUAL_UINT32(ru[0].value, rl[0].value);
+}
+
 static void test_a_malformed_payload_is_refused_rather_than_half_decoded() {
     // The frame must be otherwise PERFECT -- correct length, correct checksum -- or the parser
     // rejects it earlier and the payload logic is never reached. An earlier version of this test
@@ -338,6 +401,8 @@ int main() {
     RUN_TEST(test_an_unterminated_frame_asks_for_more_bytes);
     RUN_TEST(test_frame_length_finds_the_boundary_in_a_longer_buffer);
     RUN_TEST(test_a_malformed_payload_is_refused_rather_than_half_decoded);
+    RUN_TEST(test_a_frame_whose_payload_marker_is_wrong_is_refused);
+    RUN_TEST(test_a_lowercase_hex_value_decodes_the_same_as_uppercase);
     RUN_TEST(test_running_out_of_room_keeps_what_was_already_decoded);
     RUN_TEST(test_a_request_that_does_not_fit_is_refused_rather_than_truncated);
     RUN_TEST(test_a_request_is_refused_for_codes_that_cannot_exist);
