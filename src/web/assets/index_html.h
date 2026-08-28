@@ -187,6 +187,31 @@ function goTab(name){
 /// gets typed into the wrong section.
 function togglePanel(id){panel=panel===id?null:id;devDraft=null;paint()}
 
+// Attribute-borne DATA, never attribute-borne CODE. The browser HTML-decodes an attribute
+// value before the JS parser compiles an inline handler, so a quote that esc() turned into
+// &#39; is a quote again by the time it runs -- and a device id here is driverId + '-' +
+// the serial number the inverter reported over RS485, filtered only to printable ASCII.
+// An apostrophe in that serial used to close the string and run whatever followed, in the
+// admin's authenticated session, with the Basic-auth token sitting in sessionStorage.
+//
+// data-* values are read back with getAttribute, which yields the decoded string and never
+// executable text, so the same bytes are inert. One delegated listener on document also
+// survives every innerHTML repaint, which per-element handlers do not.
+//
+// tools/check_web_js.py fails the build if ${...} ever appears inside an on* attribute
+// again -- the shape is what was wrong, so the shape is what is banned.
+document.addEventListener('click',e=>{
+  const t=e.target.closest('[data-act]');
+  if(!t)return;
+  const a=t.getAttribute('data-act'), v=t.getAttribute('data-val')||'';
+  if(a==='panel')togglePanel(v);
+  else if(a==='tab-panel'){goTab(t.getAttribute('data-tab'));togglePanel(v)}
+  else if(a==='remove-extra')removeExtraAt(Number(v));
+  else if(a==='save-device')saveDevice(Number(v));
+  else if(a==='log-filter'){logFilter=v;loadLogs(true)}
+  else if(a==='wiz-pick')wizPick(v,JSON.parse(t.getAttribute('data-opts')||'{}'));
+});
+
 // ---------------- admin auth ----------------
 // fetch() never raises the browser's Basic-auth dialog: a 401 is just a 401. So ask once, keep
 // it for the tab only, and send the header ourselves.
@@ -485,7 +510,7 @@ function firstRunCard(here){
     <div class="hint" style="margin-top:8px">Wire A, B and ground to the inverter first, then let
       the bridge look for it. Discovery listens at each driver's own line speed and reports what
       answered; nothing is written to the inverter and nothing is changed until you confirm.</div>
-    <div class="acts"><button onclick="${here?"togglePanel('wiz')":"goTab('inv');togglePanel('wiz')"}">Find my inverter</button>
+    <div class="acts"><button data-act="${here?'panel':'tab-panel'}" data-tab="inv" data-val="wiz">Find my inverter</button>
       ${here?'':'<button class="alt" onclick="goTab(\'inv\')">Open the Inverters tab</button>'}</div>
   </div>`;
 }
@@ -738,8 +763,8 @@ function paintInverters(){
       </div>
       ${!dev.label?`<div class="hint" style="margin-top:10px">Id <code>${esc(id)}</code> — this is what the API, the MQTT topics and the Modbus unit mapping use.</div>`:''}
       <div class="acts">
-        <button class="alt sm" onclick="togglePanel('m:${esc(id)}')">${panel==='m:'+id?'Hide readings':`All ${esc(count)} reading${count===1?'':'s'}`}</button>
-        <button class="alt sm" onclick="togglePanel('s:${esc(id)}')">${panel==='s:'+id?'Close settings':'Name, driver and address'}</button>
+        <button class="alt sm" data-act="panel" data-val="m:${esc(id)}">${panel==='m:'+id?'Hide readings':`All ${esc(count)} reading${count===1?'':'s'}`}</button>
+        <button class="alt sm" data-act="panel" data-val="s:${esc(id)}">${panel==='s:'+id?'Close settings':'Name, driver and address'}</button>
       </div>
       ${panel==='m:'+id?`<div class="hair">
         <div class="hint" style="margin:0 0 10px">Everything this driver declares it can read. A channel is listed because the inverter <i>has</i> it; an em dash means it has it but is not reporting a value right now.
@@ -775,12 +800,12 @@ function paintInverters(){
       h+=`<div class="card" style="border-color:var(--warn)">
         <div class="between"><div><b>${esc(e.label||'Inverter '+(i+2))}</b>
           <span class="tag warn">starts after a restart</span></div>
-          ${panel==='x:'+i?'':`<button class="dangerAlt sm" onclick="removeExtraAt(${i})">Remove</button>`}</div>
+          ${panel==='x:'+i?'':`<button class="dangerAlt sm" data-act="remove-extra" data-val="${i}">Remove</button>`}</div>
         <div class="hint">${esc((drv&&drv.display_name)||e.driver_id||'no driver chosen')}${
           addr?' · address '+esc(addr):''} — added to the configuration, not polled yet. Correct it
           here before the restart if anything is off, or remove it.</div>
         <div class="acts">
-          <button class="alt sm" onclick="togglePanel('x:${i}')">${panel==='x:'+i?'Close settings':'Name, driver and address'}</button>
+          <button class="alt sm" data-act="panel" data-val="x:${i}">${panel==='x:'+i?'Close settings':'Name, driver and address'}</button>
         </div>
         ${panel==='x:'+i?deviceForm(i+1):''}
       </div>`;
@@ -851,10 +876,10 @@ function deviceForm(slot){
     ${drvId!==storedDrvId?'<div class="hint" style="color:var(--warn)">A different driver from the one running. Its options below start at this driver\u2019s own defaults, not the stored ones.</div>':''}`;
   h+=optionFields(drv,stored,'dv_o_');
   h+=`<div class="acts">
-      <button onclick="saveDevice(${slot})">Save</button>
+      <button data-act="save-device" data-val="${slot}">Save</button>
       <button class="alt" onclick="togglePanel(null)">Cancel</button>
       <span style="flex:1"></span>
-      ${primary?'':`<button class="dangerAlt" onclick="removeExtraAt(${slot-1})">Remove this inverter</button>`}
+      ${primary?'':`<button class="dangerAlt" data-act="remove-extra" data-val="${slot-1}">Remove this inverter</button>`}
     </div>
     <div class="hint">${primary?'This is the first inverter, which every build has. Point it at a different driver rather than removing it.'
       :'Removing it does not remove what it already published: the old entities stay in Home Assistant, available, showing their last value.'}</div>
@@ -1046,7 +1071,7 @@ function paintHealth(){
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <span class="hint" style="margin:0">show</span>
         ${[['all','everything'],['warn','warnings & errors'],['bus','RS485 only']].map(([k,n])=>
-          `<button class="pill${logFilter===k?'':' off'}" onclick="logFilter='${k}';loadLogs(true)">${esc(n)}</button>`).join('')}
+          `<button class="pill${logFilter===k?'':' off'}" data-act="log-filter" data-val="${k}">${esc(n)}</button>`).join('')}
         <span style="width:1px;height:18px;background:var(--line)"></span>
         <span class="hint" style="margin:0">level</span>
         <select class="tiny" onchange="setLogLevel(this.value)">${['error','warn','info','debug','trace'].map(l=>
@@ -1740,7 +1765,7 @@ function wizardHtml(){
         <tr><td class="dim">Serial number</td><td>${esc(x.serial_number||'—')}</td></tr>
         <tr><td class="dim">Evidence</td><td>${(x.evidence||[]).map(e=>'· '+esc(e)).join('<br>')||'—'}</td></tr>
         </table>
-        <div class="acts"><button onclick='wizPick(${JSON.stringify(x.driver_id)},${JSON.stringify(x.options||{})})'>Choose this device</button></div>
+        <div class="acts"><button data-act="wiz-pick" data-val="${esc(x.driver_id)}" data-opts="${esc(JSON.stringify(x.options||{}))}">Choose this device</button></div>
       </div>`;
     }
     h+=`<div class="acts"><button class="alt" onclick="wizStep=1;paintInverters()">Back</button></div>`;

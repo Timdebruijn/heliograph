@@ -699,6 +699,49 @@ def report(label: str, verdict: str) -> int:
     return 1
 
 
+# A serial number is bytes off the RS485 bus, and the only filter on them is "printable ASCII"
+# -- which includes the apostrophe. The dashboard used to build its per-device buttons as
+# onclick="togglePanel('m:${esc(id)}')", and esc() does NOT save that: the browser HTML-decodes
+# an attribute value before compiling the inline handler, so &#39; is an apostrophe again by the
+# time it runs. A device reporting the serial below closed the string and ran what followed, in
+# the admin's authenticated session, where sessionStorage holds the Basic-auth token.
+#
+# BOTH halves are asserted, because either alone passes for the wrong reason: the payload must
+# not run, AND the button must still open its panel. Escaping harder satisfies the first and
+# breaks the second; removing the button satisfies both and ships a dead dashboard.
+HOSTILE_SERIAL = "x');window.__pwned=1;//"
+
+HOSTILE_SERIAL_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+const done=()=>{document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK'};
+let tries=0;
+// The per-device cards live on the Inverters tab, so this has to go there first -- and wait for
+// loadInverters() to have filled the caches the cards render from.
+const tick=setInterval(()=>{
+  if(typeof goTab==='function' && tab!=='inv') goTab('inv');
+  const b=document.querySelector('[data-act="panel"][data-val^="m:"]');
+  if(!b && ++tries<=120) return;
+  clearInterval(tick);
+  try{
+    if(!b){say('no readings button rendered at all');done();return}
+    if(window.__pwned){say('the payload ran while the page was rendering');done();return}
+    const want=b.getAttribute('data-val');
+    // If the fixture ever stops carrying the payload this whole check is vacuous, so it says so
+    // rather than passing quietly.
+    if(want.indexOf("');")<0){say('the fixture lost its payload, so nothing was tested: '+want);done();return}
+    b.click();
+    setTimeout(()=>{
+      if(window.__pwned) say('the payload ran when the button was clicked');
+      if(panel!==want) say('the button did not open its panel: panel='+panel+' want='+want);
+      done();
+    },250);
+  }catch(e){say('threw: '+e.message);done()}
+},25);})();
+"""
+
+
 def main() -> int:
     stripped = build_web.served_page()
     stub = (ROOT / "tools" / "demo_fleet.js").read_text(encoding="utf-8")
@@ -769,6 +812,23 @@ def main() -> int:
         page = build_page(stripped, stub, "{soc:68,power:-1240}", INTEGRATIONS_JS)
         verdict, _ = render(chrome, page, 1000, scratch, "int")
         status |= report("integrations still reports what changed", verdict)
+
+        # The one device on this fleet whose id came off the bus rather than out of a config.
+        hostile = stub.replace(
+            "'eversolar_legacy-EU00T112345678'",
+            '"eversolar_legacy-' + HOSTILE_SERIAL + '"',
+        ).replace("'EU00T112345678'", '"' + HOSTILE_SERIAL + '"')
+        if "__pwned" not in hostile:
+            print(
+                "hostile serial: FAIL (the stub no longer carries the id this substitutes)"
+            )
+            status |= 1
+        else:
+            page = build_page(
+                stripped, hostile, "{soc:68,power:-1240}", HOSTILE_SERIAL_JS
+            )
+            verdict, _ = render(chrome, page, 1000, scratch, "hostile")
+            status |= report("a hostile serial number cannot run script", verdict)
 
     return status
 
