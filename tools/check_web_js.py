@@ -87,50 +87,46 @@ def main() -> int:
 # taint-based: proving a given value is safe means reading code, and the pages are re-authored
 # from a design tool often enough that "someone will notice" is not a control. No exceptions --
 # a handler that needs a value takes it from data-*.
-# Anchored to the HTML event-handler content attributes rather than to "a word starting with
-# on", because the latter matches `online=${f.online}` inside a template literal and this file
-# has one. The event names are a closed set; words beginning with "on" are not.
-HANDLER_NAMES = (
-    "abort|animationend|animationiteration|animationstart|auxclick|beforeinput|beforeunload|"
-    "blur|cancel|canplay|canplaythrough|change|click|close|contextmenu|copy|cuechange|cut|"
-    "dblclick|drag|dragend|dragenter|dragleave|dragover|dragstart|drop|durationchange|emptied|"
-    "ended|error|focus|focusin|focusout|formdata|hashchange|input|invalid|keydown|keypress|"
-    "keyup|load|loadeddata|loadedmetadata|loadstart|message|mousedown|mouseenter|mouseleave|"
-    "mousemove|mouseout|mouseover|mouseup|offline|online|pagehide|pageshow|paste|pause|play|"
-    "playing|pointercancel|pointerdown|pointerenter|pointerleave|pointermove|pointerout|"
-    "pointerover|pointerup|popstate|progress|ratechange|reset|resize|scroll|scrollend|search|"
-    "securitypolicyviolation|seeked|seeking|select|selectionchange|selectstart|slotchange|"
-    "stalled|storage|submit|suspend|timeupdate|toggle|touchcancel|touchend|touchmove|"
-    "touchstart|transitionend|unload|volumechange|waiting|wheel"
-)
+# Matches any on-word, MINUS the handful that are not handlers, rather than an allowlist of
+# event names. Review showed why: an allowlist has to be exhaustive to work, and the first
+# version of it was missing onbeforetoggle, onmessageerror, onanimationcancel, onbeforematch,
+# oncontextlost, onrejectionhandled, ontransitionrun and the SVG SMIL handlers -- so the exact
+# original vulnerability, written with any of those, passed. HTML keeps adding events; this
+# denylist has one entry today (`online=${f.online}` in a template literal) and does not grow
+# when the platform does.
+#
+# A false positive here is a loud CI failure on a pull request; a false negative is script
+# running in someone's session. Given the choice, be loud.
+NOT_HANDLERS = {"online"}
 
-# Three shapes, not one. The first version of this check looked only for ${...} inside a quoted
-# value, which review showed was anchored to HOW the code is written rather than to whether a
-# dynamic value reaches a handler:
-#
-#   onclick="f('m:'+esc(id))"   -- string concatenation, identical vulnerability, no ${
-#   ONCLICK="..." / onDblClick  -- attribute names are case-insensitive to the browser
-#   onclick=f(${x})             -- an unquoted value is legal HTML
-#
-# So: the value must be a static literal. No interpolation, no concatenation, no backticks, and
-# it must be quoted. A quoted [^"]* also spans newlines, which covers an attribute wrapped
-# across lines.
-#
-# The lookbehind keeps JS property assignments out -- `dlg.onclose=()=>{...}` assigns a
-# function object and compiles no string, so it is not this defect and never was.
+# The `-` in the lookbehind keeps a custom attribute like data-onclick out; the rest keeps JS
+# property assignment out -- `dlg.onclose=()=>{...}` assigns a function object and compiles no
+# string, so it is not this defect.
 HANDLER_ATTR = re.compile(
-    r"(?<![.\w$])on(?:"
-    + HANDLER_NAMES
-    + r')\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))',
+    r'(?<![-.\w$])(on[a-z]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))',
     re.IGNORECASE,
 )
-DYNAMIC = re.compile(r"\$\{|`|\+")
+
+# What makes a handler value UNSAFE is that some of it is computed. `${` and a backtick are how
+# this page normally does that; the rest are the ways review demonstrated round it.
+#
+# This cannot be exhaustive and is not the real defence. A shape check can always be evaded by
+# building the same string another way -- review did exactly that with Array.join(). It is here
+# to fail fast, in a second, on the form anyone would actually write. The defence that does not
+# depend on how the source is spelled is in check_dashboard_layout.py, which renders the page
+# with a hostile device serial and asserts no on* attribute in the DOM carries it.
+DYNAMIC = re.compile(r"\$\{|`|\+|\.join\s*\(|\.concat\s*\(|String\.raw")
 
 
 def check_no_code_in_handlers(name, source):
     hits = []
     for m in HANDLER_ATTR.finditer(source):
-        quoted = m.group(1) if m.group(1) is not None else m.group(2)
+        if m.group(1).lower() in NOT_HANDLERS:
+            continue
+        line_start = source.rfind("\n", 0, m.start()) + 1
+        if source[line_start : m.start()].lstrip().startswith("//"):
+            continue  # a JS comment describing the bug is not the bug
+        quoted = m.group(2) if m.group(2) is not None else m.group(3)
         if quoted is None:
             why = "the value is not quoted"
         elif DYNAMIC.search(quoted):

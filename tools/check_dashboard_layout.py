@@ -242,7 +242,7 @@ const tick=setInterval(async()=>{
     if(!inv.textContent.includes('starts after a restart')){
       say('a configured row that has not started is nowhere on the page');
     }
-    if(![...inv.querySelectorAll('button')].some(b=>/removeExtraAt/.test(b.getAttribute('onclick')||''))){
+    if(![...inv.querySelectorAll('button')].some(b=>b.getAttribute('data-act')==='remove-extra')){
       say('a configured row that has not started offers no way to remove it');
     }
 
@@ -267,9 +267,9 @@ const tick=setInterval(async()=>{
       if(!pend[0].textContent.includes('Refused')){
         say('the pending card names a running inverter: "'+pend[0].querySelector('b').textContent+'"');
       }
-      const btn=pend[0].querySelector('button[onclick^="removeExtraAt"]');
-      if(!btn||btn.getAttribute('onclick')!=='removeExtraAt(1)'){
-        say('the remove button points at the wrong configuration row: '+(btn&&btn.getAttribute('onclick')));
+      const btn=pend[0].querySelector('button[data-act="remove-extra"]');
+      if(!btn||btn.getAttribute('data-val')!=='1'){
+        say('the remove button points at the wrong configuration row: '+(btn&&btn.getAttribute('data-val')));
       }
     }
 
@@ -288,7 +288,7 @@ const tick=setInterval(async()=>{
     const pcard=[...document.querySelectorAll('#inv .card')]
       .find(c=>c.textContent.includes('starts after a restart'));
     const open=pcard&&[...pcard.querySelectorAll('button')]
-      .find(b=>/togglePanel\('x:/.test(b.getAttribute('onclick')||''));
+      .find(b=>b.getAttribute('data-act')==='panel'&&(b.getAttribute('data-val')||'').startsWith('x:'));
     if(!open) say('a pending row offers no way to correct it, only to delete it');
     else{
       open.click();
@@ -727,15 +727,33 @@ const tick=setInterval(()=>{
   try{
     if(!b){say('no readings button rendered at all');done();return}
     if(window.__pwned){say('the payload ran while the page was rendering');done();return}
+    // The defence that does not depend on how the source was written. A shape check in
+    // check_web_js.py can always be evaded by building the same string another way; this
+    // asks the RENDERED page whether any handler attribute ended up carrying bus bytes.
+    for(const el of document.querySelectorAll('*')){
+      for(const a of el.attributes){
+        if(/^on/i.test(a.name) && a.value.indexOf("x');")>=0)
+          say('a rendered '+a.name+' attribute carries the device serial: '+a.value.slice(0,60));
+      }
+    }
     const want=b.getAttribute('data-val');
     // If the fixture ever stops carrying the payload this whole check is vacuous, so it says so
     // rather than passing quietly.
     if(want.indexOf("');")<0){say('the fixture lost its payload, so nothing was tested: '+want);done();return}
     b.click();
     setTimeout(()=>{
-      if(window.__pwned) say('the payload ran when the button was clicked');
-      if(panel!==want) say('the button did not open its panel: panel='+panel+' want='+want);
-      done();
+      if(window.__pwned) say('the payload ran when the readings button was clicked');
+      if(panel!==want) say('the readings button did not open its panel: panel='+panel);
+      // The settings button carries the identical payload and was equally exploitable, so a
+      // regression reintroduced in only that path must not pass here either.
+      const sb=document.querySelector('[data-act="panel"][data-val^="s:"]');
+      if(!sb){say('no settings button rendered');done();return}
+      sb.click();
+      setTimeout(()=>{
+        if(window.__pwned) say('the payload ran when the settings button was clicked');
+        if(panel!==sb.getAttribute('data-val')) say('the settings button did not open its panel');
+        done();
+      },250);
     },250);
   }catch(e){say('threw: '+e.message);done()}
 },25);})();
@@ -830,6 +848,12 @@ def main() -> int:
             verdict, _ = render(chrome, page, 1000, scratch, "hostile")
             status |= report("a hostile serial number cannot run script", verdict)
 
+    # A verdict, for the same reason check_web_js.py grew one: a failing check prints its
+    # own FAIL line and then the failure detail, and every check AFTER it prints OK -- so any
+    # tail of this output reads as green. That is not hypothetical in either tool. It was
+    # read as green here on 2026-08-29, on a branch whose whole point was that a gate which
+    # cannot fail is worse than no gate.
+    print(f"RESULT: {'PASS' if status == 0 else 'FAIL'}")
     return status
 
 
