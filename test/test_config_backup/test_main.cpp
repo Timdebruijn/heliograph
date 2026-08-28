@@ -422,7 +422,7 @@ static void test_the_worst_case_preview_still_fits_its_bound() {
     // AND THE BOUND ACTUALLY BITES. The assertion above only says this payload is small
     // enough; it says nothing about whether anything would stop a larger one. Mutation
     // testing deleted the `needed > maxBytes` check in json_limits::finish() -- the single
-    // choke point all 44 payload builders share -- and this test stayed green. Refusing at
+    // choke point twenty-four payload builders share -- and this test stayed green. Refusing at
     // one byte under the measured size is self-calibrating: it cannot go vacuous when the
     // payload grows.
     std::string refused = "untouched";
