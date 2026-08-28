@@ -50,9 +50,11 @@ private:
     double deadbandFor(MeasurementType type) const;
 
     struct Sample {
-        /// Borrowed, not owned -- and safe to borrow: every measurement id is one of the
-        /// `inline constexpr const char*` constants in measurement.h, so they all have static
-        /// storage duration and outlive every throttle that points at them.
+        /// Borrowed, not owned -- and safe to borrow: an id is either one of the
+        /// `inline constexpr const char*` constants in measurement.h or, in a few tests, a
+        /// bare string literal. Both have static storage duration, so both outlive every
+        /// throttle that points at them. What would NOT be safe is an id built at runtime,
+        /// which nothing does and measurement.h's own contract forbids.
         ///
         /// This was a std::string, which rebuilt the whole vector on every publish: one
         /// allocation per channel, freed again on the next, at least once a minute per device
