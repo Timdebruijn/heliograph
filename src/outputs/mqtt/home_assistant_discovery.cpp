@@ -8,6 +8,8 @@
 #include <cstdio>
 
 #include "device/command.h"
+#include "json_limits.h"
+#include "mqtt_payloads.h"
 #include "relays/drm.h"
 
 namespace heliograph::mqtt {
@@ -185,16 +187,16 @@ void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIde
     device["via_device"] = bridge.bridgeId;
 }
 
+// Was a private copy of json_limits::finish() with the size check taken out: it caught an
+// overflowed document but let a well-formed one grow to whatever the heap allowed. Every other
+// payload on this device is bounded, and discovery payloads are the LARGEST ones -- each
+// carries the full device block -- so this was the one path without the guard, on the output
+// that publishes the most bytes.
+//
+// Now the shared one, at the same ceiling the state payloads use. One point of truth: a change
+// to how a payload is bounded should not need finding in two places.
 bool serialise(const JsonDocument& doc, std::string& out) {
-    if (doc.overflowed()) {
-        return false;
-    }
-    const size_t needed = measureJson(doc);
-    std::string  buffer;
-    buffer.resize(needed + 1);
-    buffer.resize(serializeJson(doc, buffer.data(), buffer.size()));
-    out = std::move(buffer);
-    return true;
+    return json_limits::finish(doc, out, kMaxPayloadBytes);
 }
 
 }  // namespace
