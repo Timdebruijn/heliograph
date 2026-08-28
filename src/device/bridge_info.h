@@ -113,7 +113,7 @@ struct BridgeInfo {
     /// reason is not here: it is this boot's resetReason, already above.
     uint32_t bootCount        = 0;
     bool     breadcrumbsCold  = true;
-    uint32_t previousUptimeMs = 0;
+    uint64_t previousUptimeMs = 0;
     uint32_t previousFirmware = 0;
 
     /// The board this firmware is running on. Reported to Home Assistant as the bridge

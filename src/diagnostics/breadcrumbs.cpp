@@ -42,26 +42,28 @@ BootRecord begin(Storage& storage, uint32_t runningFirmware) {
         // field says what it was running. Its death reason is this boot's
         // esp_reset_reason(), which the caller already exposes -- nothing to store.
         record.coldStart        = false;
-        record.previousUptimeMs = storage.heartbeatUptimeMs;
+        record.previousUptimeMs = static_cast<uint64_t>(storage.heartbeatUptimeSeconds) * 1000ULL;
         record.previousFirmware = storage.runningFirmware;
         record.bootCount        = storage.bootCount + 1;
     }
     // Cold path and warm path converge: write this life's record. On cold, bootCount in
     // the record defaulted to 1.
     storage.bootCount         = record.bootCount;
-    storage.heartbeatUptimeMs = 0;
+    storage.heartbeatUptimeSeconds = 0;
     storage.runningFirmware   = runningFirmware;
     storage.crc               = storageCrc(storage);
     return record;
 }
 
-void tick(Storage& storage, uint32_t uptimeMs) {
-    // One write per second of uptime. The comparison also handles the first call (heartbeat
-    // starts at 0) and is immune to loop() pace.
-    if (uptimeMs < storage.heartbeatUptimeMs + 1000) {
+void tick(Storage& storage, uint64_t uptimeMs) {
+    // One write per second of uptime, which is also why storing seconds loses nothing. Takes
+    // the full 64-bit clock: the caller used to narrow it to uint32 here, and casting a
+    // wrapped value to a wider type does not un-wrap it.
+    const uint32_t seconds = static_cast<uint32_t>(uptimeMs / 1000);
+    if (seconds == storage.heartbeatUptimeSeconds) {
         return;
     }
-    storage.heartbeatUptimeMs = uptimeMs;
+    storage.heartbeatUptimeSeconds = seconds;
     storage.crc               = storageCrc(storage);
 }
 

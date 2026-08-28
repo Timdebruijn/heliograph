@@ -50,7 +50,13 @@ namespace heliograph::breadcrumbs {
 /// once-per-four-billion event that still only costs one fabricated boot count.
 struct Storage {
     uint32_t bootCount;
-    uint32_t heartbeatUptimeMs;
+    /// SECONDS, not milliseconds. As milliseconds this wrapped at 49.7 days and the record
+    /// exists precisely to describe a bridge that had been up a long time: a 60-day life
+    /// reported ~10 days, which reads as a plausible number rather than as an error. Seconds
+    /// in the same uint32 reach 136 years and keep this struct at sixteen bytes, so the CRC
+    /// window and the RTC layout are untouched. Nothing is lost -- tick() only writes once
+    /// per second, so the millisecond digits were never meaningful.
+    uint32_t heartbeatUptimeSeconds;
     /// (major<<16)|(minor<<8)|patch of the image that is running. "The previous life died
     /// right after an OTA" is the single most valuable thing this record can show.
     uint32_t runningFirmware;
@@ -86,7 +92,11 @@ struct BootRecord {
     uint32_t bootCount = 1;
     /// The previous life's last heartbeat: "it had been up this long when it died".
     /// Meaningless on a cold start; the payload reports it absent then.
-    uint32_t previousUptimeMs = 0;
+    ///
+    /// Still milliseconds, and still what /api/v1/diagnostics publishes as
+    /// previous_uptime_ms -- the storage changed, the interface did not. 64-bit because a
+    /// 32-bit millisecond count is the wrap this moved away from.
+    uint64_t previousUptimeMs = 0;
     /// The image the previous life was running, same encoding as Storage::runningFirmware.
     uint32_t previousFirmware = 0;
 };
@@ -98,6 +108,6 @@ BootRecord begin(Storage& storage, uint32_t runningFirmware);
 
 /// Heartbeat: remembers how far this life got. Throttled internally to one write per second
 /// of uptime -- calling it every loop() pass is fine and expected.
-void tick(Storage& storage, uint32_t uptimeMs);
+void tick(Storage& storage, uint64_t uptimeMs);
 
 }  // namespace heliograph::breadcrumbs

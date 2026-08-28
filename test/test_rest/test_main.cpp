@@ -2091,14 +2091,15 @@ static void test_breadcrumbs_cold_then_warm() {
     TEST_ASSERT_EQUAL_UINT32(1, rec.bootCount);
 
     // This life runs 65 s; the heartbeat throttles to 1 Hz, so a second tick inside the
-    // same second must not move it.
+    // same second must not move it. Reported to the whole second, because that is the rate
+    // it was ever written at -- the millisecond digits were noise, never accuracy.
     breadcrumbs::tick(st, 65400);
     breadcrumbs::tick(st, 65900);
 
     auto rec2 = breadcrumbs::begin(st, 0x00001802);  // the next boot runs 0.24.2
     TEST_ASSERT_FALSE(rec2.coldStart);
     TEST_ASSERT_EQUAL_UINT32(2, rec2.bootCount);
-    TEST_ASSERT_EQUAL_UINT32(65400, rec2.previousUptimeMs);
+    TEST_ASSERT_EQUAL_UINT64(65000, rec2.previousUptimeMs);
     TEST_ASSERT_EQUAL_UINT32(0x00001801, rec2.previousFirmware);
 
     // And the record begin() left behind must itself survive a third boot: count keeps
@@ -2106,8 +2107,24 @@ static void test_breadcrumbs_cold_then_warm() {
     auto rec3 = breadcrumbs::begin(st, 0x00001802);
     TEST_ASSERT_FALSE(rec3.coldStart);
     TEST_ASSERT_EQUAL_UINT32(3, rec3.bootCount);
-    TEST_ASSERT_EQUAL_UINT32(0, rec3.previousUptimeMs);  // that life never ticked
+    TEST_ASSERT_EQUAL_UINT64(0, rec3.previousUptimeMs);  // that life never ticked
     TEST_ASSERT_EQUAL_UINT32(0x00001802, rec3.previousFirmware);
+}
+
+/// The record exists to describe a bridge that had been up a long time, and as milliseconds in
+/// a uint32 it wrapped at 49.7 days -- so the lives it was built for were exactly the ones it
+/// misreported, and it misreported them as a plausible smaller number rather than as an error.
+static void test_a_life_past_the_32_bit_millisecond_wrap_is_recorded_whole() {
+    breadcrumbs::Storage st;
+    std::memset(&st, 0, sizeof st);
+    breadcrumbs::begin(st, 1);
+
+    constexpr uint64_t kSixtyDaysMs = 60ULL * 86400ULL * 1000ULL;  // 5184000000, over 2^32
+    breadcrumbs::tick(st, kSixtyDaysMs);
+
+    const auto rec = breadcrumbs::begin(st, 1);
+    TEST_ASSERT_FALSE(rec.coldStart);
+    TEST_ASSERT_EQUAL_UINT64(kSixtyDaysMs, rec.previousUptimeMs);
 }
 
 /// One flipped bit must read as cold: a torn RTC write may never become an invented past.
@@ -2117,7 +2134,7 @@ static void test_breadcrumbs_corruption_reads_as_cold() {
     std::memset(&st, 0, sizeof st);
     breadcrumbs::begin(st, 1);
     breadcrumbs::tick(st, 5000);
-    st.heartbeatUptimeMs ^= 0x4;  // torn write, CRC now stale
+    st.heartbeatUptimeSeconds ^= 0x4;  // torn write, CRC now stale
 
     auto rec = breadcrumbs::begin(st, 1);
     TEST_ASSERT_TRUE(rec.coldStart);
@@ -2146,12 +2163,20 @@ static void test_breadcrumbs_payload_shapes() {
 
     bridge.bootCount        = 4;
     bridge.breadcrumbsCold  = false;
-    bridge.previousUptimeMs = 65400;
+    bridge.previousUptimeMs = 65000;
     bridge.previousFirmware = 0x00001801;
     TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), bridge, json));
     doc = parse(json);
-    TEST_ASSERT_EQUAL_UINT32(65400, doc["previous_uptime_ms"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT64(65000, doc["previous_uptime_ms"].as<uint64_t>());
     TEST_ASSERT_EQUAL_STRING("0.24.1", doc["previous_firmware"]);
+
+    // And the payload must carry a value past 2^32 without narrowing it on the way out. The
+    // field is milliseconds and the storage behind it now reaches 136 years, so the JSON is
+    // the last place left that could still wrap it at 49.7 days.
+    bridge.previousUptimeMs = 60ULL * 86400ULL * 1000ULL;  // 5184000000
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), bridge, json));
+    TEST_ASSERT_EQUAL_UINT64(5184000000ULL, parse(json)["previous_uptime_ms"].as<uint64_t>());
+    bridge.previousUptimeMs = 65000;
 
     // A version whose three components are all DIFFERENT and all nonzero. Every firmware this
     // project has shipped is 0.x, so every stored breadcrumb has a zero major -- which meant the
@@ -3002,6 +3027,7 @@ int main(int, char**) {
     RUN_TEST(test_poll_duration_payload_absent_until_sampled);
     RUN_TEST(test_breadcrumbs_cold_then_warm);
     RUN_TEST(test_breadcrumbs_corruption_reads_as_cold);
+    RUN_TEST(test_a_life_past_the_32_bit_millisecond_wrap_is_recorded_whole);
     RUN_TEST(test_breadcrumbs_payload_shapes);
     RUN_TEST(test_diagnostics_payload_has_no_secrets);
     RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);

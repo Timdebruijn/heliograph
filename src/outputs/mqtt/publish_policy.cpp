@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace heliograph::mqtt {
 
@@ -45,7 +46,7 @@ bool PublishThrottle::shouldPublish(const DeviceState& state, uint64_t nowMs) {
             continue;
         }
         const auto    it       = std::find_if(lastPublished_.begin(), lastPublished_.end(),
-                                              [&m](const Sample& s) { return s.id == m.id; });
+                                              [&m](const Sample& s) { return std::strcmp(s.id, m.id) == 0; });
         const Sample* previous = it == lastPublished_.end() ? nullptr : &*it;
         if (previous == nullptr) {
             return true;  // a channel appeared, e.g. a second MPPT was detected

@@ -50,7 +50,17 @@ private:
     double deadbandFor(MeasurementType type) const;
 
     struct Sample {
-        std::string id;
+        /// Borrowed, not owned -- and safe to borrow: every measurement id is one of the
+        /// `inline constexpr const char*` constants in measurement.h, so they all have static
+        /// storage duration and outlive every throttle that points at them.
+        ///
+        /// This was a std::string, which rebuilt the whole vector on every publish: one
+        /// allocation per channel, freed again on the next, at least once a minute per device
+        /// for the life of the bridge. measurement.h keeps ids as const char* for exactly that
+        /// reason -- it records 80-120 short-lived allocations per poll as "a classic
+        /// fragmentation hazard" on a device with no defragmenting allocator -- and this was
+        /// the one place downstream that put them back on the heap.
+        const char* id;
         double      value;
         bool        valid;
         bool        stale;
