@@ -290,6 +290,54 @@ static void test_write_exception_with_a_bad_crc_indicts_the_cable() {
                       parseWriteResponse(frame, 5, 0x01, kWriteSingleRegister, resp));
 }
 
+// Both cases below were found by mutation testing: deleting the guard each one exercises left
+// the whole suite green, so the branch was validated by nothing.
+
+// A byte count that is not a whole number of 16-bit registers. Without the guard the count is
+// silently halved, the odd trailing byte is dropped, and a malformed frame decodes as if it
+// were one good register -- a wrong reading with no error anywhere to say so.
+static void test_a_read_reply_with_an_odd_byte_count_is_malformed() {
+    uint8_t frame[8];
+    frame[0]           = 0x01;
+    frame[1]           = kReadHoldingRegisters;
+    frame[2]           = 0x03;  // three bytes: one register and a half
+    frame[3]           = 0x12;
+    frame[4]           = 0x34;
+    frame[5]           = 0x56;
+    const uint16_t crc = crc16(frame, 6);
+    frame[6]           = static_cast<uint8_t>(crc & 0xFF);
+    frame[7]           = static_cast<uint8_t>((crc >> 8) & 0xFF);
+
+    uint16_t     regs[4] = {};
+    ReadResponse resp;
+    TEST_ASSERT_EQUAL(
+        ParseResult::Malformed,
+        parseReadResponse(frame, sizeof(frame), 0x01, kReadHoldingRegisters, regs, 4, resp));
+}
+
+// The function-code check on the write SUCCESS path. It was covered only through the exception
+// path (test_write_exception_with_a_foreign_function_is_refused), which reaches a different
+// branch -- parseExceptionFrame. A plain, well-formed echo for a function we never sent would
+// otherwise be accepted as confirmation of our write: on a multidrop bus, that is somebody
+// else's reply being read as our setpoint landing.
+static void test_a_write_reply_echoing_a_foreign_function_is_refused() {
+    uint8_t frame[8];
+    frame[0]           = 0x01;
+    frame[1]           = kWriteMultipleRegisters;  // 0x10, and we sent 0x06
+    frame[2]           = 0x00;
+    frame[3]           = 0x10;
+    frame[4]           = 0x00;
+    frame[5]           = 0x01;
+    const uint16_t crc = crc16(frame, 6);
+    frame[6]           = static_cast<uint8_t>(crc & 0xFF);
+    frame[7]           = static_cast<uint8_t>((crc >> 8) & 0xFF);
+
+    WriteResponse resp;
+    TEST_ASSERT_EQUAL(
+        ParseResult::WrongFunction,
+        parseWriteResponse(frame, sizeof(frame), 0x01, kWriteSingleRegister, resp));
+}
+
 void run_modbus_rtu() {
     RUN_TEST(test_crc_matches_the_canonical_vector);
     RUN_TEST(test_crc_second_vector);
@@ -310,6 +358,8 @@ void run_modbus_rtu() {
     RUN_TEST(test_write_single_echo_is_validated);
     RUN_TEST(test_write_exception_is_reported);
     RUN_TEST(test_write_exception_with_a_foreign_function_is_refused);
+    RUN_TEST(test_a_read_reply_with_an_odd_byte_count_is_malformed);
+    RUN_TEST(test_a_write_reply_echoing_a_foreign_function_is_refused);
     RUN_TEST(test_write_exception_from_another_unit_is_refused);
     RUN_TEST(test_write_exception_with_a_bad_crc_indicts_the_cable);
 }

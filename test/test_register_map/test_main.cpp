@@ -488,10 +488,22 @@ static void test_a_writable_driver_flips_the_read_only_register() {
     map.update(*store.snapshot(), BridgeInfo{}, diag.snapshot(), g_now);
 
     TEST_ASSERT_EQUAL_UINT16(0, map.at(reg::kDriverReadOnly));
-    const bool anyWriteBit = map.at(reg::kCapabilitiesWrite) || map.at(reg::kCapabilitiesWrite + 1) ||
-                             map.at(reg::kCapabilitiesWrite + 2) ||
-                             map.at(reg::kCapabilitiesWrite + 3);
-    TEST_ASSERT_TRUE(anyWriteBit);
+    // The registers must carry the driver's WRITE set, not merely something non-empty. This
+    // was TEST_ASSERT_TRUE(anyWriteBit) -- an OR across the four registers -- and mutation
+    // testing published the READ bitmap into them instead: every working driver has a
+    // non-empty read set, so the OR stayed true and the one test that says which channels are
+    // writable agreed with the wrong bitmap. A client reading it would have been told it could
+    // write everything the device can report.
+    const auto&    caps  = driver.capabilities();
+    const uint64_t wrote = (static_cast<uint64_t>(map.at(reg::kCapabilitiesWrite)) << 48) |
+                           (static_cast<uint64_t>(map.at(reg::kCapabilitiesWrite + 1)) << 32) |
+                           (static_cast<uint64_t>(map.at(reg::kCapabilitiesWrite + 2)) << 16) |
+                           static_cast<uint64_t>(map.at(reg::kCapabilitiesWrite + 3));
+    TEST_ASSERT_EQUAL_UINT64(caps.write.to_ullong(), wrote);
+    // Without this the assertion above could not tell the two bitmaps apart, and would go
+    // quietly vacuous again the day the mock's sets happened to coincide.
+    TEST_ASSERT_TRUE_MESSAGE(caps.read.to_ullong() != caps.write.to_ullong(),
+                             "the fixture must declare different read and write sets");
 }
 
 // The agreement below is only tested AFTER a poll. Before one -- at boot, or all night on an

@@ -35,6 +35,15 @@ static void test_options_derive_from_roles() {
 
     // Duplicate roles (two relays on one line) appear once.
     TEST_ASSERT_EQUAL_UINT32(2, optionsFor({"drm0", "drm0"}).size());
+
+    // A role that is not "none" but is not valid either. Every fixture above feeds
+    // optionsFor roles it already accepts, so the isValidRole() filter was never
+    // exercised: garbage in the stored config would have been offered as a mode the
+    // user could pick, and patternFor() then refuses it -- a dead entry in the select.
+    const auto filtered = optionsFor({"drm0", "drm9", "DRM0", "", "drm12"});
+    TEST_ASSERT_EQUAL_UINT32(2, filtered.size());
+    TEST_ASSERT_EQUAL_STRING("normal", filtered[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("drm0", filtered[1].c_str());
 }
 
 static void test_pattern_asserts_exactly_the_role() {
@@ -62,8 +71,17 @@ static void test_invalid_modes_are_refused() {
     TEST_ASSERT_FALSE(patternFor({"drm0"}, "drm5", pattern));
     // "custom" is a reported state, never a command.
     TEST_ASSERT_FALSE(patternFor({"drm0"}, "custom", pattern));
-    // "none" is a role, never a mode.
+    // "none" is a role, never a mode. The roles list MUST contain a "none" for this to
+    // prove anything: with only {"drm0"} the match loop finds nothing and returns false
+    // whether the guard survives or not, so the assertion passed against code that had
+    // lost it. isValidRole("none") is true, so "none" reaches that loop -- and every
+    // unassigned relay carries exactly that role, because applyDrmMode() pads the list
+    // with it. Drop the guard and POST /api/v1/drm/set?mode=none energises all of them.
     TEST_ASSERT_FALSE(patternFor({"drm0"}, "none", pattern));
+    TEST_ASSERT_FALSE(patternFor({"none", "drm0", "none"}, "none", pattern));
+    for (const bool on : pattern) {
+        TEST_ASSERT_FALSE(on);
+    }
     // "normal" without any roles is meaningless.
     TEST_ASSERT_FALSE(patternFor({"none"}, "normal", pattern));
     // Refusal always leaves a released pattern behind, so a caller that ignores the

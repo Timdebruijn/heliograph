@@ -646,6 +646,18 @@ static void test_a_full_bus_of_summaries_still_fits() {
     // far over the cap a new field pushed it instead of only that it did.
     TEST_ASSERT_LESS_THAN_UINT32(rest::kMaxResponseBytes, json.size());
     TEST_ASSERT_EQUAL_UINT32(kMaxDevices, parse(json)["devices"].size());
+
+    // AND THE BOUND ACTUALLY BITES. The assertion above only says this payload is small
+    // enough; it says nothing about whether anything would stop a larger one. Mutation
+    // testing deleted the `needed > maxBytes` check in json_limits::finish() -- the single
+    // choke point twenty-four payload builders share -- and this test stayed green. Refusing at
+    // one byte under the measured size is self-calibrating: it cannot go vacuous when the
+    // payload grows.
+    std::string refused = "untouched";
+    TEST_ASSERT_FALSE(rest::buildStatusPayload(state, "modbus_profile-1", makeBridge(),
+                                               r.diagnostics.snapshot(), &eversolar::descriptor(),
+                                               g_now, fleet, refused, json.size() - 1));
+    TEST_ASSERT_EQUAL_STRING("untouched", refused.c_str());
 }
 
 // A configured device that is not polling is the failure every mistake on the settings page
@@ -1765,6 +1777,16 @@ static void test_a_capture_filled_to_its_byte_ceiling_fits_in_the_response() {
     std::string body;
     TEST_ASSERT_TRUE(rest::buildCapturePayload(report, 0, body));
     TEST_ASSERT_TRUE(body.size() <= rest::kMaxCaptureResponseBytes);
+
+    // AND THE BOUND ACTUALLY BITES. The assertion above only says this payload is small
+    // enough; it says nothing about whether anything would stop a larger one. Mutation
+    // testing deleted the `needed > maxBytes` check in json_limits::finish() -- the single
+    // choke point twenty-four payload builders share -- and this test stayed green. Refusing at
+    // one byte under the measured size is self-calibrating: it cannot go vacuous when the
+    // payload grows.
+    std::string refused = "untouched";
+    TEST_ASSERT_FALSE(rest::buildCapturePayload(report, 0, refused, body.size() - 1));
+    TEST_ASSERT_EQUAL_STRING("untouched", refused.c_str());
 }
 
 // --- restore preview ----------------------------------------------------------------------
