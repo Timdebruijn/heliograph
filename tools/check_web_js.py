@@ -29,6 +29,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="heliograph-js-") as scratch:
         for name in ASSETS:
             source = (root / name).read_text()
+            status |= check_no_code_in_handlers(name, source)
             scripts = re.findall(r"<script>(.*?)</script>", source, re.S)
             if not scripts:
                 print(f"{name}: FAIL (no <script> blocks found)")
@@ -50,6 +51,7 @@ def main() -> int:
                 print(
                     "FAIL: node is not on PATH; install Node.js to syntax-check the web assets"
                 )
+                print("RESULT: FAIL")
                 return 1
             print(f"{name}: {'OK' if result.returncode == 0 else 'FAIL'}")
             if result.returncode != 0:
@@ -69,6 +71,91 @@ def main() -> int:
     # (2026-07-29). check_layering.sh has always ended with a verdict; this now does too.
     print(f"RESULT: {'PASS' if status == 0 else 'FAIL'}")
     return status
+
+
+# An inline event handler is COMPILED AS JAVASCRIPT, and the browser HTML-decodes the attribute
+# value before that happens. So esc() -- which is correct everywhere else on these pages -- does
+# not protect a handler: it turns an apostrophe into &#39;, the parser turns it back into an
+# apostrophe, and the string the handler was building closes early.
+#
+# That was live. A device id is driverId + '-' + the serial number the inverter reports over
+# RS485, and the only filter on those bytes is "printable ASCII", which includes the apostrophe.
+# A device supplying a crafted serial got script into the admin's authenticated session, where
+# sessionStorage holds the Basic-auth token.
+#
+# The fix was to move every interpolated value into a data-* attribute read back with
+# getAttribute. This check keeps it that way. It is deliberately shape-based rather than
+# taint-based: proving a given value is safe means reading code, and the pages are re-authored
+# from a design tool often enough that "someone will notice" is not a control. No exceptions --
+# a handler that needs a value takes it from data-*.
+# Matches any on-word, MINUS the handful that are not handlers, rather than an allowlist of
+# event names. Review showed why: an allowlist has to be exhaustive to work, and the first
+# version of it was missing onbeforetoggle, onmessageerror, onanimationcancel, onbeforematch,
+# oncontextlost, onrejectionhandled, ontransitionrun and the SVG SMIL handlers -- so the exact
+# original vulnerability, written with any of those, passed. HTML keeps adding events; this
+# denylist has one entry today (`online=${f.online}` in a template literal) and does not grow
+# when the platform does.
+#
+# A false positive here is a loud CI failure on a pull request; a false negative is script
+# running in someone's session. Given the choice, be loud.
+NOT_HANDLERS = {"online"}
+
+# The `-` in the lookbehind keeps a custom attribute like data-onclick out; the rest keeps JS
+# property assignment out -- `dlg.onclose=()=>{...}` assigns a function object and compiles no
+# string, so it is not this defect.
+HANDLER_ATTR = re.compile(
+    r'(?<![-.\w$])(on[a-z]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))',
+    re.IGNORECASE,
+)
+
+# What makes a handler value UNSAFE is that some of it is computed. `${` and a backtick are how
+# this page normally does that; the rest are the ways review demonstrated round it.
+#
+# This cannot be exhaustive and is not the real defence. A shape check can always be evaded by
+# building the same string another way -- review did exactly that with Array.join(). It is here
+# to fail fast, in a second, on the form anyone would actually write. The defence that does not
+# depend on how the source is spelled is in check_dashboard_layout.py, which renders the page
+# with a hostile device serial and asserts no on* attribute in the DOM carries it.
+DYNAMIC = re.compile(
+    r"\$\{"  # template interpolation, how this page normally builds a value
+    r"|`"  # a nested template literal
+    r"|['\"]\s*\+|\+\s*['\"]"  # concatenation -- next to a quote, so /search?q=solar+panel
+    #                            stays legal: a static URL is not a built value
+    r"|\.join\s*\(|\.concat\s*\(|String\.raw"  # the ways review got round the above
+)
+
+
+def check_no_code_in_handlers(name, source):
+    hits = []
+    for m in HANDLER_ATTR.finditer(source):
+        if m.group(1).lower() in NOT_HANDLERS:
+            continue
+        quoted = m.group(2) if m.group(2) is not None else m.group(3)
+        if quoted is None:
+            why = "the value is not quoted"
+        elif DYNAMIC.search(quoted):
+            why = "the value is built rather than literal"
+        else:
+            continue
+        line = source.count("\n", 0, m.start()) + 1
+        hits.append((line, why + ": " + m.group(0).strip()[:90]))
+    print(
+        f"{name}: inline handlers carry no interpolation: {'OK' if not hits else 'FAIL'}"
+    )
+    for n, text in hits:
+        print(f"  {name}:{n}: {text}")
+    if hits:
+        print(
+            "  An on* attribute is compiled as JS after the browser HTML-decodes it, so esc()"
+        )
+        print(
+            "  does not make an interpolated value safe there. Put the value in a data-*"
+        )
+        print(
+            "  attribute and read it with getAttribute in the delegated click handler."
+        )
+        return 1
+    return 0
 
 
 # The version comparison decides whether anyone is ever told an update exists, and every way

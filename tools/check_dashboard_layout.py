@@ -24,6 +24,7 @@
 # a runner image that stops shipping Chrome shows up as a red check rather than as a layout
 # check that quietly stopped rendering anything.
 
+import json
 import pathlib
 import re
 import subprocess
@@ -242,7 +243,7 @@ const tick=setInterval(async()=>{
     if(!inv.textContent.includes('starts after a restart')){
       say('a configured row that has not started is nowhere on the page');
     }
-    if(![...inv.querySelectorAll('button')].some(b=>/removeExtraAt/.test(b.getAttribute('onclick')||''))){
+    if(![...inv.querySelectorAll('button')].some(b=>b.getAttribute('data-act')==='remove-extra')){
       say('a configured row that has not started offers no way to remove it');
     }
 
@@ -267,9 +268,9 @@ const tick=setInterval(async()=>{
       if(!pend[0].textContent.includes('Refused')){
         say('the pending card names a running inverter: "'+pend[0].querySelector('b').textContent+'"');
       }
-      const btn=pend[0].querySelector('button[onclick^="removeExtraAt"]');
-      if(!btn||btn.getAttribute('onclick')!=='removeExtraAt(1)'){
-        say('the remove button points at the wrong configuration row: '+(btn&&btn.getAttribute('onclick')));
+      const btn=pend[0].querySelector('button[data-act="remove-extra"]');
+      if(!btn||btn.getAttribute('data-val')!=='1'){
+        say('the remove button points at the wrong configuration row: '+(btn&&btn.getAttribute('data-val')));
       }
     }
 
@@ -288,7 +289,7 @@ const tick=setInterval(async()=>{
     const pcard=[...document.querySelectorAll('#inv .card')]
       .find(c=>c.textContent.includes('starts after a restart'));
     const open=pcard&&[...pcard.querySelectorAll('button')]
-      .find(b=>/togglePanel\('x:/.test(b.getAttribute('onclick')||''));
+      .find(b=>b.getAttribute('data-act')==='panel'&&(b.getAttribute('data-val')||'').startsWith('x:'));
     if(!open) say('a pending row offers no way to correct it, only to delete it');
     else{
       open.click();
@@ -699,6 +700,88 @@ def report(label: str, verdict: str) -> int:
     return 1
 
 
+# A serial number is bytes off the RS485 bus, and the only filter on them is "printable ASCII"
+# -- which includes the apostrophe. The dashboard used to build its per-device buttons as
+# onclick="togglePanel('m:${esc(id)}')", and esc() does NOT save that: the browser HTML-decodes
+# an attribute value before compiling the inline handler, so &#39; is an apostrophe again by the
+# time it runs. A device reporting the serial below closed the string and ran what followed, in
+# the admin's authenticated session, where sessionStorage holds the Basic-auth token.
+#
+# BOTH halves are asserted, because either alone passes for the wrong reason: the payload must
+# not run, AND the button must still open its panel. Escaping harder satisfies the first and
+# breaks the second; removing the button satisfies both and ships a dead dashboard.
+HOSTILE_SERIAL = "x');window.__pwned=1;//"
+
+HOSTILE_SERIAL_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+const done=()=>{document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK'};
+// Injected from HOSTILE_SERIAL, never spelled again. Review defeated the whole check by
+// changing one character of the fixture: the DOM scan probed a SEPARATE hardcoded literal,
+// so the two drifted apart and a live reintroduced XSS passed with RESULT: PASS. Two copies
+// of one string is one copy too many when a mismatch fails silent.
+const PAYLOAD=__PAYLOAD__;
+let tries=0;
+// The per-device cards live on the Inverters tab, so this has to go there first -- and wait for
+// loadInverters() to have filled the caches the cards render from.
+const tick=setInterval(()=>{
+  if(typeof goTab==='function' && tab!=='inv') goTab('inv');
+  let b=document.querySelector('[data-act="panel"][data-val^="m:"]');
+  if(!b && ++tries<=120) return;
+  clearInterval(tick);
+  try{
+    if(!b){say('no readings button rendered at all');done();return}
+    if(window.__pwned){say('the payload ran while the page was rendering');done();return}
+    // The defence that does not depend on how the source was written. A shape check in
+    // check_web_js.py can always be evaded by building the same string another way; this
+    // asks the RENDERED page whether any handler attribute ended up carrying bus bytes.
+    const scan=where=>{
+      for(const el of document.querySelectorAll('*')){
+        for(const a of el.attributes){
+          if(/^on/i.test(a.name) && a.value.indexOf(PAYLOAD)>=0)
+            say('a rendered '+a.name+' attribute on '+where+' carries the device serial: '
+                +a.value.slice(0,60));
+        }
+      }
+    };
+    // Every tab, not just this one. drawTab() paints only the active section, so a scan that
+    // stays on Inverters never sees what Live, Integrations, Health or Bridge render. None of
+    // them puts a device id in a handler today; the point is that a regression there would
+    // otherwise be invisible to the one check built to catch exactly that.
+    for(const t of ['live','inv','int','health','bridge']){
+      try{goTab(t)}catch(e){say('goTab('+t+') threw: '+e.message);continue}
+      scan(t);
+    }
+    goTab('inv');
+    // The sweep repaints, so the button captured before it is detached and a click on it
+    // never reaches the delegated listener on document. Re-query after the last repaint.
+    b=document.querySelector('[data-act="panel"][data-val^="m:"]');
+    if(!b){say('the readings button did not survive the tab sweep');done();return}
+    const want=b.getAttribute('data-val');
+    // If the fixture ever stops carrying the payload this whole check is vacuous, so it says so
+    // rather than passing quietly.
+    if(want.indexOf(PAYLOAD)<0){say('the fixture lost its payload, so nothing was tested: '+want);done();return}
+    b.click();
+    setTimeout(()=>{
+      if(window.__pwned) say('the payload ran when the readings button was clicked');
+      if(panel!==want) say('the readings button did not open its panel: panel='+panel);
+      // The settings button carries the identical payload and was equally exploitable, so a
+      // regression reintroduced in only that path must not pass here either.
+      const sb=document.querySelector('[data-act="panel"][data-val^="s:"]');
+      if(!sb){say('no settings button rendered');done();return}
+      sb.click();
+      setTimeout(()=>{
+        if(window.__pwned) say('the payload ran when the settings button was clicked');
+        if(panel!==sb.getAttribute('data-val')) say('the settings button did not open its panel');
+        done();
+      },250);
+    },250);
+  }catch(e){say('threw: '+e.message);done()}
+},25);})();
+"""
+
+
 def main() -> int:
     stripped = build_web.served_page()
     stub = (ROOT / "tools" / "demo_fleet.js").read_text(encoding="utf-8")
@@ -770,6 +853,28 @@ def main() -> int:
         verdict, _ = render(chrome, page, 1000, scratch, "int")
         status |= report("integrations still reports what changed", verdict)
 
+        # The one device on this fleet whose id came off the bus rather than out of a config.
+        hostile = stub.replace(
+            "'eversolar_legacy-EU00T112345678'",
+            '"eversolar_legacy-' + HOSTILE_SERIAL + '"',
+        ).replace("'EU00T112345678'", '"' + HOSTILE_SERIAL + '"')
+        if "__pwned" not in hostile:
+            print(
+                "hostile serial: FAIL (the stub no longer carries the id this substitutes)"
+            )
+            status |= 1
+        else:
+            js = HOSTILE_SERIAL_JS.replace("__PAYLOAD__", json.dumps(HOSTILE_SERIAL))
+            page = build_page(stripped, hostile, "{soc:68,power:-1240}", js)
+            verdict, _ = render(chrome, page, 1000, scratch, "hostile")
+            status |= report("a hostile serial number cannot run script", verdict)
+
+    # A verdict, for the same reason check_web_js.py grew one: a failing check prints its
+    # own FAIL line and then the failure detail, and every check AFTER it prints OK -- so any
+    # tail of this output reads as green. That is not hypothetical in either tool. It was
+    # read as green here on 2026-08-29, on a branch whose whole point was that a gate which
+    # cannot fail is worse than no gate.
+    print(f"RESULT: {'PASS' if status == 0 else 'FAIL'}")
     return status
 
 
