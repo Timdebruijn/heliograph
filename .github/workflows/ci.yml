@@ -90,6 +90,13 @@ jobs:
       - name: Layering invariants
         run: bash tools/check_layering.sh
 
+      # The release gate had no gate of its own. It recognised a release tag as /^v[0-9]/ while
+      # release.yml triggers on "v*", so vtest, v-wip and a bare v all built a release with no
+      # version check at all. Run here, on every push, rather than only at tag time -- a broken
+      # gate should surface before the release that needs it.
+      - name: Release version gate self-test
+        run: bash tools/check_version.sh --self-test
+
       - name: Embedded JS syntax
         run: python3 tools/check_web_js.py
 

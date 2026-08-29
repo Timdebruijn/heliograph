@@ -1980,7 +1980,7 @@ void loop() {
 
     // Breadcrumb heartbeat: "this life reached this uptime". Throttled inside to one RTC-RAM
     // write per second.
-    breadcrumbs::tick(g_breadcrumbStore, static_cast<uint32_t>(nowMs()));
+    breadcrumbs::tick(g_breadcrumbStore, nowMs());
 
     g_wifi.loop(nowMs());
     startOutputs();  // no-op until there is a network, and only ever runs once

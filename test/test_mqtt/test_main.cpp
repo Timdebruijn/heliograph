@@ -435,6 +435,47 @@ static void test_writable_driver_lists_its_bounds() {
 
 // --- Home Assistant discovery --------------------------------------------------------------
 
+// Discovery payloads are the largest this device publishes -- every entity repeats the whole
+// device block -- and they were the one path that went out unbounded, through a private copy of
+// json_limits::finish() with the size check removed. They share the state payloads' ceiling now.
+//
+// Asserted BOTH ways, because either alone is worthless: real payloads must still be published
+// (a ceiling that refuses them breaks Home Assistant discovery outright and silently), and the
+// ceiling must actually refuse something (or it is decoration).
+static void test_every_discovery_payload_fits_the_ceiling_it_now_shares() {
+    Rig              r;
+    const auto       state  = r.poll();
+    const auto       bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                                                 kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    TEST_ASSERT_TRUE_MESSAGE(entities.size() > 3, "the fixture must produce real entities");
+    size_t largest = 0;
+    for (const auto& e : entities) {
+        TEST_ASSERT_FALSE_MESSAGE(e.payload.empty(), "an entity was serialised to nothing");
+        largest = std::max(largest, e.payload.size());
+    }
+    // Room to spare, not "just fits": the device block grows when a field is added, and a
+    // ceiling this sits under by a hair would start dropping entities on the next one.
+    TEST_ASSERT_LESS_THAN_UINT32(kMaxPayloadBytes / 2, largest);
+
+    // AND THE BOUND BITES, through the real builder rather than beside it. Identity strings
+    // are unbounded std::strings filled from whatever a device reports, and every entity
+    // repeats the device block -- so a device with an absurd model name is the reachable way
+    // over the ceiling. Asserting this through buildDiscoveryEntities is what makes the guard
+    // testable at all: removing an upper bound is strictly MORE permissive, so a test that
+    // only checks real payloads fit cannot detect its absence.
+    //
+    // Over the ceiling the entity is dropped rather than published oversized. That is the
+    // convention every other payload on this device already follows.
+    DeviceState huge  = r.poll();
+    huge.identity.model = std::string(kMaxPayloadBytes, 'M');
+    const auto dropped = buildDiscoveryEntities(huge, bridge, topics, topics.availability(),
+                                                kDefaultDiscoveryPrefix, bridge.bridgeId);
+    TEST_ASSERT_EQUAL_UINT32(0, dropped.size());
+}
+
 static void test_discovery_creates_an_entity_per_supported_measurement() {
     Rig        r;
     const auto state  = r.poll();
@@ -1626,6 +1667,7 @@ int main(int, char**) {
     RUN_TEST(test_capabilities_payload_reports_read_only);
     RUN_TEST(test_writable_driver_lists_its_bounds);
     RUN_TEST(test_discovery_creates_an_entity_per_supported_measurement);
+    RUN_TEST(test_every_discovery_payload_fits_the_ceiling_it_now_shares);
     RUN_TEST(test_discovery_metadata_matches_the_measurement_type);
     RUN_TEST(test_value_template_reads_the_right_key);
     RUN_TEST(test_availability_tracks_the_bridge_not_the_inverter);
