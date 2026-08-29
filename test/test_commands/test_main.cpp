@@ -262,7 +262,21 @@ static void test_the_allowance_refills_after_a_quiet_period() {
         d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 50.0), driver);
     }
     g_now += 2000;
-    TEST_ASSERT_EQUAL(CommandResult::Ok,
+
+    // THE WHOLE BURST must be back, not just one command. The limiter has two ways to say
+    // yes after a quiet period -- the burst refilling, and the separate "one through per
+    // minInterval" allowance -- and asserting a single Ok cannot tell them apart. It passed
+    // with the refill deleted, which would have shipped a burst of three that behaved like a
+    // burst of one, silently, on the path that asserts a DRM mode.
+    for (int i = 0; i < 3; ++i) {
+        TEST_ASSERT_EQUAL_MESSAGE(
+            CommandResult::Ok,
+            d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 50.0), driver).result,
+            "the refilled allowance must be the full burst");
+    }
+    // And the fourth is refused again, so the refill restored the allowance rather than
+    // removing the limit.
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited,
                       d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 50.0), driver)
                           .result);
 }

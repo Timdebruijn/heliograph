@@ -31,6 +31,9 @@ public:
         std::string model      = "Model-1";
         /// Second and later probes report this serial instead, simulating an unstable match.
         std::string serialOnRepeat;
+        /// The same, for the model. probesAgree() compares serial AND model, and only the
+        /// serial half was ever varied -- so dropping the model comparison changed nothing.
+        std::string modelOnRepeat;
         bool        writeAttempted = false;
         /// Non-zero: begin() reconfigures the line to this, as every real driver does.
         uint32_t    begunAtBaud = 0;
@@ -71,7 +74,9 @@ public:
         r.responded      = script_->responded;
         r.checksumValid  = script_->checksumValid;
         r.confidenceScore = script_->score;
-        r.detectedModel  = script_->model;
+        r.detectedModel  = (probeCount_ > 1 && !script_->modelOnRepeat.empty())
+                               ? script_->modelOnRepeat
+                               : script_->model;
         r.serialNumber = (probeCount_ > 1 && !script_->serialOnRepeat.empty())
                              ? script_->serialOnRepeat
                              : script_->serial;
@@ -127,6 +132,10 @@ struct AddressBus {
     std::vector<std::string> probed;
     /// Same serial at every address, for the one-device-two-addresses case.
     bool sharedSerial = false;
+    /// No serial at all, which several protocols genuinely cannot report. Two silent-serial
+    /// units are two units, and mergeDuplicateSerials() has a guard saying so that no fixture
+    /// ever reached.
+    bool emptySerial = false;
 };
 
 class AddressedDriver : public InverterDriver {
@@ -151,7 +160,9 @@ public:
         r.checksumValid   = true;
         r.confidenceScore = 95;
         r.detectedModel   = "MIC-TL-X";
-        r.serialNumber    = bus_->sharedSerial ? "SHARED" : "SER-" + address_;
+        r.serialNumber    = bus_->emptySerial   ? std::string()
+                            : bus_->sharedSerial ? std::string("SHARED")
+                                                 : "SER-" + address_;
         return r;
     }
 
@@ -576,6 +587,131 @@ static void test_threshold_is_configurable() {
     TEST_ASSERT_TRUE(e.run(DiscoveryMode::Quick, c).autoSelected);
 }
 
+// probesAgree() compares responded, serial AND model. Only the serial half was ever varied by
+// a fixture, so deleting the model comparison left the suite green: a device naming a different
+// model on the second ask would have been called consistent and auto-selected.
+// Two descriptor guards that nothing reached. Both defend the wizard against a MALFORMED
+// driver declaration rather than against a misbehaving device, so no fixture built to describe
+// a device ever produced one -- which is precisely why they went unverified.
+
+// A numeric address option with no default cannot be swept: probesFor() puts the driver's own
+// default first and always includes it, so an empty one would sweep an address the driver never
+// declared. Removing the defaultValue requirement left the suite green.
+// The mirror image of the one-device-two-addresses case. mergeDuplicateSerials() folds
+// candidates that share a serial, and skips any candidate whose serial is EMPTY -- because
+// nothing can be matched on, so two silent units are two units. No fixture ever had two
+// responding candidates without a serial, so deleting that guard went unnoticed: it would have
+// collapsed two genuinely distinct inverters into one, and the owner would configure half a bus.
+static void test_two_devices_without_serial_numbers_are_not_folded_into_one() {
+    DriverRegistry reg;
+    MockTransport  t;
+    AddressBus     bus;
+    bus.occupied    = {"1", "2"};
+    bus.emptySerial = true;
+    addAddressedDriver(reg, addressedDesc("silent_serial", "1"), &bus);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Extended);
+
+    TEST_ASSERT_EQUAL_size_t(2, out.candidates.size());
+}
+
+static void test_an_address_option_without_a_default_is_not_sweepable() {
+    TEST_ASSERT_TRUE(addressedDesc("ok", "1").hasSweepableAddress());
+    TEST_ASSERT_FALSE_MESSAGE(addressedDesc("no-default", "").hasSweepableAddress(),
+                              "a numeric address option with no default cannot anchor a sweep");
+}
+
+// A default outside the option's OWN declared bounds. The guard's comment names the failure
+// exactly: such a value "would be probed, reported, offered by the wizard, and then refused by
+// the PATCH gate: a dead end". No driver in the suite declared one, so the bounds check was
+// validated by nothing.
+static void test_a_default_outside_its_own_bounds_is_refused_rather_than_offered() {
+    const DriverDescriptor inRange = addressedDesc("sane", "5", 1, 8);
+    long                   out     = 0;
+    TEST_ASSERT_TRUE(inRange.numericOption({}, "unit_id", out));
+    TEST_ASSERT_EQUAL_INT32(5, out);
+
+    // 10 is SolaX's real default and outside a 1..8 declaration -- the shape this guards.
+    const DriverDescriptor contradictory = addressedDesc("contradictory", "10", 1, 8);
+    out = 0;
+    TEST_ASSERT_FALSE_MESSAGE(contradictory.numericOption({}, "unit_id", out),
+                              "a default outside its own bounds is a dead end, not an address");
+    TEST_ASSERT_EQUAL_INT32(0, out);  // and nothing is written on refusal
+}
+
+static void test_a_device_that_names_a_different_model_on_the_second_ask_is_inconsistent() {
+    DriverRegistry     reg;
+    MockTransport      t;
+    FakeDriver::Script s;
+    s.score         = 100;
+    s.serial        = "SER-1";  // the serial AGREES; only the model moves
+    s.model         = "Model-A";
+    s.modelOnRepeat = "Model-B";
+    addDriver(reg, desc("shifty", 10), &s);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Quick);
+
+    TEST_ASSERT_FALSE(out.candidates[0].consistent);
+    TEST_ASSERT_EQUAL_INT(50, out.candidates[0].probe.confidenceScore);
+    TEST_ASSERT_FALSE(out.autoSelected);
+}
+
+// The consistency veto sits AFTER the confidence threshold, and the existing test scores 100 --
+// halved to 50, already below the threshold of 80. So the threshold did the blocking and the
+// veto itself was never exercised: removing it changed nothing. A score that survives halving
+// is what puts the veto on its own.
+static void test_the_consistency_veto_blocks_on_its_own_not_only_via_the_threshold() {
+    DriverRegistry     reg;
+    MockTransport      t;
+    FakeDriver::Script s;
+    s.score          = 200;  // halves to 100, comfortably above minConfidence
+    s.serial         = "SER-1";
+    s.serialOnRepeat = "SER-2";
+    addDriver(reg, desc("flaky", 10), &s);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Quick);
+
+    TEST_ASSERT_EQUAL_INT(100, out.candidates[0].probe.confidenceScore);
+    TEST_ASSERT_FALSE_MESSAGE(out.autoSelected, "an inconsistent probe must not be selected");
+    TEST_ASSERT_TRUE(out.reason.find("disagreed") != std::string::npos);
+
+    // The same candidate WITH the veto disabled is selected -- which is what proves the veto
+    // did the blocking, and not the threshold or the margin.
+    DriverRegistry     reg2;
+    MockTransport      t2;
+    FakeDriver::Script s2 = s;
+    addDriver(reg2, desc("flaky", 10), &s2);
+    DiscoveryConfig permissive;
+    permissive.requireConsistentProbes = false;
+    DiscoveryEngine e2(reg2, t2);
+    TEST_ASSERT_TRUE(e2.run(DiscoveryMode::Quick, permissive).autoSelected);
+}
+
+// mergeDuplicateSerials() folds two candidates together only when the DRIVER ID matches as well
+// as the serial. No fixture ever had two different drivers reporting the same serial, so
+// dropping the id comparison went unnoticed -- and it would have silently deleted one of two
+// genuinely different protocol candidates, which is exactly the disambiguation the user needs.
+static void test_two_different_drivers_reporting_one_serial_stay_two_candidates() {
+    DriverRegistry     reg;
+    MockTransport      t;
+    FakeDriver::Script a;
+    FakeDriver::Script b;
+    a.score  = 90;
+    b.score  = 85;
+    a.serial = "SAME-SERIAL";
+    b.serial = "SAME-SERIAL";
+    addDriver(reg, desc("driver-a", 10), &a);
+    addDriver(reg, desc("driver-b", 20), &b);
+
+    DiscoveryEngine e(reg, t);
+    const auto      out = e.run(DiscoveryMode::Quick);
+
+    TEST_ASSERT_EQUAL_size_t(2, out.candidates.size());
+}
+
 static void test_inconsistent_probes_halve_the_score_and_block_selection() {
     // A device that identifies as something different on the second ask was never identified.
     DriverRegistry     reg;
@@ -882,6 +1018,12 @@ int main(int, char**) {
     RUN_TEST(test_a_score_below_the_threshold_is_never_auto_selected);
     RUN_TEST(test_threshold_is_configurable);
     RUN_TEST(test_inconsistent_probes_halve_the_score_and_block_selection);
+    RUN_TEST(test_two_devices_without_serial_numbers_are_not_folded_into_one);
+    RUN_TEST(test_an_address_option_without_a_default_is_not_sweepable);
+    RUN_TEST(test_a_default_outside_its_own_bounds_is_refused_rather_than_offered);
+    RUN_TEST(test_a_device_that_names_a_different_model_on_the_second_ask_is_inconsistent);
+    RUN_TEST(test_the_consistency_veto_blocks_on_its_own_not_only_via_the_threshold);
+    RUN_TEST(test_two_different_drivers_reporting_one_serial_stay_two_candidates);
     RUN_TEST(test_consistent_probes_are_recorded_as_evidence);
     RUN_TEST(test_a_failed_checksum_blocks_selection);
     RUN_TEST(test_a_silent_bus_yields_no_candidates_and_a_useful_reason);
