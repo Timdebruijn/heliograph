@@ -545,7 +545,7 @@ namespace {
 //
 // And four ternaries became std::min, for +3 lines net once <algorithm> is counted -- the honest
 // arithmetic for a change made on clarity rather than size.
-#define HELIOGRAPH_VERSION_PATCH 2
+#define HELIOGRAPH_VERSION_PATCH 3
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
