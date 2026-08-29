@@ -51,6 +51,7 @@ def main() -> int:
                 print(
                     "FAIL: node is not on PATH; install Node.js to syntax-check the web assets"
                 )
+                print("RESULT: FAIL")
                 return 1
             print(f"{name}: {'OK' if result.returncode == 0 else 'FAIL'}")
             if result.returncode != 0:
@@ -115,7 +116,13 @@ HANDLER_ATTR = re.compile(
 # to fail fast, in a second, on the form anyone would actually write. The defence that does not
 # depend on how the source is spelled is in check_dashboard_layout.py, which renders the page
 # with a hostile device serial and asserts no on* attribute in the DOM carries it.
-DYNAMIC = re.compile(r"\$\{|`|\+|\.join\s*\(|\.concat\s*\(|String\.raw")
+DYNAMIC = re.compile(
+    r"\$\{"  # template interpolation, how this page normally builds a value
+    r"|`"  # a nested template literal
+    r"|['\"]\s*\+|\+\s*['\"]"  # concatenation -- next to a quote, so /search?q=solar+panel
+    #                            stays legal: a static URL is not a built value
+    r"|\.join\s*\(|\.concat\s*\(|String\.raw"  # the ways review got round the above
+)
 
 
 def check_no_code_in_handlers(name, source):
@@ -123,9 +130,6 @@ def check_no_code_in_handlers(name, source):
     for m in HANDLER_ATTR.finditer(source):
         if m.group(1).lower() in NOT_HANDLERS:
             continue
-        line_start = source.rfind("\n", 0, m.start()) + 1
-        if source[line_start : m.start()].lstrip().startswith("//"):
-            continue  # a JS comment describing the bug is not the bug
         quoted = m.group(2) if m.group(2) is not None else m.group(3)
         if quoted is None:
             why = "the value is not quoted"

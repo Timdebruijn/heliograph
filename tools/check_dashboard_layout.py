@@ -24,6 +24,7 @@
 # a runner image that stops shipping Chrome shows up as a red check rather than as a layout
 # check that quietly stopped rendering anything.
 
+import json
 import pathlib
 import re
 import subprocess
@@ -716,12 +717,17 @@ HOSTILE_SERIAL_JS = r"""
 const fail=[];
 const say=m=>fail.push(m);
 const done=()=>{document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK'};
+// Injected from HOSTILE_SERIAL, never spelled again. Review defeated the whole check by
+// changing one character of the fixture: the DOM scan probed a SEPARATE hardcoded literal,
+// so the two drifted apart and a live reintroduced XSS passed with RESULT: PASS. Two copies
+// of one string is one copy too many when a mismatch fails silent.
+const PAYLOAD=__PAYLOAD__;
 let tries=0;
 // The per-device cards live on the Inverters tab, so this has to go there first -- and wait for
 // loadInverters() to have filled the caches the cards render from.
 const tick=setInterval(()=>{
   if(typeof goTab==='function' && tab!=='inv') goTab('inv');
-  const b=document.querySelector('[data-act="panel"][data-val^="m:"]');
+  let b=document.querySelector('[data-act="panel"][data-val^="m:"]');
   if(!b && ++tries<=120) return;
   clearInterval(tick);
   try{
@@ -730,16 +736,32 @@ const tick=setInterval(()=>{
     // The defence that does not depend on how the source was written. A shape check in
     // check_web_js.py can always be evaded by building the same string another way; this
     // asks the RENDERED page whether any handler attribute ended up carrying bus bytes.
-    for(const el of document.querySelectorAll('*')){
-      for(const a of el.attributes){
-        if(/^on/i.test(a.name) && a.value.indexOf("x');")>=0)
-          say('a rendered '+a.name+' attribute carries the device serial: '+a.value.slice(0,60));
+    const scan=where=>{
+      for(const el of document.querySelectorAll('*')){
+        for(const a of el.attributes){
+          if(/^on/i.test(a.name) && a.value.indexOf(PAYLOAD)>=0)
+            say('a rendered '+a.name+' attribute on '+where+' carries the device serial: '
+                +a.value.slice(0,60));
+        }
       }
+    };
+    // Every tab, not just this one. drawTab() paints only the active section, so a scan that
+    // stays on Inverters never sees what Live, Integrations, Health or Bridge render. None of
+    // them puts a device id in a handler today; the point is that a regression there would
+    // otherwise be invisible to the one check built to catch exactly that.
+    for(const t of ['live','inv','int','health','bridge']){
+      try{goTab(t)}catch(e){say('goTab('+t+') threw: '+e.message);continue}
+      scan(t);
     }
+    goTab('inv');
+    // The sweep repaints, so the button captured before it is detached and a click on it
+    // never reaches the delegated listener on document. Re-query after the last repaint.
+    b=document.querySelector('[data-act="panel"][data-val^="m:"]');
+    if(!b){say('the readings button did not survive the tab sweep');done();return}
     const want=b.getAttribute('data-val');
     // If the fixture ever stops carrying the payload this whole check is vacuous, so it says so
     // rather than passing quietly.
-    if(want.indexOf("');")<0){say('the fixture lost its payload, so nothing was tested: '+want);done();return}
+    if(want.indexOf(PAYLOAD)<0){say('the fixture lost its payload, so nothing was tested: '+want);done();return}
     b.click();
     setTimeout(()=>{
       if(window.__pwned) say('the payload ran when the readings button was clicked');
@@ -842,9 +864,8 @@ def main() -> int:
             )
             status |= 1
         else:
-            page = build_page(
-                stripped, hostile, "{soc:68,power:-1240}", HOSTILE_SERIAL_JS
-            )
+            js = HOSTILE_SERIAL_JS.replace("__PAYLOAD__", json.dumps(HOSTILE_SERIAL))
+            page = build_page(stripped, hostile, "{soc:68,power:-1240}", js)
             verdict, _ = render(chrome, page, 1000, scratch, "hostile")
             status |= report("a hostile serial number cannot run script", verdict)
 
