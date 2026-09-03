@@ -22,8 +22,14 @@ inline const char kSetupHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
      visitor's console, on every load, for a file that was never going to exist.
      A data: URI costs one line in a page that is gzipped into flash, and no second request
      to a web task that serves one client at a time. SVG so it stays sharp at any size
-     without shipping several rasters. The amber is --warn from the palette below. -->
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3.4' fill='%23d29922'/%3E%3Cg stroke='%23d29922' stroke-width='1.9' stroke-linecap='round'%3E%3Cpath d='M8 1.2v1.6M8 13.2v1.6M1.2 8h1.6M13.2 8h1.6M3.1 3.1l1.15 1.15M11.75 11.75l1.15 1.15M12.9 3.1l-1.15 1.15M4.25 11.75L3.1 12.9'/%3E%3C/g%3E%3C/svg%3E"><style>
+     without shipping several rasters.
+     Square linecaps, not round: at 16 px the four DIAGONAL rays do not land on the pixel
+     grid, and rounded ends anti-alias them into pale smudges while the cardinal four stay
+     crisp -- a lopsided blur rather than a sun. Judged by rasterising at 16 px and looking
+     at the pixels, which is not what magnifying the SVG shows: vector art scales cleanly
+     and hides exactly this. The amber matches the dashboard's --warn; this page's palette has no
+     warning colour of its own, so it is written out here as a literal. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3.4' fill='%23d29922'/%3E%3Cg stroke='%23d29922' stroke-width='2' stroke-linecap='butt'%3E%3Cpath d='M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.4 1.4M11.55 11.55l1.4 1.4M12.95 3.05l-1.4 1.4M4.45 11.55l-1.4 1.4'/%3E%3C/g%3E%3C/svg%3E"><style>
 :root{--bg:#0f1115;--card:#181b22;--fg:#e6e8ec;--dim:#8b93a3;--ok:#3fb950;--bad:#f85149;--line:#262b36}
 @media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d23;--dim:#5b6472;--line:#e3e6ea}}
 *{box-sizing:border-box}body{margin:0;padding:24px;font:15px/1.55 system-ui,-apple-system,sans-serif;
