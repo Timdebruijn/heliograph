@@ -16,7 +16,15 @@ namespace heliograph::web {
 inline const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Heliograph</title><style>
+<title>Heliograph</title>
+<!-- The icon ships INSIDE the page rather than as /favicon.ico, which is why there is no
+     route for it. A browser asks for /favicon.ico on its own unless the document names an
+     icon, and that request was reaching a server with no handler for it: a 404 in every
+     visitor's console, on every load, for a file that was never going to exist.
+     A data: URI costs one line in a page that is gzipped into flash, and no second request
+     to a web task that serves one client at a time. SVG so it stays sharp at any size
+     without shipping several rasters. The amber is --warn from the palette below. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3.4' fill='%23d29922'/%3E%3Cg stroke='%23d29922' stroke-width='1.9' stroke-linecap='round'%3E%3Cpath d='M8 1.2v1.6M8 13.2v1.6M1.2 8h1.6M13.2 8h1.6M3.1 3.1l1.15 1.15M11.75 11.75l1.15 1.15M12.9 3.1l-1.15 1.15M4.25 11.75L3.1 12.9'/%3E%3C/g%3E%3C/svg%3E"><style>
 :root{--bg:#0f1115;--card:#181b22;--fg:#e6e8ec;--dim:#8b93a3;--mid:#c9ced8;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--acc:#2f81f7;--line:#262b36;--hair:#1d222b}
 @media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d23;--dim:#5b6472;--mid:#3a4149;--line:#e3e6ea;--hair:#eef0f3}}
 *{box-sizing:border-box}
