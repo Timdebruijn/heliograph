@@ -16,7 +16,23 @@ namespace heliograph::web {
 inline const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Heliograph</title><style>
+<title>Heliograph</title>
+<!-- The icon ships INSIDE the page rather than as /favicon.ico, which is why there is no
+     route for it. A browser asks for /favicon.ico on its own unless the document names an
+     icon, and that request was reaching a server with no handler for it: a 404 in every
+     visitor's console, on every load, for a file that was never going to exist.
+     A data: URI costs one line in a page that is gzipped into flash, and no second request
+     to a web task that serves one client at a time. SVG so it stays sharp at any size
+     without shipping several rasters.
+     Square linecaps, not round: at 16 px the four DIAGONAL rays do not land on the pixel
+     grid, and rounded ends anti-alias them into pale smudges while the cardinal four stay
+     crisp -- a lopsided blur rather than a sun. Judged by rasterising at 16 px and looking
+     at the pixels, which is not what magnifying the SVG shows: vector art scales cleanly
+     and hides exactly this.
+     Spaces are percent-encoded: a raw space is not legal in a URI, and while every
+     browser tolerates one here, two reviewers read the same line and stopped at it.
+     Thirteen bytes gzipped per page is a cheap answer to that. The amber is --warn from the palette below. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ccircle%20cx='8'%20cy='8'%20r='3.4'%20fill='%23d29922'/%3E%3Cg%20stroke='%23d29922'%20stroke-width='2'%20stroke-linecap='butt'%3E%3Cpath%20d='M8%201v2M8%2013v2M1%208h2M13%208h2M3.05%203.05l1.4%201.4M11.55%2011.55l1.4%201.4M12.95%203.05l-1.4%201.4M4.45%2011.55l-1.4%201.4'/%3E%3C/g%3E%3C/svg%3E"><style>
 :root{--bg:#0f1115;--card:#181b22;--fg:#e6e8ec;--dim:#8b93a3;--mid:#c9ced8;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--acc:#2f81f7;--line:#262b36;--hair:#1d222b}
 @media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d23;--dim:#5b6472;--mid:#3a4149;--line:#e3e6ea;--hair:#eef0f3}}
 *{box-sizing:border-box}
