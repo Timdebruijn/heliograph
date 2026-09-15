@@ -58,13 +58,13 @@ from the work instructions: familiar name, current releases, wrong contents.
 
 | Purpose | Choice | Version (2026-07-16) | License | Why |
 |---|---|---|---|---|
-| Platform | **pioarduino/platform-espressif32** | 55.03.39 | Apache-2.0 | Only route to Arduino core 3.x |
+| Platform | **pioarduino/platform-espressif32** | 55.03.311 | Apache-2.0 | Only route to Arduino core 3.x |
 | Core | **arduino-esp32** | 3.3.10 (2026-06-05) | LGPL-2.1 | On IDF 5.5.4 |
-| Modbus TCP server | **eModbus** | v1.7.4 (2025-06-17) | MIT | Server mode over TCP, sync+async |
+| Modbus TCP server | **eModbus** | v1.7.5stable, git-tag pinned (see below) | MIT | Server mode over TCP, sync+async |
 | JSON | **ArduinoJson** | 7.4.3 (2026-03-02) | MIT | v7 is current; v6 is legacy |
 | MQTT | **espMqttClient** | 1.7.3 (2026-06-22) | MIT | Non-blocking, QoS 0/1/2, LWT, auto-reconnect |
-| Web server | **ESP32Async/ESPAsyncWebServer** | 3.11.2 (2026-06-28) | **LGPL-3.0** | Only maintained variant |
-| TCP layer | **ESP32Async/AsyncTCP** | 3.4.10 (2026-01-01) | LGPL-3.0 | Belongs with the above |
+| Web server | **ESP32Async/ESPAsyncWebServer** | 3.12.1 | **LGPL-3.0** | Only maintained variant |
+| TCP layer | **ESP32Async/AsyncTCP** | 3.5.0 | LGPL-3.0 | Belongs with the above |
 | OTA | **`Update.h`** (core) + `esp_ota_ops` | core 3.3.10 | LGPL-2.1 / Apache-2.0 | No extra dependency |
 | Tests | **Unity** via PlatformIO | 2.7.0 (2026-07-16) | MIT | Host-based `native` env |
 
@@ -116,7 +116,7 @@ write your own Modbus parser". **Your call.**
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| eModbus's latest tag is 13 months old (commits continue) | Unpredictable build | Pin to tag `v1.7.4.stable`, not `latest` |
+| eModbus releases lag its commits, and its tags are not always manifest-bumped | Unpredictable build | Pin to an exact tag (`v1.7.5stable`), not `latest` |
 | pioarduino is a community fork | Bus factor | Apache-2.0, active; pin the exact release URL |
 | PlatformIO registry names sometimes point to archived sources | Silent legacy | Dependencies as explicit Git URLs on the ESP32Async org |
 | PlatformIO not installed on this machine | Can't build right now | `pip install platformio` before Phase 2 |
@@ -139,8 +139,12 @@ ESP32 environments compile and link cleanly.
 ### Three things the build corrected
 
 1. **eModbus's registry owner is `miq19`, not `eModbus`.** The GitHub org and the
-   PlatformIO package owner differ; `eModbus/eModbus@1.7.4` does not resolve. The correct
-   one is `miq19/eModbus@1.7.4`.
+   PlatformIO package owner differ; `eModbus/eModbus@1.7.4` does not resolve. The registry
+   pin was `miq19/eModbus@1.7.4` -- and it is no longer a registry pin at all. The
+   `v1.7.5stable` tag shipped with `library.json` still at 1.7.4, so the registry never got a
+   1.7.5 and `miq19/eModbus@1.7.5` does not resolve either. It is pinned by git tag now
+   (`https://github.com/eModbus/eModbus#v1.7.5stable`); PlatformIO reports the result as
+   `1.7.4+sha.8cdbcc9`, and that sha is the tag commit. `platformio.ini` carries the detail.
 2. **`board_build.partitions` was only in this document, not in `platformio.ini`.**
    As a result, PlatformIO silently used the board default of ~3.2 MB with a single
    app partition — meaning no OTA fallback. That's exactly the kind of bug that only

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// ESPAsyncWebServer wiring. API read from the library sources (ESPAsyncWebServer.h, v3.11.2).
+// ESPAsyncWebServer wiring. API read from the library sources (ESPAsyncWebServer.h, v3.12.1).
 
 #include "rest_api.h"
 
@@ -1216,7 +1216,7 @@ bool RestApi::begin() {
             }
             // Gated here as well as in the upload callback, because the two run on different
             // conditions. handleUpload is reached ONLY from the multipart parser (verified in
-            // ESPAsyncWebServer 3.11.2: WebRequest.cpp guards it behind _isMultipart), so a POST
+            // ESPAsyncWebServer 3.12.1: WebRequest.cpp guards it behind _isMultipart), so a POST
             // with an empty or non-multipart body never runs the upload callback -- and therefore
             // never ran authorised() -- yet still lands here. Unguarded, that let anyone on the
             // LAN call end() on an admin's in-flight image: a failed verify destroys the update,
