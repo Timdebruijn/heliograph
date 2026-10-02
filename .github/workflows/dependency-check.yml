@@ -6,7 +6,7 @@
 # open pull requests: an embedded toolchain or library bump must be a deliberate,
 # hardware-tested change, never an auto-merge.
 #
-# FOUR SOURCES, and every one of them was added AFTER something went stale unnoticed under
+# FIVE SOURCES, and every one of them was added AFTER something went stale unnoticed under
 # the set that existed before it. That pattern is the point of this comment: each source
 # covers a way of pinning a dependency that the previous ones structurally could not see, so
 # a new way of pinning something needs a new source, not a hope that an old one catches it.
@@ -25,6 +25,16 @@
 #   4. pip pins            -- `name==version` in .github/workflows/. Invisible to all three,
 #                             which read platformio.ini. `ruff==0.15.18` went six releases
 #                             stale here while this job reported nothing, every month.
+#   5. MISSING pip pins    -- a bare `pip install <name>`. Invisible to (4) and to every
+#                             source above it, because all of them compare a pin against
+#                             upstream and an unpinned package has nothing to compare. This is
+#                             the sharpest version of the rule in this comment: four sources
+#                             watching four ways of pinning, and none of them noticed that
+#                             `pip install platformio` had no pin at all. v0.27.3 was built on
+#                             PlatformIO 6.1.19 and v0.27.4 on 6.2.0 -- an OTA image built by
+#                             different tooling than its predecessor, recorded in no commit,
+#                             because from the repository's side nothing changed. Added
+#                             2026-10-02, the day platformio was pinned.
 
 name: Dependency check
 
@@ -49,7 +59,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install "platformio==6.2.0"
 
       - name: Check for outdated packages
         id: outdated
@@ -188,6 +198,45 @@ jobs:
                    | sed 's/#.*//' \
                    | grep -oE '[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9_.]*' \
                    | sort -u)
+
+          echo "$REPORT"
+          {
+            echo "report<<EOF"
+            echo "$REPORT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          if [ -n "$REPORT" ]; then
+            echo "updates=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updates=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Every `pip install` with NO version at all.
+      #
+      # THE FOURTH BLIND SPOT, and the one that embarrasses the three above: each of them
+      # compares a pin against upstream, so a package with no pin is not "up to date" to them,
+      # it is absent. `pip install platformio` sat unpinned in eight workflow steps. v0.27.3
+      # was built on PlatformIO 6.1.19 and v0.27.4 on 6.2.0 -- an OTA image built by different
+      # tooling than its predecessor, recorded in no commit, because from the repository's side
+      # nothing changed. That is the `/stable/` platform trap in docs/decisions.md, one layer up.
+      - name: Check for unpinned pip installs
+        id: unpinned
+        run: |
+          REPORT=""
+          while read -r pkg; do
+            case "$pkg" in -*|"") continue ;; esac
+            REPORT="${REPORT}${pkg}: installed WITHOUT a version pin in .github/workflows/"$'\n'
+          # ANCHORED ON `run:`, not on the words "pip install". The first version of this
+          # grepped for the phrase anywhere and reported twenty "packages" -- `the`, `sees`,
+          # `everything` -- harvested from this file's own comments and from the two lines of
+          # the grep itself. That is the trap named thirty lines above, which this step then
+          # walked into one layer up: an automation reporting its own documentation.
+          done < <(grep -rhE '^[[:space:]]*run:[[:space:]]*pip install' .github/workflows/ \
+                   | sed 's/.*pip install//' \
+                   | tr ' ' '\n' \
+                   | tr -d '"' \
+                   | grep -E '^[A-Za-z][A-Za-z0-9_.-]*$' \
+                   | sort -u)
           echo "$REPORT"
           {
             echo "report<<EOF"
@@ -201,16 +250,17 @@ jobs:
           fi
 
       - name: Open or update tracking issue
-        if: steps.outdated.outputs.registry_updates == 'true' || steps.gitpins.outputs.updates == 'true' || steps.urlpins.outputs.updates == 'true' || steps.pippins.outputs.updates == 'true'
+        if: steps.outdated.outputs.registry_updates == 'true' || steps.gitpins.outputs.updates == 'true' || steps.urlpins.outputs.updates == 'true' || steps.pippins.outputs.updates == 'true' || steps.unpinned.outputs.updates == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPORT: ${{ steps.outdated.outputs.report }}
           GIT_REPORT: ${{ steps.gitpins.outputs.report }}
           URL_REPORT: ${{ steps.urlpins.outputs.report }}
           PIP_REPORT: ${{ steps.pippins.outputs.report }}
+          UNPINNED_REPORT: ${{ steps.unpinned.outputs.report }}
         run: |
           TITLE="Dependencies have updates available"
-          BODY=$(printf 'Monthly dependency report. Four sources, because no single one sees everything — each was added after something went stale unnoticed under the previous set.\n\n**Registry packages** (`pio pkg outdated`):\n\n```\n%s\n```\n\n**Git-pinned libraries** (`OWNER/REPO#tag`; invisible to the above, which compares registry versions):\n\n```\n%s\n```\n\n**Release-URL-pinned platforms** — the ESP32 toolchain; invisible to both of the above:\n\n```\n%s\n```\n\n**pip-pinned tools in .github/workflows/** — do not ship in the firmware; invisible to all three above, which read platformio.ini:\n\n```\n%s\n```\n\nReview the changelogs and bump deliberately — toolchain and library updates are hardware-tested changes, per docs/decisions.md. A toolchain bump is not done until a board has booted on it.' "$REPORT" "${GIT_REPORT:-none behind}" "${URL_REPORT:-none behind}" "${PIP_REPORT:-none behind}")
+          BODY=$(printf 'Monthly dependency report. Five sources, because no single one sees everything — each was added after something went stale unnoticed under the previous set.\n\n**Registry packages** (`pio pkg outdated`):\n\n```\n%s\n```\n\n**Git-pinned libraries** (`OWNER/REPO#tag`; invisible to the above, which compares registry versions):\n\n```\n%s\n```\n\n**Release-URL-pinned platforms** — the ESP32 toolchain; invisible to both of the above:\n\n```\n%s\n```\n\n**pip-pinned tools in .github/workflows/** — do not ship in the firmware; invisible to all three above, which read platformio.ini:\n\n```\n%s\n```\n\n**Unpinned pip installs** — invisible to every source above, which can only compare a pin that exists:\n\n```\n%s\n```\n\nReview the changelogs and bump deliberately — toolchain and library updates are hardware-tested changes, per docs/decisions.md. A toolchain bump is not done until a board has booted on it.' "$REPORT" "${GIT_REPORT:-none behind}" "${URL_REPORT:-none behind}" "${PIP_REPORT:-none behind}" "${UNPINNED_REPORT:-none unpinned}")
           EXISTING=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body "$BODY"

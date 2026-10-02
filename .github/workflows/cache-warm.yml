@@ -72,7 +72,7 @@ jobs:
           key: pio-fw-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install "platformio==6.2.0"
 
       # Retried, because a cold run downloads from GitHub release assets and that is exactly
       # what broke the 0.12.0 release: platform-espressif32.zip returned 504 for several minutes
