@@ -7,6 +7,33 @@ entirely specific to this project.
 
 Schema version: **1** (register 0-1). Increment on every breaking change.
 
+## One master, many readers
+
+That indirection is not a compromise, it is the point.
+
+Modbus RTU has **one master**. An inverter's RS485 port answers one questioner, and a second
+one does not politely queue — the two collide, replies go to whoever asked last, and both sides
+log timeouts. This is the most common complaint across every comparable project: the SolaX
+Home Assistant integration devotes a README section to it and recommends putting a TCP
+multiplexer in front; the Huawei integration's FAQ attributes "failed to read from inverter"
+to another client holding the connection, and tells you to disable the integration while you
+use the vendor's commissioning app.
+
+This bridge owns the bus. It is the only master on it, every exchange runs under a transport
+lock, and one RS485 activity happens per poll iteration — a read, a discovery sweep or a
+capture, never two. What it learns goes into the register map here.
+
+The Modbus TCP server then serves **from that map**. It never touches the serial transport:
+a TCP read is a memory read of the last poll's result, which is why it can answer
+`modbus.max_clients` (default 4) of them at once without anything reaching the inverter.
+Home Assistant, evcc, a Node-RED flow and an industrial SCADA can all read the same inverter
+simultaneously. None of them can collide with another, because none of them is talking to the
+inverter at all.
+
+The cost is that you get **this** map rather than the inverter's own registers, and data is
+as fresh as the last poll rather than on-demand. For a device that answers one questioner at a
+time, that is the trade that makes it answerable by many.
+
 ## Conventions
 
 | Topic | Choice |
