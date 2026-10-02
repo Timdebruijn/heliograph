@@ -99,7 +99,7 @@ Where it puts the data:
 |---|---|
 | **Home Assistant** | MQTT with auto-discovery — entities appear on their own |
 | **MQTT** | Any broker, your own topics |
-| **Modbus TCP** | Port 502, for building/industrial tooling |
+| **Modbus TCP** | Port 502, for building/industrial tooling — and [several clients at once](docs/modbus-register-map.md#one-master-many-readers), which the inverter itself cannot do |
 | **REST / JSON** | `/api/v1/` — see [docs/rest-api.md](docs/rest-api.md) |
 | **Prometheus** | `/metrics` — see [docs/prometheus.md](docs/prometheus.md); also readable by Zabbix and Checkmk |
 | **Web dashboard** | Built into the device; works with no internet at all |
