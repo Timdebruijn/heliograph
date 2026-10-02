@@ -67,7 +67,7 @@ jobs:
           key: pio-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install "platformio==6.2.0"
 
       - name: Validate device profiles
         run: python3 tools/gen_profiles.py --check
@@ -121,7 +121,7 @@ jobs:
           key: pio-fw-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install "platformio==6.2.0"
 
       # Explicit and retried rather than left to the first `pio run`. On a cache miss the
       # platform zip comes from a GitHub release asset, and that endpoint returned 504 for
