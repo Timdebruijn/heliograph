@@ -56,7 +56,7 @@ from the work instructions: familiar name, current releases, wrong contents.
 
 ## Decision 2: libraries
 
-| Purpose | Choice | Version (2026-07-16) | License | Why |
+| Purpose | Choice | Version (2026-10-02) | License | Why |
 |---|---|---|---|---|
 | Platform | **pioarduino/platform-espressif32** | 55.03.311 | Apache-2.0 | Only route to Arduino core 3.x |
 | Core | **arduino-esp32** | 3.3.10 (2026-06-05) | LGPL-2.1 | On IDF 5.5.4 |
@@ -67,6 +67,16 @@ from the work instructions: familiar name, current releases, wrong contents.
 | TCP layer | **ESP32Async/AsyncTCP** | 3.5.0 | LGPL-3.0 | Belongs with the above |
 | OTA | **`Update.h`** (core) + `esp_ota_ops` | core 3.3.10 | LGPL-2.1 / Apache-2.0 | No extra dependency |
 | Tests | **Unity** via PlatformIO | 2.7.0 (2026-07-16) | MIT | Host-based `native` env |
+
+> A library bump is not done when it builds. eModbus 1.7.5 and ESPAsyncWebServer 3.12.1 were
+> reviewed twice at the desk and found API-compatible, with no effect on the SSE path and a
+> flash delta of −8 bytes — none of which is evidence that a bridge survives them. They shipped
+> in v0.27.4 and ran on the production RS485-CAN board for **16.4 days without a restart**
+> (`boot_count` unchanged): free heap 145116 against 136024 a minute after the flash, so the
+> memleak fix reads as not-worse and there is no leak; poll duration ewma 105 ms against a
+> known baseline of 103; zero checksum errors, zero invalid frames, no coredump. The same
+> reasoning as the toolchain note above — a release from something nobody booted is a release
+> nobody checked.
 
 ### Libraries rejected — explicitly
 
