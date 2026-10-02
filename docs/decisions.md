@@ -38,7 +38,7 @@ core 3.x.
 Required in `platformio.ini` — **pinned to a version, not to `stable`**:
 
 ```ini
-platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip
+platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.312-1/platform-espressif32.zip
 ```
 
 > This block used to end in `/stable/`, and that is a trap worth naming rather than quietly
@@ -79,10 +79,11 @@ from the work instructions: familiar name, current releases, wrong contents.
 > nobody checked.
 
 > **The toolchain moved to 55.03.312-1 (core 3.3.11 → 3.3.12, IDF libs 5.5.5) without being
-> announced**, and the way it happened is worth keeping rather than tidying away. The change was
-> made for a PR about pinning PlatformIO, abandoned when the new platform turned out to require
-> PlatformIO Core ≥ 6.2.0, and then carried to another branch by an uncommitted `platformio.ini`
-> surviving a `git checkout` — where `git add -A` committed it under a title about pins. Nobody
+> announced**, and the way it happened is worth keeping rather than tidying away. The edit was
+> made on a branch **for this bump**, which was then abandoned: the new platform requires
+> PlatformIO Core ≥ 6.2.0 and the machine was on 6.1.19. Deleting that branch did not delete the
+> edit — `platformio.ini` was still modified, so a `git checkout` carried it into the next
+> branch, where a `git add -A` committed it under a title about pinning PlatformIO. Nobody
 > reviewing that PR was looking at a toolchain.
 >
 > It builds clean on all four boards with flash and RAM unchanged, which is why nothing caught
