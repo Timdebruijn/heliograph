@@ -58,8 +58,8 @@ from the work instructions: familiar name, current releases, wrong contents.
 
 | Purpose | Choice | Version (2026-10-02) | License | Why |
 |---|---|---|---|---|
-| Platform | **pioarduino/platform-espressif32** | 55.03.311 | Apache-2.0 | Only route to Arduino core 3.x |
-| Core | **arduino-esp32** | 3.3.10 (2026-06-05) | LGPL-2.1 | On IDF 5.5.4 |
+| Platform | **pioarduino/platform-espressif32** | 55.03.312-1 | Apache-2.0 | Only route to Arduino core 3.x |
+| Core | **arduino-esp32** | 3.3.12 | LGPL-2.1 | On IDF 5.5.5 |
 | Modbus TCP server | **eModbus** | v1.7.5stable, git-tag pinned (see below) | MIT | Server mode over TCP, sync+async |
 | JSON | **ArduinoJson** | 7.4.3 (2026-03-02) | MIT | v7 is current; v6 is legacy |
 | MQTT | **espMqttClient** | 1.7.3 (2026-06-22) | MIT | Non-blocking, QoS 0/1/2, LWT, auto-reconnect |
@@ -77,6 +77,17 @@ from the work instructions: familiar name, current releases, wrong contents.
 > known baseline of 103; zero checksum errors, zero invalid frames, no coredump. The same
 > reasoning as the toolchain note above — a release from something nobody booted is a release
 > nobody checked.
+
+> **The toolchain moved to 55.03.312-1 (core 3.3.11 → 3.3.12, IDF libs 5.5.5) without being
+> announced**, and the way it happened is worth keeping rather than tidying away. The change was
+> made for a PR about pinning PlatformIO, abandoned when the new platform turned out to require
+> PlatformIO Core ≥ 6.2.0, and then carried to another branch by an uncommitted `platformio.ini`
+> surviving a `git checkout` — where `git add -A` committed it under a title about pins. Nobody
+> reviewing that PR was looking at a toolchain.
+>
+> It builds clean on all four boards with flash and RAM unchanged, which is why nothing caught
+> it. That is also exactly why the rule above is phrased around booting rather than building.
+> Not released until a board has run it.
 
 ### Libraries rejected — explicitly
 
