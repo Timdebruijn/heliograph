@@ -738,16 +738,25 @@ std::string selectedDriverId() {
 /// prevent, on the one path that reconfigures the line at runtime (review, 2026-07-25).
 /// The line the bus is actually running at.
 ///
-/// Two sources and no third: the stored override when it is on, otherwise the profile the
-/// driver's begin() put on the UART -- the first of its recommended profiles, which is exactly
-/// what applySerialOverride() below declines to replace. A driver capture reports this because
-/// the idle gap derives from it, and because nobody can check the framing against a protocol
-/// document a day later without knowing what the line was.
+/// Two sources and no third: the override THIS BOOT APPLIED when there is one, otherwise the
+/// profile the driver's begin() put on the UART -- the first of its recommended profiles, which
+/// is exactly what applySerialOverride() below declines to replace. A driver capture reports
+/// this because the idle gap derives from it, and because nobody can check the framing against
+/// a protocol document a day later without knowing what the line was.
 ///
+/// It reads the frozen boot values, not the live config, for the same reason applySerialOverride
+/// does. Reading the live config here meant a capture started after a saved-but-unapplied
+/// profile change stamped the PENDING line into its report while the UART still ran the old one
+/// -- so the report described a conversation that never happened at that framing, which is the
+/// one thing this field exists to prevent.
+///
+SerialProfile g_bootSerialProfile;
+bool          g_bootSerialOverride = false;
+
 /// Caller holds g_configMutex.
 SerialProfile effectiveSerialProfile() {
-    if (g_config.serial.enabled) {
-        return g_config.serial.profile;
+    if (g_bootSerialOverride) {
+        return g_bootSerialProfile;
     }
     if (g_driver != nullptr && !g_driver->descriptor().recommendedSerialProfiles.empty()) {
         return g_driver->descriptor().recommendedSerialProfiles.front();
@@ -758,8 +767,28 @@ SerialProfile effectiveSerialProfile() {
     return SerialProfile{};
 }
 
-void applySerialOverride() {
-    if (!g_config.serial.enabled) {
+/// The line this boot actually brought up, frozen at setup().
+///
+/// applySerialOverride() used to read the LIVE g_config every time, and restoreDriverLine()
+/// calls it after a discovery or a capture. So a serial profile saved through the web UI did
+/// nothing at all until some unrelated action happened to run discovery -- possibly days later
+/// -- and then the UART jumped to it without warning. That is worse than not applying: the
+/// change and its effect were separated far enough that nobody would connect them.
+///
+/// `serial` is not in configChangeRequiresReboot(), so the UI never told the operator to
+/// restart either. Until it is applied live properly, the honest behaviour is for a saved
+/// profile to take effect at the next boot and not before -- which is what freezing this makes
+/// true.
+/// `captureBoot` is true only for the call in setup(). That call reads the stored config and
+/// remembers what it applied; every later call -- restoreDriverLine(), after a discovery or a
+/// capture -- replays the remembered line instead of whatever has since been saved.
+void applySerialOverride(bool captureBoot = false) {
+    if (captureBoot) {
+        std::lock_guard<std::mutex> lock(g_configMutex);
+        g_bootSerialOverride = g_config.serial.enabled;
+        g_bootSerialProfile  = g_config.serial.profile;
+    }
+    if (!g_bootSerialOverride) {
         // Logged even when nothing is overridden. Most bridges follow their driver, and without
         // this line an owner has no way to learn what the bus is actually running at -- which
         // matters the day a firmware update changes a driver's recommendation under them.
@@ -768,7 +797,7 @@ void applySerialOverride() {
         }
         return;
     }
-    const auto& p = g_config.serial.profile;
+    const auto& p = g_bootSerialProfile;
     if (g_transport.configure(p)) {
         Serial.printf("[serial] override: %u baud, %u data bits, %s parity, %u stop\n",
                       static_cast<unsigned>(p.baudRate), static_cast<unsigned>(p.dataBits),
@@ -1909,7 +1938,7 @@ void setup() {
         // one. All devices share the bus, so there is one line to set, not one per device --
         // which also means that on a MIXED bus, with the override off, the line is left on the
         // last driver's profile. Drivers whose profiles differ need the override set explicitly.
-        applySerialOverride();
+        applySerialOverride(/*captureBoot=*/true);
         if (g_drivers.size() > 1) {
             Serial.printf("[driver] polling %u devices in turn on one bus\n",
                           static_cast<unsigned>(g_drivers.size()));
@@ -1944,10 +1973,20 @@ void setup() {
     // has no per-task timeout, so the choice is this or no idle coverage at all; discovery
     // needs the headroom more than idle starvation needs the faster trip.
     //
-    // Not watched at all: the AsyncTCP task behind the web server and the task espMqttClient
-    // creates for itself. Registering a task whose blocking behaviour we do not control risks
-    // panicking a healthy device, so their liveness is reported through diagnostics instead
-    // (webLastServiceMs / mqttLastServiceMs) and left for a human or an alert to act on.
+    // THE ASYNCTCP TASK IS WATCHED, AND NOT BY OUR CHOICE. An earlier version of this comment
+    // said the opposite -- that it was "not watched at all" and that its liveness was reported
+    // through diagnostics fields called webLastServiceMs and mqttLastServiceMs. Both halves
+    // were wrong. AsyncTCP.h defaults CONFIG_ASYNC_TCP_USE_WDT to 1 and we do not override it;
+    // the library's #undef of it sits inside `#if defined(LIBRETINY)` and never applies on an
+    // ESP32, so async_tcp calls esp_task_wdt_add(NULL) on itself. And those two diagnostics
+    // fields exist nowhere but in that sentence.
+    //
+    // What that means in practice: any handler on the web task that blocks for longer than the
+    // timeout below panics the device. Today the longest is a WiFi scan of a few seconds, so
+    // there is headroom -- but anyone deciding "may I block here?" was being told the wrong
+    // answer by the comment that used to be here.
+    //
+    // The task espMqttClient creates for itself genuinely is unwatched.
     esp_task_wdt_config_t wdtConfig = {
         .timeout_ms    = 120000,
         .idle_core_mask = 1 << 0,  // keep the idle-task coverage the sdkconfig had
