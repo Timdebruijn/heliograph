@@ -1,6 +1,6 @@
 # Documentation
 
-Thirty-three documents, grouped by **why you are here** rather than by what they are about. Start
+Thirty-five documents, grouped by **why you are here** rather than by what they are about. Start
 in the row that matches what you are trying to do.
 
 New to the project? [The README](../README.md) answers "what is this and does it work with my
@@ -37,6 +37,7 @@ and why.
 | [eversolar-protocol.md](eversolar-protocol.md) | EverSolar / Zeversolar legacy TL series. The only **Stable** driver. |
 | [growatt-sph-protocol.md](growatt-sph-protocol.md) · [growatt-mic-tl-x-protocol.md](growatt-mic-tl-x-protocol.md) | Growatt SPH hybrid; MIC and MIN TL-X string inverters. |
 | [deye-sun-xk-sg-protocol.md](deye-sun-xk-sg-protocol.md) · [solis-rhi-protocol.md](solis-rhi-protocol.md) · [sungrow-sh-protocol.md](sungrow-sh-protocol.md) | Single-phase hybrids with a battery port. |
+| [solis-s6-eh3p-protocol.md](solis-s6-eh3p-protocol.md) | Solis S6-EH3P, the **three-phase** hybrid with four strings. A separate map from the RHI above and not a superset of it — they share a register space, which is exactly what makes assuming one from the other dangerous. |
 | [huawei-sun2000-protocol.md](huawei-sun2000-protocol.md) · [goodwe-et-protocol.md](goodwe-et-protocol.md) | Huawei SUN2000 (± LUNA2000); GoodWe ET/EH/BT/BH. **GoodWe ships at unit id 247, not 1.** |
 | [sofar-hyd-protocol.md](sofar-hyd-protocol.md) | Sofar HYD, both the **3…6K-EP** single-phase and the **5…20K-3PH** three-phase profiles. Better sourced than most — two independent sources agree on sixteen of the EP's twenty registers, one of them running on real hardware; the three-phase profile's L2/L3 rows, plus grid power and house load, are vendor-document only. Grid power carries a **negative scale** — the vendor counts export positive where we count import positive. |
 | [solax-x1-protocol.md](solax-x1-protocol.md) | SolaX X1. Read this **before buying or wiring** — the first attempt on real hardware returned nothing at all. |
