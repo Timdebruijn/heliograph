@@ -221,11 +221,16 @@ is a data file, not programming.
 You need one ESP32-S3 board with an RS485 port. Pick based on whether you also want
 curtailment:
 
-| Board | What it adds | Status |
-|---|---|---|
-| [Waveshare ESP32-S3-RS485-CAN](https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN) | battery-backed clock; the reference board | **Production** — pick this if you only need to read the inverter |
-| [Waveshare ESP32-S3-Relay-1CH](https://www.waveshare.com/wiki/ESP32-S3-Relay-1CH) | 1 relay (on/off curtailment), clock | **Hardware-verified** — boots and actuates its relay on real hardware 2026-07-26; polarity not yet meter-measured |
-| [Waveshare ESP32-S3-Relay-6CH](https://www.waveshare.com/wiki/ESP32-S3-Relay-6CH) | 6 relays (stepped curtailment), status LED, buzzer | **Hardware-verified** — relays, polarity and failsafe measured 2026-07-23 |
+| Board | Buy | Docs | What it adds | Status |
+|---|---|---|---|---|
+| **ESP32-S3-RS485-CAN** | [product page](https://www.waveshare.com/esp32-s3-rs485-can.htm) | [wiki](https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN) | battery-backed clock; the reference board | **Production** — pick this if you only need to read the inverter |
+| **ESP32-S3-Relay-1CH** | [product page](https://www.waveshare.com/esp32-s3-relay-1ch.htm) | [wiki](https://www.waveshare.com/wiki/ESP32-S3-Relay-1CH) | 1 relay (on/off curtailment), clock | **Hardware-verified** — boots and actuates its relay on real hardware 2026-07-26; polarity not yet meter-measured |
+| **ESP32-S3-Relay-6CH** | [product page](https://www.waveshare.com/esp32-s3-relay-6ch.htm) | [wiki](https://www.waveshare.com/wiki/ESP32-S3-Relay-6CH) | 6 relays (stepped curtailment), status LED, buzzer | **Hardware-verified** — relays, polarity and failsafe measured 2026-07-23 |
+
+All three are Waveshare boards and cost roughly €20–30. **If you only want to see what your
+inverter is doing, take the first one.** The relay boards exist for turning the inverter
+*down*, which is a separate feature you have to enable deliberately — you do not need one to
+read your inverter, and you can always add one later.
 
 Besides the board you need a **USB-C cable**, and wire for the RS485 connection: two data
 conductors (**A** and **B**) plus a **ground** reference. A cut Ethernet patch cable is
@@ -329,7 +334,29 @@ the schematic and nobody has run it. Details and the download-mode caveat:
 
 ### 4. Wire it to the inverter
 
-With the inverter's manual in front of you, connect:
+> **If you have never wired anything before, this is the step to slow down on.** It is three
+> wires and no mains voltage, but *where* those three wires go differs on every inverter.
+> Nothing below replaces your own inverter's manual.
+
+**First, find the port — in your manual, not by looking.** Inverters put RS485 in very
+different places, and the plug tells you nothing:
+
+- an **RJ45 socket** that looks exactly like a network port (but is not one — do not plug it
+  into your router)
+- a **screw terminal** block, often behind a small cover
+- a **multi-pin plug** with a locking ring (a Solis S6 hybrid uses a 16-pin COM connector)
+
+In the manual, look for **RS485**, **COM**, **Modbus**, **Meter** or **BMS**. The manual is
+also the only place that tells you *which pin is which* — pinouts differ between models, and
+between generations of the same model. Do not copy a pinout you found for a similar-looking
+inverter.
+
+**Check whether the port is already taken.** Many inverters ship with a WiFi or LAN stick from
+the manufacturer, and on some models that stick sits on the same RS485 line. If so you have to
+choose: the vendor's app, or your own reading. Your manual, or the brand page under
+[docs/](docs/), will say which port is which.
+
+**Then connect**, with the inverter's manual in front of you:
 
 - board **A** → inverter **A** (sometimes labelled D+)
 - board **B** → inverter **B** (sometimes labelled D−)
@@ -338,6 +365,14 @@ With the inverter's manual in front of you, connect:
 Connect the ground. It is not optional folklore: without a shared reference the bus can stay
 completely silent no matter how the data wires are arranged. And if nothing comes through at
 first, **swapping A and B is the single most common fix** — it cannot damage anything.
+
+Two reassurances, because this is the step people hesitate on. These are **signal** wires,
+carrying a few volts; the dangerous parts of an inverter are behind its cover, and you never
+open that. And Heliograph only *reads* until you deliberately turn on the relay features —
+plugging it in cannot change a setting on your inverter.
+
+If you want the longer version — cable choice, chaining several inverters, where the 120 Ω
+terminators go — read [docs/rs485-bus.md](docs/rs485-bus.md) **before** you buy cable.
 
 ### 5. Find your inverter
 
