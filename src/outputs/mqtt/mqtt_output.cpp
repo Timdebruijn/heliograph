@@ -267,10 +267,20 @@ MqttOutput::Channel& MqttOutput::channelFor(const DeviceView& view, const Bridge
 bool MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
                                   const BridgeInfo& bridge) {
     if (!config_.discoveryEnabled) {
-        // Matches the old behaviour byte for byte: discoveryPublished never becomes true via
-        // this path, so loop() calls onConnected() again next tick too. Not this pass's bug to
-        // fix; changing it would be an unrelated behaviour change smuggled into a review fix.
-        return false;
+        // TRUE, not false, and the difference is a million MQTT packets a day.
+        //
+        // A previous pass noticed this and deliberately left it: returning false meant
+        // discoveryPublished never became true, so loop() called onConnected() again on the
+        // very next tick -- and that was judged out of scope for the review it was found in.
+        // The scope call was fair; leaving it a second time would not be. Measured cost with
+        // discovery off: the MQTT loop runs about four times a second, and each pass re-sent
+        // three retained QoS1 publishes and a subscribe PER DEVICE. On a plain board that is
+        // roughly 1.3 million packets a day to a broker that asked for none of them; a 6CH
+        // with its relay topics is nearer four million.
+        //
+        // "Discovery is switched off" is a completed state, not a failure. Saying so lets the
+        // caller mark the channel done, which is what every other return path here means.
+        return true;
     }
     // Every publish counted, same idiom forgetDevice() already uses below: a refusal must not
     // read as delivered, or the caller marks this channel "discovery done" while some entities
