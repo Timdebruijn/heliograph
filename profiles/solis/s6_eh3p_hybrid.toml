@@ -9,27 +9,40 @@
 # exist. Everything below was re-derived rather than inherited.
 #
 # SOURCES (read as source code, not as documentation):
-#   A. wills106/homeassistant-solax-modbus, custom_components/solax_modbus/plugin_solis.py
+#   A. wills106/homeassistant-solax-modbus @ 5845a931b (2026-10-14),
+#      custom_components/solax_modbus/plugin_solis.py
 #      Declares register, register_type, register_data_type and scale per entity, and tags
 #      each with allowedtypes X1 (single phase) or X3 (three phase). That tagging is what
 #      makes the phase split below evidence rather than assumption.
-#   B. Pho3niX90/solis_modbus, custom_components/solis_modbus/sensor_data/hybrid_sensors.py
-#      The integration behind solis-modbus.readthedocs.io. Declares register list and
-#      multiplier per entity. Its "Tested" list names S6-EH3P10K-H-EU and S6-EH3P(12-20)K-H:
-#      the same series and battery class as this profile, one size up.
+#   B. Pho3niX90/solis_modbus @ 011e31196 (2026-10-17),
+#      custom_components/solis_modbus/sensor_data/hybrid_sensors.py
+#      The integration behind solis-modbus.readthedocs.io. Declares a register list and a
+#      multiplier per entity, and a `data_type` on some. Its "Tested" list names
+#      S6-EH3P10K-H-EU and S6-EH3P(12-20)K-H: the same series and battery class as this
+#      profile, one size up. The 8K is not on that list.
+#
+# HOW THE TWO AGREE, stated precisely rather than as a slogan. Every address, width and scale
+# below appears in both. On SIGNEDNESS the two are not symmetrical: A declares
+# register_data_type on most rows, B declares `data_type` on only a few. Where both declare,
+# they agree (33029 u32, 33093 s16, 33134 s16). Where B is silent, A's declaration stands
+# alone and B falls back to its own default -- which is agreement by one source and a default,
+# not by two statements.
 #
 # Independence checked rather than assumed: different authors, different repositories,
 # different data shapes (Python dataclasses vs dicts), neither generated from the other.
 #
 # TWO TRAPS IN SOURCE B, both of which would have produced silent nonsense:
 #
-#   1. `"multiplier": 0` appears throughout. It does not mean zero. The decode path reads
-#      `self.multiplier or 1`, and 0 is falsy in Python, so 0 means 1. Copying it literally
+#   1. `"multiplier": 0` appears throughout. It does not mean zero. The decode path treats 0
+#      and 1 alike (`if multiplier == 0 or multiplier == 1`), and the bounds helpers spell the
+#      same thing as `self.multiplier or 1` -- 0 is falsy in Python. Copying a 0 into a scale
 #      would have made every affected channel read zero.
-#   2. It carries model-specific overrides. S6-EH3P10K-H-ZP and Zonneplan-badged units apply
-#      0.01 instead of the default to battery current and the battery energy counters. This
-#      profile is the plain -H, so the defaults apply -- but it means the battery energy
-#      counters are model-dependent, and they are left unmapped below partly for that reason.
+#   2. It carries model-specific overrides (solis_base_sensor.py, the inv_model branch).
+#      S6-EH3P10K-H-ZP and Zonneplan-badged units apply 0.01 instead of the default to
+#      registers {33142, 33161-33168}. Note which registers those are: 33142 is the BMS
+#      battery current, NOT the 33134 mapped below, and 33161/33165 are the battery energy
+#      counters that ARE mapped below. This profile is the plain -H, where the defaults apply;
+#      a -ZP or Zonneplan owner must halve-check those two rows before trusting them.
 #
 # A TRAP IN SOLIS'S OWN DOCUMENTATION, reported repeatedly by people reading the PDF rather
 # than an integration: Solis numbers registers inconsistently (33072 vs 3072) and the written
@@ -86,10 +99,18 @@ space = "input"
 start = 33093       # inverter temperature, grid frequency
 count = 2
 
+# Reads through 33139 to reach SOC. 33134-33138 are not mapped, but they are not waste: the
+# driver TRACE-dumps every raw block, and 33134 (battery current) and 33135 (charge/discharge
+# direction) are exactly the pair a bench session needs to settle the sign question below.
 [[block]]
 space = "input"
-start = 33133       # battery voltage, current, ... SOC
+start = 33133
 count = 7
+
+[[block]]
+space = "input"
+start = 33161       # battery charge and discharge energy, two 32-bit counters
+count = 6
 
 [[block]]
 space = "input"
@@ -118,9 +139,12 @@ type = "u16"
 scale = 0.01
 unit = "Hz"
 
-# 33073-33078. THE PHASE SPLIT IS SOURCED, not inferred: source A tags 33073/33076 as X1 and
-# 33074/33075/33077/33078 as X3, which is how a single-phase unit and a three-phase unit share
-# one map. On this three-phase model all six are live.
+# 33073-33078. THE PHASE SPLIT IS SOURCED, not inferred. In source A, 33073 appears TWICE:
+# once as "Inverter Voltage" tagged X1, and once as "Inverter Voltage L1" tagged X3. 33076 has
+# the same pair. 33074/33075/33077/33078 are X3-only L2 and L3 entities. So the same register
+# serves both topologies and is explicitly L1 on a three-phase unit -- which is what makes
+# mapping it to ac.phase_l1 correct here rather than merely convenient. Source B labels
+# 33073-33075 and 33076-33078 as A/B/C phase independently.
 [[register]]
 measurement = "ac.phase_l1.voltage"
 display_name = "L1 voltage"
@@ -276,16 +300,23 @@ type = "u16"
 scale = 0.1
 unit = "V"
 
-# 33134. SIGNED, and that is the channel that carries charge/discharge direction here --
-# see the battery.power note below for why this matters more than usual.
-[[register]]
-measurement = "battery.current"
-display_name = "Battery current"
+[[register]]                    # 33161/33162, both sources u32 scale 1
+measurement = "battery.energy_charged"
+display_name = "Battery energy charged"
 space = "input"
-address = 33134
-type = "s16"
-scale = 0.1
-unit = "A"
+address = 33161
+type = "u32"
+scale = 1
+unit = "kWh"
+
+[[register]]                    # 33165/33166, both sources u32 scale 1
+measurement = "battery.energy_discharged"
+display_name = "Battery energy discharged"
+space = "input"
+address = 33165
+type = "u32"
+scale = 1
+unit = "kWh"
 
 [[register]]                    # 33139, both sources
 measurement = "battery.soc"
@@ -298,11 +329,16 @@ unit = "%"
 
 # --- Temperature, energy, load ----------------------------------------------------------------
 
-# 33093. s16 WHERE BOTH SOURCES READ UNSIGNED, and that is a deliberate departure. Neither
-# source declares a type, so both fall back to unsigned -- under which a sub-zero reading on a
-# cold morning decodes as roughly 6553 degrees. The opposite error is impossible: no inverter
-# reaches the 3276.7 degrees where s16 would wrap. Choosing s16 cannot invent a plausible
-# wrong value; choosing u16 can.
+# 33093. SOURCE B DECLARES data_type S16 here; source A declares nothing and falls back to
+# unsigned. So this is not a departure from the sources, it is following the one that states a
+# type -- and it matches every sibling profile in this tree (growatt, goodwe, huawei, sofar,
+# sungrow and solis_rhi all map inverter.temperature as s16).
+#
+# An earlier version of this comment claimed neither source declared a type and justified s16
+# on first principles instead. That was wrong, and wrong in the way this project keeps
+# catching: a field named `data_type` in B was missed because the extraction looked only for
+# A's spelling, `register_data_type`. The conclusion survived; the stated evidence for it did
+# not exist.
 [[register]]
 measurement = "inverter.temperature"
 display_name = "Inverter temperature"
@@ -341,23 +377,36 @@ unit = "W"
 
 # --- WHAT IS DELIBERATELY NOT MAPPED, and why ------------------------------------------------
 #
-# battery.power (33149/33150). THE SOURCES DISAGREE ABOUT THE SIGN AND THE SCALE. Source A
-# declares REGISTER_S32 with scale 1 -- a signed value needing no help. Source B treats the
-# same pair as a MAGNITUDE and combines it with a direction register at 33135 to recover the
-# sign, and uses scale 0.1 for the combined entity while its plain one uses 1. Two
-# disagreements on one channel. battery.power is defined here as positive = charging, so
-# getting the sign wrong does not produce an obviously broken number, it produces a plausible
-# one pointing the wrong way -- and a reader would believe it. battery.current above is signed,
-# agreed by both sources, and carries the same direction information honestly.
+# battery.power (33149/33150). NOT a source disagreement -- an earlier version of this comment
+# said it was, and that was wrong. BOTH sources consult the direction register at 33135 to
+# decide the sign: A returns the value on charge and its absolute value on discharge, B negates
+# when the direction flag says charging. Neither treats the 32-bit pair as self-sufficient.
 #
-# grid.power (33263/33264). Both sources agree on the register pair, on s32, and on raw watts
-# (source A presents kW via scale 0.001 and source B presents W via scale 1 -- the same raw
-# value, not a conflict). WHAT NEITHER STATES IS WHICH DIRECTION IS POSITIVE. grid.power is
-# defined here as positive = importing. The only hint anywhere is a dashboard config in source
-# B's own docs setting `invert_grid: true`, which is a display choice, not a protocol
-# statement. One meter reading settles it on hardware: run a heavy load with no sun and see
-# which way the number goes. Until then this is the single most valuable row still missing,
-# because zero-export control cannot be built without it.
+# The real reason it is absent is structural: this schema maps ONE register to one measurement
+# and cannot combine a magnitude with a direction register. Mapping the pair alone would make a
+# discharging battery read as positive power, which battery.power defines as charging.
+#
+# battery.current (33134) is left out for the same reason, and that matters because it is
+# tempting: both sources decode it as s16, so it LOOKS self-describing. Neither states which
+# direction is positive, and both ship 33135 alongside it. The sibling profile reaches the same
+# conclusion in the same words -- "a confidently inverted battery graph is worse than an absent
+# one" (solis/rhi_hybrid.toml). battery.soc and battery.voltage above say what they mean without
+# a convention to get wrong.
+#
+# grid.power (33263/33264). Both sources agree on the pair, on s32 and on raw watts -- source
+# A presents kW via scale 0.001 and B presents W via scale 1, which is the same raw value in
+# different clothes, not a conflict.
+#
+# ONE SOURCE STATES THE SIGN AND THE OTHER DOES NOT. B's derived-sensor code negates this pair
+# and carries the comment "Meter total active power is positive when exporting". A is silent:
+# one signed value, no note. So the convention is single-sourced, and the two-source rule is
+# what keeps this row out -- not, as an earlier version of this comment claimed, an absence of
+# any statement at all.
+#
+# If B is right, canonical grid.power (positive = importing) wants scale = -1 here. That is a
+# one-line change and the single most valuable row still missing, because zero-export control
+# cannot be built without it. One bench reading settles it: draw a heavy load after dark and
+# see which way the number moves.
 #
 # battery.temperature (33043). Source B only. One source is research, not a map.
 #
@@ -366,10 +415,11 @@ unit = "W"
 # express per-row. Left out rather than mapped at a scale that is right for some S6 units and
 # wrong for others.
 #
-# Per-phase grid-port power (33512 phase A, 33515 phase B). Source B lists A and B and NOT C,
-# on a three-phase device. An asymmetry that obvious in a generated document is more likely a
-# gap in the source than in the inverter; mapping two thirds of a three-phase quantity would be
-# worse than mapping none.
+# Per-phase grid-port power (33512, 33515, 33518). An earlier version of this comment said
+# phase C was missing from source B. It is not -- 33518 is there, with multiplier 10. Two real
+# reasons remain. It is single-sourced: A carries no grid-port per-phase power at all. And the
+# AC GRID PORT is not the inverter's AC output, which is what ac.phase_* means here; conflating
+# them would put the wrong quantity behind a familiar name.
 #
 # Writable setpoints. None, deliberately -- and this is not the usual dormancy. Eniris, who
 # integrate Solis hybrids commercially, state that OLDER Solis firmware implemented control by
