@@ -228,9 +228,15 @@ curtailment:
 | **ESP32-S3-Relay-6CH** | [product page](https://www.waveshare.com/esp32-s3-relay-6ch.htm) | [wiki](https://www.waveshare.com/wiki/ESP32-S3-Relay-6CH) | 6 relays (stepped curtailment), status LED, buzzer | **Hardware-verified** — relays, polarity and failsafe measured 2026-07-23 |
 
 All three are Waveshare boards and cost roughly €20–30. **If you only want to see what your
-inverter is doing, take the first one.** The relay boards exist for turning the inverter
-*down*, which is a separate feature you have to enable deliberately — you do not need one to
-read your inverter, and you can always add one later.
+inverter is doing, take the first one.**
+
+The relay boards are specifically for driving an inverter's **DRM input** — the
+demand-response terminals, a dry contact. That is not the only way to turn an inverter down:
+where the inverter accepts a power limit written over **RS485**, that path needs no relay
+board at all, just the plain RS485-CAN board. Relays are the answer for inverters that expose
+no writable limit, where a DRM contact is the only control path there is. Which of the two
+applies is a property of your inverter, not of this firmware — the brand pages under
+[docs/](docs/) say which.
 
 Besides the board you need a **USB-C cable**, and wire for the RS485 connection: two data
 conductors (**A** and **B**) plus a **ground** reference. A cut Ethernet patch cable is
