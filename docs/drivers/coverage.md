@@ -23,6 +23,7 @@ driver must not promote a map nobody has confirmed.
 | `sofar_hyd_3ph` | Sofar Solar | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `sofar_hyd_ep` | Sofar Solar | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `solis_rhi_hybrid` | Solis | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ |
+| `solis_s6_eh3p_hybrid` | Solis | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ |
 | `sungrow_sh_hybrid` | Sungrow | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 
 `·` means the profile does not map it. That is usually deliberate and always explained in
@@ -58,6 +59,7 @@ the profile's own comments — see [Why a channel is missing](#why-a-channel-is-
 | `sofar_hyd_3ph` | see profile header | see profile header | **no** |
 | `sofar_hyd_ep` | see profile header | see profile header | **no** |
 | `solis_rhi_hybrid` | see profile header | see profile header | **no** |
+| `solis_s6_eh3p_hybrid` | see profile header | see profile header | **no** |
 | `sungrow_sh_hybrid` | see profile header | see profile header | **no** |
 
 Every profile in this tree is transcribed from documentation or from implementations

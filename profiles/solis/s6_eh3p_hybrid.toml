@@ -1,0 +1,381 @@
+# SPDX-License-Identifier: MIT
+#
+# Solis (Ginlong) S6-EH3P three-phase hybrid — Modbus RTU register profile.
+#
+# WHY THIS IS NOT THE RHI PROFILE. solis/rhi_hybrid.toml is scoped to the RHI-(3-6)K-48ES-5G:
+# single phase, two MPPTs. This family is three phase with four MPPTs and a high-voltage
+# battery. The register SPACE turns out to be shared -- both live in the 33xxx input range --
+# but "same space" is not "same device", and the two profiles disagree about which registers
+# exist. Everything below was re-derived rather than inherited.
+#
+# SOURCES (read as source code, not as documentation):
+#   A. wills106/homeassistant-solax-modbus, custom_components/solax_modbus/plugin_solis.py
+#      Declares register, register_type, register_data_type and scale per entity, and tags
+#      each with allowedtypes X1 (single phase) or X3 (three phase). That tagging is what
+#      makes the phase split below evidence rather than assumption.
+#   B. Pho3niX90/solis_modbus, custom_components/solis_modbus/sensor_data/hybrid_sensors.py
+#      The integration behind solis-modbus.readthedocs.io. Declares register list and
+#      multiplier per entity. Its "Tested" list names S6-EH3P10K-H-EU and S6-EH3P(12-20)K-H:
+#      the same series and battery class as this profile, one size up.
+#
+# Independence checked rather than assumed: different authors, different repositories,
+# different data shapes (Python dataclasses vs dicts), neither generated from the other.
+#
+# TWO TRAPS IN SOURCE B, both of which would have produced silent nonsense:
+#
+#   1. `"multiplier": 0` appears throughout. It does not mean zero. The decode path reads
+#      `self.multiplier or 1`, and 0 is falsy in Python, so 0 means 1. Copying it literally
+#      would have made every affected channel read zero.
+#   2. It carries model-specific overrides. S6-EH3P10K-H-ZP and Zonneplan-badged units apply
+#      0.01 instead of the default to battery current and the battery energy counters. This
+#      profile is the plain -H, so the defaults apply -- but it means the battery energy
+#      counters are model-dependent, and they are left unmapped below partly for that reason.
+#
+# A TRAP IN SOLIS'S OWN DOCUMENTATION, reported repeatedly by people reading the PDF rather
+# than an integration: Solis numbers registers inconsistently (33072 vs 3072) and the written
+# number is sometimes one above the address to send -- "active power documented as 3005-6, the
+# address to send is 3004". The numbers below are the ones both integrations put on the wire,
+# which is the form that matters. Do not "correct" them against a Solis PDF without checking
+# which convention that PDF uses.
+
+[profile]
+driver = "modbus_profile"
+id = "solis_s6_eh3p_hybrid"
+display_name = "Solis S6-EH3P hybrid (5–10 kW, three phase)"
+manufacturer = "Solis"
+
+# Two independent integrations agree on every row below. No S6 has answered THIS file.
+status = "experimental"
+default = false        # sph.toml holds the driver default
+phases = 3
+mppts = 4
+battery = true
+transports = ["rtu"]
+
+# Default address is 1, changeable from the inverter's own display (manual ch. 7.3.2) and not
+# from the installer app -- which matters, because owners do not always have the app.
+# Line settings are the family default; neither source states them for the hybrid, and the
+# 9600 8N1 figure circulating in forums is from the S6-GR1P STRING inverters, which are a
+# different map entirely. Treat the rate as the first thing to vary if nothing answers.
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# --- Read blocks ----------------------------------------------------------------------------
+# Function 04 (input registers) throughout: both sources declare REG_INPUT for every row here.
+# The 43xxx/44xxx holding range is where setpoints live and is deliberately not read.
+
+[[block]]
+space = "input"
+start = 33029       # lifetime and today's generation
+count = 7
+
+[[block]]
+space = "input"
+start = 33049       # four MPPT strings, then total DC
+count = 10
+
+[[block]]
+space = "input"
+start = 33073       # three phases, then AC active power
+count = 8
+
+[[block]]
+space = "input"
+start = 33093       # inverter temperature, grid frequency
+count = 2
+
+[[block]]
+space = "input"
+start = 33133       # battery voltage, current, ... SOC
+count = 7
+
+[[block]]
+space = "input"
+start = 33147       # household load
+count = 1
+
+# --- AC side --------------------------------------------------------------------------------
+
+# 33079/33080. Signed 32-bit: source A declares REGISTER_S32 explicitly, source B lists two
+# registers. Raw is watts in both.
+[[register]]
+measurement = "ac.power.total"
+display_name = "AC output power"
+space = "input"
+address = 33079
+type = "s32"
+scale = 1
+unit = "W"
+
+[[register]]                    # 33094, both sources, 0.01 Hz
+measurement = "ac.frequency"
+display_name = "Grid frequency"
+space = "input"
+address = 33094
+type = "u16"
+scale = 0.01
+unit = "Hz"
+
+# 33073-33078. THE PHASE SPLIT IS SOURCED, not inferred: source A tags 33073/33076 as X1 and
+# 33074/33075/33077/33078 as X3, which is how a single-phase unit and a three-phase unit share
+# one map. On this three-phase model all six are live.
+[[register]]
+measurement = "ac.phase_l1.voltage"
+display_name = "L1 voltage"
+space = "input"
+address = 33073
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]
+measurement = "ac.phase_l2.voltage"
+display_name = "L2 voltage"
+space = "input"
+address = 33074
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]
+measurement = "ac.phase_l3.voltage"
+display_name = "L3 voltage"
+space = "input"
+address = 33075
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]
+measurement = "ac.phase_l1.current"
+display_name = "L1 current"
+space = "input"
+address = 33076
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]
+measurement = "ac.phase_l2.current"
+display_name = "L2 current"
+space = "input"
+address = 33077
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]
+measurement = "ac.phase_l3.current"
+display_name = "L3 current"
+space = "input"
+address = 33078
+type = "u16"
+scale = 0.1
+unit = "A"
+
+# --- PV strings -----------------------------------------------------------------------------
+# All four MPPTs are in the shared map, which is the reason this profile exists separately:
+# the 8 kW three-phase unit has four strings and the RHI profile maps two.
+#
+# NO PER-STRING POWER REGISTER EXISTS. Source B's "PV Power n" entities list the same two
+# registers as the voltage and current entities -- it multiplies V by I. Rather than map a
+# product as if the inverter reported one, the strings carry voltage and current only, and
+# dc.power.total below is the device's own figure.
+
+[[register]]
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 voltage"
+space = "input"
+address = 33049
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]
+measurement = "dc.mppt_1.current"
+display_name = "PV1 current"
+space = "input"
+address = 33050
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 voltage"
+space = "input"
+address = 33051
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]
+measurement = "dc.mppt_2.current"
+display_name = "PV2 current"
+space = "input"
+address = 33052
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]
+measurement = "dc.mppt_3.voltage"
+display_name = "PV3 voltage"
+space = "input"
+address = 33053
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]
+measurement = "dc.mppt_3.current"
+display_name = "PV3 current"
+space = "input"
+address = 33054
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]
+measurement = "dc.mppt_4.voltage"
+display_name = "PV4 voltage"
+space = "input"
+address = 33055
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]
+measurement = "dc.mppt_4.current"
+display_name = "PV4 current"
+space = "input"
+address = 33056
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # 33057/33058, both sources, raw watts
+measurement = "dc.power.total"
+display_name = "PV power total"
+space = "input"
+address = 33057
+type = "u32"
+scale = 1
+unit = "W"
+
+# --- Battery --------------------------------------------------------------------------------
+
+[[register]]                    # 33133, both sources
+measurement = "battery.voltage"
+display_name = "Battery voltage"
+space = "input"
+address = 33133
+type = "u16"
+scale = 0.1
+unit = "V"
+
+# 33134. SIGNED, and that is the channel that carries charge/discharge direction here --
+# see the battery.power note below for why this matters more than usual.
+[[register]]
+measurement = "battery.current"
+display_name = "Battery current"
+space = "input"
+address = 33134
+type = "s16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # 33139, both sources
+measurement = "battery.soc"
+display_name = "Battery state of charge"
+space = "input"
+address = 33139
+type = "u16"
+scale = 1
+unit = "%"
+
+# --- Temperature, energy, load ----------------------------------------------------------------
+
+# 33093. s16 WHERE BOTH SOURCES READ UNSIGNED, and that is a deliberate departure. Neither
+# source declares a type, so both fall back to unsigned -- under which a sub-zero reading on a
+# cold morning decodes as roughly 6553 degrees. The opposite error is impossible: no inverter
+# reaches the 3276.7 degrees where s16 would wrap. Choosing s16 cannot invent a plausible
+# wrong value; choosing u16 can.
+[[register]]
+measurement = "inverter.temperature"
+display_name = "Inverter temperature"
+space = "input"
+address = 33093
+type = "s16"
+scale = 0.1
+unit = "°C"
+
+[[register]]                    # 33035, single register, both sources
+measurement = "energy.today"
+display_name = "Energy today"
+space = "input"
+address = 33035
+type = "u16"
+scale = 0.1
+unit = "kWh"
+
+[[register]]                    # 33029/33030, both sources
+measurement = "energy.total"
+display_name = "Energy total"
+space = "input"
+address = 33029
+type = "u32"
+scale = 1
+unit = "kWh"
+
+[[register]]                    # 33147, both sources, raw watts
+measurement = "load.power"
+display_name = "House load"
+space = "input"
+address = 33147
+type = "u16"
+scale = 1
+unit = "W"
+
+# --- WHAT IS DELIBERATELY NOT MAPPED, and why ------------------------------------------------
+#
+# battery.power (33149/33150). THE SOURCES DISAGREE ABOUT THE SIGN AND THE SCALE. Source A
+# declares REGISTER_S32 with scale 1 -- a signed value needing no help. Source B treats the
+# same pair as a MAGNITUDE and combines it with a direction register at 33135 to recover the
+# sign, and uses scale 0.1 for the combined entity while its plain one uses 1. Two
+# disagreements on one channel. battery.power is defined here as positive = charging, so
+# getting the sign wrong does not produce an obviously broken number, it produces a plausible
+# one pointing the wrong way -- and a reader would believe it. battery.current above is signed,
+# agreed by both sources, and carries the same direction information honestly.
+#
+# grid.power (33263/33264). Both sources agree on the register pair, on s32, and on raw watts
+# (source A presents kW via scale 0.001 and source B presents W via scale 1 -- the same raw
+# value, not a conflict). WHAT NEITHER STATES IS WHICH DIRECTION IS POSITIVE. grid.power is
+# defined here as positive = importing. The only hint anywhere is a dashboard config in source
+# B's own docs setting `invert_grid: true`, which is a display choice, not a protocol
+# statement. One meter reading settles it on hardware: run a heavy load with no sun and see
+# which way the number goes. Until then this is the single most valuable row still missing,
+# because zero-export control cannot be built without it.
+#
+# battery.temperature (33043). Source B only. One source is research, not a map.
+#
+# Battery energy counters (33161-33168). Source B applies a different scale to these on
+# Zonneplan-badged and -ZP units, so the scale is model-dependent in a way this profile cannot
+# express per-row. Left out rather than mapped at a scale that is right for some S6 units and
+# wrong for others.
+#
+# Per-phase grid-port power (33512 phase A, 33515 phase B). Source B lists A and B and NOT C,
+# on a three-phase device. An asymmetry that obvious in a generated document is more likely a
+# gap in the source than in the inverter; mapping two thirds of a three-phase quantity would be
+# worse than mapping none.
+#
+# Writable setpoints. None, deliberately -- and this is not the usual dormancy. Eniris, who
+# integrate Solis hybrids commercially, state that OLDER Solis firmware implemented control by
+# writing to FLASH, which has finite write endurance, and that newer firmware exposes
+# curtailment registers that avoid it. A control loop on the wrong firmware wears out the
+# inverter. The 44100-44112 dispatch block in source B (export limit 44104, power target
+# 44106/44107, failsafe interval 44101) is the right target once a unit is in front of someone,
+# the firmware level is known, and the function code this firmware sends (FC06 only) is
+# confirmed to be one the inverter accepts.
