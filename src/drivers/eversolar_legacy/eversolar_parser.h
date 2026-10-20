@@ -29,6 +29,7 @@ using namespace ::heliograph::pmu;
 enum class NormalInfoLayout {
     SingleString,  ///< 14 words / 28 bytes
     DualString,    ///< 16 words / 32 bytes
+    ThreePhase,    ///< 24 words / 48 bytes, own field order (Zeversolar TLC series)
 };
 
 /// How to pick the layout. Auto is correct for every device seen so far; the forced values
@@ -52,6 +53,11 @@ inline constexpr size_t kNormalInfoSingleStringExtendedBytes = 44;
 /// 11/12, status at 15, cross-checked I*V==P). Note that unit has ONE MPPT: the "dual" layout
 /// marks a protocol generation, not a string count -- its MPPT2 words simply read constant.
 inline constexpr size_t kNormalInfoDualStringExtendedBytes = 50;
+/// A three-phase Zeversolar TLC8000 sends 48 bytes in an order of its own: two MPPTs, then
+/// E_TOTAL, hours, PAC and status, then current/voltage per phase. Captured 2026-10-20 and
+/// cross-checked: VPV*IPV summed over both strings (897 W) against PAC (861 W) is a 96%
+/// conversion, E_TOTAL matches the inverter's display, and the three VAC words read 235 V.
+inline constexpr size_t kNormalInfoThreePhaseBytes = 48;
 
 /// Decoded measurements, already scaled to their physical units.
 ///
@@ -72,9 +78,15 @@ struct NormalInfo {
     double pvVoltage1 = 0.0;  ///< VPV, /10
     double pvCurrent1 = 0.0;  ///< IPV, /10
 
-    bool   hasSecondString = false;  ///< true only for the dual-string layout
+    bool   hasSecondString = false;  ///< true for the dual-string and three-phase layouts
     double pvVoltage2      = 0.0;    ///< VPV2, /10
     double pvCurrent2      = 0.0;    ///< IPV2, /10
+
+    bool   hasThreePhases = false;  ///< true only for the three-phase layout; L1 is acVoltage
+    double acVoltage2     = 0.0;    ///< VAC L2, /10
+    double acCurrent2     = 0.0;    ///< IAC L2, /10
+    double acVoltage3     = 0.0;    ///< VAC L3, /10
+    double acCurrent3     = 0.0;    ///< IAC L3, /10
 
     uint32_t operatingHours = 0;  ///< HOURS_UP
     uint16_t statusCode     = 0;  ///< OP_MODE, raw. Meaning is undocumented; do not map to text.
@@ -86,7 +98,7 @@ struct NormalInfo {
 
 enum class DecodeResult {
     Ok,
-    UnknownLayout,   ///< Auto: payload length is neither 28 nor 32 bytes
+    UnknownLayout,   ///< Auto: payload length is none of the known ones
     LayoutMismatch,  ///< a forced layout needs more words than the payload carries
 };
 
@@ -106,7 +118,7 @@ uint32_t readDoubleWord(const uint8_t* data, size_t highIndex, size_t lowIndex);
 
 /// Decodes a QUERY_NORMAL_INFO payload.
 ///
-/// With LayoutSelection::Auto, `len` must be exactly 28 or 32. A forced layout only requires
+/// With LayoutSelection::Auto, `len` must be one of the known lengths (28, 32, 44, 48, 50). A forced layout only requires
 /// the payload to be long enough, so a device sending an unexpected length can still be read
 /// once someone has established which field order it really uses.
 DecodeResult decodeNormalInfo(const uint8_t* data, size_t len, NormalInfo& out,

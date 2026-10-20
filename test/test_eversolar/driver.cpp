@@ -244,6 +244,57 @@ static void test_registration_succeeds_against_the_captured_hardware_frame() {
     TEST_ASSERT_EQUAL_STRING("Grid-connected (normal)", state.statusText.c_str());
 }
 
+static void test_registration_echoes_the_announcement_verbatim() {
+    // Byte for byte the offline-query response a Zeversolar sent on 2026-10-20: the 16-char
+    // serial plus a 00 02 tail, 18 data bytes. That inverter ignores an address assignment
+    // carrying the trimmed serial, so echoing the decoded string never registered it.
+    Rig r;
+    r.begin();
+    r.device.offlineQueryFrame = {0xAA, 0x55, 0x00, 0x00, 0x01, 0x00, 0x10, 0x80, 0x12, 0x53,
+                                  0x58, 0x30, 0x30, 0x30, 0x38, 0x36, 0x30, 0x31, 0x31, 0x37,
+                                  0x34, 0x30, 0x30, 0x31, 0x37, 0x00, 0x02, 0x05, 0x12};
+    r.device.requireVerbatimSerialEcho = true;
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+    TEST_ASSERT_TRUE(r.driver.registered());
+    TEST_ASSERT_EQUAL_STRING("SX00086011740017", state.identity.serialNumber.c_str());
+}
+
+static void test_a_zeversolar_id_string_yields_the_bare_model() {
+    // The head of the id string the TLC8000 sent on 2026-10-20 (the log cut the tail). It
+    // spells its brand "ZEVERSolar", which the "Ever-Solar" anchor alone never found.
+    Rig r;
+    r.begin();
+    r.device.inverterId = "3008000V1.00    TLC8000     ZEVERSolar      SX00086011740017";
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+    TEST_ASSERT_EQUAL_STRING("TLC8000", state.identity.model.c_str());
+    TEST_ASSERT_EQUAL_STRING("Zeversolar", state.identity.manufacturer.c_str());
+}
+
+static void test_frames_after_the_re_register_burst_keep_a_second_apart() {
+    // A Zeversolar ignores a request that follows our previous frame too closely (hardware,
+    // 2026-10-20). Only the RE_REGISTER repeats themselves go out back to back.
+    Rig r;
+    r.transport.msPerRead = 50;
+    std::vector<uint64_t> sentAt;
+    auto device = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        sentAt.push_back(r.transport.nowMs());
+        return device(request, reply);
+    });
+    r.begin();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+    TEST_ASSERT_TRUE(sentAt.size() > 4);
+    for (size_t i = 3; i < sentAt.size(); ++i) {
+        TEST_ASSERT_TRUE(sentAt[i] - sentAt[i - 1] >= 1000);
+    }
+}
+
 static void test_one_missed_reply_does_not_drop_the_registration() {
     // Seen live (2026-07-19 12:48): one lost QUERY_NORMAL_INFO reply made the driver forget
     // its registration and fall back to the offline query -- which a still-registered
@@ -872,6 +923,9 @@ void run_eversolar_driver() {
     RUN_TEST(test_poll_reports_not_registered_when_nobody_answers);
     RUN_TEST(test_registration_refused_without_ack);
     RUN_TEST(test_registration_succeeds_against_the_captured_hardware_frame);
+    RUN_TEST(test_registration_echoes_the_announcement_verbatim);
+    RUN_TEST(test_frames_after_the_re_register_burst_keep_a_second_apart);
+    RUN_TEST(test_a_zeversolar_id_string_yields_the_bare_model);
     RUN_TEST(test_one_missed_reply_does_not_drop_the_registration);
     RUN_TEST(test_registration_recovers_a_registered_but_forgotten_inverter);
     RUN_TEST(test_poll_fills_the_canonical_model);

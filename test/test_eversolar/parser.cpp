@@ -212,6 +212,41 @@ static void test_50_byte_payload_decodes_as_dual_generation() {
     TEST_ASSERT_DOUBLE_WITHIN(kEps, fx::expected::kEnergyTotalKwh, info.energyTotalKwh);
 }
 
+static void test_48_byte_payload_decodes_as_three_phase() {
+    // Byte for byte a QUERY_NORMAL_INFO reply from a Zeversolar TLC8000 (2026-10-20). Its
+    // display read E_TOTAL 54802.7 kWh an hour earlier; 897 W of PV becoming 861 W of AC is
+    // the cross-check that the current and power words sit where this layout says.
+    static const uint8_t kFrame[] = {
+        0xAA, 0x55, 0x00, 0x10, 0x01, 0x00, 0x11, 0x82, 0x30, 0x01, 0x0B, 0x13, 0xC9, 0x0E,
+        0x22, 0x00, 0x02, 0x00, 0x16, 0x00, 0x08, 0x5C, 0xC1, 0x00, 0x00, 0xA0, 0x03, 0x03,
+        0x5D, 0x00, 0x01, 0x00, 0x3C, 0x00, 0x0F, 0x09, 0x37, 0x13, 0x8B, 0x00, 0x0D, 0x09,
+        0x40, 0x00, 0x0D, 0x09, 0x31, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00,
+        0x00, 0x08, 0x55};
+    Frame f;
+    TEST_ASSERT_EQUAL(ParseResult::Ok, parseFrame(kFrame, sizeof(kFrame), f));
+    NormalInfo info;
+    TEST_ASSERT_EQUAL(DecodeResult::Ok, decodeNormalInfo(f.data, f.dataLength, info));
+    TEST_ASSERT_EQUAL(NormalInfoLayout::ThreePhase, info.layout);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 26.7, info.temperatureC);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 506.5, info.pvVoltage1);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 0.2, info.pvCurrent1);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 361.8, info.pvVoltage2);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 2.2, info.pvCurrent2);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 54803.3, info.energyTotalKwh);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 861.0, info.acPowerW);
+    TEST_ASSERT_EQUAL_UINT16(1, info.statusCode);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 0.60, info.energyTodayKwh);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 50.03, info.frequencyHz);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 235.9, info.acVoltage);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 1.5, info.acCurrent);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 236.8, info.acVoltage2);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 1.3, info.acCurrent2);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 235.3, info.acVoltage3);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 1.3, info.acCurrent3);
+    TEST_ASSERT_TRUE(info.hasSecondString);
+    TEST_ASSERT_TRUE(info.hasThreePhases);
+}
+
 static void test_ac_power_has_no_scale_factor() {
     // PAC is raw watts while everything around it is /10. Easy to get wrong.
     NormalInfo info;
@@ -453,6 +488,7 @@ void run_eversolar_parser() {
     RUN_TEST(test_single_string_decodes_all_values);
     RUN_TEST(test_captured_44_byte_payload_decodes_as_single_string);
     RUN_TEST(test_50_byte_payload_decodes_as_dual_generation);
+    RUN_TEST(test_48_byte_payload_decodes_as_three_phase);
     RUN_TEST(test_ac_power_has_no_scale_factor);
     RUN_TEST(test_energy_today_and_total_use_different_scales);
     RUN_TEST(test_energy_total_differs_from_reference_by_exactly_the_known_bug);

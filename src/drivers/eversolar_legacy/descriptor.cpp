@@ -13,7 +13,7 @@ const DriverDescriptor& descriptor() {
         x.protocol     = "EverSolar PMU RS485";
         x.description =
             "Manufacturer-specific PMU protocol over RS485, as used by Ever-Solar and "
-            "Zeversolar TL-series inverters. Read-only: the protocol defines no write "
+            "Zeversolar TL- and TLC-series inverters. Read-only: the protocol defines no write "
             "operations.";
         x.supportedTransports = {TransportType::Rs485, TransportType::Mock};
         // 9600 8N1 is hardcoded in the reference implementation and is the only profile

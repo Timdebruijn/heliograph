@@ -208,6 +208,31 @@ No response is expected to any of these, so every record here is `tx` and every 
 `idle_gap` rather than by a direction change. On a bus where an inverter does answer, the same
 frames appear cut by `direction_change` instead — the reply is what ends them.
 
+### Echo the announcement verbatim, not the decoded serial (hardware, 2026-10-20)
+
+`SEND_REGISTER_ADDRESS` must carry the offline-query payload **byte for byte**, then the address.
+A Zeversolar TLC8000 announces itself with 18 bytes — the 16-character serial and a `00 02` tail:
+
+```
+RX AA 55 00 00 01 00 10 80 12  53 58 30 30 30 38 36 30 31 31 37 34 30 30 31 37  00 02  05 12
+                                S  X  0  0  0  8  6  0  1  1  7  4  0  0  1  7
+```
+
+The driver used to send the *decoded* serial (cut at the NUL) plus the address — 17 bytes. The
+TLC8000 never acknowledged that, so it was never registered: the scan showed "address
+assignment was not acknowledged with 0x06" and polling stayed `not_registered`. Sending the 18
+bytes back unchanged, it acknowledged at once:
+
+```
+TX AA 55 01 00 00 00 10 01 13  53 58 ... 31 37 00 02  10  04 A4
+RX AA 55 00 10 01 00 10 81 01  06  01 A8
+```
+
+The reference has always done this — `unpack("C*", $serial_num_response)`, the raw response,
+next to its "bugfix september 2nd 2015 for serial numbers containing null" (`eversolar.pl:602-611`).
+The TL3000-20 also sends a tail (`00 01`) and registered with the decoded serial, so that model
+evidently accepts either; whether it accepts the verbatim echo too has not been re-tested on it.
+
 ## Measurement data — `QUERY_NORMAL_INFO` (`11 02` → `11 82`)
 
 The payload is an array of **16-bit big-endian words** (`parse_packet()`, `:766-777`):
@@ -265,6 +290,47 @@ The indices below are therefore **word indices**, not byte offsets.
 Note: the order of `IAC`/`VAC` and the position of `PAC` differ between the two layouts.
 A wrong layout choice therefore produces plausible-looking but completely wrong values.
 
+### Layout for three phases (24 words = 48 bytes payload)
+
+A three-phase Zeversolar **TLC8000** (id string `3008000V1.00    TLC8000     ZEVERSolar ...`)
+sends 48 bytes in an order of its own. One unit, captured 2026-10-20, frame stored in
+`test/test_eversolar/parser.cpp`:
+
+| Word | Field | Scale | Unit | Measurement ID | Captured |
+|---|---|---|---|---|---|
+| 0 | TEMP | ÷10, int16 | °C | `inverter.temperature` | 26.7 |
+| 1 | VPV | ÷10 | V | `dc.mppt_1.voltage` | 506.5 |
+| 2 | VPV2 | ÷10 | V | `dc.mppt_2.voltage` | 361.8 |
+| 3 | IPV | ÷10 | A | `dc.mppt_1.current` | 0.2 |
+| 4 | IPV2 | ÷10 | A | `dc.mppt_2.current` | 2.2 |
+| 5 | E_TOTAL_HI | — | — | high word of `energy.total` | `0008` |
+| 6 | E_TOTAL_LO | ÷10 | kWh | `energy.total` | 54803.3 |
+| 7 | HOURS_UP_HI | — | — | high word of `inverter.operating_hours` | `0000` |
+| 8 | HOURS_UP_LO | ×1 | h | `inverter.operating_hours` | 40963 |
+| 9 | PAC | ×1 | W | `ac.power.total` | 861 |
+| 10 | OP_MODE | — | — | `status_code` | 1 |
+| 11 | E_TODAY | ÷100 | kWh | `energy.today` | 0.60 |
+| 12 | IAC L1 | ÷10 | A | `ac.phase_l1.current` | 1.5 |
+| 13 | VAC L1 | ÷10 | V | `ac.phase_l1.voltage` | 235.9 |
+| 14 | FREQUENCY | ÷100 | Hz | `ac.frequency` | 50.03 |
+| 15 | IAC L2 | ÷10 | A | `ac.phase_l2.current` | 1.3 |
+| 16 | VAC L2 | ÷10 | V | `ac.phase_l2.voltage` | 236.8 |
+| 17 | IAC L3 | ÷10 | A | `ac.phase_l3.current` | 1.3 |
+| 18 | VAC L3 | ÷10 | V | `ac.phase_l3.voltage` | 235.3 |
+| 19-23 | unknown | | | not published | `FF00 0000 0000 0064 0000` |
+
+How the positions were pinned down, rather than guessed:
+
+- **E_TOTAL** 54803.3 kWh against the inverter's own display, 54802.7 kWh an hour earlier.
+- **VPV × IPV** over both strings, 101 W + 796 W = 897 W, against **PAC** 861 W: a 96 %
+  conversion. Twenty minutes later, 151 W + 926 W = 1077 W DC against 1046 W AC (97 %).
+- **VAC** reads 235-237 V on three words, each next to a current word whose V × I over the
+  three phases (~970 VA) fits the AC power; FREQUENCY sits between L1 and L2.
+- **E_TODAY** rose 0.60 → 0.70 kWh over four minutes at ~1 kW, and read 0.0 on the display at
+  first light; consistent, not yet compared with the display directly.
+- **HOURS_UP** is the least certain field: plausible for the unit's age, not checked against
+  anything.
+
 ### Layout auto-detection — and the hypothesis behind it
 
 The reference lets the user choose the layout via an ini option (`strings = 1` or `2`,
@@ -275,6 +341,7 @@ payload length:
 |---|---|---|
 | 28 bytes | 14 | 1 string |
 | 32 bytes | 16 | 2 strings |
+| 48 bytes | 24 | three phases, two strings (Zeversolar TLC, see above) |
 | otherwise | — | **discard frame**, do not publish data |
 
 **This is a hypothesis, not an established fact.** It follows from the two index maps of 14
@@ -341,7 +408,7 @@ Because the hypothesis is unproven, `decodeNormalInfo()` has a `LayoutSelection`
 
 | Selection | Behavior |
 |---|---|
-| `Auto` | 28 → single, 32 → dual, otherwise `UnknownLayout` (default) |
+| `Auto` | 28/44 → single, 32/50 → dual, 48 → three-phase, otherwise `UnknownLayout` (default) |
 | `ForceSingleString` | interprets as 1 string; requires `len >= 28` |
 | `ForceDualString` | interprets as 2 strings; requires `len >= 32` |
 
@@ -475,6 +542,22 @@ transaction, so a device that trickles bytes forever still ends. Both are compil
 in `src/protocols/pmu/pmu_transaction.h` (`kResponseTimeoutMs`, `kTransactionDeadlineMs`), shared
 with the other PMU-family driver.
 
+**At least one second between our frames.** Only the RE_REGISTER repeats go out back to back;
+every other frame waits until `kInterFrameGapMs` (1000 ms) have passed since the previous one.
+The Zeversolar TLC8000 ignores a request that follows the previous frame too closely, on both
+protocols it speaks (hardware, 2026-10-20):
+
+```
+09:30:29  RE_REGISTER ×3, offline query 12 ms later       -> silent
+09:30:42  RE_REGISTER ×3, offline query ~1 s later        -> answered (serial)
+09:30:42  SEND_REGISTER_ADDRESS right after that answer   -> silent
+```
+
+This is also why every discovery run reported "second probe disagreed" for it: the repeat
+probe came straight after the first. The reference never ran into it because it sleeps a full
+second after every request. Normal polling sends one frame every poll interval and is not
+slowed down; registration takes about four seconds instead of one.
+
 **There are no retries at this layer.** An earlier version of this paragraph said "3 retries,
 set in the driver's `SerialProfile` and configurable", which was wrong in all three parts: no
 retry loop exists in the poll path, the `SerialProfile::retries` field it named was never read by
@@ -556,5 +639,8 @@ collision above is real.
 | Format of `QUERY_INVERTER_ID` (`11 03`) | ASCII, structure unknown | Log raw first, then parse |
 | Confirmation of uint32 `energy.total` | 0.1 kWh precision | Compare with display |
 | Behavior at night | Timeouts vs. error frames | Phase 9 |
+| Three-phase layout words 19-23 | Not published | Capture across a day |
+| Three-phase `HOURS_UP` scale | Could be off | Compare with the inverter menu |
+| Does the TL3000-20 accept the verbatim serial echo? | Regression risk for the stable unit | Re-test on that hardware |
 
 For none of these points is code written in Phase 2 that hardcodes an assumption.

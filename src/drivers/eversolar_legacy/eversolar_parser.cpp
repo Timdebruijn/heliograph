@@ -50,6 +50,30 @@ inline constexpr size_t kHoursUp = 14;
 inline constexpr size_t kOpMode  = 15;
 }  // namespace dual
 
+// Word indices for the three-phase layout (24 words), from one TLC8000 capture (2026-10-20).
+// Words 19-23 (FF00 0000 0000 0064 0000) are unknown and not read.
+namespace three {
+inline constexpr size_t kTemp            = 0;
+inline constexpr size_t kVpv             = 1;
+inline constexpr size_t kVpv2            = 2;
+inline constexpr size_t kIpv             = 3;
+inline constexpr size_t kIpv2            = 4;
+inline constexpr size_t kEnergyTotalHigh = 5;
+inline constexpr size_t kEnergyTotalLow  = 6;
+inline constexpr size_t kHoursUpHigh     = 7;  // high word read 0; scale not yet checked
+inline constexpr size_t kHoursUpLow      = 8;
+inline constexpr size_t kPac             = 9;
+inline constexpr size_t kOpMode          = 10;
+inline constexpr size_t kEnergyToday     = 11;
+inline constexpr size_t kIac             = 12;
+inline constexpr size_t kVac             = 13;
+inline constexpr size_t kFrequency       = 14;
+inline constexpr size_t kIac2            = 15;
+inline constexpr size_t kVac2            = 16;
+inline constexpr size_t kIac3            = 17;
+inline constexpr size_t kVac3            = 18;
+}  // namespace three
+
 bool isPrintable(uint8_t c) { return c >= 0x20 && c <= 0x7E; }
 
 std::string toTrimmedString(const uint8_t* data, size_t len) {
@@ -106,6 +130,8 @@ DecodeResult decodeNormalInfo(const uint8_t* data, size_t len, NormalInfo& out,
             } else if (len == kNormalInfoDualStringBytes ||
                        len == kNormalInfoDualStringExtendedBytes) {
                 layout = NormalInfoLayout::DualString;
+            } else if (len == kNormalInfoThreePhaseBytes) {
+                layout = NormalInfoLayout::ThreePhase;
             } else {
                 return DecodeResult::UnknownLayout;
             }
@@ -145,6 +171,29 @@ DecodeResult decodeNormalInfo(const uint8_t* data, size_t len, NormalInfo& out,
         out.operatingHours = readWord(data, single::kHoursUp);
         out.statusCode     = readWord(data, single::kOpMode);
         out.hasSecondString = false;
+    } else if (layout == NormalInfoLayout::ThreePhase) {
+        out.layout          = NormalInfoLayout::ThreePhase;
+        out.temperatureC    = readSignedWord(data, three::kTemp) / 10.0;
+        out.energyTodayKwh  = readWord(data, three::kEnergyToday) / 100.0;
+        out.pvVoltage1      = readWord(data, three::kVpv) / 10.0;
+        out.pvCurrent1      = readWord(data, three::kIpv) / 10.0;
+        out.pvVoltage2      = readWord(data, three::kVpv2) / 10.0;
+        out.pvCurrent2      = readWord(data, three::kIpv2) / 10.0;
+        out.acCurrent       = readWord(data, three::kIac) / 10.0;
+        out.acVoltage       = readWord(data, three::kVac) / 10.0;
+        out.acCurrent2      = readWord(data, three::kIac2) / 10.0;
+        out.acVoltage2      = readWord(data, three::kVac2) / 10.0;
+        out.acCurrent3      = readWord(data, three::kIac3) / 10.0;
+        out.acVoltage3      = readWord(data, three::kVac3) / 10.0;
+        out.frequencyHz     = readWord(data, three::kFrequency) / 100.0;
+        out.acPowerW        = readWord(data, three::kPac);
+        out.impedanceValid  = false;
+        out.energyTotalKwh =
+            readDoubleWord(data, three::kEnergyTotalHigh, three::kEnergyTotalLow) / 10.0;
+        out.operatingHours  = readDoubleWord(data, three::kHoursUpHigh, three::kHoursUpLow);
+        out.statusCode      = readWord(data, three::kOpMode);
+        out.hasSecondString = true;
+        out.hasThreePhases  = true;
     } else {
         out.layout          = NormalInfoLayout::DualString;
         out.temperatureC    = readSignedWord(data, dual::kTemp) / 10.0;
