@@ -50,16 +50,6 @@ nav button.on{background:var(--card);color:var(--fg)}
 main{padding:20px;max-width:960px}
 /* --- primitives -------------------------------------------------------------------- */
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
-.card+.card{margin-top:12px}
-/* .card+.card predates the containers that space themselves with gap, and inside them it only
-   does harm. In .tiles it pushes every card but the first down within its own cell, so the
-   first health tile stretched over the whole row and read as a bigger card -- that is what the
-   override below fixes. In the .stack flex containers it ADDS to their 12px gap instead, so
-   cards on Inverters, Integrations and Bridge sit 24px apart rather than the 12px .stack asks
-   for. Measured, not deduced. Deleting .card+.card outright would fix both at once: the only
-   pairs left in block flow are the two on Health, and those carry their own inline margin-top.
-   That is a visible spacing change on three tabs, so it is Tim's call and not this fix's. */
-.tiles>.card+.card{margin-top:0}
 .card.bad{border-color:var(--bad)}.card.warn{border-color:var(--warn)}
 .stack{display:flex;flex-direction:column;gap:12px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 auto}
