@@ -13,7 +13,7 @@ const DriverDescriptor& descriptor() {
         x.protocol     = "EverSolar PMU RS485";
         x.description =
             "Manufacturer-specific PMU protocol over RS485, as used by Ever-Solar and "
-            "Zeversolar TL-series inverters. Read-only: the protocol defines no write "
+            "Zeversolar TL- and TLC-series inverters. Read-only: the protocol defines no write "
             "operations.";
         x.supportedTransports = {TransportType::Rs485, TransportType::Mock};
         // 9600 8N1 is hardcoded in the reference implementation and is the only profile
@@ -62,9 +62,9 @@ const DriverDescriptor& descriptor() {
         x.options = {DriverOption{
             "layout", "Payload layout",
             "How to interpret the measurement payload. 'auto' derives it from the frame "
-            "length (28 bytes = 1 string, 32 = 2). Force one only if a device contradicts "
-            "that.",
-            "auto", {"auto", "single", "dual"}},
+            "length (28 or 44 bytes = 1 string, 32 or 50 = 2, 48 = three-phase). Force one "
+            "only if a device contradicts that.",
+            "auto", {"auto", "single", "dual", "three"}},
             DriverOption{
             "address", "Assigned bus address",
             "Address this bridge hands to its inverter at registration. Leave at 16 unless you "

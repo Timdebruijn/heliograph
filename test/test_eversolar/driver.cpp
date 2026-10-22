@@ -115,6 +115,12 @@ static void test_an_out_of_range_stored_address_falls_back_rather_than_to_zero()
     TEST_ASSERT_EQUAL_UINT8(kFirstInverterAddress, optionsFrom(stored).assignedAddress);
 }
 
+static void test_the_three_option_forces_the_three_phase_layout() {
+    heliograph::DriverOptions stored;
+    stored["layout"] = "three";
+    TEST_ASSERT_EQUAL(LayoutSelection::ForceThreePhase, optionsFrom(stored).layout);
+}
+
 static void test_begin_broadcasts_re_register() {
     Rig r;
     r.begin();
@@ -244,6 +250,152 @@ static void test_registration_succeeds_against_the_captured_hardware_frame() {
     TEST_ASSERT_EQUAL_STRING("Grid-connected (normal)", state.statusText.c_str());
 }
 
+static void test_registration_echoes_the_announcement_verbatim() {
+    // Byte for byte the offline-query response a Zeversolar sent on 2026-10-20: the 16-char
+    // serial plus a 00 02 tail, 18 data bytes. That inverter ignores an address assignment
+    // carrying the trimmed serial, so echoing the decoded string never registered it.
+    Rig r;
+    r.begin();
+    r.device.offlineQueryFrame = {0xAA, 0x55, 0x00, 0x00, 0x01, 0x00, 0x10, 0x80, 0x12, 0x53,
+                                  0x58, 0x30, 0x30, 0x30, 0x38, 0x36, 0x30, 0x31, 0x31, 0x37,
+                                  0x34, 0x30, 0x30, 0x31, 0x37, 0x00, 0x02, 0x05, 0x12};
+    r.device.requireVerbatimSerialEcho = true;
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+    TEST_ASSERT_TRUE(r.driver.registered());
+    TEST_ASSERT_EQUAL_STRING("SX00086011740017", state.identity.serialNumber.c_str());
+}
+
+static void test_a_zeversolar_id_string_yields_the_bare_model() {
+    // The whole id string the TLC8000 sent, as the discovery report carried it on 2026-10-22
+    // (the 2026-10-20 log had cut the tail). It spells its brand "ZEVERSolar", which the
+    // "Ever-Solar" anchor alone never found.
+    Rig r;
+    r.begin();
+    r.device.inverterId =
+        "3008000V1.00    TLC8000     ZEVERSolar      SX000860117400176400V610-03017-03";
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+    TEST_ASSERT_EQUAL_STRING("TLC8000", state.identity.model.c_str());
+    TEST_ASSERT_EQUAL_STRING("Zeversolar", state.identity.manufacturer.c_str());
+}
+
+static void test_frames_after_the_re_register_burst_keep_a_second_apart() {
+    // A Zeversolar ignores a request that follows our previous frame too closely (hardware,
+    // 2026-10-20). Only the RE_REGISTER repeats themselves go out back to back.
+    Rig r;
+    r.transport.msPerRead = 50;
+    std::vector<uint64_t> sentAt;
+    auto device = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        sentAt.push_back(r.transport.nowMs());
+        return device(request, reply);
+    });
+    r.begin();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+    TEST_ASSERT_TRUE(sentAt.size() > 4);
+    for (size_t i = 3; i < sentAt.size(); ++i) {
+        TEST_ASSERT_TRUE(sentAt[i] - sentAt[i - 1] >= 1000);
+    }
+}
+
+static void test_buffered_bytes_do_not_cut_the_inter_frame_gap_short() {
+    // The real transport returns the moment the UART holds anything, so a read that drains
+    // stray bytes takes no time at all. Taking that still clock for one that cannot move would
+    // end the wait at once and send early -- intermittently, on any bus with other traffic.
+    Rig r;
+    r.transport.msPerRead               = 50;
+    r.transport.clockStillWhileBuffered = true;
+    r.begin();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));  // registers; our last frame ends now
+
+    std::vector<uint64_t> sentAt;
+    auto device = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        sentAt.push_back(r.transport.nowMs());
+        return device(request, reply);
+    });
+    const uint64_t lastFrameEnded = r.transport.nowMs();
+    r.transport.injectNoise({0x00, 0x13, 0x37});
+
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+    TEST_ASSERT_EQUAL(1, sentAt.size());
+    TEST_ASSERT_TRUE(sentAt[0] - lastFrameEnded >= 1000);
+}
+
+// Looks a channel up and fails with its id when nobody declared it. A bare find()->value would
+// dereference nullptr on that mutation and take the whole suite down instead of one test.
+static double valueOf(const DeviceState& state, const char* id) {
+    const auto* found = state.measurements.find(id);
+    TEST_ASSERT_NOT_NULL_MESSAGE(found, id);
+    return found->value;
+}
+
+static void test_three_phase_values_reach_the_device_state() {
+    // What ends up in Home Assistant. The fixture's phases all differ, so a swapped or
+    // dropped phase shows up here rather than only in the parser.
+    namespace e = fx::expected_three;
+    Rig r;
+    r.begin();
+    r.device.payload = Payload::ThreePhase;
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+
+    TEST_ASSERT_EQUAL_UINT8(3, state.capabilities.phaseCount);
+    TEST_ASSERT_TRUE(state.capabilities.has(InverterCapability::ReadMultiplePhases));
+    TEST_ASSERT_EQUAL_UINT8(2, state.capabilities.mpptCount);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL1, valueOf(state, measurement_id::kAcL1Voltage));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL1, valueOf(state, measurement_id::kAcL1Current));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL2, valueOf(state, measurement_id::kAcL2Voltage));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL2, valueOf(state, measurement_id::kAcL2Current));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL3, valueOf(state, measurement_id::kAcL3Voltage));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL3, valueOf(state, measurement_id::kAcL3Current));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcPowerW, valueOf(state, measurement_id::kAcPowerTotal));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kPvVoltage2, valueOf(state, measurement_id::kDcMppt2Voltage));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kTemperatureC, valueOf(state, measurement_id::kTemperature));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kOperatingHours,
+                              valueOf(state, measurement_id::kOperatingHours));
+}
+
+static void test_a_single_phase_payload_declares_no_second_or_third_phase() {
+    // The guard, not the body. Without it a single-phase TL3000-20 reports three phases, two
+    // of them forever empty -- and every three-phase test stays green.
+    Rig r;
+    r.begin();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+
+    TEST_ASSERT_EQUAL_UINT8(1, state.capabilities.phaseCount);
+    TEST_ASSERT_FALSE(state.capabilities.has(InverterCapability::ReadMultiplePhases));
+    for (const char* id : {measurement_id::kAcL2Voltage, measurement_id::kAcL2Current,
+                           measurement_id::kAcL3Voltage, measurement_id::kAcL3Current}) {
+        TEST_ASSERT_NULL_MESSAGE(state.measurements.find(id), id);
+    }
+}
+
+static void test_the_phase_count_follows_the_payload_back_down() {
+    // phaseCount is recomputed per poll, as mpptCount is; set once, it would stay 3 after the
+    // layout changed under it.
+    Rig r;
+    r.begin();
+    r.device.payload = Payload::ThreePhase;
+    DeviceState first;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(first));
+    TEST_ASSERT_EQUAL_UINT8(3, first.capabilities.phaseCount);
+
+    r.device.payload = Payload::SingleString;
+    DeviceState second;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(second));
+    TEST_ASSERT_EQUAL_UINT8(1, second.capabilities.phaseCount);
+}
+
 static void test_one_missed_reply_does_not_drop_the_registration() {
     // Seen live (2026-07-19 12:48): one lost QUERY_NORMAL_INFO reply made the driver forget
     // its registration and fall back to the offline query -- which a still-registered
@@ -325,19 +477,18 @@ static void test_poll_fills_the_canonical_model() {
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
 
-    const auto& m = state.measurements;
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kAcPowerW,
-                              m.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(state, measurement_id::kAcPowerTotal));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kEnergyTotalKwh,
-                              m.find(measurement_id::kEnergyTotal)->value);
+                              valueOf(state, measurement_id::kEnergyTotal));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kEnergyTodayKwh,
-                              m.find(measurement_id::kEnergyToday)->value);
+                              valueOf(state, measurement_id::kEnergyToday));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kTemperatureC,
-                              m.find(measurement_id::kTemperature)->value);
+                              valueOf(state, measurement_id::kTemperature));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kAcVoltage,
-                              m.find(measurement_id::kAcL1Voltage)->value);
+                              valueOf(state, measurement_id::kAcL1Voltage));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kFrequencyHz,
-                              m.find(measurement_id::kAcFrequency)->value);
+                              valueOf(state, measurement_id::kAcFrequency));
 }
 
 static void test_dc_power_is_marked_derived() {
@@ -375,7 +526,7 @@ static void test_dual_string_declares_the_second_mppt() {
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
 
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kPvVoltage2,
-                              state.measurements.find(measurement_id::kDcMppt2Voltage)->value);
+                              valueOf(state, measurement_id::kDcMppt2Voltage));
     TEST_ASSERT_EQUAL_UINT8(2, state.capabilities.mpptCount);
     TEST_ASSERT_TRUE(state.capabilities.has(InverterCapability::ReadMultipleMppts));
 }
@@ -426,14 +577,14 @@ static void test_corrupt_reply_does_not_touch_state() {
     r.begin();
     DeviceState state;
     r.poll(state);
-    const double good = state.measurements.find(measurement_id::kAcPowerTotal)->value;
+    const double good = valueOf(state, measurement_id::kAcPowerTotal);
 
     r.device.payload = Payload::BadChecksum;
     TEST_ASSERT_EQUAL(PollResult::ChecksumError, r.poll(state));
 
     // The previous reading survives untouched; a corrupt frame yields no data at all.
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, good,
-                              state.measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(state, measurement_id::kAcPowerTotal));
     TEST_ASSERT_TRUE(r.driver.busErrors().checksumErrors > 0);
 }
 
@@ -536,7 +687,7 @@ static void test_echo_of_our_own_request_is_skipped() {
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kAcPowerW,
-                              state.measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(state, measurement_id::kAcPowerTotal));
 }
 
 static void test_leading_line_noise_is_resynchronised_past() {
@@ -556,7 +707,7 @@ static void test_reply_split_across_reads_is_reassembled() {
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kAcPowerW,
-                              state.measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(state, measurement_id::kAcPowerTotal));
 }
 
 static void test_bus_is_locked_and_released() {
@@ -734,7 +885,7 @@ static void test_sunrise_recovers_without_intervention() {
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.0, p->value);
     // Lifetime energy keeps its value across the outage.
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kEnergyTotalKwh,
-                              snap->measurements.find(measurement_id::kEnergyTotal)->value);
+                              valueOf(*snap, measurement_id::kEnergyTotal));
 }
 
 static void test_a_single_dropped_frame_does_not_disturb_anything() {
@@ -844,16 +995,16 @@ static void test_snapshots_are_immutable_and_independent() {
     // A reader holding an old snapshot must keep seeing what it saw, however much the poll
     // loop moves on. This is what lets a slow REST client not block RS485.
     const auto held = store.snapshot();
-    const double before = held->measurements.find(measurement_id::kAcPowerTotal)->value;
+    const double before = valueOf(*held, measurement_id::kAcPowerTotal);
 
     r.device.payload = Payload::Night;
     g_now += 10000;
     ctx.pollOnce();
 
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, before,
-                              held->measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(*held, measurement_id::kAcPowerTotal));
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.0,
-                              store.snapshot()->measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(*store.snapshot(), measurement_id::kAcPowerTotal));
 }
 
 void run_eversolar_driver() {
@@ -861,6 +1012,7 @@ void run_eversolar_driver() {
     RUN_TEST(test_the_declared_read_channels_are_exactly_the_pmu_pv_set);
     RUN_TEST(test_a_config_without_the_address_option_still_gets_the_first_address);
     RUN_TEST(test_an_out_of_range_stored_address_falls_back_rather_than_to_zero);
+    RUN_TEST(test_the_three_option_forces_the_three_phase_layout);
     RUN_TEST(test_begin_broadcasts_re_register);
     RUN_TEST(test_a_second_instance_leaves_the_first_inverter_registered);
     RUN_TEST(test_the_first_address_still_broadcasts_re_register);
@@ -872,12 +1024,19 @@ void run_eversolar_driver() {
     RUN_TEST(test_poll_reports_not_registered_when_nobody_answers);
     RUN_TEST(test_registration_refused_without_ack);
     RUN_TEST(test_registration_succeeds_against_the_captured_hardware_frame);
+    RUN_TEST(test_registration_echoes_the_announcement_verbatim);
+    RUN_TEST(test_frames_after_the_re_register_burst_keep_a_second_apart);
+    RUN_TEST(test_buffered_bytes_do_not_cut_the_inter_frame_gap_short);
+    RUN_TEST(test_a_zeversolar_id_string_yields_the_bare_model);
     RUN_TEST(test_one_missed_reply_does_not_drop_the_registration);
     RUN_TEST(test_registration_recovers_a_registered_but_forgotten_inverter);
     RUN_TEST(test_poll_fills_the_canonical_model);
     RUN_TEST(test_dc_power_is_marked_derived);
     RUN_TEST(test_single_string_declares_no_second_mppt);
     RUN_TEST(test_dual_string_declares_the_second_mppt);
+    RUN_TEST(test_three_phase_values_reach_the_device_state);
+    RUN_TEST(test_a_single_phase_payload_declares_no_second_or_third_phase);
+    RUN_TEST(test_the_phase_count_follows_the_payload_back_down);
     RUN_TEST(test_status_text_does_not_invent_a_meaning);
     RUN_TEST(test_op_mode_zero_is_standby);
     RUN_TEST(test_unobserved_status_codes_stay_unknown);

@@ -18,6 +18,14 @@ constexpr int kReRegisterRepeats = 3;
 /// offline query -- it never broadcasts RE_REGISTER, and it never drops the registration, so a
 /// working inverter that merely went quiet for a moment is left alone. See poll().
 constexpr uint8_t kTimeoutsBeforeRecoveryProbe = 3;
+/// Minimum silence between two of our frames. A Zeversolar ignores a request that follows the
+/// previous frame too closely: an offline query 12 ms after the RE_REGISTER burst, and an
+/// address assignment sent the moment its announcement arrived, both went unanswered, while
+/// the same query a second later was answered (hardware, 2026-10-20). The reference sleeps a
+/// full second after every request (eversolar.pl send_request, "allow time for inverter to
+/// respond"), so no request of its follows another sooner than this. The RE_REGISTER repeats
+/// are the one exception: a single broadcast burst, about 12 ms apart, that nobody answers.
+constexpr uint32_t kInterFrameGapMs = 1000;
 
 }  // namespace
 
@@ -28,6 +36,8 @@ EversolarOptions optionsFrom(const heliograph::DriverOptions& values) {
         out.layout = LayoutSelection::ForceSingleString;
     } else if (layout == "dual") {
         out.layout = LayoutSelection::ForceDualString;
+    } else if (layout == "three") {
+        out.layout = LayoutSelection::ForceThreePhase;
     } else {
         out.layout = LayoutSelection::Auto;
     }
@@ -117,15 +127,43 @@ EversolarDriver::TransactResult EversolarDriver::transact(CommandCode command,
         return TransactResult::TransportError;
     }
 
+    waitForInterFrameGap();
     const pmu::Exchange exchange{request, requestLen, command, expectedSource, altSource};
-    return pmu::transact(*transport_, exchange, payloadOut, payloadCapacity, payloadLen, tally_,
-                         "RS485");
+    const auto result = pmu::transact(*transport_, exchange, payloadOut, payloadCapacity,
+                                      payloadLen, tally_, "RS485");
+    lastFrameMs_ = transport_->nowMs();
+    sentFrame_   = true;
+    return result;
+}
+
+void EversolarDriver::waitForInterFrameGap() {
+    if (!sentFrame_) {
+        return;
+    }
+    const uint64_t due = lastFrameMs_ + kInterFrameGapMs;
+    // Waiting by reading: the transport has no sleep, and a read with a timeout is one. Stray
+    // bytes are dropped here, as flushInput() would drop them before the next request anyway.
+    uint8_t discard[32];
+    for (uint64_t now = transport_->nowMs(); now < due;) {
+        const size_t   got   = transport_->read(discard, sizeof(discard),
+                                                static_cast<uint32_t>(due - now));
+        const uint64_t later = transport_->nowMs();
+        // A read that drained buffered bytes returns within the same millisecond, so a
+        // still clock alone does not mean the clock cannot move: only a still clock on an
+        // empty read does (simulated transport). Breaking on the first would send early on
+        // any bus with stray traffic.
+        if (later == now && got == 0) {
+            break;
+        }
+        now = later;
+    }
 }
 
 void EversolarDriver::reRegisterAll() {
     if (transport_ == nullptr) {
         return;
     }
+    waitForInterFrameGap();
     TransportLock lock(*transport_, pmu::kBusLockTimeoutMs);
     if (!lock.held()) {
         return;
@@ -140,6 +178,8 @@ void EversolarDriver::reRegisterAll() {
     for (int i = 0; i < kReRegisterRepeats; ++i) {
         transport_->write(request, len);
     }
+    lastFrameMs_ = transport_->nowMs();
+    sentFrame_   = true;
 }
 
 bool EversolarDriver::registerDevice(ProbeResult* probeOut, bool allowReRegister) {
@@ -189,10 +229,14 @@ bool EversolarDriver::registerDevice(ProbeResult* probeOut, bool allowReRegister
         probeOut->evidence.push_back("serial number decoded: " + serial);
     }
 
-    // 2. Hand it an address. The serial echoed back plus the address we allocate.
+    // 2. Hand it an address. The announcement echoed back VERBATIM plus the address we allocate.
+    // Not the decoded serial: a Zeversolar answers with 18 bytes, "SX00086011740017" + 00 02,
+    // and the trimmed string drops the tail, so the inverter never recognises its own serial and
+    // never ACKs (hardware, 2026-10-20). The reference does the same: unpack("C*") of the raw
+    // response, not the cleaned string (eversolar.pl:609-610).
     uint8_t assign[kMaxDataLength];
-    const size_t serialLen = serial.size() < sizeof(assign) - 1 ? serial.size() : sizeof(assign) - 1;
-    std::memcpy(assign, serial.data(), serialLen);
+    const size_t serialLen = payloadLen < sizeof(assign) - 1 ? payloadLen : sizeof(assign) - 1;
+    std::memcpy(assign, payload, serialLen);
     assign[serialLen] = address_;
 
     // Which source acknowledges is unproven on hardware: the inverter may still say 00 00 or
@@ -219,12 +263,29 @@ bool EversolarDriver::registerDevice(ProbeResult* probeOut, bool allowReRegister
     r = transact(cmd::kQueryInverterId, inverterAddress(address_), nullptr, 0,
                  inverterAddress(address_), payload, sizeof(payload), payloadLen);
     if (r == TransactResult::Ok && parseInverterId(payload, payloadLen, idString)) {
-        const std::string parsedModel = modelFromIdString(idString, "Ever-Solar");
-        const std::string& model      = parsedModel.empty() ? idString : parsedModel;
+        // The anchor is the brand as the id string spells it. A TL3000-20 says "Ever-Solar";
+        // a Zeversolar TLC8000 says "ZEVERSolar" (captured 2026-10-22, see
+        // test_a_zeversolar_id_string_yields_the_bare_model for the whole string), and without its
+        // own anchor the whole composite became the model, and every HA entity id with it.
+        struct Brand {
+            const char* anchor;
+            const char* manufacturer;
+        };
+        static constexpr Brand kBrands[] = {{"Ever-Solar", "Ever-Solar"},
+                                            {"ZEVERSolar", "Zeversolar"}};
+        std::string parsedModel;
+        for (const Brand& brand : kBrands) {
+            parsedModel = modelFromIdString(idString, brand.anchor);
+            if (!parsedModel.empty()) {
+                identity_.manufacturer = brand.manufacturer;
+                break;
+            }
+        }
+        const std::string& model = parsedModel.empty() ? idString : parsedModel;
         if (probeOut != nullptr) {
             probeOut->confidenceScore += 10;
             probeOut->evidence.push_back("inverter id string: " + idString);
-            probeOut->detectedManufacturer = "Ever-Solar";
+            probeOut->detectedManufacturer = identity_.manufacturer;
             probeOut->detectedModel        = model;
         }
         identity_.model = model;
@@ -260,7 +321,7 @@ ProbeResult EversolarDriver::probe() {
             result.confidenceScore += 5;
             result.evidence.push_back(
                 std::string("measurement payload decoded (") +
-                (info.layout == NormalInfoLayout::SingleString ? "28" : "32") + " bytes)");
+                std::to_string(payloadLen) + " bytes)");
         } else {
             result.evidence.push_back("measurement payload had an unexpected length");
         }
@@ -337,6 +398,11 @@ PollResult EversolarDriver::poll(DeviceState& state) {
     if (dual) {
         capabilities_.addRead(InverterCapability::ReadMultipleMppts);
     }
+    // Recomputed every poll like mpptCount, so a layout change cannot leave it stuck at 3.
+    capabilities_.phaseCount = info.hasThreePhases ? 3 : 1;
+    if (info.hasThreePhases) {
+        capabilities_.addRead(InverterCapability::ReadMultiplePhases);
+    }
 
     auto& m = state.measurements;
     m.declare(measurement_id::kAcPowerTotal, MeasurementType::Power, Unit::Watt, "AC Power");
@@ -351,6 +417,12 @@ PollResult EversolarDriver::poll(DeviceState& state) {
     m.declare(measurement_id::kEnergyTotal, MeasurementType::Energy, Unit::KilowattHour, "Total Energy");
     m.declare(measurement_id::kTemperature, MeasurementType::Temperature, Unit::Celsius, "Temperature");
     m.declare(measurement_id::kOperatingHours, MeasurementType::Duration, Unit::Hour, "Operating Hours");
+    if (info.hasThreePhases) {
+        m.declare(measurement_id::kAcL2Voltage, MeasurementType::Voltage, Unit::Volt, "AC Voltage L2");
+        m.declare(measurement_id::kAcL2Current, MeasurementType::Current, Unit::Ampere, "AC Current L2");
+        m.declare(measurement_id::kAcL3Voltage, MeasurementType::Voltage, Unit::Volt, "AC Voltage L3");
+        m.declare(measurement_id::kAcL3Current, MeasurementType::Current, Unit::Ampere, "AC Current L3");
+    }
     if (dual) {
         m.declare(measurement_id::kDcMppt2Voltage, MeasurementType::Voltage, Unit::Volt, "PV2 Voltage");
         m.declare(measurement_id::kDcMppt2Current, MeasurementType::Current, Unit::Ampere, "PV2 Current");
@@ -362,6 +434,12 @@ PollResult EversolarDriver::poll(DeviceState& state) {
     m.set(measurement_id::kAcL1Voltage, info.acVoltage, ts);
     m.set(measurement_id::kAcL1Current, info.acCurrent, ts);
     m.set(measurement_id::kAcFrequency, info.frequencyHz, ts);
+    if (info.hasThreePhases) {
+        m.set(measurement_id::kAcL2Voltage, info.acVoltage2, ts);
+        m.set(measurement_id::kAcL2Current, info.acCurrent2, ts);
+        m.set(measurement_id::kAcL3Voltage, info.acVoltage3, ts);
+        m.set(measurement_id::kAcL3Current, info.acCurrent3, ts);
+    }
     m.set(measurement_id::kDcMppt1Voltage, info.pvVoltage1, ts);
     m.set(measurement_id::kDcMppt1Current, info.pvCurrent1, ts);
 

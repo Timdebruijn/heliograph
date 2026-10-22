@@ -111,6 +111,40 @@ NIGHT_SINGLE = words(
     0,  # 13 OP_MODE
 )
 
+# --- Three-phase payload (24 words / 48 bytes) -----------------------------------------
+# CONSTRUCTED: the capture below with three words changed, each where the capture agrees
+# with a wrong decoding. Its temperature is positive (signed and unsigned reads agree), its
+# HOURS_UP high word is 0 (dropping it agrees), and IAC L2 == IAC L3 (a swap is invisible).
+# This pins the layout hypothesis, not a measurement: nothing has yet confirmed that word 15
+# is L2, word 17 is L3, or that the hours are two words at 7 and 8. A capture with visibly
+# unbalanced phases, or below freezing, would.
+THREE_PHASE = words(
+    0xFFDD,  # 0  TEMP        -3.5 C
+    5065,  # 1  VPV         506.5 V
+    3618,  # 2  VPV2        361.8 V
+    2,  # 3  IPV         0.2 A
+    22,  # 4  IPV2        2.2 A
+    0x0008,  # 5  E_TOTAL_HI
+    0x5CC1,  # 6  E_TOTAL_LO  -> 54803.3 kWh
+    0x0001,  # 7  HOURS_UP_HI
+    0x2345,  # 8  HOURS_UP_LO -> 74565 h
+    861,  # 9  PAC         861 W
+    1,  # 10 OP_MODE
+    60,  # 11 E_TODAY     0.60 kWh
+    15,  # 12 IAC L1      1.5 A
+    2359,  # 13 VAC L1      235.9 V
+    5003,  # 14 FREQUENCY   50.03 Hz
+    13,  # 15 IAC L2      1.3 A
+    2368,  # 16 VAC L2      236.8 V
+    11,  # 17 IAC L3      1.1 A
+    2353,  # 18 VAC L3      235.3 V
+    0xFF00,  # 19-23 unknown, as captured
+    0x0000,
+    0x0000,
+    0x0064,
+    0x0000,
+)
+
 SERIAL = b"XH300060115506193600V610"
 # The id string a real TL3000-20 sent on 2026-07-19 (QUERY_INVERTER_ID during Phase 3), byte
 # for byte including the space padding. The earlier constructed guess had the fields in a
@@ -213,6 +247,43 @@ FIXTURES: list[tuple[str, str, bytes]] = [
             ),
         ),
     ),
+    # Byte-for-byte a QUERY_NORMAL_INFO reply from a Zeversolar TLC8000 (2026-10-20). Its
+    # display read E_TOTAL 54802.7 kWh an hour earlier; 897 W of PV becoming 861 W of AC is
+    # the cross-check that the current and power words sit where the layout says.
+    (
+        "kRespNormalInfoThreePhaseCaptured",
+        "Response: QUERY_NORMAL_INFO captured from a real TLC8000 (48-byte three-phase payload)",
+        response(
+            0x11,
+            0x02,
+            words(
+                0x010B,
+                0x13C9,
+                0x0E22,
+                0x0002,
+                0x0016,
+                0x0008,
+                0x5CC1,
+                0x0000,
+                0xA003,
+                0x035D,
+                0x0001,
+                0x003C,
+                0x000F,
+                0x0937,
+                0x138B,
+                0x000D,
+                0x0940,
+                0x000D,
+                0x0931,
+                0xFF00,
+                0x0000,
+                0x0000,
+                0x0064,
+                0x0000,
+            ),
+        ),
+    ),
     # DERIVED, not captured: the dual-string words followed by a 9-word tail, 50 bytes total,
     # matching the payload length and word offsets of the calibrated Zeversolar 2000s capture
     # in the ha-zeversolar-modbus project (2026-05-30). We have no raw bytes from that unit;
@@ -229,6 +300,11 @@ FIXTURES: list[tuple[str, str, bytes]] = [
                 0x0000, 0x0000, 0xFFFF, 0x0000, 0x0000, 0x0000, 0x0000, 0xFFFF, 0x0000
             ),
         ),
+    ),
+    (
+        "kRespNormalInfoThreePhase",
+        "Response: QUERY_NORMAL_INFO, three-phase layout (48 bytes)",
+        response(0x11, 0x02, THREE_PHASE),
     ),
     (
         "kRespRegisterAck",
@@ -342,6 +418,18 @@ def main() -> None:
         "kRespNormalInfoCaptured drifted from the hardware capture"
     )
 
+    captured_three = bytes.fromhex(
+        "aa 55 00 10 01 00 11 82 30 01 0b 13 c9 0e 22 00 02 00 16 00 08 5c c1 00 00 a0 03"
+        " 03 5d 00 01 00 3c 00 0f 09 37 13 8b 00 0d 09 40 00 0d 09 31 ff 00 00 00 00 00"
+        " 00 64 00 00 08 55".replace(" ", "")
+    )
+    generated_three = {n: f for n, _, f in FIXTURES}[
+        "kRespNormalInfoThreePhaseCaptured"
+    ]
+    assert generated_three == captured_three, (
+        "kRespNormalInfoThreePhaseCaptured drifted from the hardware capture"
+    )
+
     out = [
         "// SPDX-License-Identifier: MIT",
         "//",
@@ -398,6 +486,29 @@ def main() -> None:
         f"inline constexpr double kEnergyTotalExpectedDelta = {E_TOTAL_HI * 0.1:.1f};"
     )
     out.append("}  // namespace expected")
+    out.append("")
+    out.append(
+        "// Expected physical values for kRespNormalInfoThreePhase (constructed)."
+    )
+    out.append("namespace expected_three {")
+    out.append("inline constexpr double kTemperatureC   = -3.5;")
+    out.append("inline constexpr double kEnergyTodayKwh = 0.60;")
+    out.append("inline constexpr double kEnergyTotalKwh = 54803.3;")
+    out.append("inline constexpr double kAcPowerW       = 861.0;")
+    out.append("inline constexpr double kFrequencyHz    = 50.03;")
+    out.append("inline constexpr double kPvVoltage1     = 506.5;")
+    out.append("inline constexpr double kPvCurrent1     = 0.2;")
+    out.append("inline constexpr double kPvVoltage2     = 361.8;")
+    out.append("inline constexpr double kPvCurrent2     = 2.2;")
+    out.append("inline constexpr double kAcVoltageL1    = 235.9;")
+    out.append("inline constexpr double kAcCurrentL1    = 1.5;")
+    out.append("inline constexpr double kAcVoltageL2    = 236.8;")
+    out.append("inline constexpr double kAcCurrentL2    = 1.3;")
+    out.append("inline constexpr double kAcVoltageL3    = 235.3;")
+    out.append("inline constexpr double kAcCurrentL3    = 1.1;")
+    out.append("inline constexpr uint32_t kOperatingHours = 74565;")
+    out.append("inline constexpr uint16_t kStatusCode     = 1;")
+    out.append("}  // namespace expected_three")
     out.append("")
     out.append(
         'inline constexpr const char* kExpectedSerial = "' + SERIAL.decode() + '";'

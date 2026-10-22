@@ -337,6 +337,7 @@ The three flags are strictly distinct:
 | `ac.power.total` | `PAC` |
 | `ac.phase_l1.voltage` | `VAC` |
 | `ac.phase_l1.current` | `IAC` |
+| `ac.phase_l2.*`, `ac.phase_l3.*` | `VAC`/`IAC` L2 and L3, only on the three-phase payload |
 | `ac.frequency` | `FREQUENCY` |
 | `dc.mppt_1.voltage` | `VPV` |
 | `dc.mppt_1.current` | `IPV` |
@@ -348,8 +349,9 @@ The three flags are strictly distinct:
 | `inverter.temperature` | `TEMP`, **signed** |
 | `inverter.operating_hours` | `HOURS_UP` |
 
-Not filled (`supported = false`): all `ac.phase_l2/l3.*`, `battery.*`, `grid.*`,
-`ac.phase_l1.power`. These **do not** appear in MQTT, not in HA, and are NaN in Modbus.
+Not filled (`supported = false`): `ac.phase_l2/l3.*` on single- and dual-string payloads,
+`battery.*`, `grid.*`, `ac.phase_l1.power`. These **do not** appear in MQTT, not in HA, and
+are NaN in Modbus.
 
 ### DeviceState
 
@@ -434,8 +436,8 @@ struct InverterCapabilities {
     std::bitset<64> read;
     std::bitset<64> write;
     std::map<InverterCommandType, NumericCapability> numeric;
-    uint8_t phaseCount;   // EverSolar: 1
-    uint8_t mpptCount;    // EverSolar: 1 or 2, from frame length
+    uint8_t phaseCount;   // EverSolar: 1, or 3 with the three-phase payload
+    uint8_t mpptCount;    // EverSolar: 1 or 2, from the payload layout
     bool    hasBattery;   // EverSolar: false
 };
 ```

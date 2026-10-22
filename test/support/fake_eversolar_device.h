@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <string>
 #include <vector>
 
 #include "drivers/eversolar_legacy/eversolar_parser.h"  // pulls in the pmu framing + eversolar names
@@ -20,7 +22,7 @@ namespace heliograph::test {
 
 class FakeEversolarDevice {
 public:
-    enum class Payload { SingleString, DualString, Night, BadChecksum, BadLength };
+    enum class Payload { SingleString, DualString, ThreePhase, Night, BadChecksum, BadLength };
 
     /// Off the bus entirely, as every solar inverter is after sunset.
     bool offline = false;
@@ -43,6 +45,16 @@ public:
     /// (source 00 00, NUL-terminated 16-char serial) instead of the constructed fixture.
     bool useCapturedOfflineQuery = false;
 
+    /// A whole offline-query response frame to send instead of either fixture, when non-empty.
+    std::vector<uint8_t> offlineQueryFrame;
+
+    /// An id string to answer QUERY_INVERTER_ID with instead of the fixture, when non-empty.
+    std::string inverterId;
+
+    /// Ignore an address assignment whose serial is not the announcement echoed back byte for
+    /// byte, as a Zeversolar does (hardware, 2026-10-20): silence, not a NAK.
+    bool requireVerbatimSerialEcho = false;
+
     /// Stay silent on this many QUERY_NORMAL_INFO requests, then answer again. One lost reply
     /// on a real bus must not cost the driver its registration.
     uint32_t silentNormalInfoPolls = 0;
@@ -64,6 +76,23 @@ public:
 private:
     static void append(std::vector<uint8_t>& out, const uint8_t* p, size_t n) {
         out.insert(out.end(), p, p + n);
+    }
+
+    /// Whether an address assignment carries exactly the data of the announcement this device
+    /// sends, followed by the one address byte.
+    bool echoesAnnouncement(const std::vector<uint8_t>& request) const {
+        using namespace heliograph::eversolar;
+        const std::vector<uint8_t>& frame = offlineQueryFrame;
+        if (frame.size() < kFrameOverhead) {
+            return false;
+        }
+        const size_t serialLen = frame[kOffsetLength];
+        if (request[kOffsetLength] != serialLen + 1 ||
+            request.size() < kOffsetData + serialLen + 1) {
+            return false;
+        }
+        return std::equal(frame.begin() + kOffsetData, frame.begin() + kOffsetData + serialLen,
+                          request.begin() + kOffsetData);
     }
 
     bool handle(const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
@@ -98,13 +127,18 @@ private:
                 // to recover -- an offline query alone stays unanswered forever.
                 return false;
             }
-            if (useCapturedOfflineQuery) {
+            if (!offlineQueryFrame.empty()) {
+                append(body, offlineQueryFrame.data(), offlineQueryFrame.size());
+            } else if (useCapturedOfflineQuery) {
                 append(body, fixtures::kRespOfflineQueryCaptured,
                        fixtures::kRespOfflineQueryCapturedLen);
             } else {
                 append(body, fixtures::kRespOfflineQuery, fixtures::kRespOfflineQueryLen);
             }
         } else if (control == 0x10 && function == 0x01) {
+            if (requireVerbatimSerialEcho && !echoesAnnouncement(request)) {
+                return false;
+            }
             if (refuseRegistration) {
                 append(body, fixtures::kRespRegisterNak, fixtures::kRespRegisterNakLen);
             } else {
@@ -112,7 +146,17 @@ private:
                 append(body, fixtures::kRespRegisterAck, fixtures::kRespRegisterAckLen);
             }
         } else if (control == 0x11 && function == 0x03) {
-            append(body, fixtures::kRespInverterId, fixtures::kRespInverterIdLen);
+            if (!inverterId.empty()) {
+                uint8_t frame[kMaxFrameSize];
+                size_t  len = 0;
+                buildRequestFrom(Address{0x00, 0x10}, CommandCode{0x11, 0x83},
+                                 Address{0x01, 0x00},
+                                 reinterpret_cast<const uint8_t*>(inverterId.data()),
+                                 inverterId.size(), frame, sizeof(frame), len);
+                append(body, frame, len);
+            } else {
+                append(body, fixtures::kRespInverterId, fixtures::kRespInverterIdLen);
+            }
         } else if (control == 0x11 && function == 0x02) {
             if (!registered) {
                 return false;  // unknown address: silence, exactly as the real device does
@@ -131,6 +175,10 @@ private:
                     break;
                 case Payload::DualString:
                     append(body, fixtures::kRespNormalInfoDual, fixtures::kRespNormalInfoDualLen);
+                    break;
+                case Payload::ThreePhase:
+                    append(body, fixtures::kRespNormalInfoThreePhase,
+                           fixtures::kRespNormalInfoThreePhaseLen);
                     break;
                 case Payload::Night:
                     append(body, fixtures::kRespNormalInfoNight, fixtures::kRespNormalInfoNightLen);

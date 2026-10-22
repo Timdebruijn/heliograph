@@ -87,7 +87,9 @@ public:
         // A read advances the simulated clock so tests can drive an overall transaction
         // deadline: `msPerRead` models bytes that trickle in just under each read's own
         // timeout without ever completing a frame.
-        clockMs_ += msPerRead;
+        if (!(clockStillWhileBuffered && !rx_.empty())) {
+            clockMs_ += msPerRead;
+        }
         if (infiniteNoise) {
             // A line that never falls silent and never forms a valid frame: the pathological
             // case a transaction deadline exists to bound. Would loop forever without one.
@@ -124,6 +126,10 @@ public:
     void advanceClock(uint64_t ms) { clockMs_ += ms; }
     /// Milliseconds the simulated clock advances per read(). 0 (default) = time stands still.
     uint32_t msPerRead = 0;
+    /// When set, a read() that finds bytes already buffered takes no simulated time, as the
+    /// real RS485 transport returns the moment the UART holds anything. Only an empty read
+    /// advances the clock by msPerRead.
+    bool     clockStillWhileBuffered = false;
     /// When set, every read() returns one noise byte and never a valid frame or silence.
     bool     infiniteNoise = false;
     uint8_t  noiseByte     = 0x00;  // not the 0xAA/0x55 header, not a Modbus reply

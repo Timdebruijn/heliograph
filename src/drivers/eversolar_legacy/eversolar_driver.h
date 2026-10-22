@@ -75,6 +75,10 @@ private:
     /// Broadcast: every inverter forgets its address. Disruptive, so only on begin().
     void reRegisterAll();
 
+    /// Hold the line idle until kInterFrameGapMs have passed since our last frame. Called
+    /// before every frame we send, outside the bus lock.
+    void waitForInterFrameGap();
+
     /// Offline query -> assign address -> read id. All read-only from the device's point of
     /// view: the assigned address is volatile and forgotten on power loss.
     ///
@@ -99,6 +103,9 @@ private:
     /// Consecutive normal-info timeouts; at kTimeoutsBeforeRecoveryProbe poll() runs a
     /// non-disruptive recovery probe. The registration is NOT dropped on timeouts.
     uint8_t consecutiveTimeouts_ = 0;
+    /// When our last frame went out (transport clock); meaningless until sentFrame_.
+    uint64_t lastFrameMs_ = 0;
+    bool     sentFrame_   = false;
     uint8_t        address_    = kFirstInverterAddress;
     DeviceIdentity identity_;
     InverterCapabilities capabilities_;

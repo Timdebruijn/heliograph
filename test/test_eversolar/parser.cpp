@@ -212,6 +212,54 @@ static void test_50_byte_payload_decodes_as_dual_generation() {
     TEST_ASSERT_DOUBLE_WITHIN(kEps, fx::expected::kEnergyTotalKwh, info.energyTotalKwh);
 }
 
+static void test_48_byte_payload_decodes_as_three_phase() {
+    // Byte for byte a QUERY_NORMAL_INFO reply from a Zeversolar TLC8000 (2026-10-20). Its
+    // display read E_TOTAL 54802.7 kWh an hour earlier; 897 W of PV becoming 861 W of AC is
+    // the cross-check that the current and power words sit where this layout says.
+    Frame f;
+    TEST_ASSERT_EQUAL(ParseResult::Ok, parseFrame(fx::kRespNormalInfoThreePhaseCaptured,
+                                                 fx::kRespNormalInfoThreePhaseCapturedLen, f));
+    NormalInfo info;
+    TEST_ASSERT_EQUAL(DecodeResult::Ok, decodeNormalInfo(f.data, f.dataLength, info));
+    TEST_ASSERT_EQUAL(NormalInfoLayout::ThreePhase, info.layout);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 26.7, info.temperatureC);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 506.5, info.pvVoltage1);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 0.2, info.pvCurrent1);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 361.8, info.pvVoltage2);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 2.2, info.pvCurrent2);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 54803.3, info.energyTotalKwh);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 861.0, info.acPowerW);
+    TEST_ASSERT_EQUAL_UINT16(1, info.statusCode);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 0.60, info.energyTodayKwh);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 50.03, info.frequencyHz);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 235.9, info.acVoltage);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 1.5, info.acCurrent);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 236.8, info.acVoltage2);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 1.3, info.acCurrent2);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 235.3, info.acVoltage3);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, 1.3, info.acCurrent3);
+    TEST_ASSERT_EQUAL_UINT32(40963, info.operatingHours);
+    TEST_ASSERT_FALSE(info.impedanceValid);  // this layout carries no impedance word
+    TEST_ASSERT_TRUE(info.hasSecondString);
+    TEST_ASSERT_TRUE(info.hasThreePhases);
+}
+
+static void test_three_phase_reads_the_hours_high_word_and_each_phase_current() {
+    // The capture above agrees with three wrong decodings: its temperature is positive, its
+    // HOURS_UP high word is 0, and its L2 and L3 currents are equal. The constructed frame
+    // differs in exactly those places.
+    namespace e = fx::expected_three;
+    NormalInfo info;
+    TEST_ASSERT_EQUAL(DecodeResult::Ok,
+                      decodeNormalInfo(fx::kRespNormalInfoThreePhase + kOffsetData,
+                                       kNormalInfoThreePhaseBytes, info));
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, e::kTemperatureC, info.temperatureC);
+    TEST_ASSERT_EQUAL_UINT32(e::kOperatingHours, info.operatingHours);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, e::kAcCurrentL1, info.acCurrent);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, e::kAcCurrentL2, info.acCurrent2);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, e::kAcCurrentL3, info.acCurrent3);
+}
+
 static void test_ac_power_has_no_scale_factor() {
     // PAC is raw watts while everything around it is /10. Easy to get wrong.
     NormalInfo info;
@@ -305,6 +353,29 @@ static void test_forced_layout_agrees_with_auto_detection() {
                                        LayoutSelection::ForceDualString));
     TEST_ASSERT_DOUBLE_WITHIN(kEps, autoInfo.acPowerW, forcedInfo.acPowerW);
     TEST_ASSERT_DOUBLE_WITHIN(kEps, autoInfo.pvVoltage2, forcedInfo.pvVoltage2);
+}
+
+static void test_forced_three_phase_agrees_with_auto_detection() {
+    NormalInfo autoInfo;
+    NormalInfo forcedInfo;
+    decodeNormalInfo(fx::kRespNormalInfoThreePhase + kOffsetData, kNormalInfoThreePhaseBytes,
+                     autoInfo);
+    TEST_ASSERT_EQUAL(DecodeResult::Ok,
+                      decodeNormalInfo(fx::kRespNormalInfoThreePhase + kOffsetData,
+                                       kNormalInfoThreePhaseBytes, forcedInfo,
+                                       LayoutSelection::ForceThreePhase));
+    TEST_ASSERT_EQUAL(NormalInfoLayout::ThreePhase, forcedInfo.layout);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, autoInfo.acPowerW, forcedInfo.acPowerW);
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, autoInfo.acVoltage3, forcedInfo.acVoltage3);
+}
+
+static void test_forcing_three_phase_on_a_dual_string_payload_is_refused() {
+    // Must not read past the payload: a 32-byte frame has no words 16-18.
+    NormalInfo info;
+    TEST_ASSERT_EQUAL(DecodeResult::LayoutMismatch,
+                      decodeNormalInfo(fx::kRespNormalInfoDual + kOffsetData,
+                                       kNormalInfoDualStringBytes, info,
+                                       LayoutSelection::ForceThreePhase));
 }
 
 static void test_forced_single_string_reads_a_dual_string_payload() {
@@ -453,6 +524,8 @@ void run_eversolar_parser() {
     RUN_TEST(test_single_string_decodes_all_values);
     RUN_TEST(test_captured_44_byte_payload_decodes_as_single_string);
     RUN_TEST(test_50_byte_payload_decodes_as_dual_generation);
+    RUN_TEST(test_48_byte_payload_decodes_as_three_phase);
+    RUN_TEST(test_three_phase_reads_the_hours_high_word_and_each_phase_current);
     RUN_TEST(test_ac_power_has_no_scale_factor);
     RUN_TEST(test_energy_today_and_total_use_different_scales);
     RUN_TEST(test_energy_total_differs_from_reference_by_exactly_the_known_bug);
@@ -463,6 +536,8 @@ void run_eversolar_parser() {
     RUN_TEST(test_night_frame_decodes_negative_temperature);
     RUN_TEST(test_night_frame_zeros_are_real_measurements);
     RUN_TEST(test_forced_layout_agrees_with_auto_detection);
+    RUN_TEST(test_forced_three_phase_agrees_with_auto_detection);
+    RUN_TEST(test_forcing_three_phase_on_a_dual_string_payload_is_refused);
     RUN_TEST(test_forced_single_string_reads_a_dual_string_payload);
     RUN_TEST(test_forcing_dual_string_on_a_short_payload_is_refused);
     RUN_TEST(test_forcing_a_layout_on_a_truncated_payload_is_refused);
