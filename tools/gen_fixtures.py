@@ -423,7 +423,9 @@ def main() -> None:
         " 03 5d 00 01 00 3c 00 0f 09 37 13 8b 00 0d 09 40 00 0d 09 31 ff 00 00 00 00 00"
         " 00 64 00 00 08 55".replace(" ", "")
     )
-    generated_three = {n: f for n, _, f in FIXTURES}["kRespNormalInfoThreePhaseCaptured"]
+    generated_three = {n: f for n, _, f in FIXTURES}[
+        "kRespNormalInfoThreePhaseCaptured"
+    ]
     assert generated_three == captured_three, (
         "kRespNormalInfoThreePhaseCaptured drifted from the hardware capture"
     )
@@ -485,7 +487,9 @@ def main() -> None:
     )
     out.append("}  // namespace expected")
     out.append("")
-    out.append("// Expected physical values for kRespNormalInfoThreePhase (constructed).")
+    out.append(
+        "// Expected physical values for kRespNormalInfoThreePhase (constructed)."
+    )
     out.append("namespace expected_three {")
     out.append("inline constexpr double kTemperatureC   = -3.5;")
     out.append("inline constexpr double kEnergyTodayKwh = 0.60;")
