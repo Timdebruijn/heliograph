@@ -649,6 +649,114 @@ const tick=setInterval(async()=>{
 """
 
 
+# Both clipboard paths, because only one of them ever runs on a device. navigator.clipboard does
+# not exist outside a secure context, and the only non-HTTPS origin browsers count as one is
+# localhost -- never a LAN address. So on every bridge, reached by IP over plain HTTP, the API
+# path is unavailable and the selection fallback IS the feature. It shipped reporting failure on
+# every device for exactly that reason: the API path works on a developer's desk, which is the
+# only place it was ever exercised. Reported from a browser, 2026-10-22.
+def copy_js(case: str) -> str:
+    """One of the worlds the same two buttons land in. Only one of them is a device.
+
+    "https"    the developer's desk: clipboard API present and usable.
+    "http"     every bridge on Chrome: navigator.clipboard is not exposed at all.
+    "firefox"  every bridge on Firefox: it IS exposed, and writeText rejects.
+    "denied"   a secure context that still refuses, as Chrome does when the document is not
+               focused. The only path that reaches the promise's rejection handler.
+    "noexec"   plain HTTP where the fallback itself fails. The button must say so.
+    """
+    secure = case in ("https", "denied")
+    if case == "http":
+        clipboard = "value:undefined"
+    elif case == "https":
+        clipboard = "value:{writeText:t=>{api.push(t.length);return Promise.resolve()}}"
+    else:
+        clipboard = (
+            "value:{writeText:t=>{api.push(t.length);"
+            "return Promise.reject(new Error('refused'))}}"
+        )
+    # A fallback that forgets to select anything would still "succeed" against a stub that
+    # ignores the selection, so the stub records what was selected when it was called.
+    stub = (
+        "document.execCommand=c=>{exec.push(c);const a=document.activeElement;"
+        "sel.push(a?a.tagName+':'+((a.selectionEnd|0)-(a.selectionStart|0)):'none');"
+        f"return {'false' if case == 'noexec' else 'true'}}};"
+    )
+    if case == "https":
+        checks = [
+            "if(api.length===0)say('a secure context stopped using the clipboard API');",
+            "if(exec.length)say('a secure context fell back to execCommand: '+exec);",
+            "if(btn.textContent.trim()!=='Copied')"
+            "say('the button reported '+JSON.stringify(btn.textContent.trim()));",
+        ]
+    elif case == "denied":
+        checks = [
+            "if(api.length===0)say('the clipboard API was not tried first');",
+            "if(!exec.includes('copy'))"
+            "say('a refused write did not fall back: '+JSON.stringify(exec));",
+            "if(btn.textContent.trim()!=='Copied')"
+            "say('the button reported '+JSON.stringify(btn.textContent.trim()));",
+        ]
+    elif case == "noexec":
+        checks = [
+            "if(!exec.includes('copy'))say('no fallback was attempted');",
+            # Honesty is the feature. A button that claims success it did not have is worse
+            # than one that admits defeat, because the text is gone either way.
+            "if(btn.textContent.trim()!=='Could not copy — select it by hand')"
+            "say('a failed copy reported '+JSON.stringify(btn.textContent.trim()));",
+        ]
+    else:
+        checks = [
+            "if(!exec.includes('copy'))"
+            "say('no fallback was attempted: '+JSON.stringify(exec));",
+            "if(!/^TEXTAREA:[1-9]/.test(sel[0]||''))"
+            "say('nothing was selected to copy: '+JSON.stringify(sel));",
+            "if(btn.textContent.trim()!=='Copied')"
+            "say('the button reported '+JSON.stringify(btn.textContent.trim()));",
+        ]
+        if case == "firefox":
+            # The guard's entire job: outside a secure context the API is not even tried, so
+            # no rejected promise reaches the console on every click. Nothing else can tell
+            # the guard from its absence, because the rejection handler falls back too.
+            checks.append(
+                "if(api.length)say('an insecure origin still tried the clipboard API');"
+            )
+        else:
+            checks.append(
+                "if(api.length)say('the clipboard API was reached with none exposed');"
+            )
+    return (
+        "(function(){\n"
+        "const fail=[];const say=m=>fail.push(m);"
+        "const api=[];const exec=[];const sel=[];\n"
+        # Declared out here, not in the try: the assertions run in a later tick and a
+        # block-scoped btn is not visible from there.
+        "let btn=null;\n"
+        "Object.defineProperty(navigator,'clipboard',{configurable:true,"
+        + clipboard
+        + "});\n"
+        f"Object.defineProperty(window,'isSecureContext',{{configurable:true,value:{str(secure).lower()}}});\n"
+        + stub
+        + "\nsetTimeout(()=>{\n"
+        "  try{\n"
+        "    for(const name of TABS){goTab(name);\n"
+        "      btn=[...document.querySelectorAll('button')]"
+        ".find(b=>b.textContent.trim()==='Copy as text');\n"
+        "      if(btn)break;}\n"
+        "    if(!btn){say('no Copy as text button on any tab');}else{btn.click();}\n"
+        "  }catch(e){say('the copy assertions threw: '+e.message);}\n"
+        # One tick after the click, not straight after it. A refused clipboard write falls back
+        # from the promise's rejection handler, which is a microtask, so asserting synchronously
+        # saw exec=[] and called a working fallback broken.
+        "  setTimeout(()=>{\n"
+        "    try{ if(btn){" + "".join(checks) + "} }\n"
+        "    catch(e){say('the copy assertions threw: '+e.message);}\n"
+        "    document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';\n"
+        "  },50);\n"
+        "},400);})();"
+    )
+
+
 def build_page(stripped: str, stub: str, battery: str, extra_js: str) -> str:
     """The served page with the stub attached, and the assertions after it.
 
@@ -852,6 +960,17 @@ def main() -> int:
         page = build_page(stripped, stub, "{soc:68,power:-1240}", INTEGRATIONS_JS)
         verdict, _ = render(chrome, page, 1000, scratch, "int")
         status |= report("integrations still reports what changed", verdict)
+
+        for case, label in (
+            ("http", "plain HTTP, no clipboard API"),
+            ("firefox", "plain HTTP, clipboard API that rejects"),
+            ("https", "a secure context"),
+            ("denied", "a secure context that refuses the write"),
+            ("noexec", "plain HTTP where the copy itself fails"),
+        ):
+            page = build_page(stripped, stub, "{soc:68,power:-1240}", copy_js(case))
+            verdict, _ = render(chrome, page, 1000, scratch, f"copy-{case}")
+            status |= report(f"copy buttons work on {label}", verdict)
 
         # The one device on this fleet whose id came off the bus rather than out of a config.
         hostile = stub.replace(

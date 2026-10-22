@@ -1184,8 +1184,12 @@ async function setLogLevel(level){
   const r=await patch({logging:{level}});
   if(r.ok){cfg.logging.level=level;loadLogs(true)}
 }
-// Confirms in the button itself. Silent success is indistinguishable from a broken button, and
-// clipboard writes fail outright on a page served over plain HTTP in some browsers.
+// Confirms in the button itself. Silent success is indistinguishable from a broken button.
+//
+// navigator.clipboard does not exist outside a secure context, and the only non-HTTPS origin
+// browsers count as one is localhost -- never a LAN address. Every bridge is reached by IP over
+// plain HTTP, so this used to report failure on every device while working on a developer's
+// desk, which is exactly why it shipped. The selection fallback is the path that actually runs.
 function copyText(text,btn){
   const done=ok=>{
     if(!btn)return;
@@ -1193,8 +1197,30 @@ function copyText(text,btn){
     btn.textContent=ok?'Copied':'Could not copy — select it by hand';
     setTimeout(()=>{btn.textContent=was},2000);
   };
-  if(!navigator.clipboard){done(false);return}
-  navigator.clipboard.writeText(text).then(()=>done(true),()=>done(false));
+  if(navigator.clipboard&&window.isSecureContext){
+    navigator.clipboard.writeText(text).then(()=>done(true),()=>done(copyBySelection(text)));
+    return;
+  }
+  done(copyBySelection(text));
+}
+// execCommand('copy') is deprecated and is still the only thing that works here. It copies the
+// document's selection, so the text has to exist in the DOM and be selected: hence the
+// off-screen textarea. readonly keeps a mobile keyboard from appearing, and setSelectionRange
+// is what iOS Safari honours when select() alone does nothing.
+function copyBySelection(text){
+  const ta=document.createElement('textarea');
+  ta.value=text;
+  ta.setAttribute('readonly','');
+  ta.style.position='fixed';
+  ta.style.top='-1000px';
+  document.body.appendChild(ta);
+  let ok=false;
+  try{
+    ta.select();
+    ta.setSelectionRange(0,text.length);
+    ok=document.execCommand('copy');
+  }catch(e){ok=false}
+  return ok;
 }
 function copyForIssue(btn){
   const b=(S&&S.bridge)||{};
