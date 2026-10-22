@@ -196,7 +196,8 @@ Two remarks:
 
 ## AC phases (100-199)
 
-20 registers per phase, starting at 100. The TL3000-20 is single-phase; only L1 is populated.
+20 registers per phase, starting at 100. How many are populated follows the device, not the driver: a single- or dual-string EverSolar fills only L1, while the three-phase
+payload fills L2 and L3 as well. An unpopulated phase reads NaN, not zero.
 
 | Offset in block | Regs | Type | Meaning |
 |---|---|---|---|
