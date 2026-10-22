@@ -655,18 +655,55 @@ const tick=setInterval(async()=>{
 # path is unavailable and the selection fallback IS the feature. It shipped reporting failure on
 # every device for exactly that reason: the API path works on a developer's desk, which is the
 # only place it was ever exercised. Reported from a browser, 2026-10-22.
+def _copy_repeat_js() -> str:
+    """Click twice, then wait out the restore and read the label."""
+    return (
+        "(function(){\n"
+        "const fail=[];const say=m=>fail.push(m);\n"
+        "Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined});\n"
+        "Object.defineProperty(window,'isSecureContext',{configurable:true,value:false});\n"
+        "document.execCommand=()=>true;\n"
+        "setTimeout(()=>{\n"
+        "  let btn=null;\n"
+        "  for(const name of TABS){goTab(name);\n"
+        "    btn=[...document.querySelectorAll('button')]"
+        ".find(x=>x.textContent.trim()==='Copy as text');\n"
+        "    if(btn)break;}\n"
+        "  if(!btn){document.title='LAYOUT-FAIL no Copy as text button on any tab';return}\n"
+        "  btn.click();btn.click();\n"
+        "  setTimeout(()=>{\n"
+        "    const now=btn.textContent.trim();\n"
+        "    if(now!=='Copy as text')"
+        "say('after two clicks the button settled on '+JSON.stringify(now));\n"
+        "    document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';\n"
+        "  },2300);\n"
+        "},300);})();"
+    )
+
+
 def copy_js(case: str) -> str:
-    """One of the worlds the same two buttons land in. Only one of them is a device.
+    """One of the worlds the two copy buttons land in. Only some of them are real browsers.
 
     "https"    the developer's desk: clipboard API present and usable.
-    "http"     every bridge on Chrome: navigator.clipboard is not exposed at all.
-    "firefox"  every bridge on Firefox: it IS exposed, and writeText rejects.
-    "denied"   a secure context that still refuses, as Chrome does when the document is not
+    "http"     every bridge: navigator.clipboard is not exposed outside a secure context, and
+               the only non-HTTPS origin that counts as one is localhost, never a LAN address.
+    "denied"   a secure context that refuses the write, as Chrome does when the document is not
                focused. The only path that reaches the promise's rejection handler.
-    "noexec"   plain HTTP where the fallback itself fails. The button must say so.
+    "exposed"  a browser that exposes the API outside a secure context and then rejects. The
+               Clipboard API is [SecureContext], so this may well not exist in the wild; it is
+               kept because it is the only thing that can tell the isSecureContext guard from
+               its absence, and it is labelled rather than dressed up as a named browser.
+    "noexec"   the fallback runs and execCommand returns false.
+    "throws"   the fallback runs and execCommand throws, as it can in a sandboxed frame.
+    "repeat"   plain HTTP, clicked twice inside the two seconds before the label is restored.
+               Asserted after the restore has run, so it costs a slower render than the rest.
+
+    Three invariants hold in every world, and each of them shipped broken once: nothing is left
+    behind in the DOM, the caret is not abandoned in the scratch textarea, and both buttons
+    respond rather than only the one a test happens to click.
     """
     secure = case in ("https", "denied")
-    if case == "http":
+    if case in ("http", "repeat"):
         clipboard = "value:undefined"
     elif case == "https":
         clipboard = "value:{writeText:t=>{api.push(t.length);return Promise.resolve()}}"
@@ -675,49 +712,64 @@ def copy_js(case: str) -> str:
             "value:{writeText:t=>{api.push(t.length);"
             "return Promise.reject(new Error('refused'))}}"
         )
+    if case == "throws":
+        settle = "throw new Error('blocked')"
+    elif case == "noexec":
+        settle = "return false"
+    else:
+        settle = "return true"
     # A fallback that forgets to select anything would still "succeed" against a stub that
     # ignores the selection, so the stub records what was selected when it was called.
     stub = (
         "document.execCommand=c=>{exec.push(c);const a=document.activeElement;"
         "sel.push(a?a.tagName+':'+((a.selectionEnd|0)-(a.selectionStart|0)):'none');"
-        f"return {'false' if case == 'noexec' else 'true'}}};"
+        f"{settle}}};"
     )
+    worked = case not in ("noexec", "throws")
+    label = "Copied" if worked else "Could not copy — select it by hand"
+    if case == "repeat":
+        # Long after the restore timer, so the subject is the label it settles on.
+        return _copy_repeat_js()
+    checks = [
+        f"if(btn.textContent.trim()!=={label!r})"
+        "say('Copy as text reported '+JSON.stringify(btn.textContent.trim()));",
+        f"if(other&&other.textContent.trim()!=={label!r})"
+        "say('Copy for an issue reported '+JSON.stringify(other.textContent.trim()));",
+        # The scratch textarea is removed, and the caret is not left sitting in it.
+        "if(document.querySelectorAll('textarea').length!==before)"
+        "say('a textarea was left behind: '+before+' -> '"
+        "+document.querySelectorAll('textarea').length);",
+        "if(document.activeElement&&document.activeElement.tagName==='TEXTAREA')"
+        "say('the caret was abandoned in the scratch textarea');",
+        # Focus was parked on a known element before the click. Removing the textarea alone
+        # sends focus to body, so only an element to come BACK to can tell a restore from its
+        # absence; a programmatic click does not move focus by itself.
+        "if(document.activeElement!==parked)"
+        "say('focus was not given back, it sits on '"
+        "+(document.activeElement?document.activeElement.tagName:'nothing'));",
+    ]
     if case == "https":
-        checks = [
+        checks += [
             "if(api.length===0)say('a secure context stopped using the clipboard API');",
             "if(exec.length)say('a secure context fell back to execCommand: '+exec);",
-            "if(btn.textContent.trim()!=='Copied')"
-            "say('the button reported '+JSON.stringify(btn.textContent.trim()));",
         ]
     elif case == "denied":
-        checks = [
+        checks += [
             "if(api.length===0)say('the clipboard API was not tried first');",
             "if(!exec.includes('copy'))"
             "say('a refused write did not fall back: '+JSON.stringify(exec));",
-            "if(btn.textContent.trim()!=='Copied')"
-            "say('the button reported '+JSON.stringify(btn.textContent.trim()));",
-        ]
-    elif case == "noexec":
-        checks = [
-            "if(!exec.includes('copy'))say('no fallback was attempted');",
-            # Honesty is the feature. A button that claims success it did not have is worse
-            # than one that admits defeat, because the text is gone either way.
-            "if(btn.textContent.trim()!=='Could not copy — select it by hand')"
-            "say('a failed copy reported '+JSON.stringify(btn.textContent.trim()));",
         ]
     else:
-        checks = [
+        checks += [
             "if(!exec.includes('copy'))"
             "say('no fallback was attempted: '+JSON.stringify(exec));",
             "if(!/^TEXTAREA:[1-9]/.test(sel[0]||''))"
             "say('nothing was selected to copy: '+JSON.stringify(sel));",
-            "if(btn.textContent.trim()!=='Copied')"
-            "say('the button reported '+JSON.stringify(btn.textContent.trim()));",
         ]
-        if case == "firefox":
-            # The guard's entire job: outside a secure context the API is not even tried, so
-            # no rejected promise reaches the console on every click. Nothing else can tell
-            # the guard from its absence, because the rejection handler falls back too.
+        if case == "exposed":
+            # The guard's entire job: outside a secure context the API is not even tried, so no
+            # rejected promise reaches the console on every click. Nothing else can tell the
+            # guard from its absence, because the rejection handler falls back too.
             checks.append(
                 "if(api.length)say('an insecure origin still tried the clipboard API');"
             )
@@ -730,20 +782,26 @@ def copy_js(case: str) -> str:
         "const fail=[];const say=m=>fail.push(m);"
         "const api=[];const exec=[];const sel=[];\n"
         # Declared out here, not in the try: the assertions run in a later tick and a
-        # block-scoped btn is not visible from there.
-        "let btn=null;\n"
+        # block-scoped binding is not visible from there.
+        "let btn=null;let other=null;let before=0;let parked=null;\n"
         "Object.defineProperty(navigator,'clipboard',{configurable:true,"
         + clipboard
         + "});\n"
         f"Object.defineProperty(window,'isSecureContext',{{configurable:true,value:{str(secure).lower()}}});\n"
         + stub
-        + "\nsetTimeout(()=>{\n"
+        + "\nconst pick=label=>{for(const name of TABS){goTab(name);\n"
+        "  const b=[...document.querySelectorAll('button')]"
+        ".find(x=>x.textContent.trim()===label);\n"
+        "  if(b)return b;} return null;};\n"
+        "setTimeout(()=>{\n"
         "  try{\n"
-        "    for(const name of TABS){goTab(name);\n"
-        "      btn=[...document.querySelectorAll('button')]"
-        ".find(b=>b.textContent.trim()==='Copy as text');\n"
-        "      if(btn)break;}\n"
-        "    if(!btn){say('no Copy as text button on any tab');}else{btn.click();}\n"
+        "    btn=pick('Copy as text');other=pick('Copy for an issue');\n"
+        "    if(!btn)say('no Copy as text button on any tab');\n"
+        "    if(!other)say('no Copy for an issue button on any tab');\n"
+        "    before=document.querySelectorAll('textarea').length;\n"
+        "    parked=document.querySelector('nav button');if(parked)parked.focus();\n"
+        "    if(btn)btn.click();\n"
+        "    if(other)other.click();\n"
         "  }catch(e){say('the copy assertions threw: '+e.message);}\n"
         # One tick after the click, not straight after it. A refused clipboard write falls back
         # from the promise's rejection handler, which is a microtask, so asserting synchronously
@@ -963,10 +1021,12 @@ def main() -> int:
 
         for case, label in (
             ("http", "plain HTTP, no clipboard API"),
-            ("firefox", "plain HTTP, clipboard API that rejects"),
+            ("exposed", "an insecure origin that exposes a rejecting API"),
             ("https", "a secure context"),
             ("denied", "a secure context that refuses the write"),
-            ("noexec", "plain HTTP where the copy itself fails"),
+            ("noexec", "plain HTTP where the copy returns false"),
+            ("throws", "plain HTTP where the copy throws"),
+            ("repeat", "plain HTTP, clicked twice in quick succession"),
         ):
             page = build_page(stripped, stub, "{soc:68,power:-1240}", copy_js(case))
             verdict, _ = render(chrome, page, 1000, scratch, f"copy-{case}")

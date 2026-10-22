@@ -1193,9 +1193,12 @@ async function setLogLevel(level){
 function copyText(text,btn){
   const done=ok=>{
     if(!btn)return;
-    const was=btn.textContent;
+    // The idle label is captured ONCE, in a data attribute. Read from textContent on every
+    // call, a second click inside the two seconds captures 'Copied' as the label to restore,
+    // and the button keeps it for good.
+    if(!btn.dataset.idle)btn.dataset.idle=btn.textContent;
     btn.textContent=ok?'Copied':'Could not copy — select it by hand';
-    setTimeout(()=>{btn.textContent=was},2000);
+    setTimeout(()=>{btn.textContent=btn.dataset.idle},2000);
   };
   if(navigator.clipboard&&window.isSecureContext){
     navigator.clipboard.writeText(text).then(()=>done(true),()=>done(copyBySelection(text)));
@@ -1208,19 +1211,27 @@ function copyText(text,btn){
 // off-screen textarea. readonly keeps a mobile keyboard from appearing, and setSelectionRange
 // is what iOS Safari honours when select() alone does nothing.
 function copyBySelection(text){
-  const ta=document.createElement('textarea');
-  ta.value=text;
-  ta.setAttribute('readonly','');
-  ta.style.position='fixed';
-  ta.style.top='-1000px';
-  document.body.appendChild(ta);
-  let ok=false;
+  // Everything inside the try, and the cleanup in a finally. Selecting text moves the focus and
+  // puts a node in the document: a throw anywhere in here would otherwise leave an invisible
+  // readonly textarea in the tab order on every click, and leave the caret in it.
+  let ta=null;
+  const had=document.activeElement;
   try{
+    ta=document.createElement('textarea');
+    ta.value=text;
+    ta.setAttribute('readonly','');
+    ta.style.position='fixed';
+    ta.style.top='-1000px';
+    document.body.appendChild(ta);
     ta.select();
     ta.setSelectionRange(0,text.length);
-    ok=document.execCommand('copy');
-  }catch(e){ok=false}
-  return ok;
+    return document.execCommand('copy');
+  }catch(e){
+    return false;
+  }finally{
+    if(ta)ta.remove();
+    if(had&&had.focus)had.focus();
+  }
 }
 function copyForIssue(btn){
   const b=(S&&S.bridge)||{};
