@@ -1,12 +1,14 @@
 # EverSolar / Zeversolar legacy RS485 protocol
 
-Status: **Stable** since 2026-07-29 — the only driver in this project at that level. Reconstructed
-from the reference implementation, verified against a real TL3000-20 from 2026-07-19, and promoted
-after eight consecutive unassisted sunrises: the one bug this protocol carried appeared only at the
-night-to-morning transition, so a reboot hid it and no bench test could ever close it. Hardware findings are marked as such;
-two captured frames are stored byte-for-byte in `tools/gen_fixtures.py`, which
-verifies itself against the captures. Where something is unknown, that is stated explicitly — no
-fields have been invented.
+Status: **Stable** since 2026-07-29 for the single-phase TL series, the only driver in this
+project at that level, and **Beta** for the three-phase TLC series added in #224 (see the README
+table for what separates the two). Reconstructed from the reference implementation, verified
+against a real TL3000-20 from 2026-07-19, and promoted after eight consecutive unassisted
+sunrises: the one bug this protocol carried appeared only at the night-to-morning transition, so a
+reboot hid it and no bench test could ever close it. Hardware findings are marked as such; three
+captured frames are stored byte-for-byte in `tools/gen_fixtures.py`, which verifies itself against
+the captures. Where something is unknown, that is stated explicitly — no fields have been
+invented.
 
 **Checking this document against a running bridge** no longer needs a USB-RS485 tap and a laptop
 at the inverter. Health → *"Record the driver's own conversation"* records the requests and
