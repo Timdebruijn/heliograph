@@ -341,7 +341,7 @@ The three flags are strictly distinct:
 | `dc.mppt_1.voltage` | `VPV` |
 | `dc.mppt_1.current` | `IPV` |
 | `dc.mppt_1.power` | *derived* |
-| `dc.mppt_2.*` | only with 32-byte payload |
+| `dc.mppt_2.*` | only on payloads that carry a second string |
 | `dc.power.total` | *derived* |
 | `energy.today` | `E_TODAY` ÷100 |
 | `energy.total` | uint32(`HI`,`LO`) ÷10 |
@@ -533,7 +533,7 @@ only thing it "changes" is a volatile bus address that the inverter forgets on p
 | 3 | — | Payload is printable ASCII (serial number) | +25 |
 | 4 | `10 01` register address | ACK = exact `0x06` | +20 |
 | 5 | `11 03` query inverter ID | ASCII identification string | +10 |
-| 6 | `11 02` query normal info | Payload exactly 28 or 32 bytes | +5 |
+| 6 | `11 02` query normal info | Payload decodes as a known layout | +5 |
 
 Maximum 100. A second identical round is mandatory: if the results diverge, the score is
 halved.
@@ -739,7 +739,7 @@ which live in one `Diagnostics` for the whole bus.
 | Suite | Covers |
 |---|---|
 | `test_eversolar_checksum` | Sum checksum, all-zero rejection, overflow |
-| `test_eversolar_parser` | 28/32-byte layouts, signed TEMP, uint32 energy.total, scale factors, partial frames, too-short/too-long frames, wrong checksum, wrong address, wrong function number |
+| `test_eversolar_parser` | every payload layout, signed TEMP, uint32 energy.total, scale factors, partial frames, too-short/too-long frames, wrong checksum, wrong address, wrong function number |
 | `test_driver_registry` | Registration, compile-time exclusion, unknown ID |
 | `test_discovery` | Confidence scoring, tied scores → no auto-selection, inconsistent probes |
 | `test_register_map` | float32 word order, NaN sentinels, validity bitmap |
