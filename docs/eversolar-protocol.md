@@ -193,9 +193,13 @@ protocol specs" while its code sends 8 — see the note in the sequence above. T
 made from a comment in a Perl script; this is the first evidence that what leaves the UART
 matches it.
 
-**An attempt is five frames in ~1 s, and attempts are ~60 s apart.** The three re-registers sit
+**An attempt is five frames, and attempts are ~60 s apart.** The three re-registers sit
 11-12 ms apart, and the whole cycle repeats a minute later. That matches the reference repeating
-steps 2-4 every minute (`:1037-1040`).
+steps 2-4 every minute (`:1037-1040`). The capture above predates the one-second inter-frame
+gap (see the transport-timing section below): now the re-register burst waits at least a second
+after the first offline query, and the second offline query at least a second after the burst,
+so an attempt takes a little over two seconds instead of ~1 s. The 11-12 ms between the
+re-registers is unchanged.
 
 **A driver that never registers is nearly silent, and that is a diagnostic trap.** Ten frames in
 two minutes, and between attempts the poll loop short-circuits on `not_registered` without
@@ -230,8 +234,13 @@ RX AA 55 00 10 01 00 10 81 01  06  01 A8
 
 The reference has always done this — `unpack("C*", $serial_num_response)`, the raw response,
 next to its "bugfix september 2nd 2015 for serial numbers containing null" (`eversolar.pl:602-611`).
-The TL3000-20 also sends a tail (`00 01`) and registered with the decoded serial, so that model
-evidently accepts either; whether it accepts the verbatim echo too has not been re-tested on it.
+The TL3000-20 also sends a tail (`00 01`) and registered with the decoded serial. It accepts
+the verbatim echo too: a TL3000-20 running this branch registered on the 0x06 ACK and then
+polled cleanly (maintainer re-test, 18 polls, 0 failures).
+
+What this capture does not show is which of the two TLC8000 fixes did the work. It was taken
+with the verbatim echo *and* the one-second gap below both active. A run on the TLC8000 with
+the trimmed serial and the gap would show whether the gap is enough on its own.
 
 ## Measurement data — `QUERY_NORMAL_INFO` (`11 02` → `11 82`)
 
@@ -330,6 +339,9 @@ How the positions were pinned down, rather than guessed:
   first light; consistent, not yet compared with the display directly.
 - **HOURS_UP** is the least certain field: plausible for the unit's age, not checked against
   anything.
+- **Which current belongs to L2 and which to L3** rests on position alone. Words 15 and 17
+  both read `000D` (1.3 A), so the capture cannot tell them apart; each is taken to belong to
+  the voltage word right after it, as IAC L1 does to VAC L1.
 
 ### Layout auto-detection — and the hypothesis behind it
 
@@ -340,7 +352,9 @@ payload length:
 | Payload length | Words | Layout |
 |---|---|---|
 | 28 bytes | 14 | 1 string |
+| 44 bytes | 22 | 1 string, plus an 8-word tail (captured TL3000-20) |
 | 32 bytes | 16 | 2 strings |
+| 50 bytes | 25 | 2 strings, plus a 9-word tail |
 | 48 bytes | 24 | three phases, two strings (Zeversolar TLC, see above) |
 | otherwise | — | **discard frame**, do not publish data |
 
@@ -411,6 +425,7 @@ Because the hypothesis is unproven, `decodeNormalInfo()` has a `LayoutSelection`
 | `Auto` | 28/44 → single, 32/50 → dual, 48 → three-phase, otherwise `UnknownLayout` (default) |
 | `ForceSingleString` | interprets as 1 string; requires `len >= 28` |
 | `ForceDualString` | interprets as 2 strings; requires `len >= 32` |
+| `ForceThreePhase` | interprets as three phases; requires `len >= 48` |
 
 A forced layout only requires that the payload is long enough, not that the length matches
 exactly. This way a device that contradicts the hypothesis remains readable without a firmware
@@ -517,7 +532,7 @@ Our parser validates more strictly:
 | Data length | `N` must match the actual frame length |
 | Checksum | sum over `[0 .. 8+N]`, and `> 0` |
 | Control/function | must be the expected response code |
-| Payload length | per function: 28/32/**44** for `11 82` (see layout section) |
+| Payload length | per function: 28/32/44/48/50 for `11 82` (see layout section) |
 
 **Hardware correction (2026-07-19):** an unregistered inverter answers the offline query from
 source `00 00` — it doesn't have an address yet; that is precisely what the query is there to
@@ -641,6 +656,6 @@ collision above is real.
 | Behavior at night | Timeouts vs. error frames | Phase 9 |
 | Three-phase layout words 19-23 | Not published | Capture across a day |
 | Three-phase `HOURS_UP` scale | Could be off | Compare with the inverter menu |
-| Does the TL3000-20 accept the verbatim serial echo? | Regression risk for the stable unit | Re-test on that hardware |
+| Does the TLC8000 need the verbatim echo, or is the gap enough? | One fewer change to the stable driver if the gap suffices | Trimmed serial with the 1 s gap on the TLC8000 |
 
 For none of these points is code written in Phase 2 that hardcodes an assumption.

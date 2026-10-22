@@ -39,6 +39,7 @@ enum class LayoutSelection {
     Auto,
     ForceSingleString,
     ForceDualString,
+    ForceThreePhase,
 };
 
 inline constexpr size_t kNormalInfoSingleStringBytes = 28;
@@ -118,9 +119,10 @@ uint32_t readDoubleWord(const uint8_t* data, size_t highIndex, size_t lowIndex);
 
 /// Decodes a QUERY_NORMAL_INFO payload.
 ///
-/// With LayoutSelection::Auto, `len` must be one of the known lengths (28, 32, 44, 48, 50). A forced layout only requires
-/// the payload to be long enough, so a device sending an unexpected length can still be read
-/// once someone has established which field order it really uses.
+/// With LayoutSelection::Auto, `len` must be one of the known lengths (28, 32, 44, 48, 50).
+/// A forced layout only requires the payload to be long enough, so a device sending an
+/// unexpected length can still be read once someone has established which field order it
+/// really uses.
 DecodeResult decodeNormalInfo(const uint8_t* data, size_t len, NormalInfo& out,
                               LayoutSelection selection = LayoutSelection::Auto);
 

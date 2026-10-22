@@ -337,19 +337,20 @@ The three flags are strictly distinct:
 | `ac.power.total` | `PAC` |
 | `ac.phase_l1.voltage` | `VAC` |
 | `ac.phase_l1.current` | `IAC` |
+| `ac.phase_l2.*`, `ac.phase_l3.*` | `VAC`/`IAC` L2 and L3, only with the 48-byte three-phase payload |
 | `ac.frequency` | `FREQUENCY` |
 | `dc.mppt_1.voltage` | `VPV` |
 | `dc.mppt_1.current` | `IPV` |
 | `dc.mppt_1.power` | *derived* |
-| `dc.mppt_2.*` | only with 32-byte payload |
+| `dc.mppt_2.*` | only with the dual-string (32/50-byte) or three-phase (48-byte) payload |
 | `dc.power.total` | *derived* |
 | `energy.today` | `E_TODAY` ÷100 |
 | `energy.total` | uint32(`HI`,`LO`) ÷10 |
 | `inverter.temperature` | `TEMP`, **signed** |
 | `inverter.operating_hours` | `HOURS_UP` |
 
-Not filled (`supported = false`): all `ac.phase_l2/l3.*`, `battery.*`, `grid.*`,
-`ac.phase_l1.power`. These **do not** appear in MQTT, not in HA, and are NaN in Modbus.
+Not filled (`supported = false`): `ac.phase_l2/l3.*` on single- and dual-string payloads,
+`battery.*`, `grid.*`, `ac.phase_l1.power`. These **do not** appear in MQTT, not in HA, and are NaN in Modbus.
 
 ### DeviceState
 
@@ -434,8 +435,8 @@ struct InverterCapabilities {
     std::bitset<64> read;
     std::bitset<64> write;
     std::map<InverterCommandType, NumericCapability> numeric;
-    uint8_t phaseCount;   // EverSolar: 1
-    uint8_t mpptCount;    // EverSolar: 1 or 2, from frame length
+    uint8_t phaseCount;   // EverSolar: 1, or 3 with the three-phase payload
+    uint8_t mpptCount;    // EverSolar: 1 or 2, from the payload layout
     bool    hasBattery;   // EverSolar: false
 };
 ```
@@ -533,7 +534,7 @@ only thing it "changes" is a volatile bus address that the inverter forgets on p
 | 3 | — | Payload is printable ASCII (serial number) | +25 |
 | 4 | `10 01` register address | ACK = exact `0x06` | +20 |
 | 5 | `11 03` query inverter ID | ASCII identification string | +10 |
-| 6 | `11 02` query normal info | Payload exactly 28 or 32 bytes | +5 |
+| 6 | `11 02` query normal info | Payload of a known length (28, 32, 44, 48 or 50 bytes) | +5 |
 
 Maximum 100. A second identical round is mandatory: if the results diverge, the score is
 halved.

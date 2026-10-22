@@ -104,6 +104,16 @@ inline constexpr uint8_t kRespNormalInfoDualExtended[] = {
 };
 inline constexpr size_t kRespNormalInfoDualExtendedLen = sizeof(kRespNormalInfoDualExtended);
 
+// Response: QUERY_NORMAL_INFO, three-phase layout (48 bytes)
+inline constexpr uint8_t kRespNormalInfoThreePhase[] = {
+    0xAA, 0x55, 0x00, 0x10, 0x01, 0x00, 0x11, 0x82, 0x30, 0x01, 0x0B, 0x13,
+    0xC9, 0x0E, 0x22, 0x00, 0x02, 0x00, 0x16, 0x00, 0x08, 0x5C, 0xC1, 0x00,
+    0x01, 0x23, 0x45, 0x03, 0x5D, 0x00, 0x01, 0x00, 0x3C, 0x00, 0x0F, 0x09,
+    0x37, 0x13, 0x8B, 0x00, 0x0D, 0x09, 0x40, 0x00, 0x0B, 0x09, 0x31, 0xFF,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x08, 0x19,
+};
+inline constexpr size_t kRespNormalInfoThreePhaseLen = sizeof(kRespNormalInfoThreePhase);
+
 // Response: SEND_REGISTER_ADDRESS acknowledged (0x06)
 inline constexpr uint8_t kRespRegisterAck[] = {
     0xAA, 0x55, 0x00, 0x10, 0x01, 0x00, 0x10, 0x81, 0x01, 0x06, 0x01, 0xA8,
@@ -207,6 +217,27 @@ inline constexpr uint16_t kStatusCode     = 1;
 inline constexpr double kEnergyTotalKwhReferenceBug = 18452.5;
 inline constexpr double kEnergyTotalExpectedDelta = 0.2;
 }  // namespace expected
+
+// Expected physical values for kRespNormalInfoThreePhase.
+namespace expected_three {
+inline constexpr double kTemperatureC   = 26.7;
+inline constexpr double kEnergyTodayKwh = 0.60;
+inline constexpr double kEnergyTotalKwh = 54803.3;
+inline constexpr double kAcPowerW       = 861.0;
+inline constexpr double kFrequencyHz    = 50.03;
+inline constexpr double kPvVoltage1     = 506.5;
+inline constexpr double kPvCurrent1     = 0.2;
+inline constexpr double kPvVoltage2     = 361.8;
+inline constexpr double kPvCurrent2     = 2.2;
+inline constexpr double kAcVoltageL1    = 235.9;
+inline constexpr double kAcCurrentL1    = 1.5;
+inline constexpr double kAcVoltageL2    = 236.8;
+inline constexpr double kAcCurrentL2    = 1.3;
+inline constexpr double kAcVoltageL3    = 235.3;
+inline constexpr double kAcCurrentL3    = 1.1;
+inline constexpr uint32_t kOperatingHours = 74565;
+inline constexpr uint16_t kStatusCode     = 1;
+}  // namespace expected_three
 
 inline constexpr const char* kExpectedSerial = "XH300060115506193600V610";
 inline constexpr const char* kExpectedInverterId = "1  3000E1.00   TL3000-20    Ever-Solar      XH300060115506193600V610-01023-06";

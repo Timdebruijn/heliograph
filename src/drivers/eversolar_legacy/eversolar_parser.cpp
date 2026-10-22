@@ -51,7 +51,9 @@ inline constexpr size_t kOpMode  = 15;
 }  // namespace dual
 
 // Word indices for the three-phase layout (24 words), from one TLC8000 capture (2026-10-20).
-// Words 19-23 (FF00 0000 0000 0064 0000) are unknown and not read.
+// Words 19-23 (FF00 0000 0000 0064 0000) are unknown and not read. The per-phase CURRENT
+// indices rest on position alone: L2 and L3 both read 0x000D in that capture, so it cannot
+// tell kIac2 from kIac3. The voltages, and V x I against PAC, do pin each pair to its phase.
 namespace three {
 inline constexpr size_t kTemp            = 0;
 inline constexpr size_t kVpv             = 1;
@@ -147,6 +149,12 @@ DecodeResult decodeNormalInfo(const uint8_t* data, size_t len, NormalInfo& out,
                 return DecodeResult::LayoutMismatch;
             }
             layout = NormalInfoLayout::DualString;
+            break;
+        case LayoutSelection::ForceThreePhase:
+            if (len < kNormalInfoThreePhaseBytes) {
+                return DecodeResult::LayoutMismatch;
+            }
+            layout = NormalInfoLayout::ThreePhase;
             break;
         default:
             return DecodeResult::UnknownLayout;

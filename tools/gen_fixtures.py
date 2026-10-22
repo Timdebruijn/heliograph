@@ -111,6 +111,37 @@ NIGHT_SINGLE = words(
     0,  # 13 OP_MODE
 )
 
+# --- Three-phase payload (24 words / 48 bytes) -----------------------------------------
+# The field order of the TLC8000 capture of 2026-10-20 (see eversolar-protocol.md), but with
+# values made distinct where the capture's were not: the capture has IAC L2 == IAC L3 and a
+# zero HOURS_UP high word, so a swapped index or a dropped high word would decode it the same.
+THREE_PHASE = words(
+    267,  # 0  TEMP        26.7 C
+    5065,  # 1  VPV         506.5 V
+    3618,  # 2  VPV2        361.8 V
+    2,  # 3  IPV         0.2 A
+    22,  # 4  IPV2        2.2 A
+    0x0008,  # 5  E_TOTAL_HI
+    0x5CC1,  # 6  E_TOTAL_LO  -> 54803.3 kWh
+    0x0001,  # 7  HOURS_UP_HI
+    0x2345,  # 8  HOURS_UP_LO -> 74565 h
+    861,  # 9  PAC         861 W
+    1,  # 10 OP_MODE
+    60,  # 11 E_TODAY     0.60 kWh
+    15,  # 12 IAC L1      1.5 A
+    2359,  # 13 VAC L1      235.9 V
+    5003,  # 14 FREQUENCY   50.03 Hz
+    13,  # 15 IAC L2      1.3 A
+    2368,  # 16 VAC L2      236.8 V
+    11,  # 17 IAC L3      1.1 A
+    2353,  # 18 VAC L3      235.3 V
+    0xFF00,  # 19-23 unknown, as captured
+    0x0000,
+    0x0000,
+    0x0064,
+    0x0000,
+)
+
 SERIAL = b"XH300060115506193600V610"
 # The id string a real TL3000-20 sent on 2026-07-19 (QUERY_INVERTER_ID during Phase 3), byte
 # for byte including the space padding. The earlier constructed guess had the fields in a
@@ -229,6 +260,11 @@ FIXTURES: list[tuple[str, str, bytes]] = [
                 0x0000, 0x0000, 0xFFFF, 0x0000, 0x0000, 0x0000, 0x0000, 0xFFFF, 0x0000
             ),
         ),
+    ),
+    (
+        "kRespNormalInfoThreePhase",
+        "Response: QUERY_NORMAL_INFO, three-phase layout (48 bytes)",
+        response(0x11, 0x02, THREE_PHASE),
     ),
     (
         "kRespRegisterAck",
@@ -398,6 +434,27 @@ def main() -> None:
         f"inline constexpr double kEnergyTotalExpectedDelta = {E_TOTAL_HI * 0.1:.1f};"
     )
     out.append("}  // namespace expected")
+    out.append("")
+    out.append("// Expected physical values for kRespNormalInfoThreePhase.")
+    out.append("namespace expected_three {")
+    out.append("inline constexpr double kTemperatureC   = 26.7;")
+    out.append("inline constexpr double kEnergyTodayKwh = 0.60;")
+    out.append("inline constexpr double kEnergyTotalKwh = 54803.3;")
+    out.append("inline constexpr double kAcPowerW       = 861.0;")
+    out.append("inline constexpr double kFrequencyHz    = 50.03;")
+    out.append("inline constexpr double kPvVoltage1     = 506.5;")
+    out.append("inline constexpr double kPvCurrent1     = 0.2;")
+    out.append("inline constexpr double kPvVoltage2     = 361.8;")
+    out.append("inline constexpr double kPvCurrent2     = 2.2;")
+    out.append("inline constexpr double kAcVoltageL1    = 235.9;")
+    out.append("inline constexpr double kAcCurrentL1    = 1.5;")
+    out.append("inline constexpr double kAcVoltageL2    = 236.8;")
+    out.append("inline constexpr double kAcCurrentL2    = 1.3;")
+    out.append("inline constexpr double kAcVoltageL3    = 235.3;")
+    out.append("inline constexpr double kAcCurrentL3    = 1.1;")
+    out.append("inline constexpr uint32_t kOperatingHours = 74565;")
+    out.append("inline constexpr uint16_t kStatusCode     = 1;")
+    out.append("}  // namespace expected_three")
     out.append("")
     out.append(
         'inline constexpr const char* kExpectedSerial = "' + SERIAL.decode() + '";'

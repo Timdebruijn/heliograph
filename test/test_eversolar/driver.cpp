@@ -115,6 +115,12 @@ static void test_an_out_of_range_stored_address_falls_back_rather_than_to_zero()
     TEST_ASSERT_EQUAL_UINT8(kFirstInverterAddress, optionsFrom(stored).assignedAddress);
 }
 
+static void test_the_three_option_forces_the_three_phase_layout() {
+    heliograph::DriverOptions stored;
+    stored["layout"] = "three";
+    TEST_ASSERT_EQUAL(LayoutSelection::ForceThreePhase, optionsFrom(stored).layout);
+}
+
 static void test_begin_broadcasts_re_register() {
     Rig r;
     r.begin();
@@ -293,6 +299,61 @@ static void test_frames_after_the_re_register_burst_keep_a_second_apart() {
     for (size_t i = 3; i < sentAt.size(); ++i) {
         TEST_ASSERT_TRUE(sentAt[i] - sentAt[i - 1] >= 1000);
     }
+}
+
+static void test_buffered_bytes_do_not_cut_the_inter_frame_gap_short() {
+    // The real transport returns the moment the UART holds anything, so a read that drains
+    // stray bytes takes no time at all. Taking that still clock for one that cannot move would
+    // end the wait at once and send early -- intermittently, on any bus with other traffic.
+    Rig r;
+    r.transport.msPerRead               = 50;
+    r.transport.clockStillWhileBuffered = true;
+    r.begin();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));  // registers; our last frame ends now
+
+    std::vector<uint64_t> sentAt;
+    auto device = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
+        sentAt.push_back(r.transport.nowMs());
+        return device(request, reply);
+    });
+    const uint64_t lastFrameEnded = r.transport.nowMs();
+    r.transport.injectNoise({0x00, 0x13, 0x37});
+
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+    TEST_ASSERT_EQUAL(1, sentAt.size());
+    TEST_ASSERT_TRUE(sentAt[0] - lastFrameEnded >= 1000);
+}
+
+static void test_three_phase_values_reach_the_device_state() {
+    // What ends up in Home Assistant. The fixture's phases all differ, so a swapped or
+    // dropped phase shows up here rather than only in the parser.
+    namespace e = fx::expected_three;
+    Rig r;
+    r.begin();
+    r.device.payload = Payload::ThreePhase;
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+
+    const auto& m = state.measurements;
+    TEST_ASSERT_EQUAL_UINT8(3, state.capabilities.phaseCount);
+    TEST_ASSERT_EQUAL_UINT8(2, state.capabilities.mpptCount);
+    TEST_ASSERT_NOT_NULL(m.find(measurement_id::kAcL2Voltage));
+    TEST_ASSERT_NOT_NULL(m.find(measurement_id::kAcL2Current));
+    TEST_ASSERT_NOT_NULL(m.find(measurement_id::kAcL3Voltage));
+    TEST_ASSERT_NOT_NULL(m.find(measurement_id::kAcL3Current));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL1, m.find(measurement_id::kAcL1Voltage)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL1, m.find(measurement_id::kAcL1Current)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL2, m.find(measurement_id::kAcL2Voltage)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL2, m.find(measurement_id::kAcL2Current)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL3, m.find(measurement_id::kAcL3Voltage)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL3, m.find(measurement_id::kAcL3Current)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcPowerW, m.find(measurement_id::kAcPowerTotal)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kPvVoltage2, m.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kOperatingHours,
+                              m.find(measurement_id::kOperatingHours)->value);
 }
 
 static void test_one_missed_reply_does_not_drop_the_registration() {
@@ -912,6 +973,7 @@ void run_eversolar_driver() {
     RUN_TEST(test_the_declared_read_channels_are_exactly_the_pmu_pv_set);
     RUN_TEST(test_a_config_without_the_address_option_still_gets_the_first_address);
     RUN_TEST(test_an_out_of_range_stored_address_falls_back_rather_than_to_zero);
+    RUN_TEST(test_the_three_option_forces_the_three_phase_layout);
     RUN_TEST(test_begin_broadcasts_re_register);
     RUN_TEST(test_a_second_instance_leaves_the_first_inverter_registered);
     RUN_TEST(test_the_first_address_still_broadcasts_re_register);
@@ -925,6 +987,7 @@ void run_eversolar_driver() {
     RUN_TEST(test_registration_succeeds_against_the_captured_hardware_frame);
     RUN_TEST(test_registration_echoes_the_announcement_verbatim);
     RUN_TEST(test_frames_after_the_re_register_burst_keep_a_second_apart);
+    RUN_TEST(test_buffered_bytes_do_not_cut_the_inter_frame_gap_short);
     RUN_TEST(test_a_zeversolar_id_string_yields_the_bare_model);
     RUN_TEST(test_one_missed_reply_does_not_drop_the_registration);
     RUN_TEST(test_registration_recovers_a_registered_but_forgotten_inverter);
@@ -932,6 +995,7 @@ void run_eversolar_driver() {
     RUN_TEST(test_dc_power_is_marked_derived);
     RUN_TEST(test_single_string_declares_no_second_mppt);
     RUN_TEST(test_dual_string_declares_the_second_mppt);
+    RUN_TEST(test_three_phase_values_reach_the_device_state);
     RUN_TEST(test_status_text_does_not_invent_a_meaning);
     RUN_TEST(test_op_mode_zero_is_standby);
     RUN_TEST(test_unobserved_status_codes_stay_unknown);

@@ -23,7 +23,8 @@ constexpr uint8_t kTimeoutsBeforeRecoveryProbe = 3;
 /// address assignment sent the moment its announcement arrived, both went unanswered, while
 /// the same query a second later was answered (hardware, 2026-10-20). The reference sleeps a
 /// full second after every request (eversolar.pl send_request, "allow time for inverter to
-/// respond"), so it never sends faster than this.
+/// respond"), so no request of its follows another sooner than this. The RE_REGISTER repeats
+/// are the one exception: a single broadcast burst, about 12 ms apart, that nobody answers.
 constexpr uint32_t kInterFrameGapMs = 1000;
 
 }  // namespace
@@ -35,6 +36,8 @@ EversolarOptions optionsFrom(const heliograph::DriverOptions& values) {
         out.layout = LayoutSelection::ForceSingleString;
     } else if (layout == "dual") {
         out.layout = LayoutSelection::ForceDualString;
+    } else if (layout == "three") {
+        out.layout = LayoutSelection::ForceThreePhase;
     } else {
         out.layout = LayoutSelection::Auto;
     }
@@ -142,10 +145,15 @@ void EversolarDriver::waitForInterFrameGap() {
     // bytes are dropped here, as flushInput() would drop them before the next request anyway.
     uint8_t discard[32];
     for (uint64_t now = transport_->nowMs(); now < due;) {
-        transport_->read(discard, sizeof(discard), static_cast<uint32_t>(due - now));
+        const size_t   got   = transport_->read(discard, sizeof(discard),
+                                                static_cast<uint32_t>(due - now));
         const uint64_t later = transport_->nowMs();
-        if (later == now) {
-            break;  // a clock that does not move (simulated transport) cannot be waited on
+        // A read that drained buffered bytes returns within the same millisecond, so a
+        // still clock alone does not mean the clock cannot move: only a still clock on an
+        // empty read does (simulated transport). Breaking on the first would send early on
+        // any bus with stray traffic.
+        if (later == now && got == 0) {
+            break;
         }
         now = later;
     }
