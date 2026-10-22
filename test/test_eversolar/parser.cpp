@@ -216,14 +216,9 @@ static void test_48_byte_payload_decodes_as_three_phase() {
     // Byte for byte a QUERY_NORMAL_INFO reply from a Zeversolar TLC8000 (2026-10-20). Its
     // display read E_TOTAL 54802.7 kWh an hour earlier; 897 W of PV becoming 861 W of AC is
     // the cross-check that the current and power words sit where this layout says.
-    static const uint8_t kFrame[] = {
-        0xAA, 0x55, 0x00, 0x10, 0x01, 0x00, 0x11, 0x82, 0x30, 0x01, 0x0B, 0x13, 0xC9, 0x0E,
-        0x22, 0x00, 0x02, 0x00, 0x16, 0x00, 0x08, 0x5C, 0xC1, 0x00, 0x00, 0xA0, 0x03, 0x03,
-        0x5D, 0x00, 0x01, 0x00, 0x3C, 0x00, 0x0F, 0x09, 0x37, 0x13, 0x8B, 0x00, 0x0D, 0x09,
-        0x40, 0x00, 0x0D, 0x09, 0x31, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00,
-        0x00, 0x08, 0x55};
     Frame f;
-    TEST_ASSERT_EQUAL(ParseResult::Ok, parseFrame(kFrame, sizeof(kFrame), f));
+    TEST_ASSERT_EQUAL(ParseResult::Ok, parseFrame(fx::kRespNormalInfoThreePhaseCaptured,
+                                                 fx::kRespNormalInfoThreePhaseCapturedLen, f));
     NormalInfo info;
     TEST_ASSERT_EQUAL(DecodeResult::Ok, decodeNormalInfo(f.data, f.dataLength, info));
     TEST_ASSERT_EQUAL(NormalInfoLayout::ThreePhase, info.layout);
@@ -250,13 +245,15 @@ static void test_48_byte_payload_decodes_as_three_phase() {
 }
 
 static void test_three_phase_reads_the_hours_high_word_and_each_phase_current() {
-    // The capture above cannot catch two mistakes: its HOURS_UP high word is 0 and its L2 and
-    // L3 currents are equal. The constructed frame differs in exactly those places.
+    // The capture above agrees with three wrong decodings: its temperature is positive, its
+    // HOURS_UP high word is 0, and its L2 and L3 currents are equal. The constructed frame
+    // differs in exactly those places.
     namespace e = fx::expected_three;
     NormalInfo info;
     TEST_ASSERT_EQUAL(DecodeResult::Ok,
                       decodeNormalInfo(fx::kRespNormalInfoThreePhase + kOffsetData,
                                        kNormalInfoThreePhaseBytes, info));
+    TEST_ASSERT_DOUBLE_WITHIN(kEps, e::kTemperatureC, info.temperatureC);
     TEST_ASSERT_EQUAL_UINT32(e::kOperatingHours, info.operatingHours);
     TEST_ASSERT_DOUBLE_WITHIN(kEps, e::kAcCurrentL1, info.acCurrent);
     TEST_ASSERT_DOUBLE_WITHIN(kEps, e::kAcCurrentL2, info.acCurrent2);

@@ -326,6 +326,14 @@ static void test_buffered_bytes_do_not_cut_the_inter_frame_gap_short() {
     TEST_ASSERT_TRUE(sentAt[0] - lastFrameEnded >= 1000);
 }
 
+// Looks a channel up and fails with its id when nobody declared it. A bare find()->value would
+// dereference nullptr on that mutation and take the whole suite down instead of one test.
+static double valueOf(const DeviceState& state, const char* id) {
+    const auto* found = state.measurements.find(id);
+    TEST_ASSERT_NOT_NULL_MESSAGE(found, id);
+    return found->value;
+}
+
 static void test_three_phase_values_reach_the_device_state() {
     // What ends up in Home Assistant. The fixture's phases all differ, so a swapped or
     // dropped phase shows up here rather than only in the parser.
@@ -337,23 +345,53 @@ static void test_three_phase_values_reach_the_device_state() {
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
 
-    const auto& m = state.measurements;
     TEST_ASSERT_EQUAL_UINT8(3, state.capabilities.phaseCount);
+    TEST_ASSERT_TRUE(state.capabilities.has(InverterCapability::ReadMultiplePhases));
     TEST_ASSERT_EQUAL_UINT8(2, state.capabilities.mpptCount);
-    TEST_ASSERT_NOT_NULL(m.find(measurement_id::kAcL2Voltage));
-    TEST_ASSERT_NOT_NULL(m.find(measurement_id::kAcL2Current));
-    TEST_ASSERT_NOT_NULL(m.find(measurement_id::kAcL3Voltage));
-    TEST_ASSERT_NOT_NULL(m.find(measurement_id::kAcL3Current));
-    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL1, m.find(measurement_id::kAcL1Voltage)->value);
-    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL1, m.find(measurement_id::kAcL1Current)->value);
-    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL2, m.find(measurement_id::kAcL2Voltage)->value);
-    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL2, m.find(measurement_id::kAcL2Current)->value);
-    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL3, m.find(measurement_id::kAcL3Voltage)->value);
-    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL3, m.find(measurement_id::kAcL3Current)->value);
-    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcPowerW, m.find(measurement_id::kAcPowerTotal)->value);
-    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kPvVoltage2, m.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL1, valueOf(state, measurement_id::kAcL1Voltage));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL1, valueOf(state, measurement_id::kAcL1Current));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL2, valueOf(state, measurement_id::kAcL2Voltage));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL2, valueOf(state, measurement_id::kAcL2Current));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcVoltageL3, valueOf(state, measurement_id::kAcL3Voltage));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcCurrentL3, valueOf(state, measurement_id::kAcL3Current));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kAcPowerW, valueOf(state, measurement_id::kAcPowerTotal));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kPvVoltage2, valueOf(state, measurement_id::kDcMppt2Voltage));
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kTemperatureC, valueOf(state, measurement_id::kTemperature));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, e::kOperatingHours,
-                              m.find(measurement_id::kOperatingHours)->value);
+                              valueOf(state, measurement_id::kOperatingHours));
+}
+
+static void test_a_single_phase_payload_declares_no_second_or_third_phase() {
+    // The guard, not the body. Without it a single-phase TL3000-20 reports three phases, two
+    // of them forever empty -- and every three-phase test stays green.
+    Rig r;
+    r.begin();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+
+    TEST_ASSERT_EQUAL_UINT8(1, state.capabilities.phaseCount);
+    TEST_ASSERT_FALSE(state.capabilities.has(InverterCapability::ReadMultiplePhases));
+    for (const char* id : {measurement_id::kAcL2Voltage, measurement_id::kAcL2Current,
+                           measurement_id::kAcL3Voltage, measurement_id::kAcL3Current}) {
+        TEST_ASSERT_NULL_MESSAGE(state.measurements.find(id), id);
+    }
+}
+
+static void test_the_phase_count_follows_the_payload_back_down() {
+    // phaseCount is recomputed per poll, as mpptCount is; set once, it would stay 3 after the
+    // layout changed under it.
+    Rig r;
+    r.begin();
+    r.device.payload = Payload::ThreePhase;
+    DeviceState first;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(first));
+    TEST_ASSERT_EQUAL_UINT8(3, first.capabilities.phaseCount);
+
+    r.device.payload = Payload::SingleString;
+    DeviceState second;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(second));
+    TEST_ASSERT_EQUAL_UINT8(1, second.capabilities.phaseCount);
 }
 
 static void test_one_missed_reply_does_not_drop_the_registration() {
@@ -437,19 +475,18 @@ static void test_poll_fills_the_canonical_model() {
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
 
-    const auto& m = state.measurements;
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kAcPowerW,
-                              m.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(state, measurement_id::kAcPowerTotal));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kEnergyTotalKwh,
-                              m.find(measurement_id::kEnergyTotal)->value);
+                              valueOf(state, measurement_id::kEnergyTotal));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kEnergyTodayKwh,
-                              m.find(measurement_id::kEnergyToday)->value);
+                              valueOf(state, measurement_id::kEnergyToday));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kTemperatureC,
-                              m.find(measurement_id::kTemperature)->value);
+                              valueOf(state, measurement_id::kTemperature));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kAcVoltage,
-                              m.find(measurement_id::kAcL1Voltage)->value);
+                              valueOf(state, measurement_id::kAcL1Voltage));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kFrequencyHz,
-                              m.find(measurement_id::kAcFrequency)->value);
+                              valueOf(state, measurement_id::kAcFrequency));
 }
 
 static void test_dc_power_is_marked_derived() {
@@ -487,7 +524,7 @@ static void test_dual_string_declares_the_second_mppt() {
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
 
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kPvVoltage2,
-                              state.measurements.find(measurement_id::kDcMppt2Voltage)->value);
+                              valueOf(state, measurement_id::kDcMppt2Voltage));
     TEST_ASSERT_EQUAL_UINT8(2, state.capabilities.mpptCount);
     TEST_ASSERT_TRUE(state.capabilities.has(InverterCapability::ReadMultipleMppts));
 }
@@ -538,14 +575,14 @@ static void test_corrupt_reply_does_not_touch_state() {
     r.begin();
     DeviceState state;
     r.poll(state);
-    const double good = state.measurements.find(measurement_id::kAcPowerTotal)->value;
+    const double good = valueOf(state, measurement_id::kAcPowerTotal);
 
     r.device.payload = Payload::BadChecksum;
     TEST_ASSERT_EQUAL(PollResult::ChecksumError, r.poll(state));
 
     // The previous reading survives untouched; a corrupt frame yields no data at all.
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, good,
-                              state.measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(state, measurement_id::kAcPowerTotal));
     TEST_ASSERT_TRUE(r.driver.busErrors().checksumErrors > 0);
 }
 
@@ -648,7 +685,7 @@ static void test_echo_of_our_own_request_is_skipped() {
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kAcPowerW,
-                              state.measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(state, measurement_id::kAcPowerTotal));
 }
 
 static void test_leading_line_noise_is_resynchronised_past() {
@@ -668,7 +705,7 @@ static void test_reply_split_across_reads_is_reassembled() {
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kAcPowerW,
-                              state.measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(state, measurement_id::kAcPowerTotal));
 }
 
 static void test_bus_is_locked_and_released() {
@@ -846,7 +883,7 @@ static void test_sunrise_recovers_without_intervention() {
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.0, p->value);
     // Lifetime energy keeps its value across the outage.
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, fx::expected::kEnergyTotalKwh,
-                              snap->measurements.find(measurement_id::kEnergyTotal)->value);
+                              valueOf(*snap, measurement_id::kEnergyTotal));
 }
 
 static void test_a_single_dropped_frame_does_not_disturb_anything() {
@@ -956,16 +993,16 @@ static void test_snapshots_are_immutable_and_independent() {
     // A reader holding an old snapshot must keep seeing what it saw, however much the poll
     // loop moves on. This is what lets a slow REST client not block RS485.
     const auto held = store.snapshot();
-    const double before = held->measurements.find(measurement_id::kAcPowerTotal)->value;
+    const double before = valueOf(*held, measurement_id::kAcPowerTotal);
 
     r.device.payload = Payload::Night;
     g_now += 10000;
     ctx.pollOnce();
 
     TEST_ASSERT_DOUBLE_WITHIN(1e-6, before,
-                              held->measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(*held, measurement_id::kAcPowerTotal));
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.0,
-                              store.snapshot()->measurements.find(measurement_id::kAcPowerTotal)->value);
+                              valueOf(*store.snapshot(), measurement_id::kAcPowerTotal));
 }
 
 void run_eversolar_driver() {
@@ -996,6 +1033,8 @@ void run_eversolar_driver() {
     RUN_TEST(test_single_string_declares_no_second_mppt);
     RUN_TEST(test_dual_string_declares_the_second_mppt);
     RUN_TEST(test_three_phase_values_reach_the_device_state);
+    RUN_TEST(test_a_single_phase_payload_declares_no_second_or_third_phase);
+    RUN_TEST(test_the_phase_count_follows_the_payload_back_down);
     RUN_TEST(test_status_text_does_not_invent_a_meaning);
     RUN_TEST(test_op_mode_zero_is_standby);
     RUN_TEST(test_unobserved_status_codes_stay_unknown);

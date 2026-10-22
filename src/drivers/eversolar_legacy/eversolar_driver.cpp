@@ -398,6 +398,11 @@ PollResult EversolarDriver::poll(DeviceState& state) {
     if (dual) {
         capabilities_.addRead(InverterCapability::ReadMultipleMppts);
     }
+    // Recomputed every poll like mpptCount, so a layout change cannot leave it stuck at 3.
+    capabilities_.phaseCount = info.hasThreePhases ? 3 : 1;
+    if (info.hasThreePhases) {
+        capabilities_.addRead(InverterCapability::ReadMultiplePhases);
+    }
 
     auto& m = state.measurements;
     m.declare(measurement_id::kAcPowerTotal, MeasurementType::Power, Unit::Watt, "AC Power");
@@ -413,7 +418,6 @@ PollResult EversolarDriver::poll(DeviceState& state) {
     m.declare(measurement_id::kTemperature, MeasurementType::Temperature, Unit::Celsius, "Temperature");
     m.declare(measurement_id::kOperatingHours, MeasurementType::Duration, Unit::Hour, "Operating Hours");
     if (info.hasThreePhases) {
-        capabilities_.phaseCount = 3;
         m.declare(measurement_id::kAcL2Voltage, MeasurementType::Voltage, Unit::Volt, "AC Voltage L2");
         m.declare(measurement_id::kAcL2Current, MeasurementType::Current, Unit::Ampere, "AC Current L2");
         m.declare(measurement_id::kAcL3Voltage, MeasurementType::Voltage, Unit::Volt, "AC Voltage L3");
