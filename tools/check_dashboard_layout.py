@@ -583,6 +583,15 @@ const tick=setInterval(async()=>{
   try{
     goTab('health');
     await new Promise(r=>setTimeout(r,400));
+    // The four counters are one grid row at this width, so they must start at the same
+    // height. They did not: .card+.card's stacking margin applied inside the grid too and
+    // pushed every tile but the first down 12px, leaving tile one stretched and taller.
+    const tiles=[...document.querySelectorAll('.tiles>.card')];
+    if(tiles.length!==4) say('expected 4 health tiles, rendered '+tiles.length);
+    else{
+      const tops=tiles.map(t=>Math.round(t.getBoundingClientRect().top));
+      if(Math.max(...tops)-Math.min(...tops)>1) say('the health tiles do not share a top: '+tops.join(','));
+    }
     const box=document.querySelector('#logbox');
     if(!box) say('no log box on the Health tab');
     else{

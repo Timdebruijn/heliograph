@@ -51,6 +51,10 @@ main{padding:20px;max-width:960px}
 /* --- primitives -------------------------------------------------------------------- */
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
 .card+.card{margin-top:12px}
+/* A grid spaces its children with gap, so the stacking margin above must not apply there:
+   inside a grid it pushes every card but the first down within its own cell. .tiles is the
+   only grid holding cards today; scope any new one that does the same way. */
+.tiles>.card+.card{margin-top:0}
 .card.bad{border-color:var(--bad)}.card.warn{border-color:var(--warn)}
 .stack{display:flex;flex-direction:column;gap:12px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 auto}
