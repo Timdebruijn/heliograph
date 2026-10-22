@@ -146,7 +146,8 @@ picture:
 
 | Inverter family | Connection | Status |
 |---|---|---|
-| EverSolar / Zeversolar legacy (TL series) | RS485 | **Stable** — the only driver at this level. Running in production and validated over **eight consecutive unassisted sunrises**, the transition where its one known bug lived. Several inverters on one loop are supported but **not yet confirmed on hardware** — read [the pitfalls](docs/eversolar-protocol.md#several-inverters-on-one-bus) first, and report what happens on [#82](https://github.com/Timdebruijn/heliograph/issues/82) |
+| EverSolar / Zeversolar legacy (TL series, single phase) | RS485 | **Stable** — the only driver at this level. Running in production and validated over **eight consecutive unassisted sunrises**, the transition where its one known bug lived. Several inverters on one loop are supported but **not yet confirmed on hardware** — read [the pitfalls](docs/eversolar-protocol.md#several-inverters-on-one-bus) first, and report what happens on [#82](https://github.com/Timdebruijn/heliograph/issues/82) |
+| Zeversolar TLC series (TLC8000, three phase) | RS485 | **Beta** — same driver, different payload, and the first thing here proven on hardware nobody in this project owns. Contributed and validated on his own TLC8000 by [@Thomvanoorschot](https://github.com/Thomvanoorschot) in [#224](https://github.com/Timdebruijn/heliograph/pull/224): it registers within seconds of boot, polls without failures, and every channel reaches Home Assistant. Its lifetime-energy reading was checked against the inverter's own display, and DC against AC came out at a plausible 96% conversion. Beta rather than Stable because it has not run unattended across sunrises yet, the operating-hours word has never been compared with anything, and which of the two per-phase **current** registers is L2 rests on the layout rather than on a measurement: both read the same value in the only capture that exists, so no reading distinguishes them. A regression would be caught — the tests pin the mapping with a deliberately constructed frame — but the mapping itself is still a hypothesis. The three voltages differ in the capture and are therefore proven. See [docs/eversolar-protocol.md](docs/eversolar-protocol.md) |
 | Growatt SPH hybrid (3–6 kW) | Modbus RTU over RS485 | **Experimental** — register map transcribed from documentation, not yet confirmed against real hardware |
 | Growatt MIC TL-X (0.6–3.3 kW, single phase) | Modbus RTU over RS485 | **Experimental** — map cross-checked against two independent sources that agree, not yet confirmed against real hardware; see [docs/growatt-mic-tl-x-protocol.md](docs/growatt-mic-tl-x-protocol.md) |
 | Growatt MIN TL-X (2.5–6 kW, single phase) | Modbus RTU over RS485 | **Experimental** — same register layout as the MIC, with a second PV string; separate profile because the tracker count differs. Not yet confirmed against real hardware; see [docs/growatt-mic-tl-x-protocol.md](docs/growatt-mic-tl-x-protocol.md) |
@@ -167,9 +168,12 @@ What the labels mean, weakest first:
 - **Experimental** — the protocol has been implemented from documentation, but nobody has
   confirmed it against that inverter yet. It may simply not work. You would be the first.
 - **Beta** — confirmed against a real inverter, running, still collecting evidence before
-  being called Stable. Nothing sits here today.
+  being called Stable. The Zeversolar TLC8000 sits here, on someone else's hardware.
 - **Stable** — validated and soak-tested on real hardware over a long enough run to trust it
-  unattended. One driver has reached this.
+  unattended. One driver has reached this, and only for the model it was proven on: the labels
+  above describe a driver-and-inverter pair, not the driver alone. The same EverSolar driver is
+  Stable on a TL3000-20 and Beta on a TLC8000, and the REST API still reports the weaker of the
+  two per driver rather than per device.
 
 The same three words apply to the **register map** you pick, separately from the driver that
 reads it. One driver serves every Modbus inverter here, so its label can only ever describe the
