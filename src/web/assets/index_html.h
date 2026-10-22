@@ -1189,6 +1189,13 @@ async function setLogLevel(level){
 // browsers count as one is localhost -- never a LAN address. Every bridge is reached by IP over
 // plain HTTP, so this used to report failure on every device while working on a developer's
 // desk, which is exactly why it shipped. The selection fallback is the path that actually runs.
+//
+// Testing the property is enough; there is no isSecureContext check here on purpose. The API
+// is [SecureContext], so its presence already implies one, measured on Chrome and on Firefox
+// at http://<lan-ip>/ where both report `typeof navigator.clipboard === 'undefined'`. A guard
+// that cannot change the branch still has to be read, and still needs a test world of its own
+// to prove it does nothing. If a browser ever does expose it insecurely, writeText rejects and
+// the handler below falls back, which is what the guard would have done anyway.
 function copyText(text,btn){
   const done=ok=>{
     if(!btn)return;
@@ -1199,7 +1206,7 @@ function copyText(text,btn){
     btn.textContent=ok?'Copied':'Could not copy — select it by hand';
     setTimeout(()=>{btn.textContent=btn.dataset.idle},2000);
   };
-  if(navigator.clipboard&&window.isSecureContext){
+  if(navigator.clipboard){
     navigator.clipboard.writeText(text).then(()=>done(true),()=>done(copyBySelection(text)));
     return;
   }
@@ -1229,7 +1236,7 @@ function copyBySelection(text){
     return false;
   }finally{
     if(ta)ta.remove();
-    if(had&&had.focus)had.focus();
+    if(had)had.focus();
   }
 }
 function copyForIssue(btn){
