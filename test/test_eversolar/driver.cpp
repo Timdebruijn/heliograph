@@ -268,11 +268,13 @@ static void test_registration_echoes_the_announcement_verbatim() {
 }
 
 static void test_a_zeversolar_id_string_yields_the_bare_model() {
-    // The head of the id string the TLC8000 sent on 2026-10-20 (the log cut the tail). It
-    // spells its brand "ZEVERSolar", which the "Ever-Solar" anchor alone never found.
+    // The whole id string the TLC8000 sent, as the discovery report carried it on 2026-10-22
+    // (the 2026-10-20 log had cut the tail). It spells its brand "ZEVERSolar", which the
+    // "Ever-Solar" anchor alone never found.
     Rig r;
     r.begin();
-    r.device.inverterId = "3008000V1.00    TLC8000     ZEVERSolar      SX00086011740017";
+    r.device.inverterId =
+        "3008000V1.00    TLC8000     ZEVERSolar      SX000860117400176400V610-03017-03";
 
     DeviceState state;
     TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));

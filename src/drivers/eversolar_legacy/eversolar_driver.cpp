@@ -264,8 +264,8 @@ bool EversolarDriver::registerDevice(ProbeResult* probeOut, bool allowReRegister
                  inverterAddress(address_), payload, sizeof(payload), payloadLen);
     if (r == TransactResult::Ok && parseInverterId(payload, payloadLen, idString)) {
         // The anchor is the brand as the id string spells it. A TL3000-20 says "Ever-Solar";
-        // a Zeversolar TLC8000 says "ZEVERSolar" (captured 2026-10-20:
-        // "3008000V1.00    TLC8000     ZEVERSolar      SX00086011740017..."), and without its
+        // a Zeversolar TLC8000 says "ZEVERSolar" (captured 2026-10-22, see
+        // test_a_zeversolar_id_string_yields_the_bare_model for the whole string), and without its
         // own anchor the whole composite became the model, and every HA entity id with it.
         struct Brand {
             const char* anchor;

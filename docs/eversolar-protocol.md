@@ -301,7 +301,7 @@ A wrong layout choice therefore produces plausible-looking but completely wrong 
 
 ### Layout for three phases (24 words = 48 bytes payload)
 
-A three-phase Zeversolar **TLC8000** (id string `3008000V1.00    TLC8000     ZEVERSolar ...`)
+A three-phase Zeversolar **TLC8000** (id string `3008000V1.00    TLC8000     ZEVERSolar      SX000860117400176400V610-03017-03`)
 sends 48 bytes in an order of its own. One unit, captured 2026-10-20, frame stored in
 `test/test_eversolar/parser.cpp`:
 
