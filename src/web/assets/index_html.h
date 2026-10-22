@@ -50,7 +50,6 @@ nav button.on{background:var(--card);color:var(--fg)}
 main{padding:20px;max-width:960px}
 /* --- primitives -------------------------------------------------------------------- */
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
-.card+.card{margin-top:12px}
 .card.bad{border-color:var(--bad)}.card.warn{border-color:var(--warn)}
 .stack{display:flex;flex-direction:column;gap:12px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 auto}
