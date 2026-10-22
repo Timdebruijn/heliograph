@@ -83,6 +83,26 @@ inline constexpr uint8_t kRespOfflineQueryCaptured[] = {
 };
 inline constexpr size_t kRespOfflineQueryCapturedLen = sizeof(kRespOfflineQueryCaptured);
 
+// Response: QUERY_NORMAL_INFO captured from a real Zeversolar TLC8000 (48-byte three-phase payload)
+inline constexpr uint8_t kRespNormalInfoThreePhase[] = {
+    0xAA, 0x55, 0x00, 0x10, 0x01, 0x00, 0x11, 0x82, 0x30, 0x01, 0x0B, 0x13,
+    0xC9, 0x0E, 0x22, 0x00, 0x02, 0x00, 0x16, 0x00, 0x08, 0x5C, 0xC1, 0x00,
+    0x00, 0xA0, 0x03, 0x03, 0x5D, 0x00, 0x01, 0x00, 0x3C, 0x00, 0x0F, 0x09,
+    0x37, 0x13, 0x8B, 0x00, 0x0D, 0x09, 0x40, 0x00, 0x0D, 0x09, 0x31, 0xFF,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x08, 0x55,
+};
+inline constexpr size_t kRespNormalInfoThreePhaseLen = sizeof(kRespNormalInfoThreePhase);
+
+// Response: the TLC8000 three-phase payload as a probe frame, with sub-zero temperature, a non-zero hours high word and distinct L2/L3 currents (CONSTRUCTED, see tools/gen_fixtures.py)
+inline constexpr uint8_t kRespNormalInfoThreePhaseConstructed[] = {
+    0xAA, 0x55, 0x00, 0x10, 0x01, 0x00, 0x11, 0x82, 0x30, 0xFF, 0xFF, 0x13,
+    0xC9, 0x0E, 0x22, 0x00, 0x02, 0x00, 0x16, 0x00, 0x08, 0x5C, 0xC1, 0x00,
+    0x01, 0xA0, 0x03, 0x03, 0x5D, 0x00, 0x01, 0x00, 0x3C, 0x00, 0x0F, 0x09,
+    0x37, 0x13, 0x8B, 0x00, 0x14, 0x09, 0x40, 0x00, 0x1E, 0x09, 0x31, 0xFF,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x0A, 0x60,
+};
+inline constexpr size_t kRespNormalInfoThreePhaseConstructedLen = sizeof(kRespNormalInfoThreePhaseConstructed);
+
 // Response: QUERY_NORMAL_INFO captured from a real TL3000-20 (44-byte payload: single-string words plus unknown tail)
 inline constexpr uint8_t kRespNormalInfoCaptured[] = {
     0xAA, 0x55, 0x00, 0x10, 0x01, 0x00, 0x11, 0x82, 0x2C, 0x01, 0x82, 0x01,
@@ -206,6 +226,33 @@ inline constexpr uint16_t kStatusCode     = 1;
 // `high * 65535` instead of `high * 65536`. Our value is high*0.1 kWh higher.
 inline constexpr double kEnergyTotalKwhReferenceBug = 18452.5;
 inline constexpr double kEnergyTotalExpectedDelta = 0.2;
+
+// The TLC8000 frame. Separate names rather than reusing the single-string ones:
+// a different device on a different layout, where a shared constant would hide a swap.
+namespace three_phase {
+inline constexpr double kTemperatureC   = 26.7;
+inline constexpr double kEnergyTodayKwh = 0.60;
+inline constexpr double kEnergyTotalKwh = 54803.3;
+inline constexpr double kPvVoltage1     = 506.5;
+inline constexpr double kPvCurrent1     = 0.2;
+inline constexpr double kPvVoltage2     = 361.8;
+inline constexpr double kPvCurrent2     = 2.2;
+inline constexpr double kAcPowerW       = 861.0;
+inline constexpr double kFrequencyHz    = 50.03;
+inline constexpr double kAcL1Voltage    = 235.9;
+inline constexpr double kAcL1Current    = 1.5;
+inline constexpr double kAcL2Voltage    = 236.8;
+inline constexpr double kAcL2Current    = 1.3;
+inline constexpr double kAcL3Voltage    = 235.3;
+inline constexpr double kAcL3Current    = 1.3;
+inline constexpr uint32_t kOperatingHours = 40963;
+inline constexpr uint16_t kStatusCode     = 1;
+// Only in kRespNormalInfoThreePhaseConstructed.
+inline constexpr double kTemperatureCConstructed = -0.1;
+inline constexpr uint32_t kOperatingHoursConstructed = 106499;
+inline constexpr double kAcL2CurrentConstructed = 2.0;
+inline constexpr double kAcL3CurrentConstructed = 3.0;
+}  // namespace three_phase
 }  // namespace expected
 
 inline constexpr const char* kExpectedSerial = "XH300060115506193600V610";

@@ -22,7 +22,17 @@ namespace heliograph::test {
 
 class FakeEversolarDevice {
 public:
-    enum class Payload { SingleString, DualString, Night, BadChecksum, BadLength };
+    enum class Payload {
+        SingleString,
+        DualString,
+        ThreePhase,
+        /// Same frame as a probe: sub-zero temperature, non-zero hours high word,
+        /// distinct L2/L3 currents. See the fixture's own note.
+        ThreePhaseConstructed,
+        Night,
+        BadChecksum,
+        BadLength,
+    };
 
     /// Off the bus entirely, as every solar inverter is after sunset.
     bool offline = false;
@@ -175,6 +185,14 @@ private:
                     break;
                 case Payload::DualString:
                     append(body, fixtures::kRespNormalInfoDual, fixtures::kRespNormalInfoDualLen);
+                    break;
+                case Payload::ThreePhase:
+                    append(body, fixtures::kRespNormalInfoThreePhase,
+                           fixtures::kRespNormalInfoThreePhaseLen);
+                    break;
+                case Payload::ThreePhaseConstructed:
+                    append(body, fixtures::kRespNormalInfoThreePhaseConstructed,
+                           fixtures::kRespNormalInfoThreePhaseConstructedLen);
                     break;
                 case Payload::Night:
                     append(body, fixtures::kRespNormalInfoNight, fixtures::kRespNormalInfoNightLen);

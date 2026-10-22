@@ -405,6 +405,109 @@ static void test_dc_power_is_marked_derived() {
     TEST_ASSERT_FALSE(state.measurements.find(measurement_id::kAcPowerTotal)->derived);
 }
 
+/// find() returns nullptr for a channel no driver declared. Dereferencing that takes the whole
+/// suite down with SIGSEGV at the first bad id, which hides every later result, so look it up
+/// through here instead and get one clean failure naming the channel.
+static const Measurement& channel(const MeasurementSet& m, const char* id) {
+    const Measurement* e = m.find(id);
+    TEST_ASSERT_NOT_NULL_MESSAGE(e, id);
+    return *e;
+}
+
+static void test_a_three_phase_payload_reaches_the_canonical_model() {
+    // The 48-byte TLC8000 frame, through the driver rather than the parser. Nothing asserted
+    // this before: every one of phaseCount, the four L2/L3 declarations and the four m.set()
+    // calls could be deleted with the whole suite still green, because no driver test ever
+    // sent a 48-byte payload. The parser being right is not the same as the values arriving.
+    Rig r;
+    r.begin();
+    r.device.payload = Payload::ThreePhase;
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+
+    namespace tp = fx::expected::three_phase;
+    const auto& m = state.measurements;
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL1Voltage, channel(m, measurement_id::kAcL1Voltage).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL1Current, channel(m, measurement_id::kAcL1Current).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL2Voltage, channel(m, measurement_id::kAcL2Voltage).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL2Current, channel(m, measurement_id::kAcL2Current).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL3Voltage, channel(m, measurement_id::kAcL3Voltage).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL3Current, channel(m, measurement_id::kAcL3Current).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcPowerW, channel(m, measurement_id::kAcPowerTotal).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kFrequencyHz, channel(m, measurement_id::kAcFrequency).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kEnergyTotalKwh, channel(m, measurement_id::kEnergyTotal).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kEnergyTodayKwh, channel(m, measurement_id::kEnergyToday).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kTemperatureC, channel(m, measurement_id::kTemperature).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kPvVoltage1, channel(m, measurement_id::kDcMppt1Voltage).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kPvCurrent1, channel(m, measurement_id::kDcMppt1Current).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kPvCurrent2, channel(m, measurement_id::kDcMppt2Current).value);
+    // Two words in this layout, high word zero, and nothing pinned it at any level before:
+    // shifting the index, dropping the high word or returning a constant all passed.
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, static_cast<double>(tp::kOperatingHours),
+                              channel(m, measurement_id::kOperatingHours).value);
+    TEST_ASSERT_EQUAL_UINT16(tp::kStatusCode, state.statusCode);
+
+
+    TEST_ASSERT_EQUAL_UINT8(3, state.capabilities.phaseCount);
+    // This frame carries two live strings, so the dual-MPPT path must come with it.
+    TEST_ASSERT_EQUAL_UINT8(2, state.capabilities.mpptCount);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kPvVoltage2,
+                              channel(m, measurement_id::kDcMppt2Voltage).value);
+}
+
+static void test_the_constructed_three_phase_probe_frame_decodes_through_the_driver() {
+    // Three things the real capture cannot distinguish from a wrong implementation, because
+    // its own values happen to agree with one: a temperature that is positive (so signed and
+    // unsigned read alike), an hours high word of zero (so dropping it reads alike), and
+    // 0x000D on both L2 and L3 current (so a swap is invisible). The probe frame changes
+    // exactly those three words. It pins the layout hypothesis, not a measurement.
+    Rig r;
+    r.begin();
+    r.device.payload = Payload::ThreePhaseConstructed;
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+
+    namespace tp = fx::expected::three_phase;
+    const auto& m = state.measurements;
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL1Current, channel(m, measurement_id::kAcL1Current).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL2CurrentConstructed,
+                              channel(m, measurement_id::kAcL2Current).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL3CurrentConstructed,
+                              channel(m, measurement_id::kAcL3Current).value);
+    // Sub-zero, so an unsigned read of this word would publish 6553.5 degC to Home Assistant.
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kTemperatureCConstructed,
+                              channel(m, measurement_id::kTemperature).value);
+    // High word 0x0001, so a read that drops it reports 40963 h instead of 106499 h.
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, static_cast<double>(tp::kOperatingHoursConstructed),
+                              channel(m, measurement_id::kOperatingHours).value);
+    // The voltages differ in the capture already; asserted here so a swap of the whole block
+    // cannot pass by moving currents and voltages together.
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL2Voltage, channel(m, measurement_id::kAcL2Voltage).value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, tp::kAcL3Voltage, channel(m, measurement_id::kAcL3Voltage).value);
+}
+
+static void test_a_payload_without_three_phases_never_claims_them() {
+    // The guard, not the body. Replacing `if (info.hasThreePhases)` with `if (true)` left the
+    // whole suite green, and that mutation has a TL3000-20 publishing phaseCount 3 with two
+    // phases that are declared and empty. Found by review of this commit, 2026-10-22.
+    for (Payload p : {Payload::SingleString, Payload::DualString}) {
+        Rig r;
+        r.begin();
+        r.device.payload = p;
+
+        DeviceState state;
+        TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(state));
+
+        TEST_ASSERT_EQUAL_UINT8(1, state.capabilities.phaseCount);
+        TEST_ASSERT_NULL(state.measurements.find(measurement_id::kAcL2Voltage));
+        TEST_ASSERT_NULL(state.measurements.find(measurement_id::kAcL2Current));
+        TEST_ASSERT_NULL(state.measurements.find(measurement_id::kAcL3Voltage));
+        TEST_ASSERT_NULL(state.measurements.find(measurement_id::kAcL3Current));
+    }
+}
+
 static void test_single_string_declares_no_second_mppt() {
     Rig r;
     r.begin();
@@ -930,6 +1033,9 @@ void run_eversolar_driver() {
     RUN_TEST(test_registration_recovers_a_registered_but_forgotten_inverter);
     RUN_TEST(test_poll_fills_the_canonical_model);
     RUN_TEST(test_dc_power_is_marked_derived);
+    RUN_TEST(test_a_three_phase_payload_reaches_the_canonical_model);
+    RUN_TEST(test_the_constructed_three_phase_probe_frame_decodes_through_the_driver);
+    RUN_TEST(test_a_payload_without_three_phases_never_claims_them);
     RUN_TEST(test_single_string_declares_no_second_mppt);
     RUN_TEST(test_dual_string_declares_the_second_mppt);
     RUN_TEST(test_status_text_does_not_invent_a_meaning);

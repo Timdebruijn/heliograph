@@ -71,6 +71,76 @@ SINGLE_STRING = words(
     1,  # 13 OP_MODE     meaning undocumented
 )
 
+# --- Three-phase payload (24 words / 48 bytes) -----------------------------------------
+#
+# Byte-for-byte the QUERY_NORMAL_INFO a Zeversolar TLC8000 answered with on 2026-10-20: 26.7
+# degC, 506.5 V / 0.2 A and 361.8 V / 2.2 A PV, 54803.3 kWh lifetime (matching its display),
+# 40963 h, 861 W, OP_MODE 1, 0.60 kWh today, then current/voltage per phase and five trailing
+# words of unknown meaning. The field order is its own: see docs/eversolar-protocol.md.
+THREE_PHASE = words(
+    0x010B,
+    0x13C9,
+    0x0E22,
+    0x0002,
+    0x0016,
+    0x0008,
+    0x5CC1,
+    0x0000,
+    0xA003,
+    0x035D,
+    0x0001,
+    0x003C,
+    0x000F,
+    0x0937,
+    0x138B,
+    0x000D,
+    0x0940,
+    0x000D,
+    0x0931,
+    0xFF00,
+    0x0000,
+    0x0000,
+    0x0064,
+    0x0000,
+)
+
+# The same payload turned into a probe frame. CONSTRUCTED, and the distinction matters: three
+# things in the real capture cannot be told apart from a wrong implementation, so this variant
+# changes exactly those three words and nothing else.
+#
+#   temperature  0xFFFF  (-0.1 degC)  the capture reads +26.7, so signed and unsigned agree
+#   hours high   0x0001  (106499 h)   the capture reads 0, so dropping the high word agrees
+#   L2/L3 curr   2.0 A / 3.0 A        the capture has 0x000D for both, so a swap is invisible
+#
+# It pins the layout hypothesis, not a measurement: no inverter has confirmed that word 15 is
+# L2 and word 17 is L3, nor that the hours are two words at 7 and 8.
+THREE_PHASE_CONSTRUCTED = words(
+    0xFFFF,
+    0x13C9,
+    0x0E22,
+    0x0002,
+    0x0016,
+    0x0008,
+    0x5CC1,
+    0x0001,
+    0xA003,
+    0x035D,
+    0x0001,
+    0x003C,
+    0x000F,
+    0x0937,
+    0x138B,
+    0x0014,
+    0x0940,
+    0x001E,
+    0x0931,
+    0xFF00,
+    0x0000,
+    0x0000,
+    0x0064,
+    0x0000,
+)
+
 # --- Dual-string payload (16 words / 32 bytes) -----------------------------------------
 # Note the different field order: IAC/VAC swap and PAC moves. Same physical values as the
 # single-string fixture so a layout mix-up in the parser shows up as wrong numbers.
@@ -180,6 +250,19 @@ FIXTURES: list[tuple[str, str, bytes]] = [
     # and FFFF. Neither 28 nor 32: the length-decides-layout hypothesis is hereby disproven,
     # and the reference making `strings` a config option finally makes sense -- it only ever
     # indexes words and ignores everything after.
+    (
+        "kRespNormalInfoThreePhase",
+        "Response: QUERY_NORMAL_INFO captured from a real Zeversolar TLC8000"
+        " (48-byte three-phase payload)",
+        response(0x11, 0x02, THREE_PHASE),
+    ),
+    (
+        "kRespNormalInfoThreePhaseConstructed",
+        "Response: the TLC8000 three-phase payload as a probe frame, with sub-zero temperature,"
+        " a non-zero hours high word and distinct L2/L3 currents"
+        " (CONSTRUCTED, see tools/gen_fixtures.py)",
+        response(0x11, 0x02, THREE_PHASE_CONSTRUCTED),
+    ),
     (
         "kRespNormalInfoCaptured",
         "Response: QUERY_NORMAL_INFO captured from a real TL3000-20"
@@ -332,6 +415,17 @@ def main() -> None:
         "kRespOfflineQueryCaptured drifted from the hardware capture"
     )
 
+    captured_three_phase = bytes.fromhex(
+        "aa 55 00 10 01 00 11 82 30 01 0b 13 c9 0e 22 00 02 00 16 00 08 5c c1 00 00 a0 03"
+        " 03 5d 00 01 00 3c 00 0f 09 37 13 8b 00 0d 09 40 00 0d 09 31 ff 00 00 00 00 00 00"
+        " 64 00 00 08 55".replace(" ", "")
+    )
+    assert {n: f for n, _, f in FIXTURES}[
+        "kRespNormalInfoThreePhase"
+    ] == captured_three_phase, (
+        "kRespNormalInfoThreePhase drifted from the hardware capture"
+    )
+
     captured_info = bytes.fromhex(
         "aa 55 00 10 01 00 11 82 2c 01 82 01 58 0d 88 00 14 00 1b 09 02 13 8b 02 8f ff ff"
         " 00 05 68 9b 00 00 b9 29 00 01 00 00 00 00 ff ff 00 00 00 00 00 00 ff 00 00 00"
@@ -397,6 +491,37 @@ def main() -> None:
     out.append(
         f"inline constexpr double kEnergyTotalExpectedDelta = {E_TOTAL_HI * 0.1:.1f};"
     )
+    out.append("")
+    out.append(
+        "// The TLC8000 frame. Separate names rather than reusing the single-string ones:"
+    )
+    out.append(
+        "// a different device on a different layout, where a shared constant would hide a swap."
+    )
+    out.append("namespace three_phase {")
+    out.append("inline constexpr double kTemperatureC   = 26.7;")
+    out.append("inline constexpr double kEnergyTodayKwh = 0.60;")
+    out.append("inline constexpr double kEnergyTotalKwh = 54803.3;")
+    out.append("inline constexpr double kPvVoltage1     = 506.5;")
+    out.append("inline constexpr double kPvCurrent1     = 0.2;")
+    out.append("inline constexpr double kPvVoltage2     = 361.8;")
+    out.append("inline constexpr double kPvCurrent2     = 2.2;")
+    out.append("inline constexpr double kAcPowerW       = 861.0;")
+    out.append("inline constexpr double kFrequencyHz    = 50.03;")
+    out.append("inline constexpr double kAcL1Voltage    = 235.9;")
+    out.append("inline constexpr double kAcL1Current    = 1.5;")
+    out.append("inline constexpr double kAcL2Voltage    = 236.8;")
+    out.append("inline constexpr double kAcL2Current    = 1.3;")
+    out.append("inline constexpr double kAcL3Voltage    = 235.3;")
+    out.append("inline constexpr double kAcL3Current    = 1.3;")
+    out.append("inline constexpr uint32_t kOperatingHours = 40963;")
+    out.append("inline constexpr uint16_t kStatusCode     = 1;")
+    out.append("// Only in kRespNormalInfoThreePhaseConstructed.")
+    out.append("inline constexpr double kTemperatureCConstructed = -0.1;")
+    out.append("inline constexpr uint32_t kOperatingHoursConstructed = 106499;")
+    out.append("inline constexpr double kAcL2CurrentConstructed = 2.0;")
+    out.append("inline constexpr double kAcL3CurrentConstructed = 3.0;")
+    out.append("}  // namespace three_phase")
     out.append("}  // namespace expected")
     out.append("")
     out.append(
