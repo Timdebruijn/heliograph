@@ -919,6 +919,39 @@ static void test_a_string_not_read_this_poll_withdraws_the_total_rather_than_shr
     const auto* total = m.find(measurement_id::kDcPowerTotal);
     TEST_ASSERT_NOT_NULL(total);
     TEST_ASSERT_FALSE(total->valid);
+
+    // And back: the next full poll publishes the new sum again.
+    setReg(blocks[1], 186, 300);
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 3, m, 3000);
+    TEST_ASSERT_TRUE(total->valid);
+    TEST_ASSERT_EQUAL_DOUBLE(1100.0, total->value);
+    TEST_ASSERT_EQUAL_UINT64(3000, total->timestampMs);
+}
+
+// The case the per-string timestamp check exists for: one string fresh, the other left over
+// from the previous poll. Both are valid, and their sum is a number that never happened.
+static void test_one_fresh_string_and_one_stale_one_publish_no_total() {
+    const DeviceProfile& deye = *findProfile("deye_sun_xk_sg");
+    std::vector<RegisterMapping> mappings(deye.mappings, deye.mappings + deye.mappingCount);
+    for (RegisterMapping& mp : mappings) {
+        if (std::strcmp(mp.measurementId, measurement_id::kDcMppt2Power) == 0) {
+            mp.address = 100;  // string 2 moved into the first block, string 1 stays at 186
+        }
+    }
+    DeviceProfile split = deye;
+    split.mappings      = mappings.data();
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+    setReg(blocks[1], 186, 1200);
+    setReg(blocks[0], 100, 800);
+
+    MeasurementSet m;
+    applyProfile(split, blocks, 3, m, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(2000.0, m.find(measurement_id::kDcPowerTotal)->value);
+    applyProfile(split, blocks, 1, m, 2000);  // only string 2's block came back
+
+    TEST_ASSERT_TRUE(m.find(measurement_id::kDcMppt1Power)->valid);  // stale, not invalid
+    TEST_ASSERT_FALSE(m.find(measurement_id::kDcPowerTotal)->valid);
 }
 
 static void test_strings_that_were_never_read_declare_no_total() {
@@ -1072,7 +1105,9 @@ static void test_the_deye_profile_publishes_nothing_it_could_not_source() {
     TEST_ASSERT_NULL(m.find(measurement_id::kGridExportPower));
     TEST_ASSERT_NULL(m.find(measurement_id::kTemperature));   // 90/91: sources disagree which
     // No whole-array register: dc.power.total here is the derived sum, pinned elsewhere.
-    TEST_ASSERT_TRUE(m.find(measurement_id::kDcPowerTotal)->derived);
+    const auto* total = m.find(measurement_id::kDcPowerTotal);
+    TEST_ASSERT_NOT_NULL(total);
+    TEST_ASSERT_TRUE(total->derived);
     TEST_ASSERT_NULL(m.find(measurement_id::kDcMppt3Power));  // third string: one source only
 }
 
@@ -2274,6 +2309,7 @@ int main(int, char**) {
     RUN_TEST(test_soc_is_decoded_as_a_plain_percent);
     RUN_TEST(test_pv_total_is_summed_from_the_strings_when_the_profile_has_none);
     RUN_TEST(test_a_string_not_read_this_poll_withdraws_the_total_rather_than_shrinking_it);
+    RUN_TEST(test_one_fresh_string_and_one_stale_one_publish_no_total);
     RUN_TEST(test_strings_that_were_never_read_declare_no_total);
     RUN_TEST(test_a_total_the_device_reports_is_never_overruled);
     RUN_TEST(test_no_total_when_the_profile_maps_fewer_strings_than_it_declares);

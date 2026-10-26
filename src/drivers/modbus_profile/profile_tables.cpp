@@ -12,6 +12,8 @@ namespace heliograph::profile {
 namespace {
 
 /// Per-string PV power, in the order the canonical model numbers the strings.
+/// ponytail: five, because the canonical model names five. A profile with mppts > 5 never
+/// derives a total; add the ids here when the model grows.
 constexpr const char* kStringPower[] = {
     measurement_id::kDcMppt1Power, measurement_id::kDcMppt2Power, measurement_id::kDcMppt3Power,
     measurement_id::kDcMppt4Power, measurement_id::kDcMppt5Power,
