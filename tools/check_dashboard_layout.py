@@ -671,7 +671,6 @@ def _copy_repeat_js() -> str:
         "(function(){\n"
         "const fail=[];const say=m=>fail.push(m);\n"
         "Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined});\n"
-        "Object.defineProperty(window,'isSecureContext',{configurable:true,value:false});\n"
         "document.execCommand=()=>true;\n"
         "setTimeout(()=>{\n"
         "  let btn=null;\n"
@@ -699,10 +698,9 @@ def copy_js(case: str) -> str:
                the only non-HTTPS origin that counts as one is localhost, never a LAN address.
     "denied"   a secure context that refuses the write, as Chrome does when the document is not
                focused. The only path that reaches the promise's rejection handler.
-    "exposed"  a browser that exposes the API outside a secure context and then rejects. The
-               Clipboard API is [SecureContext], so this may well not exist in the wild; it is
-               kept because it is the only thing that can tell the isSecureContext guard from
-               its absence, and it is labelled rather than dressed up as a named browser.
+    "shim"     something assigned navigator.clipboard on an insecure origin and its writeText
+               throws, as a polyfill or an extension can. Not a browser; the only world that
+               reaches the try in copyText, and the reason that try exists.
     "noexec"   the fallback runs and execCommand returns false.
     "throws"   the fallback runs and execCommand throws, as it can in a sandboxed frame.
     "repeat"   plain HTTP, clicked twice inside the two seconds before the label is restored.
@@ -712,16 +710,23 @@ def copy_js(case: str) -> str:
     behind in the DOM, the caret is not abandoned in the scratch textarea, and both buttons
     respond rather than only the one a test happens to click.
     """
-    secure = case in ("https", "denied")
-    if case in ("http", "repeat"):
-        clipboard = "value:undefined"
-    elif case == "https":
+    # Which clipboard stub is installed IS the world: the API being present is what a secure
+    # context means, and the page reads nothing else to decide. Spelled out per case rather
+    # than falling through an else -- noexec and throws used to land on the rejecting stub and
+    # nobody noticed, because an isSecureContext guard meant it was never called.
+    if case == "https":
         clipboard = "value:{writeText:t=>{api.push(t.length);return Promise.resolve()}}"
-    else:
+    elif case == "denied":
         clipboard = (
             "value:{writeText:t=>{api.push(t.length);"
             "return Promise.reject(new Error('refused'))}}"
         )
+    elif case == "shim":
+        # Synchronously, not a rejected promise. A shim returning a value with no .then throws
+        # in the same place for the same reason, so one world covers both.
+        clipboard = "value:{writeText:t=>{api.push(t.length);throw new Error('shim')}}"
+    else:  # http, noexec, throws: no API at all, as on every bridge
+        clipboard = "value:undefined"
     if case == "throws":
         settle = "throw new Error('blocked')"
     elif case == "noexec":
@@ -776,12 +781,9 @@ def copy_js(case: str) -> str:
             "if(!/^TEXTAREA:[1-9]/.test(sel[0]||''))"
             "say('nothing was selected to copy: '+JSON.stringify(sel));",
         ]
-        if case == "exposed":
-            # The guard's entire job: outside a secure context the API is not even tried, so no
-            # rejected promise reaches the console on every click. Nothing else can tell the
-            # guard from its absence, because the rejection handler falls back too.
+        if case == "shim":
             checks.append(
-                "if(api.length)say('an insecure origin still tried the clipboard API');"
+                "if(api.length===0)say('the shim was never called, so the try was not entered');"
             )
         else:
             checks.append(
@@ -797,7 +799,6 @@ def copy_js(case: str) -> str:
         "Object.defineProperty(navigator,'clipboard',{configurable:true,"
         + clipboard
         + "});\n"
-        f"Object.defineProperty(window,'isSecureContext',{{configurable:true,value:{str(secure).lower()}}});\n"
         + stub
         + "\nconst pick=label=>{for(const name of TABS){goTab(name);\n"
         "  const b=[...document.querySelectorAll('button')]"
@@ -1031,11 +1032,11 @@ def main() -> int:
 
         for case, label in (
             ("http", "plain HTTP, no clipboard API"),
-            ("exposed", "an insecure origin that exposes a rejecting API"),
             ("https", "a secure context"),
             ("denied", "a secure context that refuses the write"),
             ("noexec", "plain HTTP where the copy returns false"),
             ("throws", "plain HTTP where the copy throws"),
+            ("shim", "a clipboard shim whose writeText throws"),
             ("repeat", "plain HTTP, clicked twice in quick succession"),
         ):
             page = build_page(stripped, stub, "{soc:68,power:-1240}", copy_js(case))

@@ -1189,6 +1189,10 @@ async function setLogLevel(level){
 // browsers count as one is localhost -- never a LAN address. Every bridge is reached by IP over
 // plain HTTP, so this used to report failure on every device while working on a developer's
 // desk, which is exactly why it shipped. The selection fallback is the path that actually runs.
+//
+// There is no isSecureContext test here: the API is [SecureContext], so the property existing
+// IS the secure-context test. Measured on Chrome and on Firefox at http://<lan-ip>/, where both
+// report `typeof navigator.clipboard === 'undefined'`.
 function copyText(text,btn){
   const done=ok=>{
     if(!btn)return;
@@ -1199,9 +1203,16 @@ function copyText(text,btn){
     btn.textContent=ok?'Copied':'Could not copy — select it by hand';
     setTimeout(()=>{btn.textContent=btn.dataset.idle},2000);
   };
-  if(navigator.clipboard&&window.isSecureContext){
-    navigator.clipboard.writeText(text).then(()=>done(true),()=>done(copyBySelection(text)));
-    return;
+  if(navigator.clipboard){
+    // The try is for something that assigned the property anyway -- a polyfill, an extension,
+    // a webview shim. Such a thing can throw, or return a value with no .then, and BOTH throw
+    // synchronously right here. Either one would otherwise escape the click handler and leave
+    // the button saying nothing at all, which is the one outcome this function exists to
+    // prevent. An async rejection is handled below, as a real refusal is.
+    try{
+      navigator.clipboard.writeText(text).then(()=>done(true),()=>done(copyBySelection(text)));
+      return;
+    }catch(e){ /* fall through to the selection copy */ }
   }
   done(copyBySelection(text));
 }
@@ -1229,7 +1240,7 @@ function copyBySelection(text){
     return false;
   }finally{
     if(ta)ta.remove();
-    if(had&&had.focus)had.focus();
+    if(had)had.focus();
   }
 }
 function copyForIssue(btn){
