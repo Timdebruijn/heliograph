@@ -117,9 +117,11 @@ and the dashboard report `stable` for a TLC8000 too.
 
 Those eleven are where most inverter brands live, and the shipped maps are the part of this
 project with the least evidence behind them. The driver that reads them has met real hardware,
-though — with a map somebody wrote for their own inverter.
+though — with a map somebody wrote for their own inverter. That is why its row says both
+Experimental and yes: a grade is earned by what ships, and that map is not in this repository
+yet.
 
-**Experimental** means implemented from documentation. It may simply not work. If you run it,
+**Experimental** means nothing shipped has been confirmed on hardware. It may simply not work. If you run it,
 you are the first.
 **Beta** means a real inverter has answered it, and it has not yet run unattended long enough to
 be called anything more.
