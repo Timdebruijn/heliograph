@@ -1,558 +1,207 @@
 # Heliograph
 
-> A heliograph signalled messages with sunlight. This one translates what your solar
-> inverter is saying into languages the rest of your network speaks.
+**Read your solar inverter over RS485 and publish it locally — Home Assistant, MQTT, Modbus TCP,
+REST and Prometheus, all at once. One ESP32 board, roughly €20–30, no cloud anywhere in the
+path.**
 
-<p align="center">
-  <a href="https://github.com/Timdebruijn/heliograph/releases/latest"><img src="https://img.shields.io/github/v/release/Timdebruijn/heliograph?sort=semver&color=brightgreen" alt="Latest release"></a>
-  <a href="https://github.com/Timdebruijn/heliograph/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Timdebruijn/heliograph/ci.yml?branch=main&label=CI" alt="CI status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/runs%20on-ESP32--S3-informational" alt="Runs on ESP32-S3">
-</p>
+![The built-in dashboard, reading a 2014 EverSolar over RS485](docs/images/live.png)
 
-**Your solar inverter, finally yours.** Whether it is fifteen years old and abandoned by its
-manufacturer or fresh out of the box, Heliograph is open-source firmware for a small, cheap box
-that sits next to it and speaks its native protocol. It **reads** the inverter and hands the
-data to whatever you already use — **Home Assistant, MQTT, Modbus TCP, a REST/JSON API, or
-Prometheus** — and on the relay boards it can also **turn the inverter down** when you want it
-to produce less. New Modbus inverters go in as a **TOML data file** — no C++, no firmware fork.
-It runs entirely on your own network. No account, no cloud, no subscription.
-
-<p align="center">
-  <a href="https://timdebruijn.github.io/heliograph/"><strong>⚡ Flash it from your browser — nothing to install →</strong></a>
-</p>
-
-<p align="center">
-  <img src="docs/images/live.png" width="480" alt="Heliograph's built-in web dashboard showing live production from a long-unsupported EverSolar inverter">
-  <br>
-  <em>The built-in dashboard — a long-unsupported EverSolar read live over RS485, with no cloud and no app in between.</em>
-</p>
+> **Before anything else, check [the inverter table](#does-it-work-with-my-inverter).** Most of
+> it says *never met a device*. That is not modesty — it is the only number on this page that
+> decides whether this is worth your evening.
 
 ---
 
-## The problem
+## Why it exists
 
-Solar inverters are built to last twenty years. The software around them is not.
+The portal was shut down, the app stopped working, or the dongle is no longer supported. The
+inverter still produces perfectly; you just cannot see it any more. Heliograph exists because of
+an EverSolar that outlived its own monitoring portal.
 
-- **The manufacturer's monitoring died.** The portal was shut down, the app stopped working,
-  or the monitoring dongle is no longer supported. The inverter still produces perfectly —
-  you just cannot see it any more. Heliograph exists because of an EverSolar that
-  outlived its own monitoring portal.
-- **Your data goes to their cloud first.** Production figures from equipment in your own
-  home travel to a manufacturer's server, come back minutes later, and vanish when your
-  internet does. You cannot query yesterday's output without asking someone else's website.
-- **It does not talk to anything you own.** No MQTT, no Modbus, no API — so the numbers
-  never reach Home Assistant, your dashboards, or your own monitoring.
-- **You cannot turn it down when you need to.** With negative electricity prices or a
-  feed-in limit, you may want the inverter to produce less. Most consumer inverters offer no
-  way to do that locally.
+Reading the inverter over its own RS485 port removes the vendor from the path: no account, no
+portal, no dongle firmware that can decide to stop answering. **It does not make you immune to a
+vendor changing what that port does.** Nothing can promise that, and anyone who does is guessing.
 
-Heliograph addresses the first three for the inverters it supports, and the fourth on the
-relay boards (see [Curtailment](#curtailment-turning-the-inverter-down)).
+Four things people keep running into, and where this lands on each:
+
+| What happens | Where this helps |
+|---|---|
+| A firmware update quietly removes local access. Reported on Solax, SolarEdge, Huawei, Deye, Solarman sticks, APsystems, Enphase. | RS485 is a different door from the dongle or the API. If the vendor closes that door too, this stops working as well. |
+| The cloud is slow, rate-limited, or locks you out. One Growatt owner: *"I have been banned for 24 hours."* | No account to ban. Polls every 10 s by default. |
+| The vendor disappears. Omnik went bankrupt; `solaredge_modbus` was archived in May 2026 with no successor. | MIT, self-hosted, no server to switch off. |
+| Readings are silently wrong, and nobody can tell you whether the register map is right. | Every map says how far it has been proven. See below. |
+
+---
 
 ## What it does
 
-### It reads your inverter
+Reads the inverter over RS485 and serves the same decoded data four ways at the same time:
+**MQTT** with Home Assistant discovery, a **Modbus TCP server**, a **REST API**, and
+**Prometheus**. It has its own dashboard on the board, so there is nothing else to install to
+see whether it works.
 
-Heliograph speaks your inverter's native protocol over RS485, converts everything into one
-common set of measurements, and republishes that.
+Polling is **every 10 seconds by default**, configurable from 1 to 3600. A poll takes about
+103 ms. That is faster than a cloud that lags five to fifteen minutes, and it is still a poll
+and not a live feed.
 
-> **Four words that appear throughout this page.** You do not need to understand them to follow
-> the setup, but they stop being mysterious once someone says them plainly:
->
-> - **RS485** — a two-wire electrical standard for sending data over a long cable, used by
->   nearly every inverter's communication port. It is wiring, not software: two data wires and
->   a ground, and several devices may share one pair.
-> - **Modbus RTU** — the most common *language* spoken over those wires. "RTU" here just means
->   the serial-cable flavour. Not to be confused with **Modbus TCP**, which is the same language
->   over your *network*, and is one of the things Heliograph offers to your own tooling. Your
->   inverter side is RTU; the port-502 side is TCP. They are not the same wires.
-> - **Unit id** — the number that identifies one device on a shared RS485 cable, so that two
->   inverters on one pair can be told apart. Most ship as 1; some vendors ship something else,
->   and the table below says so where it matters.
-> - **MPPT** — *maximum power point tracker*: one of the inverter's independent solar inputs.
->   An inverter with two MPPTs has two strings of panels it optimises separately, which is why
->   readings come per tracker.
+It speaks more than one wire protocol, which is unusual on an ESP32. Two of them are not Modbus
+at all — EverSolar/Zeversolar's own PMU framing, and SolarMax's MaxTalk ASCII. Alongside those it
+reads SunSpec and plain Modbus RTU with eleven device profiles. A discovery mode probes an
+unknown RS485 bus and works out which family is on it.
 
-```mermaid
-flowchart LR
-    INV["☀️ Your inverter<br><i>any age, any brand<br>this project supports</i>"]
-    subgraph home["Your own network — no account, no cloud, no subscription"]
-        direction TB
-        BR["<b>Heliograph</b><br>ESP32-S3 + RS485<br><i>a small box next to the inverter</i>"]
-        HA["🏠 Home Assistant"]
-        TOOLS["📊 Grafana · Prometheus<br>Node-RED · your own scripts"]
-    end
-    INV -- "RS485<br>two data wires + ground" --> BR
-    BR -- "MQTT auto-discovery<br>entities appear by themselves" --> HA
-    BR -- "Modbus TCP · REST/JSON · /metrics" --> TOOLS
-    style BR fill:#e8f4ea,stroke:#2d7a3e,stroke-width:2px
-    style INV fill:#fff8e1,stroke:#b8860b
-```
-
-Everything in that box stays in your house. The inverter's own cloud, if it still has one, is not
-in the picture — and neither is ours, because there isn't one.
-
-Where it puts the data:
-
-| Integration | How |
-|---|---|
-| **Home Assistant** | MQTT with auto-discovery — entities appear on their own |
-| **MQTT** | Any broker, your own topics |
-| **Modbus TCP** | Port 502, for building/industrial tooling — and [several clients at once](docs/modbus-register-map.md#one-master-many-readers), which the inverter itself cannot do |
-| **REST / JSON** | `/api/v1/` — see [docs/rest-api.md](docs/rest-api.md) |
-| **Prometheus** | `/metrics` — see [docs/prometheus.md](docs/prometheus.md); also readable by Zabbix and Checkmk |
-| **Web dashboard** | Built into the device; works with no internet at all |
-
-<p align="center">
-  <img src="docs/images/inverters.png" width="420" alt="The Inverters tab listing each inverter's identity, capabilities and every live measurement">
-  <br>
-  <em>Everything the inverter reports collapses into one canonical model — which is why the same values reach Home Assistant, MQTT, Modbus, REST and Prometheus without any per-output glue.</em>
-</p>
-
-### And it can turn your inverter down
-
-On the relay boards, Heliograph drives the **DRM input** that many inverters carry — the
-demand-response terminals an energy company would otherwise use — so you can cut or step down
-production during negative electricity prices or under a feed-in limit. You control it from
-Home Assistant, MQTT or the API, like any other switch.
-
-This matters most precisely where the reading side is limited: for an inverter that exposes no
-way to write a power limit over RS485, a DRM contact is often the **only** control path that
-exists. It is the one thing here that acts rather than observes, so it ships switched off,
-behind two independent gates, and fails safe by design — details in
-[Curtailment](#curtailment-turning-the-inverter-down).
-
-### And you can teach it a new inverter
-
-Most Modbus inverters can be added **without touching C++**. A driver is a TOML file listing
-the registers and their scaling, compiled into the firmware at build time — if you can read
-the register table in your inverter's manual, you can write one. Every integration above then
-works for it for free, because outputs only ever see the canonical measurements, never the
-raw protocol. There is even a probe script for reading a device you have in front of you.
-
-Full walkthrough: [docs/adding-a-device.md](docs/adding-a-device.md).
+![Finding and naming what is on the bus](docs/images/inverters.png)
 
 ---
 
-## Which inverters work today?
+## Does it work with my inverter?
 
-**Start here** — this is the question that decides whether the rest is worth your time. One
-inverter family is in daily production use; several more are implemented and waiting for their
-first real-world confirmation. And if yours is not on the list yet, you are not stuck: adding a
-Modbus inverter is a data file, not a code change (see
-[Help support your own inverter](#help-support-your-own-inverter)). The honest, per-family
-picture:
+Probably not yet, and nobody should tell you otherwise from a README.
 
-| Inverter family | Connection | Status |
+This table does not count how many inverters are *supported*. It counts how many have been seen
+working, which is two.
+
+An inverter is reached in one of two ways. A **driver** is hand-written code for one protocol
+family. A **profile** is a Modbus register map written as data — a table of addresses, scales and
+units — read by the one Modbus driver. The two are graded separately, because they fail
+differently: a driver gets the framing wrong, a profile gets the meaning of register 33079 wrong.
+
+**Drivers**
+
+| Driver | Status | Has a real device ever answered it? |
 |---|---|---|
-| EverSolar / Zeversolar legacy (TL series, single phase) | RS485 | **Stable** — the only driver at this level. Running in production and validated over **eight consecutive unassisted sunrises**, the transition where its one known bug lived. Several inverters on one loop are supported but **not yet confirmed on hardware** — read [the pitfalls](docs/eversolar-protocol.md#several-inverters-on-one-bus) first, and report what happens on [#82](https://github.com/Timdebruijn/heliograph/issues/82) |
-| Zeversolar TLC series (TLC8000, three phase) | RS485 | **Beta** — same driver, different payload, and the first inverter here confirmed on hardware nobody in this project owns. Contributed and validated on his own TLC8000 by [@Thomvanoorschot](https://github.com/Thomvanoorschot) in [#224](https://github.com/Timdebruijn/heliograph/pull/224): it registers within seconds of boot, polls without failures, and every channel reaches Home Assistant. Its lifetime-energy reading was checked against the inverter's own display, and DC against AC came out at a plausible 96% conversion. Beta rather than Stable because it has not run unattended across sunrises yet, the operating-hours word has never been compared with anything, and which of the two per-phase **current** registers is L2 rests on the layout rather than on a measurement: both read the same value in the only capture that exists, so no reading distinguishes them. All six per-phase registers are placed by position; the currents are the pair that cannot even be told apart from each other. A regression would be caught — the tests pin the mapping with a deliberately constructed frame — but which register is L2 remains a hypothesis for the voltages too. See [docs/eversolar-protocol.md](docs/eversolar-protocol.md) |
-| Growatt SPH hybrid (3–6 kW) | Modbus RTU over RS485 | **Experimental** — register map transcribed from documentation, not yet confirmed against real hardware |
-| Growatt MIC TL-X (0.6–3.3 kW, single phase) | Modbus RTU over RS485 | **Experimental** — map cross-checked against two independent sources that agree, not yet confirmed against real hardware; see [docs/growatt-mic-tl-x-protocol.md](docs/growatt-mic-tl-x-protocol.md) |
-| Growatt MIN TL-X (2.5–6 kW, single phase) | Modbus RTU over RS485 | **Experimental** — same register layout as the MIC, with a second PV string; separate profile because the tracker count differs. Not yet confirmed against real hardware; see [docs/growatt-mic-tl-x-protocol.md](docs/growatt-mic-tl-x-protocol.md) |
-| Deye / Sunsynk SUN-xK-SG hybrid (single phase) | Modbus RTU over RS485 | **Experimental** — every mapped row corroborated by two independent implementations that agree, not yet confirmed against real hardware. Battery power, grid frequency and inverter temperature are deliberately **not** published until a bench session settles them; see [docs/deye-sun-xk-sg-protocol.md](docs/deye-sun-xk-sg-protocol.md) |
-| Solis / Ginlong RHI hybrid (3–6 kW, single phase) | Modbus RTU over RS485 | **Experimental** — every mapped row corroborated by two independent implementations that agree, not yet confirmed against real hardware. Battery power needs a direction register this schema cannot combine, and the two sources disagree on meter power by a factor of 1000, so neither is published; see [docs/solis-rhi-protocol.md](docs/solis-rhi-protocol.md) |
-| Solis / Ginlong S6-EH3P hybrid (5–10 kW, three phase) | Modbus RTU over RS485 | **Experimental** — 25 channels corroborated by two independent implementations that agree; no S6 has answered it. Three phases, four strings. Grid power is left out because only one source states which direction is positive, and that is the one reading that would unlock it; see [docs/solis-s6-eh3p-protocol.md](docs/solis-s6-eh3p-protocol.md) |
-| Sungrow SH residential hybrid | Modbus RTU over RS485 | **Experimental**, and the best-sourced map here — rows come from Sungrow's own protocol specification, cross-checked register by register against a widely deployed integration. Not yet confirmed against real hardware; see [docs/sungrow-sh-protocol.md](docs/sungrow-sh-protocol.md) |
-| Huawei SUN2000 (residential, ± LUNA2000) | Modbus RTU over RS485 | **Experimental, single-sourced** — transcribed from one mature library implementing Huawei's published interface, *not* cross-checked against the vendor document itself. Not SunSpec. See [docs/huawei-sun2000-protocol.md](docs/huawei-sun2000-protocol.md) |
-| GoodWe ET / EH / BT / BH hybrid | Modbus RTU over RS485 | **Experimental, single-sourced, read-only** — the public vendor protocol document is titled "Read Only", so no setpoints are declared at all. **Set `unit_id` to 247**: GoodWe ships this family at 247, not 1, and a wrong address looks exactly like a wiring fault. See [docs/goodwe-et-protocol.md](docs/goodwe-et-protocol.md) |
-| SolaX X1 series (X1 Mini G1/G2/G3) | RS485 | **Experimental** — the first attempt on real hardware (an X1-Mini-G1) returned no data at all. Read [docs/solax-x1-protocol.md](docs/solax-x1-protocol.md) before you buy or wire anything |
-| Sofar Solar HYD 3…6K-EP (single phase, hybrid) | Modbus RTU over RS485 | **Experimental, but two-sourced** — sixteen of its twenty registers agreed by the vendor protocol document and an independent configuration published as working on a real HYD-3600-EP; the energy counters, grid power and house load are vendor-only. Grid power is mapped with a **negative scale** — the vendor counts export positive where we count import positive. See [docs/sofar-hyd-protocol.md](docs/sofar-hyd-protocol.md) |
-| Sofar Solar HYD 5…20K-3PH (three phase, hybrid) | Modbus RTU over RS485 | **Experimental** — shares the EP map and adds phases L2/L3. Most of what it shares is two-sourced; **eight rows are vendor-document only** — the four L2/L3 registers, both energy counters, grid power and house load — the phases because the hardware behind the second source is single-phase. See [docs/sofar-hyd-protocol.md](docs/sofar-hyd-protocol.md) |
-| SolarMax (S / C / MT / TS series) | RS485 (MaxTalk, not Modbus) | **Experimental** — the vendor went bankrupt and took its portal with it, so this is the only way these units report anything. Framing agreed by two independent sources; several scale factors rest on one, and **DC voltage is deliberately not published** because the two disagree. No SolarMax has ever answered this driver — see [docs/solarmax-protocol.md](docs/solarmax-protocol.md) |
-| Any inverter implementing **SunSpec** | Modbus RTU over RS485 | **Experimental** — one generic driver for the published standard, so no per-vendor file is needed. Not yet confirmed against any physical device; see [docs/sunspec.md](docs/sunspec.md) for which vendors are worth trying |
+| EverSolar / Zeversolar **TL** series (PMU framing, not Modbus) | **Stable**, for that model | Yes — a TL3000-20, the author's own, in production |
+| Same driver, Zeversolar **TLC** series (three-phase) | **Beta** | Yes — one TLC8000, on a contributor's hardware, not the author's |
+| SunSpec | Experimental | No |
+| SolarMax (MaxTalk ASCII, not Modbus) | Experimental | No |
+| SolaX X1 | Experimental | One field attempt. It returned zero bytes. |
 
-What the labels mean, weakest first:
+**Modbus profiles** — Deye, GoodWe, Growatt (×3), Huawei, Sofar (×2), Solis (×2), Sungrow
 
-- **Experimental** — the protocol has been implemented from documentation, but nobody has
-  confirmed it against that inverter yet. It may simply not work. You would be the first.
-- **Beta** — confirmed against a real inverter, running, still collecting evidence before
-  being called Stable. The Zeversolar TLC8000 sits here, on someone else's hardware.
-- **Stable** — validated and soak-tested on real hardware over a long enough run to trust it
-  unattended. One driver has reached this, and only for the model it was proven on: the labels
-  above describe a driver-and-inverter pair, not the driver alone. The same EverSolar driver is
-  Stable on a TL3000-20 and Beta on a TLC8000, while the REST API reports one level per driver
-  rather than per device: it serves the driver's own declared level, `stable`, for both of them.
+| | |
+|---|---|
+| Status | Experimental, all eleven |
+| Have any of them met a device? | **No. Zero of eleven.** |
 
-The same three words apply to the **register map** you pick, separately from the driver that
-reads it. One driver serves every Modbus inverter here, so its label can only ever describe the
-least-proven map in the build — the map's own status is shown next to it when you choose one,
-and in [the coverage matrix](docs/drivers/coverage.md). **Every Modbus map here is
-Experimental**, including those for inverters this project has running: what has been proven
-there is the plumbing, not the register table.
+Those eleven are where most inverter brands live, and they are the part of this project with the
+least evidence behind it. The two inverters that have answered are both EverSolar, through the
+driver in the first table.
 
-Two more things to check on your own inverter:
+**Experimental** means implemented from documentation. It may simply not work. If you run it,
+you are the first.
+**Beta** means a real inverter has answered it, and it has not yet run unattended long enough to
+be called anything more.
+**Stable** means validated and soak-tested on hardware. The label belongs to a driver *and* an
+inverter, not to a driver alone.
 
-1. **Does it have an accessible communication port?** Usually a screw terminal marked
-   RS485/COM, or an RJ45 socket. It must be reachable from outside — you should never need
-   to open the inverter.
-2. **Is that port free?** If a manufacturer's WiFi dongle is plugged into the port you need,
-   it may have to come out. On some models the dongle sits on a separate port and both can
-   stay; on others it does not.
+What Experimental looks like in practice: the one outside tester who reported back had a
+three-phase Deye SG05, and the bundled profile returned no readings until he wrote his own
+driver.
 
-**Not in the table?** That does not have to be the end of it — see
-[Help support your own inverter](#help-support-your-own-inverter). Adding a Modbus inverter
-is a data file, not programming.
+### How a register map earns its grade
+
+A map copied out of a vendor PDF is not a map a device has answered. Vendor documentation is
+sometimes only partly accurate, and a reading that is valid but wrong is the failure that goes
+unnoticed for months.
+
+So each profile records where every row came from, and is graded by how many independent sources
+agree on it. Two agreeing sources is still not a device confirming — it is a better guess, and it
+is labelled as one. Eleven profiles, 197 read registers, 8 write rows, nothing verified against
+hardware. [`docs/drivers/coverage.md`](docs/drivers/coverage.md) has it row by row.
+
+No inverter firmware version is named as tested anywhere in this project. Do not read that
+absence as "all of them".
 
 ---
 
-## Before you start: what you are getting into
+## Who this is for
 
-**Read this properly. Heliograph is a do-it-yourself project.**
+- You have an inverter with an RS485 port, and a vendor cloud you would rather not depend on.
+- You run Home Assistant, Prometheus, or something that speaks Modbus TCP.
+- You can live with a project where your inverter has probably never been tried.
 
-- You will be connecting two or three wires to your inverter's **communication port**. That
-  is low-voltage data wiring — **not** mains, and **not** the DC side of your panels.
-- Everything described here uses **external ports only**. You should never open the
-  inverter's enclosure. If a guide ever tells you to, stop.
-- Your inverter is still equipment connected to the grid. **If you are not comfortable
-  working around it, ask a qualified installer.** There is no shame in that, and it is far
-  cheaper than the alternative.
-- Always follow **your inverter's own manual** for what its connector pins do. Pinouts differ
-  between models and even between generations of the same model. Never assume.
-- Interfering with a communication port can, on some models, affect warranty or the
-  manufacturer's monitoring. Check before you commit.
-- Heliograph is provided under the MIT licence: **no warranty, at your own risk**. With the
-  settings it ships with it cannot act on your inverter at all: `security.read_only_mode` is
-  on by default and refuses every command. That flag is the guarantee, not an absence of
-  capability — see [docs/security.md](docs/security.md).
+## Who it is not for
+
+- Anyone whose inverter has no RS485 connection. Some are WiFi-only, and there is nothing here
+  for them.
+- Anyone who needs a control path they can rely on today. See below.
+- Anyone who needs authentication on the data outputs.
 
 ---
 
-## Getting started
+## Where it stops
 
-### 1. Get the hardware
-
-You need one ESP32-S3 board with an RS485 port. Pick based on whether you also want
-curtailment:
-
-| Board | Buy | Docs | What it adds | Status |
-|---|---|---|---|---|
-| **ESP32-S3-RS485-CAN** | [product page](https://www.waveshare.com/esp32-s3-rs485-can.htm) | [wiki](https://www.waveshare.com/wiki/ESP32-S3-RS485-CAN) | battery-backed clock; the reference board | **Production** — pick this if you only need to read the inverter |
-| **ESP32-S3-Relay-1CH** | [product page](https://www.waveshare.com/esp32-s3-relay-1ch.htm) | [wiki](https://www.waveshare.com/wiki/ESP32-S3-Relay-1CH) | 1 relay (on/off curtailment), clock | **Hardware-verified** — boots and actuates its relay on real hardware 2026-07-26; polarity not yet meter-measured |
-| **ESP32-S3-Relay-6CH** | [product page](https://www.waveshare.com/esp32-s3-relay-6ch.htm) | [wiki](https://www.waveshare.com/wiki/ESP32-S3-Relay-6CH) | 6 relays (stepped curtailment), status LED, buzzer | **Hardware-verified** — relays, polarity and failsafe measured 2026-07-23 |
-
-All three are Waveshare boards and cost roughly €20–30. **If you only want to see what your
-inverter is doing, take the first one.**
-
-The relay boards are specifically for driving an inverter's **DRM input** — the
-demand-response terminals, a dry contact. That is not the only way to turn an inverter down:
-where the inverter accepts a power limit written over **RS485**, that path needs no relay
-board at all, just the plain RS485-CAN board. Relays are the answer for inverters that expose
-no writable limit, where a DRM contact is the only control path there is. Which of the two
-applies is a property of your inverter, not of this firmware — the brand pages under
-[docs/](docs/) say which.
-
-Besides the board you need a **USB-C cable**, and wire for the RS485 connection: two data
-conductors (**A** and **B**) plus a **ground** reference. A cut Ethernet patch cable is
-often the easiest source, and for inverters with an RJ45 communication port it may be all
-you need. The RS485-CAN and Relay-6CH can be powered either over USB-C or from a 7–36 V DC
-screw terminal, which is handy when there is no USB power near the inverter; check the
-product page for whichever board you buy.
-
-For one inverter, A/B/GND is genuinely all there is to it.
-
-**Several inverters share one cable.** They hang off it in a chain — not one cable each — and
-each answers to its own address:
-
-```mermaid
-flowchart LR
-    B["🔌 Bridge<br><b>bus end</b><br>120 Ω ON"]
-    I1["Inverter<br>address 1<br>termination OFF"]
-    I2["Inverter<br>address 2<br>termination OFF"]
-    I3["Inverter<br>address 3<br><b>bus end</b><br>120 Ω ON"]
-    B --- I1 --- I2 --- I3
-    style B fill:#e8f4ea,stroke:#2d7a3e,stroke-width:2px
-    style I3 fill:#e8f4ea,stroke:#2d7a3e,stroke-width:2px
-```
-
-Three rules in one picture: **chain, not star**; the 120 Ω terminator goes at the **two ends
-only**; and every unit needs its **own address** set before you connect them, or two inverters
-answer at once and their replies collide. Read
-**[docs/rs485-bus.md](docs/rs485-bus.md)** before you wire it — including what a star topology
-looks like and why it works on the bench and fails in the roof.
-
-> **Several inverters on one bus are polled in turn**, up to eight, each with its own address.
-> The first is configured under *Settings → Driver*, the rest under *Settings → Extra devices* —
-> one row per inverter, each with its own driver and whatever that driver needs to address it.
-> The page refuses to save a row with no driver, an unset register map, or an address already
-> in use, because all three are mistakes the firmware can only report as a log line at boot.
-> Save, then restart. Afterwards the **Device** tab lists every inverter that is actually being
-> polled, and says so plainly when one of the configured ones is missing and why.
->
-> Over the API it is one field, and sending the array **replaces** it:
->
-> ```
-> curl -u admin:PASSWORD -X PATCH http://<bridge>/api/v1/config \
->   -H 'Content-Type: application/json' \
->   -d '{"additional_devices":[{"driver_id":"modbus_profile","options":{"unit_id":"2"}}]}'
-> ```
->
-> **Extended discovery sweeps addresses 1–8**, so the wizard reports one candidate per inverter
-> with the address each answered at — use it to check that the addresses you assigned actually
-> took. It configures one device; the rest go in `additional_devices` as above. Quick discovery
-> is unchanged: each driver's default address only.
->
-> **Every output carries all of them now.** Modbus TCP serves one **unit id per inverter**,
-> consecutively from `modbus.unit_id` — unit 1, 2, 3 with the default — and the register map is
-> the same at each. Prometheus labels every inverter series with `device="…"`, the same id REST
-> and Home Assistant use. Note that the units share one bus and one poll interval, so each is
-> read roughly every N intervals with N inverters.
-
-### 2. Flash the firmware
-
-- **In your browser (easiest):** open the
-  [web installer](https://timdebruijn.github.io/heliograph/) in Chrome or Edge, plug the
-  board into your computer with USB-C, pick your board, click Connect. Nothing to install.
-- **With esptool:** download `heliograph-<version>-<board>-factory.bin` from the
-  [latest release](https://github.com/Timdebruijn/heliograph/releases/latest):
-
-  ```bash
-  esptool.py --chip esp32s3 write_flash 0x0 heliograph-<version>-<board>-factory.bin
-  ```
-
-- **From source:** `pio run -e waveshare-rs485-can` (or the environment for your board), then
-  flash `.pio/build/waveshare-rs485-can/firmware.factory.bin`.
-
-Already running Heliograph? Update over the air instead — *Settings → Firmware update* with
-the release's `heliograph-<version>-<board>.bin`. **Settings survive an over-the-air update;
-a factory flash erases them.**
-
-### 3. Connect it to your WiFi
-
-On first boot the board creates its own WiFi network called **`Heliograph-Setup-XXXX`**. Join
-it with your phone or laptop; the setup page opens by itself. Choose your network, set an
-admin password, and save. The board reboots and tells you the address to visit, something
-like `http://heliograph-a1b2c3.local`.
-
-**Write that admin password down.** The same setup network comes back on its own if the board
-later loses WiFi for a few minutes — a router reboot is enough — so that you can point it at a
-new network without digging the board out. Because that network is open and anyone in range
-could otherwise reconfigure your bridge, changing anything through it asks for the admin
-password once one is set.
-
-If you lose the password, the way back in is a **factory reset**: hold the board's **BOOT**
-button for about 5 seconds while it is running. That erases the stored configuration — WiFi,
-password, everything — and returns the board to first-boot setup. Failing that, re-flash a
-`-factory.bin` over USB, which wipes the same settings.
-
-Two things worth knowing before you rely on it. On the Relay-6CH the countdown blinks the LED
-and the buzzer confirms the wipe; **on the RS485-CAN there is no LED and no buzzer, so the hold
-gives no feedback at all** — the board simply reboots into setup when it worked. And the reset
-itself is only hardware-verified on the Relay-6CH; on the other two boards the pin comes from
-the schematic and nobody has run it. Details and the download-mode caveat:
-[docs/hardware.md](docs/hardware.md#recovery--hold-boot-to-factory-reset).
-
-### 4. Wire it to the inverter
-
-> **If you have never wired anything before, this is the step to slow down on.** It is three
-> wires and no mains voltage, but *where* those three wires go differs on every inverter.
-> Nothing below replaces your own inverter's manual.
-
-**First, find the port — in your manual, not by looking.** Inverters put RS485 in very
-different places, and the plug tells you nothing:
-
-- an **RJ45 socket** that looks exactly like a network port (but is not one — do not plug it
-  into your router)
-- a **screw terminal** block, often behind a small cover
-- a **multi-pin plug** with a locking ring (a Solis S6 hybrid uses a 16-pin COM connector)
-
-In the manual, look for **RS485**, **COM**, **Modbus**, **Meter** or **BMS**. The manual is
-also the only place that tells you *which pin is which* — pinouts differ between models, and
-between generations of the same model. Do not copy a pinout you found for a similar-looking
-inverter.
-
-**Check whether the port is already taken.** Many inverters ship with a WiFi or LAN stick from
-the manufacturer, and on some models that stick sits on the same RS485 line. If so you have to
-choose: the vendor's app, or your own reading. Your manual, or the brand page under
-[docs/](docs/), will say which port is which.
-
-**Then connect**, with the inverter's manual in front of you:
-
-- board **A** → inverter **A** (sometimes labelled D+)
-- board **B** → inverter **B** (sometimes labelled D−)
-- board **GND** → inverter **GND**
-
-Connect the ground. It is not optional folklore: without a shared reference the bus can stay
-completely silent no matter how the data wires are arranged. And if nothing comes through at
-first, **swapping A and B is the single most common fix** — it cannot damage anything.
-
-Two reassurances, because this is the step people hesitate on. These are **signal** wires,
-carrying a few volts; the dangerous parts of an inverter are behind its cover, and you never
-open that. And plugging it in cannot change a setting on your inverter: the shipped
-configuration has `security.read_only_mode` on, which refuses every command before it can reach
-a driver.
-
-If you want the longer version — cable choice, chaining several inverters, where the 120 Ω
-terminators go — read [docs/rs485-bus.md](docs/rs485-bus.md) **before** you buy cable.
-
-### 5. Find your inverter
-
-Open the dashboard and run the wizard on the *Discovery* tab. It tries the supported
-protocols and proposes a driver. It identifies the **protocol**, not the model — so a driver
-that ships several register maps still needs the map chosen, and the wizard's confirm step
-asks for it.
-
-The wizard offers two modes. **Quick** tries each driver at its own default address, which is
-what you want for one inverter. **Extended** additionally sweeps addresses 1–8, which is slower
-and is how you check that the addresses you assigned to several inverters actually took.
-
-**If nothing answers**, work down this list — the first two fix most cases:
-
-1. **Swap A and B.** It cannot damage anything, and reversed data wires are the single most
-   common cause of complete silence.
-2. **Check the ground wire is connected.** Without a shared reference the bus can stay silent
-   however the data wires are arranged.
-3. **Unplug the manufacturer's dongle** if one is on that port. Two masters on one bus corrupt
-   each other's messages, and the dongle will not yield.
-4. **Try the other baud rate.** Most inverters ship at 9600; some at 115200. Discovery tries
-   both, but a device configured to something else answers neither.
-5. **Check the unit id.** Most vendors ship 1 — GoodWe ships this family at **247**, and a
-   wrong address looks exactly like a wiring fault. Extended discovery finds it for you.
-6. **Then turn the log level up to `trace`** under *Settings* and watch the *Logs* tab. It
-   shows exactly what is being sent and whether anything comes back, which separates "my wiring
-   is wrong" from "it replied and we could not read it" — a distinction worth having before you
-   open an issue.
-
-<p align="center">
-  <img src="docs/images/discovery.png" width="480" alt="The Discovery wizard stepping through interface, mode, probing, candidates, confirm, test poll and save">
-  <br>
-  <em>Discovery is a guided wizard: it probes the bus, proposes a driver, and lets you confirm with a test poll before anything is saved.</em>
-</p>
-
-### 6. Connect your tooling
-
-MQTT and Home Assistant discovery are configured under *Settings*; enable MQTT, point it at
-your broker, and the entities appear in Home Assistant by themselves. Modbus TCP listens on
-port 502, Prometheus scrapes `/metrics`, and the JSON API lives under `/api/v1/`.
+- **Eleven of eleven Modbus profiles have never met a device.** Nor has SunSpec, nor SolarMax.
+- **DRM curtailment has never driven a real inverter.** The relay boards are measured on the
+  bench — order, polarity, failsafe, boot state. The inverter side of that connection has never
+  been made. If you are the first, [`docs/drm.md`](docs/drm.md) is written for you, and expect to
+  debug it.
+- **Writes are switched off, not absent.** `security.read_only_mode` is on by default and refuses
+  every command before a driver is reached. That flag is the guarantee. The SunSpec driver does
+  carry a write path for the power limit and for connect/disconnect, and no device has ever
+  answered it. [`docs/security.md`](docs/security.md) is the authority.
+- **Modbus TCP carries 39 of the 44 channels.** `battery.power`, `battery.current`,
+  `battery.temperature` and both battery energy counters have no register.
+- **No authentication on Modbus TCP or on REST reads.** Where there is authentication it is HTTP
+  Basic over plain HTTP, and OTA images are unsigned. Keep it on a network you trust.
+- **A wrong-but-valid static IP can lock you out** ([#69](https://github.com/Timdebruijn/heliograph/issues/69)).
+  Holding BOOT to factory-reset is the only way back.
+- **One maintainer, pre-1.0.** Expect breaking changes.
 
 ---
 
-## Curtailment: turning the inverter down
+## What else exists
 
-The relay boards can drive an inverter's **DRM input** (the demand-response terminals many
-inverters carry) to reduce or stop production — useful during negative electricity prices or
-under a feed-in limit. This matters most for the inverters Heliograph can only read: if there
-is no way to write a power limit over RS485, a DRM contact may be the only control path that
-exists.
+If you have a Raspberry Pi, [SolarAssistant](https://solar-assistant.io) covers 66 vendors across
+RS232, RS485 and CAN, with a cable per protocol. It costs €59 software-only, or €159–204 with
+hardware, one licence per installation. It is mature and it is broad, and for most people with a
+Pi it is the sensible answer today.
 
-Three things are worth understanding before you consider it:
-
-**Status: the actuator is proven, the connection to an inverter is not yet.** On the Relay-6CH
-the relays themselves have been verified on real hardware (2026-07-23): channel order,
-polarity, the power-cut failsafe and the de-energised boot state were all measured rather than
-assumed. The Relay-1CH's single relay has since been actuated on hardware too (2026-07-26),
-though its polarity and failsafe have not yet been meter-measured the way the 6CH's were. What
-has *not* happened yet on either board is driving a real inverter's DRM port — that step is
-waiting on a manufacturer's confirmation of how their terminals expect to be driven. Treat this
-as a capability that is built and bench-tested, not as one that has been run in the field.
-
-**It ships switched off.** Two independent settings must both be changed before a relay can
-move (`relays.enabled` on, and `security.read_only_mode` off). A relay board with factory
-settings is inert.
-
-**Failing safe is a wiring decision.** A de-energised relay leaves its NO contact open and its
-NC contact closed. Whichever way round your inverter expects its DRM input, one of those two
-contacts keeps the rule *"if the bridge dies, the inverter keeps producing"* true — without
-changing any firmware setting. On the 6CH this was measured, not assumed: cutting power
-releases the contact immediately, and the board boots with every relay de-energised. No relay
-state is stored anywhere, deliberately, so a reboot can never restore a curtailment nobody
-just asked for.
-
-Full wiring rules and a pre-flight checklist: **[docs/drm.md](docs/drm.md)**. Check your own
-inverter's manual for what its DRM terminals expect — this varies by manufacturer and must
-never be guessed.
+What a survey of the ESP32 projects did not turn up: anything combining several non-Modbus
+inverter protocols on one board, anything serving a Modbus TCP server with decoded inverter data,
+any open-source DRM curtailment at all, or any project grading its register maps by how many
+sources agree. The ESP32 projects found each speak one family — OpenDTU (Hoymiles),
+OpenInverterGateway (Growatt), SolaxModbusGateway, sofar2mqtt. "Not found" is the honest limit of
+that search.
 
 ---
 
-## Help support your own inverter
+## What has been measured
 
-If your inverter is not in the table, you are exactly the person this project needs. There
-are three ways to help, and only one of them involves writing code:
+1,055 host tests run with no hardware attached. They prove the code does what its author
+intended; they do not prove an inverter will answer it. For that, the table above is the only
+evidence this project has.
 
-1. **Tell us it exists.** Open a
-   [device request](https://github.com/Timdebruijn/heliograph/issues/new/choose) with the
-   model and whatever documentation you have. Sometimes the protocol is already known.
-2. **Add a Modbus inverter yourself — as a data file.** Modbus devices are described by a
-   TOML file listing registers and scaling, not by C++. If you can read a register table in a
-   manual, you can write one.
-   [docs/adding-a-device.md](docs/adding-a-device.md) walks through it, including a script
-   for probing a device you have in front of you.
-3. **Confirm an Experimental driver.** The Growatt SPH and SolaX X1 drivers are implemented
-   but unproven on real hardware. If you own one, running it and reporting what happened —
-   including "it returned nothing" — is genuinely valuable. That is how the SolaX findings
-   already in the docs came to be.
+A production bridge ran 16.4 days without a restart on 0.27.4. The flash image is 1.54 MB, with
+about 152 KB of free heap out of roughly 320 KB.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the practicalities.
+![What the bridge thinks is wrong, when something is](docs/images/health.png)
+
+One mention outside the author's own bench: a blog post by Tim Retout (10 October 2026) about
+getting a Zeversolar Zeverlution 3680 into Home Assistant credits the protocol work —
+*"credit to eversolar-monitor, Heliograph and others"*. He did not run this firmware; he built his
+own ESPHome component and names this project among the prior reverse-engineering efforts he drew
+on.
 
 ---
 
-## How it is built
+## Where to start
 
-A strict layering — Transport → Driver → canonical measurement model → output adapters —
-keeps brand-specific knowledge confined to `src/drivers/<driver>/`. Outputs only ever see
-canonical measurements and capabilities, which is why a new driver gets every integration for
-free. The protocol core is platform-independent and host-tested, so most of the firmware can
-be verified without any hardware. Unknown values are published as *null or omitted, never
-zero* — a missing reading must never look like a real measurement of nothing. Over-the-air
-updates are guarded by a watchdog-backed bootloader rollback that has already earned its keep
-in this project's own history.
+Everything practical is in [`docs/`](docs/README.md), grouped by what you are trying to do.
 
-Details: [docs/architecture.md](docs/architecture.md).
+| | |
+|---|---|
+| Buy a board and wire it up, start to finish | [getting-started.md](docs/getting-started.md) |
+| Read this before touching the RS485 wiring | [rs485-bus.md](docs/rs485-bus.md) |
+| Check what your inverter's profile rests on | [drivers/coverage.md](docs/drivers/coverage.md) |
+| Connect Home Assistant, MQTT, Prometheus, Modbus | [mqtt.md](docs/mqtt.md) · [prometheus.md](docs/prometheus.md) · [modbus-register-map.md](docs/modbus-register-map.md) |
+| Turn an inverter down over its DRM input | [drm.md](docs/drm.md) |
+| Add your own inverter | [adding-a-device.md](docs/adding-a-device.md) |
 
-## All the documentation
+**If your inverter is not in the table: plug it in anyway and say what happened.** A report that
+it returned nothing is worth as much as one that it worked — that is how the SolaX row above got
+its evidence, and it is the single most useful thing anyone can contribute right now.
 
-Thirty-three documents, and **[docs/README.md](docs/README.md) groups them by what you are trying
-to do** — get it working, fix it when it does not, check whether your inverter is supported,
-connect your own tooling, add a new inverter, or understand how it is built. It also marks which
-documents are dated records rather than instructions, so nobody follows a "next step" that
-happened months ago.
-
-## Development
-
-```bash
-pio test -e native          # 1000+ host tests, no hardware needed
-./tools/check_layering.sh   # architectural invariants
-pio check -e native         # static analysis (cppcheck)
-ruff check tools/           # lint for the Python tooling
-pio run -e waveshare-rs485-can   # or -relay-1ch / -relay-6ch
-```
-
-The `mock` environment runs the full output stack against a simulated inverter — useful for
-UI and integration work without an RS485 bus. It adds two virtual relays and compiles the real
-drivers out; the **driver itself is in every shipped image**, so on real hardware you can just
-pick *Mock Inverter* under Settings → Driver.
-
-It models a three-phase hybrid with two MPPTs and a battery — deliberately unlike any single
-real device, so an output adapter that quietly assumed one phase or no battery has something to
-fail against. Give each one a `unit_id` under **Extra devices** and you can run a whole
-simulated fleet: separate device ids, separate MQTT subtrees and Home Assistant devices,
-consecutive Modbus unit ids, and one `device` label per instance in Prometheus. Their solar
-curves are staggered, so they report different values at the same moment rather than one number
-multiplied by N — which is what makes a shared store or an off-by-one unit id visible instead of
-plausible.
-
-What it cannot do is anything at the byte level: it ignores the transport entirely, so protocol
-framing, checksums and timing still need real hardware.
-
-**Writes are switched off, not absent, and the difference matters.** What stops a command
-reaching your inverter is `security.read_only_mode`, which is on by default and refuses every
-command before any driver is reached. Rely on that flag, not on an absence of capability —
-[docs/security.md](docs/security.md) says the same thing and is the authority here.
-
-What the capability looks like today: the EverSolar protocol defines no writes at all, and none
-of the shipped Modbus profiles has a write row marked verified, so none of them can dispatch one
-(see [docs/device-profiles/schema.md](docs/device-profiles/schema.md) for how write support is
-staged). The SunSpec driver is the exception: it has a real write path for the power limit and
-for connect/disconnect, gated only on the device publishing SunSpec model 123. No device has
-ever answered that driver, so the path has never run against hardware.
-
-Curtailment works the other way round, and is not affected by any of this — a potential-free
-contact on the bridge closing a circuit the inverter already offers for exactly that purpose,
-with no protocol write at all.
-
-## License
+## Licence
 
 MIT — see [LICENSE](LICENSE). Protocol knowledge was re-implemented from community
-references; credits and third-party licences in
-[LICENSE-THIRD-PARTY.md](LICENSE-THIRD-PARTY.md).
+documentation; see the per-protocol documents for sources.

@@ -12,7 +12,7 @@ inverter" first. Come back here when you need detail.
 
 | | |
 |---|---|
-| [../README.md](../README.md) | Which inverters work, what to buy, flash it, join WiFi, wire it, find the inverter. The whole path, start to finish. |
+| [getting-started.md](getting-started.md) | What to buy, flash it, join WiFi, wire it, find the inverter. The whole path, start to finish. |
 | [hardware.md](hardware.md) | The three supported boards: pins, power, the RTC, the BOOT-button factory reset, and what has and has not been verified on each. |
 | [rs485-bus.md](rs485-bus.md) | **Read this before you wire anything.** Three wires, why ground is not optional, chain-not-star, where the 120 Ω terminators go, and giving each inverter its own address. |
 | [drm.md](drm.md) | Turning the inverter *down* using the relay boards and its DRM input. Ships off, behind two gates, fails safe. |
@@ -22,12 +22,12 @@ inverter" first. Come back here when you need detail.
 | | |
 |---|---|
 | [rs485-bus.md § When it does not work](rs485-bus.md#when-it-does-not-work) | The three failure modes the bridge distinguishes — timeouts, checksum errors, invalid frames — and what each one points at. Start here: they mean different things and rule out different causes. |
-| The Discovery step in [../README.md](../README.md#5-find-your-inverter) | The ordered checklist when nothing answers at all. Swap A/B first; it is the answer more often than anything else. |
+| The Discovery step in [getting-started.md](getting-started.md#5-find-your-inverter) | The ordered checklist when nothing answers at all. Swap A/B first; it is the answer more often than anything else. |
 | [rest-api.md § Diagnostics](rest-api.md) and [prometheus.md](prometheus.md) | What the bridge itself thinks is wrong — counters, poll durations, reset reasons, stored crash dumps. |
 
 ## Does it work with my inverter?
 
-The per-family table in [../README.md](../README.md#which-inverters-work-today) is the short
+The per-family table in [../README.md](../README.md#does-it-work-with-my-inverter) is the short
 answer. These are the long ones — sources, register maps, and what each map does **not** publish
 and why.
 
