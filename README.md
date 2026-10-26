@@ -212,9 +212,10 @@ is a data file, not programming.
   between models and even between generations of the same model. Never assume.
 - Interfering with a communication port can, on some models, affect warranty or the
   manufacturer's monitoring. Check before you commit.
-- Heliograph is provided under the MIT licence: **no warranty, at your own risk**. It only
-  ever *reads* your inverter unless you deliberately enable the relay features described
-  below.
+- Heliograph is provided under the MIT licence: **no warranty, at your own risk**. With the
+  settings it ships with it cannot act on your inverter at all: `security.read_only_mode` is
+  on by default and refuses every command. That flag is the guarantee, not an absence of
+  capability — see [docs/security.md](docs/security.md).
 
 ---
 
@@ -378,8 +379,9 @@ first, **swapping A and B is the single most common fix** — it cannot damage a
 
 Two reassurances, because this is the step people hesitate on. These are **signal** wires,
 carrying a few volts; the dangerous parts of an inverter are behind its cover, and you never
-open that. And Heliograph only *reads* until you deliberately turn on the relay features —
-plugging it in cannot change a setting on your inverter.
+open that. And plugging it in cannot change a setting on your inverter: the shipped
+configuration has `security.read_only_mode` on, which refuses every command before it can reach
+a driver.
 
 If you want the longer version — cable choice, chaining several inverters, where the 120 Ω
 terminators go — read [docs/rs485-bus.md](docs/rs485-bus.md) **before** you buy cable.
@@ -533,12 +535,21 @@ plausible.
 What it cannot do is anything at the byte level: it ignores the transport entirely, so protocol
 framing, checksums and timing still need real hardware.
 
-All inverter drivers are **read-only**, and that is not in tension with the curtailment above:
-no driver ever writes to your inverter over its protocol. Sending a setpoint would need a
-hardware-verified register map and a write row marked verified, and no shipped profile has one (see
-[docs/device-profiles/schema.md](docs/device-profiles/schema.md) for how write support is
-staged). Curtailment works the other way round — a potential-free contact on the bridge closing
-a circuit the inverter already offers for exactly that purpose, with no protocol write at all.
+**Writes are switched off, not absent, and the difference matters.** What stops a command
+reaching your inverter is `security.read_only_mode`, which is on by default and refuses every
+command before any driver is reached. Rely on that flag, not on an absence of capability —
+[docs/security.md](docs/security.md) says the same thing and is the authority here.
+
+What the capability looks like today: the EverSolar protocol defines no writes at all, and none
+of the shipped Modbus profiles has a write row marked verified, so none of them can dispatch one
+(see [docs/device-profiles/schema.md](docs/device-profiles/schema.md) for how write support is
+staged). The SunSpec driver is the exception: it has a real write path for the power limit and
+for connect/disconnect, gated only on the device publishing SunSpec model 123. No device has
+ever answered that driver, so the path has never run against hardware.
+
+Curtailment works the other way round, and is not affected by any of this — a potential-free
+contact on the bridge closing a circuit the inverter already offers for exactly that purpose,
+with no protocol write at all.
 
 ## License
 

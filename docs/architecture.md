@@ -475,8 +475,15 @@ MQTT / REST / Modbus / HA
      5. driver->execute(command)
           │
           ▼
-       Driver → Unsupported (every driver today)
+       Driver → Unsupported, except SunSpec (see below)
 ```
+
+Every driver but one answers `Unsupported`, and that one is worth naming: `sunspec` declares
+`supportsWrite` and implements `execute()` for the power limit (`WMaxLimPct` / `WMaxLim_Ena`) and
+for connect/disconnect (`Conn`). Its only gate is the device publishing SunSpec model 123 — there
+is no `verified` flag the way a Modbus profile's write row has one. No device has ever answered
+that driver. The gate that actually holds for every driver is `security.read_only_mode`, earlier
+in the chain.
 
 Two details of that chain are easy to get wrong and are worth stating.
 
