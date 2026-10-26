@@ -43,9 +43,24 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSET = ROOT / "src/web/assets/index_html.h"
 FIXTURE = ROOT / "docs/images/fixture.json"
 
-# Endpoint -> filename stem. The page GETs exactly these; anything else it asks for gets a 404,
-# which is what a bridge with the feature switched off would answer anyway.
-ENDPOINTS = ["status", "config", "diagnostics", "drivers", "discovery", "capture"]
+# The flat endpoints the page GETs. The Inverters tab also GETs /api/v1/devices and three paths
+# UNDER each device it finds there; capture() adds those, because they depend on the listing.
+#
+# Anything not captured gets a 404, which is what a bridge with the feature switched off would
+# answer. That is fine for a feature nobody configured and wrong for one that is running: with
+# the per-device paths missing, the Inverters tab rendered a healthy bridge as "0 inverters
+# polled of 1 configured" and drew the whole wiring-troubleshooting panel. docs/images/
+# inverters.png showed exactly that, in the README, from the day it was committed until
+# 2026-10-26.
+ENDPOINTS = [
+    "status",
+    "config",
+    "diagnostics",
+    "drivers",
+    "discovery",
+    "capture",
+    "devices",
+]
 
 # data-t value -> output file. Tabs are switched by CLICK, not by URL, so each shot navigates to
 # the same page and clicks its way there.
@@ -83,6 +98,17 @@ def sanitise(payload):
     return payload
 
 
+def _device_id(value: str) -> str:
+    """A device id with any serial-shaped tail replaced.
+
+    Shape kept -- driver-SERIAL -- because the id is what MQTT topics and the Modbus unit
+    mapping are keyed on, and a reader needs to recognise the form. Its own function because
+    the ids also appear as BARE STRINGS in /api/v1/devices, where there is no key to match on
+    and sanitise() would otherwise pass them straight through.
+    """
+    return re.sub(r"[A-Za-z0-9]{8,}$", "0000000001", value)
+
+
 def _field(key: str, value):
     if isinstance(value, (dict, list)):
         return sanitise(value)
@@ -106,9 +132,7 @@ def _field(key: str, value):
         # come from the same MAC and a reader who sees them disagree learns something false.
         if value.startswith("heliograph-"):
             return "heliograph-a1b2c3"
-        # Shape kept -- driver-SERIAL -- because the id is what MQTT topics and the Modbus unit
-        # mapping are keyed on, and a reader needs to recognise the form.
-        return re.sub(r"[A-Za-z0-9]{8,}$", "0000000001", value)
+        return _device_id(value)
     if re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}", value):
         return "192.168.1.50"
     return value
@@ -146,18 +170,36 @@ def audit(payload: dict) -> list[str]:
     return found
 
 
+def _fetch(host: str, name: str):
+    url = f"http://{host}/api/v1/{name}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            return json.load(response)
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
+        # Recorded as absent rather than fatal: a bridge with no capture stored, or discovery
+        # never run, legitimately has nothing to say and the page renders that state fine.
+        print(f"  {name}: not captured ({exc})")
+        return None
+
+
 def capture(host: str) -> dict:
-    out = {}
+    out, raw = {}, {}
     for name in ENDPOINTS:
-        url = f"http://{host}/api/v1/{name}"
-        try:
-            with urllib.request.urlopen(url, timeout=10) as response:
-                out[name] = sanitise(json.load(response))
-        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
-            # Recorded as absent rather than fatal: a bridge with no capture stored, or discovery
-            # never run, legitimately has nothing to say and the page renders that state fine.
-            print(f"  {name}: not captured ({exc})")
-            out[name] = None
+        raw[name] = _fetch(host, name)
+        out[name] = sanitise(raw[name]) if raw[name] is not None else None
+
+    # The listing carries bare id strings, which sanitise() cannot reach: there is no key on a
+    # list element. Rewritten here so that the ids the page reads, the keys it then asks for,
+    # and the ids inside each payload all agree -- and so a serial-bearing id cannot reach the
+    # committed fixture, where audit() would refuse the whole capture.
+    real_ids = (raw.get("devices") or {}).get("devices", [])
+    if real_ids:
+        out["devices"] = {"devices": [_device_id(i) for i in real_ids]}
+    for real_id in real_ids:
+        for leaf in ("", "/measurements", "/capabilities"):
+            payload = _fetch(host, f"devices/{real_id}{leaf}")
+            key = f"devices/{_device_id(real_id)}{leaf}"
+            out[key] = sanitise(payload) if payload is not None else None
     return out
 
 
