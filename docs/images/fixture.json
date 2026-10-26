@@ -3,7 +3,7 @@
     "bridge": {
       "id": "heliograph-a1b2c3",
       "name": "Heliograph",
-      "firmware_version": "0.27.2 (Aug 27 2026 08:36:35)",
+      "firmware_version": "0.29.0 (Oct 22 2026 15:11:53)",
       "board_id": "rs485-can",
       "ip_address": "192.168.1.50",
       "ip_mode": "dhcp",
@@ -11,23 +11,23 @@
       "devices_configured": 1,
       "devices_started": 1,
       "device_problems": [],
-      "uptime_seconds": 8503,
+      "uptime_seconds": 346921,
       "wifi_connected": true,
-      "wifi_rssi_dbm": -55,
+      "wifi_rssi_dbm": -49,
       "mqtt_connected": true,
       "modbus_listening": true,
       "modbus_clients": 0,
       "time_synced": true,
-      "time": "2026-08-27 13:02:21",
-      "ntp_last_sync": "2026-08-27 10:40:44",
+      "time": "2026-10-26 16:35:53",
+      "ntp_last_sync": "2026-10-26 16:13:59",
       "ntp_server": "pool.ntp.org",
       "ntp_server_source": "dhcp",
-      "free_heap_bytes": 144468,
+      "free_heap_bytes": 153840,
       "boot_button_pressed": false
     },
     "device": {
       "id": "eversolar_legacy-16",
-      "label": "Dak huis",
+      "label": "Roof array",
       "driver_id": "eversolar_legacy",
       "support_level": "stable",
       "manufacturer": "Ever-Solar",
@@ -37,23 +37,23 @@
       "data_valid": true,
       "data_stale": false,
       "consecutive_poll_failures": 0,
-      "last_successful_poll_seconds_ago": 6
+      "last_successful_poll_seconds_ago": 4
     },
     "measurements": {
       "ac.power.total": {
-        "value": 2076,
+        "value": 11,
         "unit": "W",
         "valid": true,
         "stale": false
       },
       "ac.phase_l1.voltage": {
-        "value": 239.7,
+        "value": 228.1,
         "unit": "V",
         "valid": true,
         "stale": false
       },
       "ac.phase_l1.current": {
-        "value": 8.6,
+        "value": 0.3,
         "unit": "A",
         "valid": true,
         "stale": false
@@ -65,51 +65,51 @@
         "stale": false
       },
       "dc.mppt_1.voltage": {
-        "value": 323.8,
+        "value": 327.5,
         "unit": "V",
         "valid": true,
         "stale": false
       },
       "dc.mppt_1.current": {
-        "value": 6.6,
+        "value": 0.1,
         "unit": "A",
         "valid": true,
         "stale": false
       },
       "dc.mppt_1.power": {
-        "value": 2137.08,
+        "value": 32.75,
         "unit": "W",
         "valid": true,
         "stale": false,
         "derived": true
       },
       "dc.power.total": {
-        "value": 2137.08,
+        "value": 32.75,
         "unit": "W",
         "valid": true,
         "stale": false,
         "derived": true
       },
       "energy.today": {
-        "value": 2.57,
+        "value": 3.5,
         "unit": "kWh",
         "valid": true,
         "stale": false
       },
       "energy.total": {
-        "value": 35997.8,
+        "value": 36494.1,
         "unit": "kWh",
         "valid": true,
         "stale": false
       },
       "inverter.temperature": {
-        "value": 40,
+        "value": 25.4,
         "unit": "\u00b0C",
         "valid": true,
         "stale": false
       },
       "inverter.operating_hours": {
-        "value": 47996,
+        "value": 48724,
         "unit": "h",
         "valid": true,
         "stale": false
@@ -121,32 +121,32 @@
     "devices": [
       {
         "id": "eversolar_legacy-16",
-        "label": "Dak huis",
+        "label": "Roof array",
         "online": true,
         "data_valid": true,
         "data_stale": false,
         "modbus_unit_id": 1,
-        "last_successful_poll_seconds_ago": 6,
-        "energy_today_kwh": 2.57,
-        "ac_voltage_v": 239.7,
-        "temperature_c": 40,
+        "last_successful_poll_seconds_ago": 4,
+        "energy_today_kwh": 3.5,
+        "ac_voltage_v": 228.1,
+        "temperature_c": 25.4,
         "battery_soc_pct": null,
         "battery_power_w": null,
-        "ac_power_w": 2076
+        "ac_power_w": 11
       }
     ],
     "totals": {
       "devices_answering": 1,
       "devices_polled": 1,
-      "ac_power_w": 2076,
+      "ac_power_w": 11,
       "ac_power_devices": 1,
-      "energy_today_kwh": 2.57,
+      "energy_today_kwh": 3.5,
       "energy_today_devices": 1,
-      "energy_total_kwh": 35997.8,
+      "energy_total_kwh": 36494.1,
       "energy_total_devices": 1
     },
-    "poll_success_total": 834,
-    "poll_failure_total": 1
+    "poll_success_total": 14522,
+    "poll_failure_total": 3317
   },
   "config": {
     "version": 2,
@@ -191,7 +191,7 @@
     "driver": {
       "id": "eversolar_legacy",
       "auto_detect": false,
-      "label": "Dak huis",
+      "label": "Roof array",
       "options": {}
     },
     "additional_devices": [],
@@ -213,7 +213,7 @@
       "check_enabled": true
     },
     "logging": {
-      "level": "info"
+      "level": "trace"
     },
     "security": {
       "password_set": true,
@@ -221,14 +221,14 @@
     }
   },
   "diagnostics": {
-    "uptime_seconds": 8503,
-    "firmware_version": "0.27.2 (Aug 27 2026 08:36:35)",
+    "uptime_seconds": 346921,
+    "firmware_version": "0.29.0 (Oct 22 2026 15:11:53)",
     "board": "Waveshare ESP32-S3-RS485-CAN",
-    "free_heap_bytes": 144712,
-    "minimum_free_heap_bytes": 88980,
-    "max_alloc_heap_bytes": 94196,
+    "free_heap_bytes": 154088,
+    "minimum_free_heap_bytes": 104592,
+    "max_alloc_heap_bytes": 102388,
     "psram_size_bytes": 8388608,
-    "psram_free_bytes": 8378140,
+    "psram_free_bytes": 8368144,
     "reset_reason": 3,
     "ota_image_state": "valid",
     "coredump_present": false,
@@ -238,36 +238,36 @@
     "coredump_cause_name": null,
     "coredump_fault_address": null,
     "wifi_connected": true,
-    "wifi_rssi_dbm": -55,
+    "wifi_rssi_dbm": -49,
     "mqtt_connected": true,
     "time_synced": true,
-    "time": "2026-08-27 13:02:21",
-    "ntp_last_sync": "2026-08-27 10:40:44",
+    "time": "2026-10-26 16:35:53",
+    "ntp_last_sync": "2026-10-26 16:13:59",
     "ntp_server": "pool.ntp.org",
     "ntp_server_source": "dhcp",
-    "poll_success_total": 834,
-    "poll_duration_count": 834,
-    "poll_duration_last_ms": 101,
+    "poll_success_total": 14522,
+    "poll_duration_count": 14522,
+    "poll_duration_last_ms": 106,
     "poll_duration_min_ms": 99,
-    "poll_duration_max_ms": 108,
-    "poll_duration_ewma_ms": 101,
-    "poll_failure_total": 1,
+    "poll_duration_max_ms": 4438,
+    "poll_duration_ewma_ms": 107,
+    "poll_failure_total": 3317,
     "consecutive_poll_failures": 0,
     "checksum_error_total": 0,
-    "rs485_timeout_total": 1,
+    "rs485_timeout_total": 6562,
     "invalid_frame_total": 0,
     "wifi_reconnect_total": 0,
     "mqtt_reconnect_total": 0,
     "modbus_client_connections_total": 0,
-    "rest_requests_total": 16,
+    "rest_requests_total": 24960,
     "mqtt_publish_failure_total": 0,
-    "last_successful_poll_ms": 8496462,
-    "rs485_stack_free_bytes": 3264,
-    "loop_stack_free_bytes": 3624,
+    "last_successful_poll_ms": 346916991,
+    "rs485_stack_free_bytes": 1248,
+    "loop_stack_free_bytes": 3244,
     "last_error": "poll failed: timeout",
-    "boot_count": 11,
-    "previous_uptime_ms": 1341958057,
-    "previous_firmware": "0.27.1",
+    "boot_count": 10,
+    "previous_uptime_ms": 9795000,
+    "previous_firmware": "0.28.1",
     "coredump_backtrace": null,
     "coredump_backtrace_corrupted": null
   },
@@ -319,7 +319,7 @@
         ]
       },
       {
-        "id": "0000000001",
+        "id": "solarmax",
         "display_name": "SolarMax (MaxTalk RS485)",
         "manufacturer": "SolarMax",
         "protocol": "MaxTalk RS485",
@@ -370,12 +370,13 @@
           {
             "key": "layout",
             "display_name": "Payload layout",
-            "description": "How to interpret the measurement payload. 'auto' derives it from the frame length (28 bytes = 1 string, 32 = 2). Force one only if a device contradicts that.",
+            "description": "How to interpret the measurement payload. 'auto' derives it from the frame length (28 or 44 bytes = 1 string, 32 or 50 = 2, 48 = three-phase). Force one only if a device contradicts that.",
             "default_value": "auto",
             "allowed_values": [
               "auto",
               "single",
-              "dual"
+              "dual",
+              "three"
             ]
           },
           {
@@ -469,6 +470,7 @@
               "sofar_hyd_3ph",
               "sofar_hyd_ep",
               "solis_rhi_hybrid",
+              "solis_s6_eh3p_hybrid",
               "sungrow_sh_hybrid"
             ],
             "allowed_labels": [
@@ -482,13 +484,14 @@
               "Sofar HYD 5\u202620K-3PH hybrid (three phase) \u2014 Sofar Solar (experimental)",
               "Sofar HYD 3\u20266K-EP hybrid (single phase) \u2014 Sofar Solar (experimental)",
               "Solis RHI hybrid (3-6 kW, single phase) \u2014 Solis (experimental)",
+              "Solis S6-EH3P hybrid (5\u201310 kW, three phase) \u2014 Solis (experimental)",
               "Sungrow SH residential hybrid \u2014 Sungrow (experimental)"
             ]
           }
         ]
       },
       {
-        "id": "mock_0000000001",
+        "id": "mock_inverter",
         "display_name": "Mock Inverter",
         "manufacturer": "Heliograph open-source project",
         "protocol": "none (simulated)",
@@ -520,7 +523,7 @@
         ]
       },
       {
-        "id": "mock_inverter_0000000001",
+        "id": "mock_inverter_writable",
         "display_name": "Mock Inverter (writable)",
         "manufacturer": "Heliograph open-source project",
         "protocol": "none (simulated)",
@@ -577,5 +580,158 @@
       "truncated": false
     },
     "frames": []
+  },
+  "devices": {
+    "devices": [
+      "eversolar_legacy-16"
+    ]
+  },
+  "devices/eversolar_legacy-16": {
+    "id": "eversolar_legacy-16",
+    "config_slot": 0,
+    "label": "Roof array",
+    "identity": {
+      "manufacturer": "Ever-Solar",
+      "model": "TL3000-20",
+      "serial_number": "SN0000000000",
+      "protocol_name": "EverSolar PMU RS485",
+      "driver_id": "eversolar_legacy"
+    },
+    "driver": {
+      "id": "eversolar_legacy",
+      "display_name": "Ever-Solar / Zeversolar (legacy PMU)",
+      "protocol": "EverSolar PMU RS485",
+      "support_level": "stable",
+      "supports_write": false
+    },
+    "online": true,
+    "data_valid": true,
+    "data_stale": false,
+    "consecutive_poll_failures": 0,
+    "last_successful_poll_seconds_ago": 4
+  },
+  "devices/eversolar_legacy-16/measurements": {
+    "measurements": {
+      "ac.power.total": {
+        "display_name": "AC Power",
+        "value": 11,
+        "unit": "W",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      },
+      "ac.phase_l1.voltage": {
+        "display_name": "AC Voltage",
+        "value": 228.1,
+        "unit": "V",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      },
+      "ac.phase_l1.current": {
+        "display_name": "AC Current",
+        "value": 0.3,
+        "unit": "A",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      },
+      "ac.frequency": {
+        "display_name": "Grid Frequency",
+        "value": 49.98,
+        "unit": "Hz",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      },
+      "dc.mppt_1.voltage": {
+        "display_name": "PV1 Voltage",
+        "value": 327.5,
+        "unit": "V",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      },
+      "dc.mppt_1.current": {
+        "display_name": "PV1 Current",
+        "value": 0.1,
+        "unit": "A",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      },
+      "dc.mppt_1.power": {
+        "display_name": "PV1 Power",
+        "value": 32.75,
+        "unit": "W",
+        "valid": true,
+        "stale": false,
+        "derived": true,
+        "timestamp_ms": 346916991
+      },
+      "dc.power.total": {
+        "display_name": "DC Power",
+        "value": 32.75,
+        "unit": "W",
+        "valid": true,
+        "stale": false,
+        "derived": true,
+        "timestamp_ms": 346916991
+      },
+      "energy.today": {
+        "display_name": "Energy Today",
+        "value": 3.5,
+        "unit": "kWh",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      },
+      "energy.total": {
+        "display_name": "Total Energy",
+        "value": 36494.1,
+        "unit": "kWh",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      },
+      "inverter.temperature": {
+        "display_name": "Temperature",
+        "value": 25.4,
+        "unit": "\u00b0C",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      },
+      "inverter.operating_hours": {
+        "display_name": "Operating Hours",
+        "value": 48724,
+        "unit": "h",
+        "valid": true,
+        "stale": false,
+        "timestamp_ms": 346916991
+      }
+    }
+  },
+  "devices/eversolar_legacy-16/capabilities": {
+    "read_only": true,
+    "phase_count": 1,
+    "mppt_count": 1,
+    "has_battery": false,
+    "read": [
+      "read_ac_power",
+      "read_ac_voltage",
+      "read_ac_current",
+      "read_grid_frequency",
+      "read_dc_power",
+      "read_dc_voltage",
+      "read_dc_current",
+      "read_energy_today",
+      "read_energy_total",
+      "read_temperature",
+      "read_operating_hours",
+      "read_status"
+    ],
+    "write": [],
+    "numeric": {}
   }
 }
