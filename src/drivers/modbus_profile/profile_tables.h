@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "device/capability.h"
 #include "device/measurement.h"
@@ -134,6 +135,16 @@ struct WriteMapping {
     size_t            optionCount = 0;
 };
 
+/// The register that says what the inverter is doing, and what each of its values means, from a
+/// profile's [status_register] section. A value the table does not list is reported as
+/// "Unknown (<n>)", never guessed at.
+struct StatusRegister {
+    RegSpace          space;
+    uint16_t          address;
+    const EnumOption* names;  ///< code -> text, compile-time data in profiles_generated.cpp
+    size_t            nameCount;
+};
+
 struct DeviceProfile {
     const char* id;           ///< stable, e.g. "sph"
     const char* displayName;  ///< e.g. "SPH (3-6 kW)"
@@ -171,6 +182,10 @@ struct DeviceProfile {
     /// Defaults to Experimental, the lowest rung, so a profile that forgets to declare it
     /// understates what we know rather than overstating it.
     ProfileStatus status = ProfileStatus::Experimental;
+
+    /// Null when the profile maps no status register, which was every profile before the field
+    /// existed: the device then reports no status at all rather than a default one.
+    const StatusRegister* statusRegister = nullptr;
 };
 
 /// Looks up a profile by its stable id (e.g. "sph"). Returns nullptr when unknown, so a
@@ -209,5 +224,11 @@ bool findRegister(const BlockData* blocks, size_t blockCount, RegSpace space, ui
 /// poll timestamp stamped on each reading.
 void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t blockCount,
                   MeasurementSet& measurements, uint64_t ts);
+
+/// Reads the profile's status register from this poll's blocks. False when the profile has none
+/// or its block was not read this poll; the caller then publishes no status, because a code
+/// carried over from an earlier poll would describe a moment that has passed.
+bool decodeStatus(const DeviceProfile& profile, const BlockData* blocks, size_t blockCount,
+                  uint16_t& code, std::string& text);
 
 }  // namespace heliograph::profile

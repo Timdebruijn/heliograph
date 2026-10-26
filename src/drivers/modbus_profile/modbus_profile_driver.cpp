@@ -226,9 +226,13 @@ PollResult ModbusProfileDriver::poll(DeviceState& state) {
     state.capabilities = caps;
 
     state.identity = identity();  // already carries driverId (see identity())
-    // The protocol exposes a status/fault word, but its code space is undocumented for the SPH
-    // and unconfirmed here. Naming a status would be inventing one.
-    state.statusText         = "";
+    // Only what the profile's [status_register] table says. A profile without one reports no
+    // status: naming a code space nobody documented would be inventing one.
+    uint16_t    statusCode = 0;
+    std::string statusText;
+    state.statusCodeSupported = decodeStatus(profile, blocks_, validCount, statusCode, statusText);
+    state.statusCode          = statusCode;
+    state.statusText          = statusText;
     state.errorCodeSupported = false;
     state.errorCode          = 0;
     return PollResult::Ok;
