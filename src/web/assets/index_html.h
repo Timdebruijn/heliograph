@@ -569,9 +569,14 @@ function paintLive(){
   }else{
     const now=(m['ac.power.total']||{}).value;
     const rated=b.rated_power_w||null;   // absent on most drivers; the bar is then omitted
+    // ac.power.total is the AC side of the inverter, not the panels. On a plain PV inverter the
+    // two are the same thing; on a hybrid, at night, that power comes out of the battery, and
+    // "Solar production now" showed it as solar (reported by a tester with a three-phase
+    // hybrid, 2026-09-30).
+    const heroLabel=shown(m,'battery.soc')?'Inverter output now':'Producing now';
     h+=`<div class="hero">
       <div>
-        <div class="k">${shown(m,'battery.soc')?'Solar production now':'Producing now'}</div>
+        <div class="k">${heroLabel}</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px">
           <span class="big">${esc(now==null?'—':sp(Math.round(now)))}</span><span style="font-size:20px" class="dim">W</span></div>
         ${rated?bar((now||0)/rated*100)+`<div class="hint">${Math.round((now||0)/rated*100)}% of this inverter's ${esc(sp(rated))} W</div>`:''}
