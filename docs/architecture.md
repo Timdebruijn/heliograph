@@ -461,7 +461,9 @@ output modules being touched.
 
 ## Command model and dispatcher
 
-Fully implemented in the MVP, including tests; only the EverSolar driver returns `Unsupported`.
+Fully implemented, including tests. Which drivers decline is in
+[security.md § What can reach the inverter](security.md#what-can-reach-the-inverter), which is
+the one place that list is maintained.
 
 ```
 MQTT / REST / Modbus / HA
@@ -475,15 +477,18 @@ MQTT / REST / Modbus / HA
      5. driver->execute(command)
           │
           ▼
-       Driver → Unsupported, except SunSpec (see below)
+       Driver → Unsupported, for most of them (see below)
 ```
 
-Every driver but one answers `Unsupported`, and that one is worth naming: `sunspec` declares
-`supportsWrite` and implements `execute()` for the power limit (`WMaxLimPct` / `WMaxLim_Ena`) and
-for connect/disconnect (`Conn`). Its only gate is the device publishing SunSpec model 123 — there
-is no `verified` flag the way a Modbus profile's write row has one. No device has ever answered
-that driver. The gate that actually holds for every driver is `security.read_only_mode`, earlier
-in the chain.
+Two drivers do not answer `Unsupported`. `modbus_profile` declares `supportsWrite` and writes
+one holding register over FC06, and is dormant only because every `[[write]]` row in every
+shipped profile is `verified = false`. `sunspec` declares it too, implements `execute()` for the
+power limit (`WMaxLimPct` / `WMaxLim_Ena`) and connect/disconnect (`Conn`), and its gate is a
+device property rather than a review flag: it needs the inverter to have published SunSpec model
+123. Neither has ever written to a device.
+
+The gate that holds for all of them is `security.read_only_mode`, earlier in the chain — with
+the exception named above under discovery, which is not a command and does not pass through it.
 
 Two details of that chain are easy to get wrong and are worth stating.
 

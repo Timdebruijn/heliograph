@@ -25,10 +25,17 @@ faster way in than reading this top to bottom.
   between models and even between generations of the same model. Never assume.
 - Interfering with a communication port can, on some models, affect warranty or the
   manufacturer's monitoring. Check before you commit.
-- Heliograph is provided under the MIT licence: **no warranty, at your own risk**. With the
-  settings it ships with it cannot act on your inverter at all: `security.read_only_mode` is
-  on by default and refuses every command. That flag is the guarantee, not an absence of
-  capability — see [docs/security.md](security.md).
+- Heliograph is provided under the MIT licence: **no warranty, at your own risk**.
+- **No setpoint can reach your inverter with the settings it ships with.**
+  `security.read_only_mode` is on by default and refuses every command before any driver sees
+  it. That flag is the guarantee, not an absence of capability, and anyone with the admin
+  password can turn it off — see [security.md](security.md).
+- **One thing is transmitted regardless, on EverSolar and SolaX.** Those inverters are found by
+  being *given* a bus address, so discovery broadcasts a re-register and then assigns one.
+  There is no read-only way to discover an inverter of that family. The address is volatile and
+  the inverter forgets it on power loss, no configuration is altered, and nothing persists. But
+  if a second inverter of the same family shares the line, that broadcast makes it forget its
+  address too, and it re-registers afterwards.
 
 ---
 
@@ -190,9 +197,10 @@ first, **swapping A and B is the single most common fix** — it cannot damage a
 
 Two reassurances, because this is the step people hesitate on. These are **signal** wires,
 carrying a few volts; the dangerous parts of an inverter are behind its cover, and you never
-open that. And plugging it in cannot change a setting on your inverter: the shipped
-configuration has `security.read_only_mode` on, which refuses every command before it can reach
-a driver.
+open that. And no setpoint can reach the inverter: the shipped configuration has
+`security.read_only_mode` on, which refuses every command before it can reach a driver. The
+handshake that finds an EverSolar or SolaX does transmit — see the note above — but it changes
+no setting and the address it assigns is forgotten on power loss.
 
 If you want the longer version — cable choice, chaining several inverters, where the 120 Ω
 terminators go — read [docs/rs485-bus.md](rs485-bus.md) **before** you buy cable.
@@ -226,7 +234,7 @@ and is how you check that the addresses you assigned to several inverters actual
    open an issue.
 
 <p align="center">
-  <img src="docs/images/discovery.png" width="480" alt="The Discovery wizard stepping through interface, mode, probing, candidates, confirm, test poll and save">
+  <img src="images/discovery.png" width="480" alt="The Discovery wizard stepping through interface, mode, probing, candidates, confirm, test poll and save">
   <br>
   <em>Discovery is a guided wizard: it probes the bus, proposes a driver, and lets you confirm with a test poll before anything is saved.</em>
 </p>
@@ -280,8 +288,9 @@ never be guessed.
 
 ## Help support your own inverter
 
-If your inverter is not in the table, you are exactly the person this project needs. There
-are three ways to help, and only one of them involves writing code:
+If your inverter is not in [the table on the front page](../README.md#does-it-work-with-my-inverter),
+you are exactly the person this project needs. There are three ways to help, and only one of
+them involves writing code:
 
 1. **Tell us it exists.** Open a
    [device request](https://github.com/Timdebruijn/heliograph/issues/new/choose) with the
@@ -291,10 +300,11 @@ are three ways to help, and only one of them involves writing code:
    manual, you can write one.
    [docs/adding-a-device.md](adding-a-device.md) walks through it, including a script
    for probing a device you have in front of you.
-3. **Confirm an Experimental driver.** The Growatt SPH and SolaX X1 drivers are implemented
-   but unproven on real hardware. If you own one, running it and reporting what happened —
-   including "it returned nothing" — is genuinely valuable. That is how the SolaX findings
-   already in the docs came to be.
+3. **Confirm something Experimental.** Every Modbus profile and every driver but the EverSolar
+   one is unproven on real hardware — eleven profiles, plus SunSpec, SolarMax and SolaX X1. If
+   you own any of them, running it and reporting what happened — including "it returned
+   nothing" — is genuinely valuable. That is how the SolaX findings already in the docs came to
+   be.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the practicalities.
 

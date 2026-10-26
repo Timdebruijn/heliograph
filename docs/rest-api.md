@@ -87,9 +87,10 @@ performing anything: the RS485 task owns the bus and runs the transaction on its
 the reply is `202` with a `request_id`, and `GET /api/v1/devices/<id>/commands/<request_id>` says
 what became of it.
 
-**Nothing currently ends in a device being written to**, and the endpoint says so rather than
-pretending. Every shipping driver answers `Unsupported`, and both halves return
-`404 no_command_path` while no write path is wired at all. The layers below are real —
+**No shipped configuration ends in a device being written to**, and the endpoint says so rather
+than pretending. Most drivers answer `Unsupported`; the two that do not are listed in
+[security.md](security.md#what-can-reach-the-inverter), and both are gated — by an unverified
+write row, or by a device property no inverter here has ever satisfied. The layers below are real —
 [write-path.md](device-profiles/write-path.md) describes what a profile must declare before a
 register is ever written, and `security.read_only_mode` refuses the whole path regardless.
 

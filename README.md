@@ -4,7 +4,7 @@
 REST and Prometheus, all at once. One ESP32 board, roughly €20–30, no cloud anywhere in the
 path.**
 
-![The built-in dashboard, reading a 2014 EverSolar over RS485](docs/images/live.png)
+![The built-in dashboard, reading an EverSolar the manufacturer stopped supporting in 2019](docs/images/live.png)
 
 > **Before anything else, check [the inverter table](#does-it-work-with-my-inverter).** Most of
 > it says *never met a device*. That is not modesty — it is the only number on this page that
@@ -40,14 +40,40 @@ Reads the inverter over RS485 and serves the same decoded data four ways at the 
 **Prometheus**. It has its own dashboard on the board, so there is nothing else to install to
 see whether it works.
 
-Polling is **every 10 seconds by default**, configurable from 1 to 3600. A poll takes about
-103 ms. That is faster than a cloud that lags five to fifteen minutes, and it is still a poll
+Polling is **every 10 seconds by default**, configurable from 1 to 3600. On the one bridge where
+it has been measured over months — an EverSolar on RS485 — a poll takes about 103 ms. A Modbus
+profile reading several blocks has never been timed against hardware. Either way it is a poll
 and not a live feed.
 
-It speaks more than one wire protocol, which is unusual on an ESP32. Two of them are not Modbus
-at all — EverSolar/Zeversolar's own PMU framing, and SolarMax's MaxTalk ASCII. Alongside those it
-reads SunSpec and plain Modbus RTU with eleven device profiles. A discovery mode probes an
-unknown RS485 bus and works out which family is on it.
+It speaks more than one wire protocol, which is unusual on an ESP32. Three of them are not Modbus
+at all — the AA55/PMU framing shared by EverSolar/Zeversolar and SolaX, and SolarMax's MaxTalk
+ASCII. Alongside those it reads SunSpec and plain Modbus RTU with eleven device profiles. A
+discovery mode probes an unknown RS485 bus and works out which family is on it.
+
+### Turning the inverter down
+
+Reading is half of it. Negative prices and feed-in limits are why people want the other half, and
+a survey of what exists found no open-source project doing it at all.
+
+Two routes are built. **Over the protocol**, a setpoint — a power limit, or connect and
+disconnect. **Over a dry contact**, the relay boards close the DRM terminals many inverters carry
+for exactly this, which is often the only control an inverter that cannot be written to still
+offers.
+
+Both are gated, deliberately, and the gates are the part worth knowing before you count on
+either:
+
+- `security.read_only_mode` is **on by default** and refuses every command before any driver sees
+  it. Anyone with the admin password can turn it off.
+- A Modbus profile will not write a row that is not marked `verified`, and no shipped profile has
+  one. Verified means a register checked against a device, not against a second PDF.
+- SunSpec's write path has a different gate — the inverter must publish SunSpec model 123 — and
+  no SunSpec device has ever answered this firmware.
+- The relays switch, measured on the bench. **Nothing has ever been wired to an inverter's DRM
+  port.** If you are first, [`docs/drm.md`](docs/drm.md) is written for you.
+
+The path is built and tested; what is missing is a verified register and somebody's hardware to
+prove it against. That is the current state, not the design.
 
 ![Finding and naming what is on the bus](docs/images/inverters.png)
 
@@ -71,6 +97,12 @@ differently: a driver gets the framing wrong, a profile gets the meaning of regi
 |---|---|---|
 | EverSolar / Zeversolar **TL** series (PMU framing, not Modbus) | **Stable**, for that model | Yes — a TL3000-20, the author's own, in production |
 | Same driver, Zeversolar **TLC** series (three-phase) | **Beta** | Yes — one TLC8000, on a contributor's hardware, not the author's |
+
+The TLC row carries two caveats the word Beta does not: which of the two per-phase current
+registers is L2 rests on the layout rather than on a measurement, because both read the same
+value in the only capture that exists, and the operating-hours word has never been compared with
+anything. Beta also lives in prose only — in the code the driver is one driver, so the REST API
+and the dashboard report `stable` for a TLC8000 too.
 | SunSpec | Experimental | No |
 | SolarMax (MaxTalk ASCII, not Modbus) | Experimental | No |
 | SolaX X1 | Experimental | One field attempt. It returned zero bytes. |
@@ -93,9 +125,9 @@ be called anything more.
 **Stable** means validated and soak-tested on hardware. The label belongs to a driver *and* an
 inverter, not to a driver alone.
 
-What Experimental looks like in practice: the one outside tester who reported back had a
-three-phase Deye SG05, and the bundled profile returned no readings until he wrote his own
-driver.
+What Experimental looks like in practice: the one outside tester who has reported back, in
+[the thread asking for testers](https://community.home-assistant.io/t/heliograph-esp32-firmware-that-speaks-your-inverters-native-protocol-mqtt-ha-modbus-tcp-rest-prometheus-looking-for-testers/1022820), had a three-phase Deye SG05. The bundled profile
+returned no readings until he wrote his own driver.
 
 ### How a register map earns its grade
 
@@ -103,9 +135,11 @@ A map copied out of a vendor PDF is not a map a device has answered. Vendor docu
 sometimes only partly accurate, and a reading that is valid but wrong is the failure that goes
 unnoticed for months.
 
-So each profile records where every row came from, and is graded by how many independent sources
-agree on it. Two agreeing sources is still not a device confirming — it is a better guess, and it
-is labelled as one. Eleven profiles, 197 read registers, 8 write rows, nothing verified against
+So each profile names its sources in its own header, row by row where it matters, and says which
+rows rest on one source rather than two. Two agreeing sources is still not a device confirming —
+it is a better guess, and it is written down as one. The annotation is prose and it is uneven:
+Huawei and GoodWe are single-sourced and say so, while GoodWe annotates none of its eighteen rows
+individually. Eleven profiles, 197 read registers, 8 write rows, nothing verified against
 hardware. [`docs/drivers/coverage.md`](docs/drivers/coverage.md) has it row by row.
 
 No inverter firmware version is named as tested anywhere in this project. Do not read that
@@ -123,7 +157,8 @@ absence as "all of them".
 
 - Anyone whose inverter has no RS485 connection. Some are WiFi-only, and there is nothing here
   for them.
-- Anyone who needs a control path they can rely on today. See below.
+- Anyone who needs curtailment working **this week**. It is built; nothing has proven it on an
+  inverter yet.
 - Anyone who needs authentication on the data outputs.
 
 ---
@@ -131,20 +166,27 @@ absence as "all of them".
 ## Where it stops
 
 - **Eleven of eleven Modbus profiles have never met a device.** Nor has SunSpec, nor SolarMax.
-- **DRM curtailment has never driven a real inverter.** The relay boards are measured on the
-  bench — order, polarity, failsafe, boot state. The inverter side of that connection has never
-  been made. If you are the first, [`docs/drm.md`](docs/drm.md) is written for you, and expect to
-  debug it.
-- **Writes are switched off, not absent.** `security.read_only_mode` is on by default and refuses
-  every command before a driver is reached. That flag is the guarantee. The SunSpec driver does
-  carry a write path for the power limit and for connect/disconnect, and no device has ever
-  answered it. [`docs/security.md`](docs/security.md) is the authority.
+- **No control path has ever reached a device**, by either route. The gates above are all still
+  shut, and the relay measurements cover one board of the three: the Relay-6CH was measured for
+  order, polarity, failsafe and boot state, while the 1CH switches and its polarity has not been
+  put on a meter.
+- **Finding an EverSolar or SolaX is not a read-only operation.** That family is discovered by
+  being given a bus address, so discovery transmits by design and `read_only_mode` does not
+  cover it. Nothing is configured and the address is forgotten on power loss.
+  [`docs/security.md`](docs/security.md) is the authority on all of this.
 - **Modbus TCP carries 39 of the 44 channels.** `battery.power`, `battery.current`,
   `battery.temperature` and both battery energy counters have no register.
-- **No authentication on Modbus TCP or on REST reads.** Where there is authentication it is HTTP
-  Basic over plain HTTP, and OTA images are unsigned. Keep it on a network you trust.
+- **No authentication on Modbus TCP, on REST reads, or on `/metrics`.** Where there is
+  authentication it is HTTP Basic over plain HTTP, so the admin password travels in clear — and
+  that password is what turns the read-only flag off. Stored credentials are unencrypted, the
+  setup access point is open and comes back after a WiFi failure, and OTA images are unsigned.
+  Keep it on a network you trust; [`docs/security.md`](docs/security.md) has the full list.
 - **A wrong-but-valid static IP can lock you out** ([#69](https://github.com/Timdebruijn/heliograph/issues/69)).
-  Holding BOOT to factory-reset is the only way back.
+  The ways back are holding BOOT to factory-reset, or re-flashing over USB. The BOOT reset has
+  been measured on the Relay-6CH and not on the RS485-CAN, where it also gives no feedback.
+- **Several inverters on one bus is unconfirmed on hardware.** It is implemented across every
+  output and has only ever been run against simulated fleets
+  ([#82](https://github.com/Timdebruijn/heliograph/issues/82)).
 - **One maintainer, pre-1.0.** Expect breaking changes.
 
 ---
@@ -171,16 +213,17 @@ that search.
 intended; they do not prove an inverter will answer it. For that, the table above is the only
 evidence this project has.
 
-A production bridge ran 16.4 days without a restart on 0.27.4. The flash image is 1.54 MB, with
-about 152 KB of free heap out of roughly 320 KB.
+A production bridge ran 16.4 days without a restart on 0.27.4, ending with 145 KB of free heap
+against 136 KB a minute after the flash — it did not shrink. The v0.29.0 image for that board is
+1.57 MB, in a 6.25 MB slot.
 
 ![What the bridge thinks is wrong, when something is](docs/images/health.png)
 
 One mention outside the author's own bench: a blog post by Tim Retout (10 October 2026) about
-getting a Zeversolar Zeverlution 3680 into Home Assistant credits the protocol work —
-*"credit to eversolar-monitor, Heliograph and others"*. He did not run this firmware; he built his
-own ESPHome component and names this project among the prior reverse-engineering efforts he drew
-on.
+getting a Zeversolar Zeverlution 3680 into Home Assistant, which builds its own ESPHome component
+and credits the protocol work — *"credit to eversolar-monitor, Heliograph and others"*. That is a
+one-clause mention among several projects, and it is the whole of it. This project's own EverSolar
+work was in turn reconstructed from eversolar-monitor, which is named first.
 
 ---
 
@@ -194,7 +237,7 @@ Everything practical is in [`docs/`](docs/README.md), grouped by what you are tr
 | Read this before touching the RS485 wiring | [rs485-bus.md](docs/rs485-bus.md) |
 | Check what your inverter's profile rests on | [drivers/coverage.md](docs/drivers/coverage.md) |
 | Connect Home Assistant, MQTT, Prometheus, Modbus | [mqtt.md](docs/mqtt.md) · [prometheus.md](docs/prometheus.md) · [modbus-register-map.md](docs/modbus-register-map.md) |
-| Turn an inverter down over its DRM input | [drm.md](docs/drm.md) |
+| Turn an inverter down over its DRM input — the demand-response contacts many inverters carry | [drm.md](docs/drm.md) |
 | Add your own inverter | [adding-a-device.md](docs/adding-a-device.md) |
 
 **If your inverter is not in the table: plug it in anyway and say what happened.** A report that
@@ -203,5 +246,6 @@ its evidence, and it is the single most useful thing anyone can contribute right
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). Protocol knowledge was re-implemented from community
-documentation; see the per-protocol documents for sources.
+MIT — see [LICENSE](LICENSE), with third-party notices in
+[LICENSE-THIRD-PARTY.md](LICENSE-THIRD-PARTY.md). Protocol knowledge was re-implemented from
+community documentation; see the per-protocol documents for sources.

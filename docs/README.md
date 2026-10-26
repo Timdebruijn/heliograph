@@ -1,6 +1,6 @@
 # Documentation
 
-Thirty-five documents, grouped by **why you are here** rather than by what they are about. Start
+Thirty-six documents, grouped by **why you are here** rather than by what they are about. Start
 in the row that matches what you are trying to do.
 
 New to the project? [The README](../README.md) answers "what is this and does it work with my
