@@ -1304,7 +1304,7 @@ void startRestApi() {
         // is the problem: a sweep re-registers every inverter and walks eight addresses, so the
         // recording would be of something no driver ever does, filed under a report that claims
         // to show the driver's own conversation.
-        if (g_capture.busy() || g_driverCapture.busy()) {
+        if (g_capture.busy() || g_driverCapture.busy() || g_registerReader.busy()) {
             return false;
         }
         return g_discovery.request(extended);
@@ -1314,7 +1314,7 @@ void startRestApi() {
     // want exclusive use of the same bus. A driver capture blocks it too -- this one takes the
     // bus away from the driver, which is precisely the traffic the other is recording.
     ctx.requestCapture = [](const diag::CaptureConfig& config, const SerialProfile& profile) {
-        if (g_discovery.busy() || g_driverCapture.busy()) {
+        if (g_discovery.busy() || g_driverCapture.busy() || g_registerReader.busy()) {
             return false;
         }
         return g_capture.request(config, profile);

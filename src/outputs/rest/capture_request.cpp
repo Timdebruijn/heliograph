@@ -28,14 +28,17 @@ ApiError invalid(std::string message) {
 
 /// Decimal digits only, so "5oo" or "" is an error rather than 5 or 0. Someone typing register
 /// numbers by hand is exactly who makes that typo, and a read of the wrong register that looks
-/// like an answer is worse than a refusal. Out-of-range values come back as -1.
+/// like an answer is worse than a refusal. Anything that is not digits comes back as -1; a
+/// digit string too long for a long comes back as LONG_MAX. Both fail every caller's range check.
 long strictNumber(const char* raw) {
-    if (raw == nullptr || *raw == '\0') {
+    // The first character is checked by hand because strtol skips leading whitespace (any of
+    // it, tabs and newlines too) and accepts a sign.
+    if (raw == nullptr || *raw < '0' || *raw > '9') {
         return -1;
     }
     char*      end   = nullptr;
     const long value = std::strtol(raw, &end, 10);
-    return (*end != '\0' || *raw == '-' || *raw == '+' || *raw == ' ') ? -1 : value;
+    return *end != '\0' ? -1 : value;
 }
 
 }  // namespace

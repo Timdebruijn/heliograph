@@ -2078,13 +2078,15 @@ async function startRegRead(){
   }
   if(regTimer)clearInterval(regTimer);
   const started=Date.now();
+  // Keeps polling when the tab is left, so the answer is there on return. A read waits behind a
+  // running discovery sweep, which can take a minute or more: say so instead of calling it lost.
   regTimer=setInterval(async()=>{
-    if(!$('#rr_msg')||Date.now()-started>15000){clearInterval(regTimer);regTimer=null;
-      if($('#rr_msg'))say('#rr_msg','err','No answer from the bridge within 15 s.');return}
+    const waited=Date.now()-started;
+    if(waited>180000){clearInterval(regTimer);regTimer=null;say('#rr_msg','err','No answer from the bridge in 3 minutes.');return}
     let d;try{d=await getJson('/api/v1/registers')}catch(e){return}
-    if(d.status!=='done')return;
+    if(d.status!=='done'){if(waited>5000)say('#rr_msg','','Queued — the bus is busy with something else, the read goes out after it.');return}
     clearInterval(regTimer);regTimer=null;renderRegRead(d);
-  },500);
+  },1000);
 }
 const REG_RESULT={timeout:'Nothing answered. Check the unit id, and that this register space exists on the device.',
   exception:'The device answered and refused',crc:'Bytes arrived with a bad checksum — a wiring or line-speed problem, not the register.',

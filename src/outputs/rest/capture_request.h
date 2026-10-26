@@ -46,14 +46,14 @@ using QueryParam = std::function<const char*(const char* name)>;
 /// can see them.
 std::optional<ApiError> parseCaptureRequest(const QueryParam& param, CaptureRequest& out);
 
-/// Bounds for the passive mode, here rather than as literals in the handler so a test asserts
-/// the same numbers the endpoint enforces.
 /// The register reader's query: unit (1-247, default 1), space (holding|input, default
 /// holding), address (required, 0-65535) and count (1-kMaxRegisterReadCount, default 1).
 /// Lives here with the capture parser because it is the same kind of thing: a bus action whose
 /// every parameter is a small number in the query string.
 std::optional<ApiError> parseRegisterReadRequest(const QueryParam& param, RegisterReadRequest& out);
 
+/// Bounds for the passive mode, here rather than as literals in the handler so a test asserts
+/// the same numbers the endpoint enforces.
 inline constexpr long kMaxPassiveCaptureFrames = 256;
 inline constexpr long kMinBaudRate             = 300;
 inline constexpr long kMaxBaudRate             = 921600;

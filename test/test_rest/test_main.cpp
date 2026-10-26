@@ -3058,6 +3058,14 @@ static void test_a_register_read_refuses_what_is_not_a_plain_number() {
         {{"address", "1"}, {"unit", "0"}},
         {{"address", "1"}, {"unit", "248"}},
         {{"address", "1"}, {"space", "coil"}},
+        {{"address", "0x10"}},
+        {{"address", " 5"}},
+        {{"address", "\t5"}},
+        {{"address", "+5"}},
+        {{"address", "99999999999999999999"}},  // overflows long
+        {{"address", "1"}, {"unit", "1x"}},
+        {{"address", "1"}, {"count", "2x"}},
+        {{"address", "1"}, {"count", ""}},
     };
     for (const Query& q : bad) {
         const auto error = parseRead(q, r);
@@ -3069,9 +3077,11 @@ static void test_a_register_read_refuses_what_is_not_a_plain_number() {
 
 // Answers fn 0x03/0x04 with register value = address + 1, so a test can tell which registers
 // came back. Records the function code it was asked for.
+static uint8_t g_lastUnit = 0;
 static test::Responder countingDevice(uint8_t& lastFunction) {
     return [&lastFunction](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
         if (req.size() < 8) return false;
+        g_lastUnit           = req[0];
         lastFunction         = req[1];
         const uint16_t start = static_cast<uint16_t>((req[2] << 8) | req[3]);
         const uint16_t count = static_cast<uint16_t>((req[4] << 8) | req[5]);
@@ -3093,12 +3103,13 @@ static void test_a_register_read_runs_on_the_bus_task_and_reports_the_words() {
     RegisterReader reader(clockFn);
 
     TEST_ASSERT_FALSE(reader.runIfRequested(transport));  // nothing asked: the poll keeps its slot
-    TEST_ASSERT_TRUE(reader.request({1, modbus::kReadInputRegisters, 32, 2}));
+    TEST_ASSERT_TRUE(reader.request({7, modbus::kReadInputRegisters, 32, 2}));
     TEST_ASSERT_TRUE(reader.busy());
     TEST_ASSERT_FALSE(reader.request({1, modbus::kReadInputRegisters, 40, 1}));  // one at a time
 
     TEST_ASSERT_TRUE(reader.runIfRequested(transport));
     TEST_ASSERT_EQUAL_HEX8(modbus::kReadInputRegisters, function);
+    TEST_ASSERT_EQUAL_UINT8(7, g_lastUnit);  // the unit asked for, not the driver's
     const RegisterReadReport report = reader.report();
     TEST_ASSERT_EQUAL(RegisterReadStatus::Done, report.status);
     TEST_ASSERT_EQUAL(modbus::ReadStatus::Ok, report.outcome.status);
@@ -3153,6 +3164,27 @@ static void test_a_register_read_payload_carries_the_raw_words() {
     TEST_ASSERT_EQUAL(500, doc["values"][0].as<int>());
     TEST_ASSERT_EQUAL(501, doc["values"][1].as<int>());
     TEST_ASSERT_FALSE(doc["busy"].as<bool>());
+}
+
+// A refusal is an answer, and its code is what tells "no such register" (2) from the rest.
+static void test_a_refused_register_read_reports_the_exception_code() {
+    test::MockTransport transport;
+    transport.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 2) return false;
+        reply = {req[0], static_cast<uint8_t>(req[1] | modbus::kExceptionFlag), 0x02};
+        test::appendModbusCrc(reply);
+        return true;
+    });
+    RegisterReader reader(clockFn);
+    reader.request({1, modbus::kReadHoldingRegisters, 9999, 1});
+    reader.runIfRequested(transport);
+
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildRegisterReadPayload(reader.report(), body));
+    JsonDocument doc = parse(body);
+    TEST_ASSERT_EQUAL_STRING("exception", doc["result"]);
+    TEST_ASSERT_EQUAL(2, doc["exception_code"].as<int>());
+    TEST_ASSERT_EQUAL(0, doc["values"].size());
 }
 
 static void test_an_unused_register_reader_reports_idle_and_nothing_else() {
@@ -3335,5 +3367,6 @@ int main(int, char**) {
     RUN_TEST(test_a_silent_unit_is_reported_as_a_timeout_with_no_values);
     RUN_TEST(test_a_register_read_payload_carries_the_raw_words);
     RUN_TEST(test_an_unused_register_reader_reports_idle_and_nothing_else);
+    RUN_TEST(test_a_refused_register_read_reports_the_exception_code);
     return UNITY_END();
 }
