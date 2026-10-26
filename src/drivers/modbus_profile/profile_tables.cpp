@@ -2,10 +2,77 @@
 
 #include "profile_tables.h"
 
+#include <cstring>
+
 // The profile tables (register maps, read blocks) live in profiles_generated.cpp, emitted
 // at build time from profiles/growatt/*.toml. This file keeps only the decode logic.
 
 namespace heliograph::profile {
+
+namespace {
+
+/// Per-string PV power, in the order the canonical model numbers the strings.
+constexpr const char* kStringPower[] = {
+    measurement_id::kDcMppt1Power, measurement_id::kDcMppt2Power, measurement_id::kDcMppt3Power,
+    measurement_id::kDcMppt4Power, measurement_id::kDcMppt5Power,
+};
+
+bool profileMaps(const DeviceProfile& profile, const char* id) {
+    for (size_t i = 0; i < profile.mappingCount; ++i) {
+        if (std::strcmp(profile.mappings[i].measurementId, id) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// dc.power.total for a profile that reads power per string but has no total register --
+/// several inverters simply do not report one, and four shipped profiles were publishing their
+/// strings with no total beside them.
+///
+/// A device-reported total is never overruled: if the profile maps one, this does nothing.
+///
+/// The profile must map power for every tracker it declares (`mppts`). A profile that declares
+/// three and maps two would otherwise publish two strings' worth as the whole array. That is
+/// the most a profile can vouch for: the Deye profile says outright that larger units in the
+/// family have a third or fourth string it does not map, so on such a unit the sum is of the
+/// strings this map reads -- which is what the display name says, and why it is marked derived.
+///
+/// Every string the profile maps must have been read in THIS poll (timestamp == ts). A block
+/// that was skipped leaves its channels holding the previous reading, so summing whatever is
+/// valid would add two moments together and publish a total that never existed. One string
+/// missing means no total, not a smaller one.
+void deriveDcTotal(const DeviceProfile& profile, MeasurementSet& measurements, uint64_t ts) {
+    if (profileMaps(profile, measurement_id::kDcPowerTotal)) {
+        return;
+    }
+    size_t mapped = 0;
+    for (const char* id : kStringPower) {
+        mapped += profileMaps(profile, id) ? 1 : 0;
+    }
+    if (mapped == 0 || mapped != profile.mpptCount) {
+        return;
+    }
+    double sum = 0.0;
+    for (const char* id : kStringPower) {
+        if (!profileMaps(profile, id)) {
+            continue;
+        }
+        const Measurement* m = measurements.find(id);
+        if (m == nullptr || !m->valid || m->timestampMs != ts) {
+            if (measurements.find(measurement_id::kDcPowerTotal) != nullptr) {
+                measurements.invalidate(measurement_id::kDcPowerTotal);
+            }
+            return;
+        }
+        sum += m->value;
+    }
+    measurements.declare(measurement_id::kDcPowerTotal, MeasurementType::Power, Unit::Watt,
+                         "PV Power (sum of strings)", /*derived=*/true);
+    measurements.set(measurement_id::kDcPowerTotal, sum, ts);
+}
+
+}  // namespace
 
 const char* profileStatusName(ProfileStatus status) {
     switch (status) {
@@ -69,6 +136,7 @@ void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t 
         measurements.declare(mp.measurementId, mp.type, mp.unit, mp.displayName);
         measurements.set(mp.measurementId, static_cast<double>(raw) * mp.scale + mp.offset, ts);
     }
+    deriveDcTotal(profile, measurements, ts);
 }
 
 }  // namespace heliograph::profile
