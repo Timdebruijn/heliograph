@@ -84,7 +84,7 @@ prove it against. That is the current state, not the design.
 Probably not yet, and nobody should tell you otherwise from a README.
 
 This table does not count how many inverters are *supported*. It counts how many have been seen
-working, which is two.
+working, which is three.
 
 An inverter is reached in one of two ways. A **driver** is hand-written code for one protocol
 family. A **profile** is a Modbus register map written as data — a table of addresses, scales and
@@ -97,26 +97,27 @@ differently: a driver gets the framing wrong, a profile gets the meaning of regi
 |---|---|---|
 | EverSolar / Zeversolar **TL** series (PMU framing, not Modbus) | **Stable**, for that model | Yes — a TL3000-20, the author's own, in production |
 | Same driver, Zeversolar **TLC** series (three-phase) | **Beta** | Yes — one TLC8000, on a contributor's hardware, not the author's |
+| Modbus profile driver | Experimental | Yes — a Deye SG05, through a profile its owner wrote (below) |
+| SunSpec | Experimental | No |
+| SolarMax (MaxTalk ASCII, not Modbus) | Experimental | No |
+| SolaX X1 | Experimental | One field attempt. It returned zero bytes. |
 
 The TLC row carries two caveats the word Beta does not: which of the two per-phase current
 registers is L2 rests on the layout rather than on a measurement, because both read the same
 value in the only capture that exists, and the operating-hours word has never been compared with
 anything. Beta also lives in prose only — in the code the driver is one driver, so the REST API
 and the dashboard report `stable` for a TLC8000 too.
-| SunSpec | Experimental | No |
-| SolarMax (MaxTalk ASCII, not Modbus) | Experimental | No |
-| SolaX X1 | Experimental | One field attempt. It returned zero bytes. |
 
 **Modbus profiles** — Deye, GoodWe, Growatt (×3), Huawei, Sofar (×2), Solis (×2), Sungrow
 
 | | |
 |---|---|
 | Status | Experimental, all eleven |
-| Have any of them met a device? | **No. Zero of eleven.** |
+| Have any of the shipped profiles met a device? | **No. Zero of eleven.** |
 
-Those eleven are where most inverter brands live, and they are the part of this project with the
-least evidence behind it. The two inverters that have answered are both EverSolar, through the
-driver in the first table.
+Those eleven are where most inverter brands live, and the shipped maps are the part of this
+project with the least evidence behind them. The driver that reads them has met real hardware,
+though — with a map somebody wrote for their own inverter.
 
 **Experimental** means implemented from documentation. It may simply not work. If you run it,
 you are the first.
@@ -125,9 +126,12 @@ be called anything more.
 **Stable** means validated and soak-tested on hardware. The label belongs to a driver *and* an
 inverter, not to a driver alone.
 
-What Experimental looks like in practice: the one outside tester who has reported back, in
-[the thread asking for testers](https://community.home-assistant.io/t/heliograph-esp32-firmware-that-speaks-your-inverters-native-protocol-mqtt-ha-modbus-tcp-rest-prometheus-looking-for-testers/1022820), had a three-phase Deye SG05. The bundled profile
-returned no readings until he wrote his own driver.
+What that looks like in practice, from [the thread asking for testers](https://community.home-assistant.io/t/heliograph-esp32-firmware-that-speaks-your-inverters-native-protocol-mqtt-ha-modbus-tcp-rest-prometheus-looking-for-testers/1022820/3): the
+bundled Deye profile is single-phase, so on a three-phase Deye SG05 it read nothing. Its owner —
+who wrote that they don't have *"the biggest experience with programming"* — wrote a profile for
+the SG05 instead, built the firmware, flashed it, and got *"a pretty stable readout"*. That is
+what adding an inverter as data is for: a table of registers, not a driver. Writes were not
+tried, and that profile has not yet come back into this repository.
 
 ### How a register map earns its grade
 
