@@ -1190,12 +1190,9 @@ async function setLogLevel(level){
 // plain HTTP, so this used to report failure on every device while working on a developer's
 // desk, which is exactly why it shipped. The selection fallback is the path that actually runs.
 //
-// Testing the property is enough; there is no isSecureContext check here on purpose. The API
-// is [SecureContext], so its presence already implies one, measured on Chrome and on Firefox
-// at http://<lan-ip>/ where both report `typeof navigator.clipboard === 'undefined'`. A guard
-// that cannot change the branch still has to be read, and still needs a test world of its own
-// to prove it does nothing. If a browser ever does expose it insecurely, writeText rejects and
-// the handler below falls back, which is what the guard would have done anyway.
+// There is no isSecureContext test here: the API is [SecureContext], so the property existing
+// IS the secure-context test. Measured on Chrome and on Firefox at http://<lan-ip>/, where both
+// report `typeof navigator.clipboard === 'undefined'`.
 function copyText(text,btn){
   const done=ok=>{
     if(!btn)return;
@@ -1207,8 +1204,15 @@ function copyText(text,btn){
     setTimeout(()=>{btn.textContent=btn.dataset.idle},2000);
   };
   if(navigator.clipboard){
-    navigator.clipboard.writeText(text).then(()=>done(true),()=>done(copyBySelection(text)));
-    return;
+    // The try is for something that assigned the property anyway -- a polyfill, an extension,
+    // a webview shim. Such a thing can throw, or return a value with no .then, and BOTH throw
+    // synchronously right here. Either one would otherwise escape the click handler and leave
+    // the button saying nothing at all, which is the one outcome this function exists to
+    // prevent. An async rejection is handled below, as a real refusal is.
+    try{
+      navigator.clipboard.writeText(text).then(()=>done(true),()=>done(copyBySelection(text)));
+      return;
+    }catch(e){ /* fall through to the selection copy */ }
   }
   done(copyBySelection(text));
 }

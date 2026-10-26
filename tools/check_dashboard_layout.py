@@ -698,6 +698,9 @@ def copy_js(case: str) -> str:
                the only non-HTTPS origin that counts as one is localhost, never a LAN address.
     "denied"   a secure context that refuses the write, as Chrome does when the document is not
                focused. The only path that reaches the promise's rejection handler.
+    "shim"     something assigned navigator.clipboard on an insecure origin and its writeText
+               throws, as a polyfill or an extension can. Not a browser; the only world that
+               reaches the try in copyText, and the reason that try exists.
     "noexec"   the fallback runs and execCommand returns false.
     "throws"   the fallback runs and execCommand throws, as it can in a sandboxed frame.
     "repeat"   plain HTTP, clicked twice inside the two seconds before the label is restored.
@@ -718,7 +721,11 @@ def copy_js(case: str) -> str:
             "value:{writeText:t=>{api.push(t.length);"
             "return Promise.reject(new Error('refused'))}}"
         )
-    else:  # http, noexec, throws, repeat: no API at all, as on every bridge
+    elif case == "shim":
+        # Synchronously, not a rejected promise. A shim returning a value with no .then throws
+        # in the same place for the same reason, so one world covers both.
+        clipboard = "value:{writeText:t=>{api.push(t.length);throw new Error('shim')}}"
+    else:  # http, noexec, throws: no API at all, as on every bridge
         clipboard = "value:undefined"
     if case == "throws":
         settle = "throw new Error('blocked')"
@@ -774,9 +781,14 @@ def copy_js(case: str) -> str:
             "if(!/^TEXTAREA:[1-9]/.test(sel[0]||''))"
             "say('nothing was selected to copy: '+JSON.stringify(sel));",
         ]
-        checks.append(
-            "if(api.length)say('the clipboard API was reached with none exposed');"
-        )
+        if case == "shim":
+            checks.append(
+                "if(api.length===0)say('the shim was never called, so the try was not entered');"
+            )
+        else:
+            checks.append(
+                "if(api.length)say('the clipboard API was reached with none exposed');"
+            )
     return (
         "(function(){\n"
         "const fail=[];const say=m=>fail.push(m);"
@@ -1024,6 +1036,7 @@ def main() -> int:
             ("denied", "a secure context that refuses the write"),
             ("noexec", "plain HTTP where the copy returns false"),
             ("throws", "plain HTTP where the copy throws"),
+            ("shim", "a clipboard shim whose writeText throws"),
             ("repeat", "plain HTTP, clicked twice in quick succession"),
         ):
             page = build_page(stripped, stub, "{soc:68,power:-1240}", copy_js(case))
