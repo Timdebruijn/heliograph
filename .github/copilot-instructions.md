@@ -46,7 +46,7 @@ See `docs/adding-a-device.md` for the full workflow.
 
 | Environment | Command | Purpose |
 |---|---|---|
-| `native` | `pio test -e native` | ~930 host tests, no hardware needed |
+| `native` | `pio test -e native` | 1,055 host tests, no hardware needed |
 | `waveshare-rs485-can` etc. | `pio run -e waveshare-rs485-can` | Production firmware, one env per board (all drivers) |
 | `mock` | `pio run -e mock` | Full output stack with a simulated inverter |
 

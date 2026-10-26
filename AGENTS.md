@@ -64,7 +64,7 @@ talk to a driver directly.
 Run these and confirm they pass before committing:
 
 ```bash
-pio test -e native                    # ~930 host tests, no hardware needed
+pio test -e native                    # 1,055 host tests, no hardware needed
 bash tools/check_layering.sh          # layering invariants — read RESULT: PASS/FAIL at the end
 python3 tools/gen_profiles.py --check # profile schema (when touching profiles/)
 python3 tools/check_web_js.py         # embedded JS (when touching src/web/)

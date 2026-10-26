@@ -2,8 +2,9 @@
 //
 // The single gate every write must pass through, whatever asked for it.
 //
-// Fully implemented in the MVP even though the only shipping driver rejects everything: the
-// read-only guarantee is worth having as a tested contract rather than as an absence of code.
+// Fully implemented before anything could use it. Two drivers now declare a write path --
+// see docs/security.md -- and both are gated behind something else; the read-only guarantee
+// is worth having as a tested contract rather than as an absence of code.
 // When a writable driver is added later, the safety checks already exist and are already
 // proven, instead of being written under pressure alongside the first thing that can move a
 // real inverter.

@@ -167,7 +167,9 @@ All registration traffic goes to broadcast (`0x00`).
 After that, `QUERY_NORMAL_INFO` (`11 02`) is sent periodically to the assigned address.
 The reference repeats steps 2-4 every minute to find new inverters (`:1037-1040`).
 
-**All four steps are read-only.** Nothing is configured in the inverter except for
+**All four steps leave the inverter's configuration untouched**, which is not the same as
+read-only: steps 1 and 3 transmit, and step 3 assigns an address. Nothing is configured
+in the inverter except for
 a volatile bus address, which the inverter itself forgets when it loses power. This procedure
 is therefore safe as a probe (see `docs/architecture.md`, discovery).
 

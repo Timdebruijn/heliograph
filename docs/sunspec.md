@@ -141,7 +141,7 @@ base register and set it here.
 ## Connection
 
 Modbus RTU over RS485 today. Wire A/B and ground to the inverter's RS485 terminals as for any
-other RS485 device, and check the [general safety notes](../README.md#before-you-start-what-you-are-getting-into)
+other RS485 device, and check the [general safety notes](getting-started.md#before-you-start-what-you-are-getting-into)
 first.
 
 **Modbus TCP is not supported yet.** This matters, because most SunSpec devices in the wild —

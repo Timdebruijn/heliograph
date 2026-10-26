@@ -119,7 +119,7 @@ command topics for the inverter because the active driver had no write capabilit
 stopped being true when the command queue landed: the subscription is unconditional wherever a
 handler is wired, which it always is. What is still true is that no shipped register map has a
 `verified` write row, so a command on that topic ends in `unsupported` rather than a register
-write — and `read_only_mode` refuses the whole path before a driver is reached. See
+write for every Modbus profile — SunSpec is the exception, and its gate is the device, not a flag — and `read_only_mode` refuses the whole path before a driver is reached. See
 [docs/security.md](security.md#what-can-reach-the-inverter) for which drivers can write and under
 what conditions; the honest summary is "gated", not "absent".
 

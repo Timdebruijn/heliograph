@@ -24,14 +24,22 @@ the same LAN", not "someone holding the PCB in their hands".
 ## What can reach the inverter
 
 This section exists because the sentence it replaces was wrong, and wrong in the direction that
-matters here: it said no driver in this build can write to an inverter. Two of the four can.
+matters here: it said no driver in this build can write to an inverter. Two of the six can.
 
 | Driver | Can it write? |
 |---|---|
 | `eversolar_legacy` | No. `supportsWrite = false`, and the protocol defines no writes at all |
 | `solax_x1` | No. `supportsWrite = false` |
+| `solarmax` | No. Neither source documents a write, so none is declared |
 | `modbus_profile` | **Declares it and implements it** — `execute()` writes one holding register over FC06 and verifies the device's echo. But every `[[write]]` row in every shipped profile is `verified = false`, and the driver refuses an unverified row, so **no profile writes today** |
 | `sunspec` | **Declares it and implements it, and its gate is a device property rather than a review flag.** `execute()` writes the power-limit registers and the connect/disconnect register. It requires that the inverter published SunSpec model 123 and that the block was read. Attach a SunSpec inverter that implements model 123, turn read-only mode off, send the command, and it will write |
+
+One thing bypasses all of this, because it is not a command. The AA55/PMU family — EverSolar
+and SolaX — is discovered by being *assigned* a bus address, so `probe()` transmits a
+re-register broadcast and an address assignment by design, outside the dispatcher and outside
+`read_only_mode`. There is no read-only way to discover such an inverter. It configures nothing
+and the address is volatile, but a second inverter of that family on the same line is made to
+forget its address and re-register. See [architecture.md](architecture.md) § discovery.
 
 **So what actually protects the inverter with the shipped configuration is
 `security.read_only_mode`, which is `true` by default and refuses every command before a driver

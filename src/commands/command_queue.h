@@ -8,8 +8,8 @@
 // write needs to say WHAT and for WHICH device, and the caller needs to learn what became of the
 // specific request it made -- hence requestId rather than a fire-and-forget bool.
 //
-// Built ahead of any driver that can accept a command (every shipping driver returns
-// CommandResult::Unsupported), for the same reason CommandDispatcher itself was: the tested
+// Built ahead of any driver that could accept a command, for the same reason
+// CommandDispatcher itself was: the tested
 // contract is worth having before the first thing that needs it, not written under pressure
 // alongside it.
 
