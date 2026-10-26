@@ -30,6 +30,7 @@
 #include "app/driver_capture_runner.h"
 #include "app/device_plan.h"
 #include "app/discovery_runner.h"
+#include "app/register_reader.h"
 #include "boards/board.h"
 #include "commands/command_dispatcher.h"
 #include "commands/command_queue.h"
@@ -720,6 +721,9 @@ CaptureRunner g_capture{nowMs};
 /// it records.
 DriverCaptureRunner g_driverCapture{nowMs};
 
+/// Owns the register reader's one-at-a-time reads, on the same request/run split.
+RegisterReader g_registerReader{nowMs};
+
 /// The configured driver, or the highest-priority one compiled in. No manufacturer name here.
 std::string selectedDriverId() {
     if (!g_config.driver.id.empty() && g_registry.contains(g_config.driver.id)) {
@@ -1320,7 +1324,9 @@ void startRestApi() {
     // recording of a probe sweep or of a passive window (in which the bridge says nothing at
     // all) is not what this report claims to contain.
     ctx.requestDriverCapture = [](const diag::TapConfig& config) {
-        if (g_discovery.busy() || g_capture.busy()) {
+        // A waiting register read too: it would land inside the window and be filed as the
+        // driver's own traffic.
+        if (g_discovery.busy() || g_capture.busy() || g_registerReader.busy()) {
             return false;
         }
         // The line is not the operator's to choose here -- there is a working driver and it is
@@ -1330,6 +1336,17 @@ void startRestApi() {
         return g_driverCapture.request(config, effectiveSerialProfile());
     };
     ctx.driverCaptureReport = [] { return g_driverCapture.report(); };
+    // Refused while anything else holds or is about to hold the bus, for the reasons the three
+    // above give each other: a read inside a probe sweep, a passive window or a driver capture
+    // either goes out on a line it was not meant for or lands in a recording that claims to be
+    // something else.
+    ctx.requestRegisterRead = [](const RegisterReadRequest& request) {
+        if (g_discovery.busy() || g_capture.busy() || g_driverCapture.busy()) {
+            return false;
+        }
+        return g_registerReader.request(request);
+    };
+    ctx.registerReadReport = [] { return g_registerReader.report(); };
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
     // The undo behind a configuration restore. Straight through to the store, which owns both
     // the stash and the swap; the REST layer only decides when.
@@ -1552,6 +1569,16 @@ void rs485Task(void* /*arg*/) {
                 restoreDriverLine();
             }
             vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+        // A register read, on the same terms: one transaction in place of this cycle's poll.
+        // It goes out on the line the driver is using, which is the line the device on the
+        // other end is listening at.
+        if (g_registerReader.runIfRequested(g_transport)) {
+            const auto report = g_registerReader.report();
+            log::info("register read: unit %u fn 0x%02X %u+%u -> status %u",
+                      report.request.unitId, report.request.functionCode, report.request.start,
+                      report.request.count, static_cast<unsigned>(report.outcome.status));
             continue;
         }
         // A queued write command, on the same terms as discovery and capture above: instead of

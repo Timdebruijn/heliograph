@@ -30,6 +30,8 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | POST | `/api/v1/actions/capture` | **✔** | Record the bus (`?mode=passive\|driver&seconds=&frames=`, plus line settings in `passive`) |
 | GET | `/api/v1/capture` | — | The last passive capture, with per-frame hex and checksum verdicts |
 | GET | `/api/v1/capture/driver` | — | The last driver capture: the same, plus a direction per frame |
+| POST | `/api/v1/actions/read-registers` | **✔** | Read 1–16 Modbus registers once (`?unit=&space=holding\|input&address=&count=`) |
+| GET | `/api/v1/registers` | — | The last register read: the request, the result and the raw words |
 | POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
 | POST | `/api/v1/actions/reboot` | **✔** | Reboot |
 | POST | `/api/v1/actions/clear-coredump` | **✔** | Discard a stored crash dump (404 when there is none) |
@@ -559,6 +561,32 @@ straddles the deadline.
 The report is bounded at 64 KB and the capture stops when full rather than dropping the oldest:
 for a handshake the interesting part is at the beginning, and a ring buffer would reliably
 discard exactly that. `summary.truncated` says which happened.
+
+## Reading registers
+
+For working out a register map without a rebuild per guess. The web UI has it on the Health
+tab as **Read registers**.
+
+```bash
+curl -X POST -u admin \
+  "http://bridge/api/v1/actions/read-registers?unit=1&space=holding&address=500&count=2"
+curl http://bridge/api/v1/registers
+```
+
+```json
+{"status": "done", "busy": false, "unit": 1, "space": "holding", "address": 500,
+ "count": 2, "result": "ok", "values": [2, 0]}
+```
+
+- **Read-only.** The bridge sends function 0x03 or 0x04 and nothing else, so
+  `security.read_only_mode` does not apply.
+- **One read in place of one poll**, on the line settings the bridge is already using.
+  A second request while one waits gets 409, as does a request while discovery or a
+  capture has the bus.
+- `result` is `ok`, `timeout`, `exception` (with `exception_code`), `crc`, `protocol` or
+  `transport_error`. `values` holds raw 16-bit words, only when `result` is `ok`.
+- `unit` 1–247 (default 1), `space` defaults to `holding`, `count` 1–16 (default 1).
+  `address` is required and must be plain digits.
 
 ## Applying changes: `reboot_required`
 

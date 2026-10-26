@@ -31,6 +31,7 @@
 #include "support/eversolar_rig.h"
 #include "support/fake_eversolar_device.h"
 #include "support/mock_transport.h"
+#include "support/modbus_frame.h"
 #include "fixtures/eversolar_frames.h"
 
 using namespace heliograph;
@@ -3014,6 +3015,155 @@ static void test_the_mock_hybrid_also_exports() {
                      std::string::npos);
 }
 
+// ---------------------------------------------------------------------------------------
+// The register reader: query rules, the handover to the bus task, and the payload.
+// ---------------------------------------------------------------------------------------
+
+static std::optional<rest::ApiError> parseRead(const Query& q, RegisterReadRequest& out) {
+    return rest::parseRegisterReadRequest(queryOf(q), out);
+}
+
+static void test_a_register_read_needs_only_an_address() {
+    RegisterReadRequest r;
+    TEST_ASSERT_FALSE(parseRead({{"address", "500"}}, r).has_value());
+    TEST_ASSERT_EQUAL_UINT8(1, r.unitId);
+    TEST_ASSERT_EQUAL_UINT8(modbus::kReadHoldingRegisters, r.functionCode);
+    TEST_ASSERT_EQUAL_UINT16(500, r.start);
+    TEST_ASSERT_EQUAL_UINT16(1, r.count);
+}
+
+static void test_a_register_read_takes_unit_space_and_count() {
+    RegisterReadRequest r;
+    TEST_ASSERT_FALSE(
+        parseRead({{"unit", "3"}, {"space", "input"}, {"address", "0"}, {"count", "16"}}, r)
+            .has_value());
+    TEST_ASSERT_EQUAL_UINT8(3, r.unitId);
+    TEST_ASSERT_EQUAL_UINT8(modbus::kReadInputRegisters, r.functionCode);
+    TEST_ASSERT_EQUAL_UINT16(16, r.count);
+}
+
+// Typed by hand, so the typos are refused rather than read as a different register: "5oo" is
+// not 5, an empty field is not 0.
+static void test_a_register_read_refuses_what_is_not_a_plain_number() {
+    RegisterReadRequest r;
+    const Query bad[] = {
+        {},                                        // no address
+        {{"address", ""}},
+        {{"address", "5oo"}},
+        {{"address", "-1"}},
+        {{"address", "65536"}},
+        {{"address", "65535"}, {"count", "2"}},    // runs off the end
+        {{"address", "1"}, {"count", "0"}},
+        {{"address", "1"}, {"count", "17"}},
+        {{"address", "1"}, {"unit", "0"}},
+        {{"address", "1"}, {"unit", "248"}},
+        {{"address", "1"}, {"space", "coil"}},
+    };
+    for (const Query& q : bad) {
+        const auto error = parseRead(q, r);
+        TEST_ASSERT_TRUE(error.has_value());
+        TEST_ASSERT_EQUAL(400, error->httpStatus);
+    }
+    TEST_ASSERT_FALSE(parseRead({{"address", "65535"}, {"count", "1"}}, r).has_value());
+}
+
+// Answers fn 0x03/0x04 with register value = address + 1, so a test can tell which registers
+// came back. Records the function code it was asked for.
+static test::Responder countingDevice(uint8_t& lastFunction) {
+    return [&lastFunction](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 8) return false;
+        lastFunction         = req[1];
+        const uint16_t start = static_cast<uint16_t>((req[2] << 8) | req[3]);
+        const uint16_t count = static_cast<uint16_t>((req[4] << 8) | req[5]);
+        reply                = {req[0], req[1], static_cast<uint8_t>(count * 2)};
+        for (uint16_t i = 0; i < count; ++i) {
+            const uint16_t v = static_cast<uint16_t>(start + i + 1);
+            reply.push_back(static_cast<uint8_t>(v >> 8));
+            reply.push_back(static_cast<uint8_t>(v & 0xFF));
+        }
+        test::appendModbusCrc(reply);
+        return true;
+    };
+}
+
+static void test_a_register_read_runs_on_the_bus_task_and_reports_the_words() {
+    uint8_t             function = 0;
+    test::MockTransport transport;
+    transport.setResponder(countingDevice(function));
+    RegisterReader reader(clockFn);
+
+    TEST_ASSERT_FALSE(reader.runIfRequested(transport));  // nothing asked: the poll keeps its slot
+    TEST_ASSERT_TRUE(reader.request({1, modbus::kReadInputRegisters, 32, 2}));
+    TEST_ASSERT_TRUE(reader.busy());
+    TEST_ASSERT_FALSE(reader.request({1, modbus::kReadInputRegisters, 40, 1}));  // one at a time
+
+    TEST_ASSERT_TRUE(reader.runIfRequested(transport));
+    TEST_ASSERT_EQUAL_HEX8(modbus::kReadInputRegisters, function);
+    const RegisterReadReport report = reader.report();
+    TEST_ASSERT_EQUAL(RegisterReadStatus::Done, report.status);
+    TEST_ASSERT_EQUAL(modbus::ReadStatus::Ok, report.outcome.status);
+    TEST_ASSERT_EQUAL_size_t(2, report.values.size());
+    TEST_ASSERT_EQUAL_UINT16(33, report.values[0]);
+    TEST_ASSERT_EQUAL_UINT16(34, report.values[1]);
+    TEST_ASSERT_FALSE(reader.busy());
+    TEST_ASSERT_FALSE(reader.runIfRequested(transport));  // one request is one read
+}
+
+// The reader's own guard, behind the REST parser: nothing but a read, nothing past the bound.
+static void test_the_register_reader_sends_nothing_but_reads() {
+    RegisterReader reader(clockFn);
+    TEST_ASSERT_FALSE(reader.request({1, 0x06, 100, 1}));  // write single register
+    TEST_ASSERT_FALSE(reader.request({1, 0x10, 100, 1}));  // write multiple
+    TEST_ASSERT_FALSE(reader.request({1, modbus::kReadHoldingRegisters, 100, 0}));
+    TEST_ASSERT_FALSE(
+        reader.request({1, modbus::kReadHoldingRegisters, 100, kMaxRegisterReadCount + 1}));
+    TEST_ASSERT_FALSE(reader.request({1, modbus::kReadHoldingRegisters, 65535, 2}));
+    TEST_ASSERT_FALSE(reader.busy());
+}
+
+static void test_a_silent_unit_is_reported_as_a_timeout_with_no_values() {
+    test::MockTransport transport;  // no responder: silence
+    RegisterReader      reader(clockFn);
+    TEST_ASSERT_TRUE(reader.request({9, modbus::kReadHoldingRegisters, 500, 1}));
+    TEST_ASSERT_TRUE(reader.runIfRequested(transport));
+
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildRegisterReadPayload(reader.report(), body));
+    JsonDocument doc = parse(body);
+    TEST_ASSERT_EQUAL_STRING("done", doc["status"]);
+    TEST_ASSERT_EQUAL_STRING("timeout", doc["result"]);
+    TEST_ASSERT_EQUAL(9, doc["unit"].as<int>());
+    TEST_ASSERT_EQUAL(0, doc["values"].size());
+}
+
+static void test_a_register_read_payload_carries_the_raw_words() {
+    uint8_t             function = 0;
+    test::MockTransport transport;
+    transport.setResponder(countingDevice(function));
+    RegisterReader reader(clockFn);
+    reader.request({1, modbus::kReadHoldingRegisters, 499, 2});
+    reader.runIfRequested(transport);
+
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildRegisterReadPayload(reader.report(), body));
+    JsonDocument doc = parse(body);
+    TEST_ASSERT_EQUAL_STRING("ok", doc["result"]);
+    TEST_ASSERT_EQUAL_STRING("holding", doc["space"]);
+    TEST_ASSERT_EQUAL(499, doc["address"].as<int>());
+    TEST_ASSERT_EQUAL(500, doc["values"][0].as<int>());
+    TEST_ASSERT_EQUAL(501, doc["values"][1].as<int>());
+    TEST_ASSERT_FALSE(doc["busy"].as<bool>());
+}
+
+static void test_an_unused_register_reader_reports_idle_and_nothing_else() {
+    RegisterReader reader(clockFn);
+    std::string    body;
+    TEST_ASSERT_TRUE(rest::buildRegisterReadPayload(reader.report(), body));
+    JsonDocument doc = parse(body);
+    TEST_ASSERT_EQUAL_STRING("idle", doc["status"]);
+    TEST_ASSERT_FALSE(doc["address"].is<int>());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_config_response_contains_no_secret_anywhere);
@@ -3177,5 +3327,13 @@ int main(int, char**) {
     RUN_TEST(test_restore_preview_omits_an_absent_export_date);
     RUN_TEST(test_restore_preview_of_a_real_backup_leaks_no_password);
     RUN_TEST(test_restore_result_reports_a_missing_undo_separately);
+    RUN_TEST(test_a_register_read_needs_only_an_address);
+    RUN_TEST(test_a_register_read_takes_unit_space_and_count);
+    RUN_TEST(test_a_register_read_refuses_what_is_not_a_plain_number);
+    RUN_TEST(test_a_register_read_runs_on_the_bus_task_and_reports_the_words);
+    RUN_TEST(test_the_register_reader_sends_nothing_but_reads);
+    RUN_TEST(test_a_silent_unit_is_reported_as_a_timeout_with_no_values);
+    RUN_TEST(test_a_register_read_payload_carries_the_raw_words);
+    RUN_TEST(test_an_unused_register_reader_reports_idle_and_nothing_else);
     return UNITY_END();
 }
