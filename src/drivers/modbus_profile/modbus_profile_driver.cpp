@@ -223,6 +223,9 @@ PollResult ModbusProfileDriver::poll(DeviceState& state) {
     }
     caps.addRead(InverterCapability::ReadAcPower);
     caps.addRead(InverterCapability::ReadDcPower);
+    if (profile.statusRegister != nullptr) {
+        caps.addRead(InverterCapability::ReadStatus);  // what gives it a Home Assistant entity
+    }
     state.capabilities = caps;
 
     state.identity = identity();  // already carries driverId (see identity())

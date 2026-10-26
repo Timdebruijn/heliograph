@@ -354,6 +354,7 @@ static void test_a_full_poll_decodes_measurements_over_the_bus() {
     TEST_ASSERT_EQUAL_DOUBLE(51.2, state.measurements.find(measurement_id::kBatteryVoltage)->value);
     TEST_ASSERT_TRUE(state.capabilities.hasBattery);
     TEST_ASSERT_FALSE(state.statusCodeSupported);  // no [status_register] in this profile
+    TEST_ASSERT_FALSE(state.capabilities.has(InverterCapability::ReadStatus));
 }
 
 // The poll carries the decoded status onto the device state. Register 0 answers 0, which the
@@ -374,6 +375,7 @@ static void test_a_poll_reports_the_status_the_profile_maps() {
     TEST_ASSERT_TRUE(state.statusCodeSupported);
     TEST_ASSERT_EQUAL_UINT16(0, state.statusCode);
     TEST_ASSERT_EQUAL_STRING("Standby", state.statusText.c_str());
+    TEST_ASSERT_TRUE(state.capabilities.has(InverterCapability::ReadStatus));  // HA entity
 }
 
 static void test_silence_is_a_timeout() {

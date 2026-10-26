@@ -462,11 +462,19 @@ def parse_profile(
             raise ProfileError(f"{sw}: values must list at least one code")
         names = []
         for key, text in values.items():
-            if not key.isdigit() or int(key) > 0xFFFF:
-                raise ProfileError(f"{sw}: code '{key}' must be a register value, 0-65535")
+            # ASCII only: str.isdigit() also accepts "²" (which int() then refuses with a bare
+            # traceback) and Arabic-Indic digits (which it silently converts).
+            if not (key.isascii() and key.isdigit()) or int(key) > 0xFFFF:
+                raise ProfileError(
+                    f"{sw}: code '{key}' must be a register value, 0-65535"
+                )
             if not isinstance(text, str) or not text:
                 raise ProfileError(f"{sw}: code {key} needs a non-empty name")
             check_text(text, sw, key)
+            if any(code == int(key) for code, _ in names):
+                # "7" and "007" are different TOML keys and the same register value; the
+                # second name would never be shown.
+                raise ProfileError(f"{sw}: code {int(key)} is listed twice")
             names.append((int(key), text))
         parsed_status = {"space": space, "address": address, "names": sorted(names)}
 

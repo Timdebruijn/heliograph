@@ -159,7 +159,7 @@ the registers in question. Both mechanisms are always consistent.
 | 3 | 30004 | 1 | uint16 | Inverter online (1/0) | ✔ |
 | 4 | 30005 | 1 | uint16 | Data valid (1/0) | ✔ |
 | 5 | 30006 | 1 | uint16 | Data stale (1/0) | ✔ |
-| 6 | 30007 | 1 | uint16 | Status code (raw `OP_MODE`) | ✔ |
+| 6 | 30007 | 1 | uint16 | Status code: the driver's raw value (`OP_MODE` on EverSolar; a profile's own code space with `[status_register]`) | ✔ |
 | 7 | 30008 | 1 | uint16 | Error code | ✖ `0xFFFF` |
 | 10 | 30011 | 2 | float32 | Total AC power (W) | ✔ `PAC` |
 | 12 | 30013 | 2 | float32 | AC voltage L1 (V) | ✔ `VAC` |

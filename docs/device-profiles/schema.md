@@ -195,9 +195,12 @@ values  = { 0 = "Standby", 1 = "Self-check", 2 = "Normal", 3 = "Alarm", 4 = "Fau
 | `address` | int | yes | Must sit inside a `[[block]]` that is not a probe block. |
 | `values` | table | yes | Register value (0–65535) to name. At least one entry. |
 
-A value missing from the table is published as `Unknown (<n>)`, never given a meaning. In a
-poll where the register's block was not read, the device reports no status, not the last one
-and not code 0. Without this section a profile reports no status at all, as before.
+A value missing from the table is published as `Unknown (<n>)`, never given a meaning. The
+code itself is the device's own value, so its meaning is whatever this table says, not a
+bridge-wide code space. When a poll reads other blocks but skips the status register's, the
+device reports no status rather than the last one or code 0. A poll that fails outright leaves
+the state alone, as for every driver, and the outputs then mark the data stale. Without this
+section a profile reports no status at all, as before.
 
 ## `[[write]]` — optional: writable setpoint registers
 
