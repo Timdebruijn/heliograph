@@ -18,6 +18,7 @@
 #include <optional>
 
 #include "app/driver_capture_runner.h"
+#include "app/register_reader.h"
 #include "diagnostics/bus_tap.h"
 #include "diagnostics/frame_capture.h"
 #include "rest_payloads.h"
@@ -44,6 +45,12 @@ using QueryParam = std::function<const char*(const char* name)>;
 /// facts about the running bridge, not about the request, and they stay with the handler that
 /// can see them.
 std::optional<ApiError> parseCaptureRequest(const QueryParam& param, CaptureRequest& out);
+
+/// The register reader's query: unit (1-247, default 1), space (holding|input, default
+/// holding), address (required, 0-65535) and count (1-kMaxRegisterReadCount, default 1).
+/// Lives here with the capture parser because it is the same kind of thing: a bus action whose
+/// every parameter is a small number in the query string.
+std::optional<ApiError> parseRegisterReadRequest(const QueryParam& param, RegisterReadRequest& out);
 
 /// Bounds for the passive mode, here rather than as literals in the handler so a test asserts
 /// the same numbers the endpoint enforces.

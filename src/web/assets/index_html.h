@@ -550,7 +550,7 @@ function paintLive(){
     const short=answering!==expected;
     h+=`<div class="hero">
       <div>
-        <div class="k">Producing now · all inverters</div>
+        <div class="k">Output now · all inverters</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px">
           <span class="big">${esc(sp(Math.round(tot.ac_power_w??0)))}</span><span style="font-size:20px" class="dim">W</span></div>
         <div class="hint" style="margin-top:2px${short?';color:var(--bad)':''}">${
@@ -569,9 +569,15 @@ function paintLive(){
   }else{
     const now=(m['ac.power.total']||{}).value;
     const rated=b.rated_power_w||null;   // absent on most drivers; the bar is then omitted
+    // ac.power.total is the AC side of the inverter, not the panels. On a plain PV inverter the
+    // two are the same thing; on a hybrid, at night, that power comes out of the battery, and
+    // a label saying "production" showed battery discharge as solar. Same battery test as the
+    // battery card below, so the two cannot disagree. The fleet hero above sums every device,
+    // hybrids included, so it never says production at all.
+    const heroLabel=shown(m,'battery.soc')||shown(m,'battery.power')?'Inverter output now':'Producing now';
     h+=`<div class="hero">
       <div>
-        <div class="k">${shown(m,'battery.soc')?'Solar production now':'Producing now'}</div>
+        <div class="k">${heroLabel}</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px">
           <span class="big">${esc(now==null?'—':sp(Math.round(now)))}</span><span style="font-size:20px" class="dim">W</span></div>
         ${rated?bar((now||0)/rated*100)+`<div class="hint">${Math.round((now||0)/rated*100)}% of this inverter's ${esc(sp(rated))} W</div>`:''}
@@ -1110,8 +1116,10 @@ function paintHealth(){
     <div class="hint">Named the way a person would ask for them; the raw field name is still on <code>/api/v1/diagnostics</code>, unchanged.</div>
     <div class="groups" id="h_counters" style="margin-top:14px"></div>
   </div>
-  ${driverCaptureHtml()}`;
+  ${driverCaptureHtml()}
+  ${regReadHtml()}`;
   $('#health').innerHTML=h;
+  if(regRead)renderRegRead(regRead);
   // Rendered again after the card exists, so a repaint of this tab does not throw away a
   // recording somebody is still reading. The other capture loses its table on a repaint; this
   // one keeps the last report in a variable precisely so it does not have to.
@@ -2042,6 +2050,76 @@ function downloadCapture(){
 // ---------------- driver capture: recording the conversation we already have ----------------
 // Lives on Health, not in the troubleshooting flow. That flow only appears when discovery names
 // nothing, which is exactly the bridge this cannot help -- there is no driver talking to record.
+// ---------------- register reader ----------------
+// For working out a register map without a rebuild per guess: ask, see the raw words. Reads
+// only -- the bridge sends 0x03/0x04 and nothing else -- so it is safe on a register nobody has
+// identified yet. Kept in a variable like the driver capture, so a repaint keeps the answer.
+let regTimer=null, regRead=null;
+function regReadHtml(){
+  return `<div class="card" style="margin-top:12px">
+    <div class="between"><b>Read registers</b>
+      <button class="alt pill" onclick="startRegRead()">Read</button></div>
+    <div class="hint"><b>Read-only.</b> One read takes the place of one poll, on the line settings the bridge is already using. Every view of the raw words is shown, because signedness, scale and word order are usually what you are trying to find out.</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+      <label for="rr_unit" style="margin:0">Unit</label>
+      <input id="rr_unit" class="tiny" type="number" value="1" min="1" max="247" style="width:64px">
+      <select id="rr_space" class="tiny"><option value="holding">holding (03)</option><option value="input">input (04)</option></select>
+      <label for="rr_addr" style="margin:0">Register</label>
+      <input id="rr_addr" class="tiny" type="number" min="0" max="65535" style="width:96px">
+      <label for="rr_count" style="margin:0">Count</label>
+      <input id="rr_count" class="tiny" type="number" value="2" min="1" max="16" style="width:64px">
+    </div>
+    <div id="rr_msg" class="msg hide"></div><div id="rr_out"></div></div>`;
+}
+async function startRegRead(){
+  const addr=val('rr_addr').trim();
+  if(addr===''){say('#rr_msg','err','Enter a register number.');return}
+  const q='?unit='+encodeURIComponent(val('rr_unit'))+'&space='+encodeURIComponent(val('rr_space'))+
+    '&address='+encodeURIComponent(addr)+'&count='+encodeURIComponent(val('rr_count'));
+  say('#rr_msg','','Reading…');$('#rr_out').innerHTML='';regRead=null;
+  const r=await authFetch('/api/v1/actions/read-registers'+q,{method:'POST'});
+  if(!r.ok&&r.status!==202){
+    const d=await r.json().catch(()=>({}));
+    say('#rr_msg','err',esc((d.error&&d.error.message)||httpWhy(r)));return;
+  }
+  if(regTimer)clearInterval(regTimer);
+  const started=Date.now();
+  // Keeps polling when the tab is left, so the answer is there on return. A read waits behind a
+  // running discovery sweep, which can take a minute or more: say so instead of calling it lost.
+  regTimer=setInterval(async()=>{
+    const waited=Date.now()-started;
+    if(waited>180000){clearInterval(regTimer);regTimer=null;say('#rr_msg','err','No answer from the bridge in 3 minutes.');return}
+    let d;try{d=await getJson('/api/v1/registers')}catch(e){return}
+    if(d.status!=='done'){if(waited>5000)say('#rr_msg','','Queued — the bus is busy with something else, the read goes out after it.');return}
+    clearInterval(regTimer);regTimer=null;renderRegRead(d);
+  },1000);
+}
+const REG_RESULT={timeout:'Nothing answered. Check the unit id, and that this register space exists on the device.',
+  exception:'The device answered and refused',crc:'Bytes arrived with a bad checksum — a wiring or line-speed problem, not the register.',
+  protocol:'An answer came back, but not to this question (wrong unit or a malformed frame).',
+  transport_error:'The bridge could not send on the bus.'};
+function renderRegRead(d){
+  regRead=d;
+  if(!$('#rr_out'))return;
+  const where=`unit ${esc(d.unit)}, ${esc(d.space)} ${esc(d.address)}`+(d.count>1?`–${esc(d.address+d.count-1)}`:'');
+  if(d.result!=='ok'){
+    const why=REG_RESULT[d.result]||esc(d.result);
+    say('#rr_msg','err',`${where}: ${why}${d.result==='exception'?` (exception ${esc(d.exception_code)}${d.exception_code===2?', illegal data address: the device has no such register':''})`:''}`);
+    return;
+  }
+  say('#rr_msg','ok',where);
+  const v=d.values||[], s16=x=>x>=32768?x-65536:x, s32=x=>x>=2147483648?x-4294967296:x;
+  const rows=v.map((x,i)=>{
+    const nx=v[i+1], hi=nx===undefined?null:x*65536+nx, lo=nx===undefined?null:nx*65536+x;
+    return `<tr><td>${esc(d.address+i)}</td><td><code>0x${x.toString(16).toUpperCase().padStart(4,'0')}</code></td>
+      <td>${esc(x)}</td><td>${esc(s16(x))}</td>
+      <td>${hi===null?'—':esc(hi)+' / '+esc(s32(hi))}</td><td>${lo===null?'—':esc(lo)+' / '+esc(s32(lo))}</td></tr>`;
+  }).join('');
+  $('#rr_out').innerHTML=`<div style="overflow-x:auto"><table style="margin-top:10px"><tr><th>Register</th><th>Hex</th><th>u16</th><th>s16</th>
+    <th>32-bit, this word high<br><span class="dim">u32 / s32</span></th><th>32-bit, this word low<br><span class="dim">u32 / s32</span></th></tr>${rows}</table></div>
+    <div class="hint">Raw words, before any scale. A 32-bit value spans this register and the next.</div>`;
+}
+
 let dcapTimer=null, driverCapture=null;
 function driverCaptureHtml(){
   return `<div class="card" style="margin-top:12px">

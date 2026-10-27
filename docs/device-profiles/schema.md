@@ -249,6 +249,9 @@ By design. Being honest about the boundary saves contributors wasted effort:
   registers of an existing codec.
 - **Computed values.** No arithmetic between registers (e.g. power = V × I). If a
   device needs a derived channel, that is a small driver change — open an issue.
+  One is built in: a profile that maps string power for every tracker in `mppts` but no
+  `dc.power.total` gets the sum of those strings, marked `derived`. It is left out for
+  any poll in which one of the strings was not read.
 - **Acting on writes.** A `[[write]]` row *records* a writable register; it cannot
   *enable* writing. That requires `verified = true` plus a driver write path — see the
   `[[write]]` section above.

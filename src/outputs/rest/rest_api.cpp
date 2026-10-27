@@ -1076,6 +1076,48 @@ bool RestApi::begin() {
         request->send(202, kJson, "{\"status\":\"accepted\"}");
     });
 
+    // The register reader. Reads only (0x03/0x04), so read_only_mode does not apply; it is
+    // still behind the API key, because it takes a poll slot and talks on the bus.
+    g_server->on("/api/v1/actions/read-registers", HTTP_POST,
+                 [this, authorised, rateLimited](AsyncWebServerRequest* request) {
+        if (!authorised(request) || rateLimited(request)) {
+            return;
+        }
+        if (context_.requestRegisterRead == nullptr) {
+            sendError(request, {404, "no_register_reader", "this build cannot read registers"});
+            return;
+        }
+        const rest::QueryParam param = [request](const char* name) -> const char* {
+            return request->hasParam(name) ? request->getParam(name)->value().c_str() : nullptr;
+        };
+        RegisterReadRequest parsed;
+        if (const auto error = rest::parseRegisterReadRequest(param, parsed)) {
+            sendError(request, *error);
+            return;
+        }
+        if (!context_.requestRegisterRead(parsed)) {
+            sendError(request, {409, "bus_busy",
+                                "a read, capture or discovery run is already using the bus"});
+            return;
+        }
+        request->send(202, kJson, "{\"status\":\"accepted\"}");
+    });
+
+    g_server->on(AsyncURIMatcher::exact("/api/v1/registers"), HTTP_GET,
+                 [this](AsyncWebServerRequest* request) {
+        context_.diagnostics->recordRestRequest();
+        if (context_.registerReadReport == nullptr) {
+            sendError(request, {404, "no_register_reader", "this build cannot read registers"});
+            return;
+        }
+        std::string body;
+        if (!buildRegisterReadPayload(context_.registerReadReport(), body)) {
+            sendError(request, {500, "payload_too_large", "register read exceeded its bound"});
+            return;
+        }
+        request->send(200, kJson, body.c_str());
+    });
+
     // Bus capture, in either of its two modes: `passive` for a device discovery could not name,
     // `driver` for one we already talk to. Every parameter travels in the query: they are a
     // handful of numbers and two enums, and a JSON body would need the whole collectBody dance

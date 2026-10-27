@@ -9,6 +9,7 @@
 
 #include "app/capture_runner.h"
 #include "app/driver_capture_runner.h"
+#include "app/register_reader.h"
 #include "config/config_backup.h"
 #include "device/bridge_info.h"
 #include "device/device_state.h"
@@ -166,6 +167,10 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& diagnostics, const Bridg
 /// the confidence score, and the reason a match was or was not accepted automatically.
 bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::string& out,
                            size_t maxBytes = kMaxResponseBytes);
+
+/// The register reader's last result: what was asked, what the device answered, and the values.
+bool buildRegisterReadPayload(const RegisterReadReport& report, std::string& out,
+                              size_t maxBytes = kMaxResponseBytes);
 
 /// Drivers compiled into this build. The discovery wizard needs this rather than a hardcoded
 /// list in the frontend.

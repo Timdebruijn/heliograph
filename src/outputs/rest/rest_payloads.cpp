@@ -449,6 +449,44 @@ bool buildDiagnosticsPayload(const DiagnosticsSnapshot& d, const BridgeInfo& bri
     return finish(doc, out, maxBytes);
 }
 
+bool buildRegisterReadPayload(const RegisterReadReport& report, std::string& out,
+                              size_t maxBytes) {
+    JsonDocument doc;
+    doc["status"] = registerReadStatusName(report.status);
+    doc["busy"]   = report.status == RegisterReadStatus::Requested;
+    if (report.status == RegisterReadStatus::Idle) {
+        return finish(doc, out, maxBytes);
+    }
+    const RegisterReadRequest& r = report.request;
+    doc["unit"]    = r.unitId;
+    doc["space"]   = r.functionCode == modbus::kReadInputRegisters ? "input" : "holding";
+    doc["address"] = r.start;
+    doc["count"]   = r.count;
+    if (report.status != RegisterReadStatus::Done) {
+        return finish(doc, out, maxBytes);
+    }
+    const char* result = "transport_error";
+    switch (report.outcome.status) {
+        case modbus::ReadStatus::Ok:             result = "ok"; break;
+        case modbus::ReadStatus::Exception:      result = "exception"; break;
+        case modbus::ReadStatus::Timeout:        result = "timeout"; break;
+        case modbus::ReadStatus::Crc:            result = "crc"; break;
+        case modbus::ReadStatus::Protocol:       result = "protocol"; break;
+        case modbus::ReadStatus::TransportError: break;
+    }
+    doc["result"] = result;
+    if (report.outcome.status == modbus::ReadStatus::Exception) {
+        doc["exception_code"] = report.outcome.exceptionCode;
+    }
+    // Raw words only. Signedness, scale and word order are the questions the reader is for, so
+    // the page derives those views; the bridge reports what came off the wire.
+    JsonArray values = doc["values"].to<JsonArray>();
+    for (uint16_t v : report.values) {
+        values.add(v);
+    }
+    return finish(doc, out, maxBytes);
+}
+
 bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::string& out,
                            size_t maxBytes) {
     JsonDocument doc;
