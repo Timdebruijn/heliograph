@@ -26,7 +26,59 @@ ApiError invalid(std::string message) {
     return ApiError{400, "invalid_parameter", std::move(message)};
 }
 
+/// Decimal digits only, so "5oo" or "" is an error rather than 5 or 0. Someone typing register
+/// numbers by hand is exactly who makes that typo, and a read of the wrong register that looks
+/// like an answer is worse than a refusal. Anything that is not digits comes back as -1; a
+/// digit string too long for a long comes back as LONG_MAX. Both fail every caller's range check.
+long strictNumber(const char* raw) {
+    // The first character is checked by hand because strtol skips leading whitespace (any of
+    // it, tabs and newlines too) and accepts a sign.
+    if (raw == nullptr || *raw < '0' || *raw > '9') {
+        return -1;
+    }
+    char*      end   = nullptr;
+    const long value = std::strtol(raw, &end, 10);
+    return *end != '\0' ? -1 : value;
+}
+
 }  // namespace
+
+std::optional<ApiError> parseRegisterReadRequest(const QueryParam& param,
+                                                 RegisterReadRequest& out) {
+    out = RegisterReadRequest{};
+
+    const char* unit = param("unit");
+    const long  id   = unit == nullptr ? 1 : strictNumber(unit);
+    if (id < 1 || id > 247) {
+        return invalid("unit must be between 1 and 247");
+    }
+    out.unitId = static_cast<uint8_t>(id);
+
+    if (const char* space = param("space")) {
+        if (std::strcmp(space, "input") == 0) {
+            out.functionCode = modbus::kReadInputRegisters;
+        } else if (std::strcmp(space, "holding") != 0) {
+            return invalid("space must be holding or input");
+        }
+    }
+
+    const long address = strictNumber(param("address"));
+    if (address < 0 || address > 0xFFFF) {
+        return invalid("address must be between 0 and 65535");
+    }
+    out.start = static_cast<uint16_t>(address);
+
+    const char* countRaw = param("count");
+    const long  count    = countRaw == nullptr ? 1 : strictNumber(countRaw);
+    if (count < 1 || count > kMaxRegisterReadCount) {
+        return invalid("count must be between 1 and " + std::to_string(kMaxRegisterReadCount));
+    }
+    if (address + count > 0x10000) {
+        return invalid("address + count runs past register 65535");
+    }
+    out.count = static_cast<uint16_t>(count);
+    return std::nullopt;
+}
 
 std::optional<ApiError> parseCaptureRequest(const QueryParam& param, CaptureRequest& out) {
     out = CaptureRequest{};

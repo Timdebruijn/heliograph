@@ -37,6 +37,7 @@ class AsyncWebServerRequest;
 #include "app/capture_runner.h"
 #include "app/discovery_runner.h"
 #include "app/driver_capture_runner.h"
+#include "app/register_reader.h"
 #include "drivers/driver_registry.h"
 #include "rest_payloads.h"
 #include "state/state_store.h"
@@ -93,6 +94,11 @@ struct RestContext {
     /// The current driver-capture report. Carries frames only once it is done -- while it runs,
     /// the bus task is still appending to them.
     std::function<DriverCaptureReport()> driverCaptureReport;
+    /// Queue one register read for the bus task. False when one is already waiting, or when
+    /// discovery or a capture has the bus.
+    std::function<bool(const RegisterReadRequest&)> requestRegisterRead;
+    /// The last register read, for the page to poll.
+    std::function<RegisterReadReport()> registerReadReport;
     /// Wipes stored configuration including credentials, then reboots into the setup portal.
     /// The same wipe the BOOT-hold performs, reached over the network instead of the button --
     /// which is what a user without physical access has when a config locks them out.
