@@ -722,7 +722,7 @@ CaptureRunner g_capture{nowMs};
 DriverCaptureRunner g_driverCapture{nowMs};
 
 /// Owns the register reader's one-at-a-time reads, on the same request/run split.
-RegisterReader g_registerReader{nowMs};
+RegisterReader g_registerReader;
 
 /// The configured driver, or the highest-priority one compiled in. No manufacturer name here.
 std::string selectedDriverId() {

@@ -3100,7 +3100,7 @@ static void test_a_register_read_runs_on_the_bus_task_and_reports_the_words() {
     uint8_t             function = 0;
     test::MockTransport transport;
     transport.setResponder(countingDevice(function));
-    RegisterReader reader(clockFn);
+    RegisterReader reader;
 
     TEST_ASSERT_FALSE(reader.runIfRequested(transport));  // nothing asked: the poll keeps its slot
     TEST_ASSERT_TRUE(reader.request({7, modbus::kReadInputRegisters, 32, 2}));
@@ -3122,7 +3122,7 @@ static void test_a_register_read_runs_on_the_bus_task_and_reports_the_words() {
 
 // The reader's own guard, behind the REST parser: nothing but a read, nothing past the bound.
 static void test_the_register_reader_sends_nothing_but_reads() {
-    RegisterReader reader(clockFn);
+    RegisterReader reader;
     TEST_ASSERT_FALSE(reader.request({1, 0x06, 100, 1}));  // write single register
     TEST_ASSERT_FALSE(reader.request({1, 0x10, 100, 1}));  // write multiple
     TEST_ASSERT_FALSE(reader.request({1, modbus::kReadHoldingRegisters, 100, 0}));
@@ -3134,7 +3134,7 @@ static void test_the_register_reader_sends_nothing_but_reads() {
 
 static void test_a_silent_unit_is_reported_as_a_timeout_with_no_values() {
     test::MockTransport transport;  // no responder: silence
-    RegisterReader      reader(clockFn);
+    RegisterReader      reader;
     TEST_ASSERT_TRUE(reader.request({9, modbus::kReadHoldingRegisters, 500, 1}));
     TEST_ASSERT_TRUE(reader.runIfRequested(transport));
 
@@ -3151,7 +3151,7 @@ static void test_a_register_read_payload_carries_the_raw_words() {
     uint8_t             function = 0;
     test::MockTransport transport;
     transport.setResponder(countingDevice(function));
-    RegisterReader reader(clockFn);
+    RegisterReader reader;
     reader.request({1, modbus::kReadHoldingRegisters, 499, 2});
     reader.runIfRequested(transport);
 
@@ -3175,7 +3175,7 @@ static void test_a_refused_register_read_reports_the_exception_code() {
         test::appendModbusCrc(reply);
         return true;
     });
-    RegisterReader reader(clockFn);
+    RegisterReader reader;
     reader.request({1, modbus::kReadHoldingRegisters, 9999, 1});
     reader.runIfRequested(transport);
 
@@ -3188,7 +3188,7 @@ static void test_a_refused_register_read_reports_the_exception_code() {
 }
 
 static void test_an_unused_register_reader_reports_idle_and_nothing_else() {
-    RegisterReader reader(clockFn);
+    RegisterReader reader;
     std::string    body;
     TEST_ASSERT_TRUE(rest::buildRegisterReadPayload(reader.report(), body));
     JsonDocument doc = parse(body);

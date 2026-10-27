@@ -219,7 +219,7 @@
     if (u.startsWith('/api/v1/logs')) return json(logs);
     if (u.startsWith('/api/v1/discovery')) return json({status:'idle',busy:false,candidates:[]});
     if (u.startsWith('/api/v1/capture')) return json({status:'idle'});
-    if (u.startsWith('/api/v1/registers')) return json({status:'done', busy:false, unit:1,
+    if (u.startsWith('/api/v1/registers')) return json({status:'done', unit:1,
       space:'holding', address:500, count:3, result:'ok', values:[2, 0xFFFF, 0x8001]});
     if (u.startsWith('/api/v1/')) return json({ok: true}, 202);
     // Everything else is refused rather than passed through. The page's update check goes out

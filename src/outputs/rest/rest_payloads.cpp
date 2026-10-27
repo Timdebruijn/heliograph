@@ -453,7 +453,6 @@ bool buildRegisterReadPayload(const RegisterReadReport& report, std::string& out
                               size_t maxBytes) {
     JsonDocument doc;
     doc["status"] = registerReadStatusName(report.status);
-    doc["busy"]   = report.status == RegisterReadStatus::Requested;
     if (report.status == RegisterReadStatus::Idle) {
         return finish(doc, out, maxBytes);
     }

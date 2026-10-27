@@ -51,7 +51,6 @@ bool RegisterReader::runIfRequested(Transport& transport) {
     if (outcome.status == modbus::ReadStatus::Ok) {
         report_.values.assign(values, values + request.count);
     }
-    report_.finishedMs = clock_ ? clock_() : 0;
     report_.status     = RegisterReadStatus::Done;
     return true;
 }

@@ -460,7 +460,7 @@ def parse_profile(
         values = _require(status_register, "values", dict, sw)
         if not values:
             raise ProfileError(f"{sw}: values must list at least one code")
-        names = []
+        names = {}
         for key, text in values.items():
             # ASCII only: str.isdigit() also accepts "²" (which int() then refuses with a bare
             # traceback) and Arabic-Indic digits (which it silently converts).
@@ -471,12 +471,16 @@ def parse_profile(
             if not isinstance(text, str) or not text:
                 raise ProfileError(f"{sw}: code {key} needs a non-empty name")
             check_text(text, sw, key)
-            if any(code == int(key) for code, _ in names):
+            if int(key) in names:
                 # "7" and "007" are different TOML keys and the same register value; the
                 # second name would never be shown.
                 raise ProfileError(f"{sw}: code {int(key)} is listed twice")
-            names.append((int(key), text))
-        parsed_status = {"space": space, "address": address, "names": sorted(names)}
+            names[int(key)] = text
+        parsed_status = {
+            "space": space,
+            "address": address,
+            "names": sorted(names.items()),
+        }
 
     # [[write]] rows: read-only is the default — a register is writable only when declared
     # here, and even then it stays dormant (see WriteMapping in profile_tables.h).
