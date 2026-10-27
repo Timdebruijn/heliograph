@@ -442,6 +442,42 @@ def parse_profile(
             }
         )
 
+    # [status_register]: one register and a table of what its values mean. The table is the
+    # point -- a code nobody wrote down is published as "Unknown (<n>)", never given a meaning.
+    status_register = data.get("status_register")
+    parsed_status = None
+    if status_register is not None:
+        sw = f"{where} [status_register]"
+        space = _require(status_register, "space", str, sw)
+        if space not in SPACES:
+            raise ProfileError(f"{sw}: space must be one of {sorted(SPACES)}")
+        address = _require(status_register, "address", int, sw)
+        if not covered(space, address, exclude_probe=True):
+            raise ProfileError(
+                f"{sw}: register {address} ({space}) is not inside a non-probe [[block]] "
+                f"-- the driver would never read it"
+            )
+        values = _require(status_register, "values", dict, sw)
+        if not values:
+            raise ProfileError(f"{sw}: values must list at least one code")
+        names = []
+        for key, text in values.items():
+            # ASCII only: str.isdigit() also accepts "²" (which int() then refuses with a bare
+            # traceback) and Arabic-Indic digits (which it silently converts).
+            if not (key.isascii() and key.isdigit()) or int(key) > 0xFFFF:
+                raise ProfileError(
+                    f"{sw}: code '{key}' must be a register value, 0-65535"
+                )
+            if not isinstance(text, str) or not text:
+                raise ProfileError(f"{sw}: code {key} needs a non-empty name")
+            check_text(text, sw, key)
+            if any(code == int(key) for code, _ in names):
+                # "7" and "007" are different TOML keys and the same register value; the
+                # second name would never be shown.
+                raise ProfileError(f"{sw}: code {int(key)} is listed twice")
+            names.append((int(key), text))
+        parsed_status = {"space": space, "address": address, "names": sorted(names)}
+
     # [[write]] rows: read-only is the default — a register is writable only when declared
     # here, and even then it stays dormant (see WriteMapping in profile_tables.h).
     writes = data.get("write", [])
@@ -662,6 +698,7 @@ def parse_profile(
         "blocks": parsed_blocks,
         "registers": parsed_regs,
         "writes": parsed_writes,
+        "status_register": parsed_status,
     }
 
 
@@ -795,6 +832,17 @@ def generate(
                         f"{'true' if wr['verified'] else 'false'}}},"
                     )
             w("};")
+        if p["status_register"]:
+            sr = p["status_register"]
+            w(f"constexpr EnumOption k{sym}StatusNames[] = {{")
+            for code, text in sr["names"]:
+                w(f"    {{{code}, {cpp_string(text)}}},")
+            w("};")
+            w(
+                f"constexpr StatusRegister k{sym}Status{{RegSpace::{SPACES[sr['space']]}, "
+                f"{sr['address']}, k{sym}StatusNames, "
+                f"sizeof(k{sym}StatusNames) / sizeof(k{sym}StatusNames[0])}};"
+            )
     w("")
     w("constexpr DeviceProfile kProfiles[] = {")
     for p in profiles:
@@ -826,7 +874,10 @@ def generate(
             )
         else:
             w("     /*hasSerial=*/false, SerialProfile{},")
-        w(f"     {status}}},")
+        if p["status_register"]:
+            w(f"     {status}, &k{sym}Status}},")
+        else:
+            w(f"     {status}}},")
     w("};")
     w("")
     w("}  // namespace")

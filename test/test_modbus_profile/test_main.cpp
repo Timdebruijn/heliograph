@@ -35,6 +35,14 @@ static void setReg(BlockData& b, uint16_t addr, uint16_t value) {
     b.values[addr - b.start] = value;
 }
 
+// --- [status_register] ---------------------------------------------------------------------
+// The table is a tester's three-phase hybrid, as they wrote it out. A profile copy with the
+// register pointed into one hand-built block, so the decode is tested apart from any real map.
+constexpr EnumOption kTestStatusNames[] = {
+    {0, "Standby"}, {1, "Self-check"}, {2, "Normal"}, {3, "Alarm"}, {4, "Fault"},
+};
+constexpr StatusRegister kTestStatus{RegSpace::Holding, 500, kTestStatusNames, 5};
+
 // Two Input blocks matching the SPH profile: base 0-124 and storage 1000-1044.
 static void makeSphBlocks(BlockData blocks[2]) {
     blocks[0] = {RegSpace::Input, 0, 125, {}};
@@ -42,6 +50,50 @@ static void makeSphBlocks(BlockData blocks[2]) {
 }
 
 // --- pure decoding ------------------------------------------------------------------------
+
+static DeviceProfile profileWithStatus() {
+    DeviceProfile p  = *findProfile("deye_sun_xk_sg");
+    p.statusRegister = &kTestStatus;
+    return p;
+}
+
+static void test_a_listed_status_code_is_reported_with_its_name() {
+    BlockData block = {RegSpace::Holding, 500, 1, {}};
+    setReg(block, 500, 2);
+    uint16_t    code = 0;
+    std::string text;
+    TEST_ASSERT_TRUE(decodeStatus(profileWithStatus(), &block, 1, code, text));
+    TEST_ASSERT_EQUAL_UINT16(2, code);
+    TEST_ASSERT_EQUAL_STRING("Normal", text.c_str());
+}
+
+// A code the table does not list is reported as unknown, with the number, not dropped: the
+// device did say something, and the number is what someone extending the table needs.
+static void test_an_unlisted_status_code_is_unknown_with_its_number() {
+    BlockData block = {RegSpace::Holding, 500, 1, {}};
+    setReg(block, 500, 7);
+    uint16_t    code = 0;
+    std::string text;
+    TEST_ASSERT_TRUE(decodeStatus(profileWithStatus(), &block, 1, code, text));
+    TEST_ASSERT_EQUAL_UINT16(7, code);
+    TEST_ASSERT_EQUAL_STRING("Unknown (7)", text.c_str());
+}
+
+// Status register's block not read this poll: no status, rather than code 0 -- which in this
+// table, as in most, means Standby.
+static void test_no_status_when_its_register_was_not_read() {
+    BlockData block = {RegSpace::Holding, 96, 30, {}};
+    uint16_t    code = 0;
+    std::string text;
+    TEST_ASSERT_FALSE(decodeStatus(profileWithStatus(), &block, 1, code, text));
+}
+
+static void test_a_profile_without_a_status_register_reports_none() {
+    BlockData block = {RegSpace::Holding, 500, 1, {}};
+    uint16_t    code = 0;
+    std::string text;
+    TEST_ASSERT_FALSE(decodeStatus(*findProfile("deye_sun_xk_sg"), &block, 1, code, text));
+}
 
 static void test_soc_is_decoded_as_a_plain_percent() {
     BlockData blocks[2];
@@ -301,6 +353,29 @@ static void test_a_full_poll_decodes_measurements_over_the_bus() {
     TEST_ASSERT_EQUAL_DOUBLE(87.0, state.measurements.find(measurement_id::kBatterySoc)->value);
     TEST_ASSERT_EQUAL_DOUBLE(51.2, state.measurements.find(measurement_id::kBatteryVoltage)->value);
     TEST_ASSERT_TRUE(state.capabilities.hasBattery);
+    TEST_ASSERT_FALSE(state.statusCodeSupported);  // no [status_register] in this profile
+    TEST_ASSERT_FALSE(state.capabilities.has(InverterCapability::ReadStatus));
+}
+
+// The poll carries the decoded status onto the device state. Register 0 answers 0, which the
+// table names Standby: reported because the profile says so, not because 0 is the default.
+static void test_a_poll_reports_the_status_the_profile_maps() {
+    static constexpr StatusRegister kInputStatus{RegSpace::Input, 0, kTestStatusNames, 5};
+    DeviceProfile withStatus  = defaultProfile();
+    withStatus.statusRegister = &kInputStatus;
+    MockTransport transport;
+    transport.setResponder(sphResponder());
+    ProfileOptions options;
+    options.profile = &withStatus;
+    ModbusProfileDriver driver(transport, options);
+
+    DeviceState state;
+    state.lastPollAttemptMs = 5000;
+    TEST_ASSERT_EQUAL(PollResult::Ok, driver.poll(state));
+    TEST_ASSERT_TRUE(state.statusCodeSupported);
+    TEST_ASSERT_EQUAL_UINT16(0, state.statusCode);
+    TEST_ASSERT_EQUAL_STRING("Standby", state.statusText.c_str());
+    TEST_ASSERT_TRUE(state.capabilities.has(InverterCapability::ReadStatus));  // HA entity
 }
 
 static void test_silence_is_a_timeout() {
@@ -2307,6 +2382,10 @@ static void test_the_dump_stays_silent_below_trace() {
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_soc_is_decoded_as_a_plain_percent);
+    RUN_TEST(test_a_listed_status_code_is_reported_with_its_name);
+    RUN_TEST(test_an_unlisted_status_code_is_unknown_with_its_number);
+    RUN_TEST(test_no_status_when_its_register_was_not_read);
+    RUN_TEST(test_a_profile_without_a_status_register_reports_none);
     RUN_TEST(test_pv_total_is_summed_from_the_strings_when_the_profile_has_none);
     RUN_TEST(test_a_string_not_read_this_poll_withdraws_the_total_rather_than_shrinking_it);
     RUN_TEST(test_one_fresh_string_and_one_stale_one_publish_no_total);
@@ -2324,6 +2403,7 @@ int main(int, char**) {
     RUN_TEST(test_a_register_in_an_unread_block_is_left_undeclared);
     RUN_TEST(test_find_register_reports_out_of_range);
     RUN_TEST(test_a_full_poll_decodes_measurements_over_the_bus);
+    RUN_TEST(test_a_poll_reports_the_status_the_profile_maps);
     RUN_TEST(test_silence_is_a_timeout);
     RUN_TEST(test_all_blocks_refused_is_not_registered);
     RUN_TEST(test_one_refused_block_does_not_sink_the_poll);

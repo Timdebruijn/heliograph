@@ -177,6 +177,31 @@ Neither `offset` nor a negative `scale` is accepted on a `[[write]]` row: the wr
 both rather than emitting a row that passes review and then silently refuses or mis-writes every
 value.
 
+## `[status_register]` — optional: what the inverter is doing
+
+One register that holds the operating state, and a table of what its values mean. The bridge
+publishes the code and its name as the device status, on every output that carries one.
+
+```toml
+[status_register]
+space   = "holding"
+address = 500
+values  = { 0 = "Standby", 1 = "Self-check", 2 = "Normal", 3 = "Alarm", 4 = "Fault" }
+```
+
+| Key | Type | Required | Meaning |
+|-----|------|----------|---------|
+| `space` | string | yes | `"holding"` or `"input"`. |
+| `address` | int | yes | Must sit inside a `[[block]]` that is not a probe block. |
+| `values` | table | yes | Register value (0–65535) to name. At least one entry. |
+
+A value missing from the table is published as `Unknown (<n>)`, never given a meaning. The
+code itself is the device's own value, so its meaning is whatever this table says, not a
+bridge-wide code space. When a poll reads other blocks but skips the status register's, the
+device reports no status rather than the last one or code 0. A poll that fails outright leaves
+the state alone, as for every driver, and the outputs then mark the data stale. Without this
+section a profile reports no status at all, as before.
+
 ## `[[write]]` — optional: writable setpoint registers
 
 **Read-only is the default.** A register is writable only when declared here — and even then

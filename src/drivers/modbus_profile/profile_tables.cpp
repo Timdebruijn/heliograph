@@ -141,4 +141,20 @@ void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t 
     deriveDcTotal(profile, measurements, ts);
 }
 
+bool decodeStatus(const DeviceProfile& profile, const BlockData* blocks, size_t blockCount,
+                  uint16_t& code, std::string& text) {
+    const StatusRegister* sr = profile.statusRegister;
+    if (sr == nullptr || !findRegister(blocks, blockCount, sr->space, sr->address, code)) {
+        return false;
+    }
+    for (size_t i = 0; i < sr->nameCount; ++i) {
+        if (sr->names[i].value == code) {
+            text = sr->names[i].label;
+            return true;
+        }
+    }
+    text = "Unknown (" + std::to_string(code) + ")";
+    return true;
+}
+
 }  // namespace heliograph::profile
