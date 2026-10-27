@@ -62,9 +62,7 @@ void deriveDcTotal(const DeviceProfile& profile, MeasurementSet& measurements, u
         }
         const Measurement* m = measurements.find(id);
         if (m == nullptr || !m->valid || m->timestampMs != ts) {
-            if (measurements.find(measurement_id::kDcPowerTotal) != nullptr) {
-                measurements.invalidate(measurement_id::kDcPowerTotal);
-            }
+            measurements.invalidate(measurement_id::kDcPowerTotal);
             return;
         }
         sum += m->value;

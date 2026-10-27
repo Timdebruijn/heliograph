@@ -16,7 +16,6 @@
 #include <mutex>
 #include <vector>
 
-#include "device/clock.h"
 #include "protocols/modbus/modbus_client.h"
 #include "transport/transport.h"
 
@@ -46,13 +45,10 @@ struct RegisterReadReport {
     RegisterReadRequest   request;
     modbus::ReadOutcome   outcome;
     std::vector<uint16_t> values;  ///< only when outcome.status == Ok
-    uint64_t              finishedMs = 0;
 };
 
 class RegisterReader {
 public:
-    explicit RegisterReader(ClockFn clock) : clock_(std::move(clock)) {}
-
     /// Web task. False when a read is already waiting, or when the request is outside what this
     /// reader sends -- the REST layer validates first, this is the last line.
     bool request(const RegisterReadRequest& request);
@@ -64,7 +60,6 @@ public:
     bool               busy() const;
 
 private:
-    ClockFn            clock_;
     mutable std::mutex mutex_;
     RegisterReadReport report_;
 };

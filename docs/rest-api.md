@@ -574,7 +574,7 @@ curl http://bridge/api/v1/registers
 ```
 
 ```json
-{"status": "done", "busy": false, "unit": 1, "space": "holding", "address": 500,
+{"status": "done", "unit": 1, "space": "holding", "address": 500,
  "count": 2, "result": "ok", "values": [2, 0]}
 ```
 
