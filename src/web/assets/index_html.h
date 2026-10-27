@@ -550,7 +550,7 @@ function paintLive(){
     const short=answering!==expected;
     h+=`<div class="hero">
       <div>
-        <div class="k">Producing now · all inverters</div>
+        <div class="k">Output now · all inverters</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px">
           <span class="big">${esc(sp(Math.round(tot.ac_power_w??0)))}</span><span style="font-size:20px" class="dim">W</span></div>
         <div class="hint" style="margin-top:2px${short?';color:var(--bad)':''}">${
@@ -569,9 +569,15 @@ function paintLive(){
   }else{
     const now=(m['ac.power.total']||{}).value;
     const rated=b.rated_power_w||null;   // absent on most drivers; the bar is then omitted
+    // ac.power.total is the AC side of the inverter, not the panels. On a plain PV inverter the
+    // two are the same thing; on a hybrid, at night, that power comes out of the battery, and
+    // a label saying "production" showed battery discharge as solar. Same battery test as the
+    // battery card below, so the two cannot disagree. The fleet hero above sums every device,
+    // hybrids included, so it never says production at all.
+    const heroLabel=shown(m,'battery.soc')||shown(m,'battery.power')?'Inverter output now':'Producing now';
     h+=`<div class="hero">
       <div>
-        <div class="k">${shown(m,'battery.soc')?'Solar production now':'Producing now'}</div>
+        <div class="k">${heroLabel}</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px">
           <span class="big">${esc(now==null?'—':sp(Math.round(now)))}</span><span style="font-size:20px" class="dim">W</span></div>
         ${rated?bar((now||0)/rated*100)+`<div class="hint">${Math.round((now||0)/rated*100)}% of this inverter's ${esc(sp(rated))} W</div>`:''}
