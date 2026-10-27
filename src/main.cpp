@@ -376,7 +376,7 @@ namespace {
 // implement. A wrong map can report a wrong number; it cannot put a device into an untested
 // state.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 29
+#define HELIOGRAPH_VERSION_MINOR 30
 //
 // 0.26.0 can record a conversation it is having, not just one it is overhearing.
 //
@@ -546,7 +546,7 @@ namespace {
 //
 // And four ternaries became std::min, for +3 lines net once <algorithm> is counted -- the honest
 // arithmetic for a change made on clarity rather than size.
-#define HELIOGRAPH_VERSION_PATCH 1
+#define HELIOGRAPH_VERSION_PATCH 0
 #define HELIOGRAPH_STRINGIFY_(x) #x
 #define HELIOGRAPH_STRINGIFY(x) HELIOGRAPH_STRINGIFY_(x)
 constexpr uint16_t kFirmwareMajor = HELIOGRAPH_VERSION_MAJOR;
