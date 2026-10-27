@@ -885,6 +885,121 @@ void makeDeyeBlocks(BlockData blocks[3]) {
 }
 }  // namespace
 
+// --- dc.power.total from the strings -------------------------------------------------------
+// The Deye profile reads PV1/PV2 power (u16, holding 186/187, scale 1) and has no total.
+
+static void test_pv_total_is_summed_from_the_strings_when_the_profile_has_none() {
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+    setReg(blocks[1], 186, 1200);
+    setReg(blocks[1], 187, 800);
+
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 3, m, 1000);
+
+    const auto* total = m.find(measurement_id::kDcPowerTotal);
+    TEST_ASSERT_NOT_NULL(total);
+    TEST_ASSERT_TRUE(total->valid);
+    TEST_ASSERT_TRUE(total->derived);  // the inverter did not report it, and consumers can tell
+    TEST_ASSERT_EQUAL_DOUBLE(2000.0, total->value);
+}
+
+static void test_a_string_not_read_this_poll_withdraws_the_total_rather_than_shrinking_it() {
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+    setReg(blocks[1], 186, 1200);
+    setReg(blocks[1], 187, 800);
+
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 3, m, 1000);
+    // Second poll, and the block holding the strings did not come back. Their channels still
+    // carry the first poll's values; adding those up now would publish a total from two moments.
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 1, m, 2000);
+
+    const auto* total = m.find(measurement_id::kDcPowerTotal);
+    TEST_ASSERT_NOT_NULL(total);
+    TEST_ASSERT_FALSE(total->valid);
+
+    // And back: the next full poll publishes the new sum again.
+    setReg(blocks[1], 186, 300);
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 3, m, 3000);
+    TEST_ASSERT_TRUE(total->valid);
+    TEST_ASSERT_EQUAL_DOUBLE(1100.0, total->value);
+    TEST_ASSERT_EQUAL_UINT64(3000, total->timestampMs);
+}
+
+// The case the per-string timestamp check exists for: one string fresh, the other left over
+// from the previous poll. Both are valid, and their sum is a number that never happened.
+static void test_one_fresh_string_and_one_stale_one_publish_no_total() {
+    const DeviceProfile& deye = *findProfile("deye_sun_xk_sg");
+    std::vector<RegisterMapping> mappings(deye.mappings, deye.mappings + deye.mappingCount);
+    for (RegisterMapping& mp : mappings) {
+        if (std::strcmp(mp.measurementId, measurement_id::kDcMppt2Power) == 0) {
+            mp.address = 100;  // string 2 moved into the first block, string 1 stays at 186
+        }
+    }
+    DeviceProfile split = deye;
+    split.mappings      = mappings.data();
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+    setReg(blocks[1], 186, 1200);
+    setReg(blocks[0], 100, 800);
+
+    MeasurementSet m;
+    applyProfile(split, blocks, 3, m, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(2000.0, m.find(measurement_id::kDcPowerTotal)->value);
+    applyProfile(split, blocks, 1, m, 2000);  // only string 2's block came back
+
+    TEST_ASSERT_TRUE(m.find(measurement_id::kDcMppt1Power)->valid);  // stale, not invalid
+    TEST_ASSERT_FALSE(m.find(measurement_id::kDcPowerTotal)->valid);
+}
+
+static void test_strings_that_were_never_read_declare_no_total() {
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sun_xk_sg"), blocks, 1, m, 1000);  // only the 96 block
+
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcPowerTotal));
+}
+
+// A profile that declares more trackers than it maps power for would publish part of the array
+// as the whole of it. No total is better than a total that is short by a string.
+static void test_no_total_when_the_profile_maps_fewer_strings_than_it_declares() {
+    DeviceProfile partial = *findProfile("deye_sun_xk_sg");
+    partial.mpptCount     = 3;
+    BlockData blocks[3];
+    makeDeyeBlocks(blocks);
+    setReg(blocks[1], 186, 1200);
+    setReg(blocks[1], 187, 800);
+
+    MeasurementSet m;
+    applyProfile(partial, blocks, 3, m, 1000);
+
+    TEST_ASSERT_NULL(m.find(measurement_id::kDcPowerTotal));
+}
+
+static void test_a_total_the_device_reports_is_never_overruled() {
+    BlockData blocks[2];
+    makeSphBlocks(blocks);
+    setReg(blocks[0], 116, 0);
+    setReg(blocks[0], 117, 12345);  // the device's own total: 1234.5 W
+    setReg(blocks[0], 5, 0);        // and two strings that would add up to 6000 W
+    setReg(blocks[0], 6, 30000);
+    setReg(blocks[0], 9, 0);
+    setReg(blocks[0], 10, 30000);
+
+    MeasurementSet m;
+    applyProfile(*findProfile("sph"), blocks, 2, m, 1000);
+
+    const auto* total = m.find(measurement_id::kDcPowerTotal);
+    TEST_ASSERT_NOT_NULL(total);
+    TEST_ASSERT_FALSE(total->derived);
+    TEST_ASSERT_DOUBLE_WITHIN(0.01, 1234.5, total->value);
+}
+
+
 static void test_the_deye_profile_describes_a_single_phase_two_string_hybrid() {
     const DeviceProfile* p = findProfile("deye_sun_xk_sg");
     TEST_ASSERT_NOT_NULL(p);
@@ -989,7 +1104,10 @@ static void test_the_deye_profile_publishes_nothing_it_could_not_source() {
     TEST_ASSERT_NULL(m.find(measurement_id::kGridImportPower));
     TEST_ASSERT_NULL(m.find(measurement_id::kGridExportPower));
     TEST_ASSERT_NULL(m.find(measurement_id::kTemperature));   // 90/91: sources disagree which
-    TEST_ASSERT_NULL(m.find(measurement_id::kDcPowerTotal));  // no whole-array register
+    // No whole-array register: dc.power.total here is the derived sum, pinned elsewhere.
+    const auto* total = m.find(measurement_id::kDcPowerTotal);
+    TEST_ASSERT_NOT_NULL(total);
+    TEST_ASSERT_TRUE(total->derived);
     TEST_ASSERT_NULL(m.find(measurement_id::kDcMppt3Power));  // third string: one source only
 }
 
@@ -2189,6 +2307,12 @@ static void test_the_dump_stays_silent_below_trace() {
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_soc_is_decoded_as_a_plain_percent);
+    RUN_TEST(test_pv_total_is_summed_from_the_strings_when_the_profile_has_none);
+    RUN_TEST(test_a_string_not_read_this_poll_withdraws_the_total_rather_than_shrinking_it);
+    RUN_TEST(test_one_fresh_string_and_one_stale_one_publish_no_total);
+    RUN_TEST(test_strings_that_were_never_read_declare_no_total);
+    RUN_TEST(test_a_total_the_device_reports_is_never_overruled);
+    RUN_TEST(test_no_total_when_the_profile_maps_fewer_strings_than_it_declares);
     RUN_TEST(test_voltage_scales_by_a_tenth);
     RUN_TEST(test_temperature_is_signed);
     RUN_TEST(test_battery_power_is_a_signed_32bit_pair);

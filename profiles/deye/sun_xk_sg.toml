@@ -285,7 +285,9 @@ unit = "°C"
 # agreed answer about which register fills it, so it stays out.
 #
 # dc.power.total. Neither source reads a whole-array PV power register; both sum the strings.
-# A profile cannot do arithmetic, and summing is not what this schema expresses.
+# So does the driver: with power mapped for both trackers in `mppts` and no total register,
+# it publishes the sum, marked derived. On a unit with a third string that is two strings'
+# worth, which is why the third is a known gap and not a detail.
 #
 # grid.import_power / grid.export_power. Register 169 is a single SIGNED bidirectional value.
 # Our two channels are separate unsigned rails, and splitting one into two needs arithmetic.
