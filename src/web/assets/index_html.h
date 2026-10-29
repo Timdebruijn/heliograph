@@ -67,7 +67,6 @@ main{padding:20px;max-width:960px}
 .row.rule{border-bottom:1px solid var(--hair)}
 .tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
 .cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
-.cols3{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
 .groups{display:grid;gap:18px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
 .fact .k{font-size:11px}.fact div+div{font-size:14px;margin-top:2px;overflow-wrap:anywhere}
 /* --- buttons and fields ------------------------------------------------------------ */
@@ -195,7 +194,6 @@ let tab='live', panel=null, logFilter='all', logPaused=false;
 let S=null;              // last /api/v1/status
 let cfg=null, drivers=null;
 const devCache={}, measCache={};
-let xdevs=null;          // extra-device rows being edited, or null when not loaded
 
 const TABS=[...document.querySelectorAll('nav button')].map(b=>b.dataset.t);
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>goTab(b.dataset.t));
@@ -1078,7 +1076,6 @@ const DIAGGROUPS=[
 ];
 function paintHealth(){
   const d=diag||{};
-  const busErrors=(d.checksum_error_total||0)+(d.rs485_timeout_total||0)+(d.invalid_frame_total||0);
   // The four counters move on every poll. They are written by liveFields() into their own
   // nodes, so the tab around them -- the log and its scroll position, the level dropdown, the
   // pause box -- is never rebuilt to move a number.
@@ -2047,9 +2044,6 @@ function downloadCapture(){
       String(f.length).padStart(3)+'  '+(f.modbus_crc_ok?'modbus  ':f.aa55_ok?'aa55    ':'-       ')+'  '+f.hex)];
   saveBlob(new Blob([lines.join('\n')+'\n'],{type:'text/plain'}),'heliograph-capture-'+d.line.baud_rate+'.txt');
 }
-// ---------------- driver capture: recording the conversation we already have ----------------
-// Lives on Health, not in the troubleshooting flow. That flow only appears when discovery names
-// nothing, which is exactly the bridge this cannot help -- there is no driver talking to record.
 // ---------------- register reader ----------------
 // For working out a register map without a rebuild per guess: ask, see the raw words. Reads
 // only -- the bridge sends 0x03/0x04 and nothing else -- so it is safe on a register nobody has
@@ -2120,6 +2114,9 @@ function renderRegRead(d){
     <div class="hint">Raw words, before any scale. A 32-bit value spans this register and the next.</div>`;
 }
 
+// ---------------- driver capture: recording the conversation we already have ----------------
+// Lives on Health, not in the troubleshooting flow. That flow only appears when discovery names
+// nothing, which is exactly the bridge this cannot help -- there is no driver talking to record.
 let dcapTimer=null, driverCapture=null;
 function driverCaptureHtml(){
   return `<div class="card" style="margin-top:12px">

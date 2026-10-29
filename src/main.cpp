@@ -675,9 +675,8 @@ std::mutex      g_relayMutex;
 
 /// The write path's gate and its request slot -- wired ahead of any driver that can accept a
 /// command the gate would otherwise let through. Which drivers decline is in docs/security.md;
-/// two of them do not. readOnlyMode() follows
-/// g_config.security.readOnlyMode on exactly the same two sites as g_relays' does, so the one
-/// kill switch covers both. REST and MQTT both submit here (submitCommand below); rs485Task
+/// two of them do not. Its setReadOnlyMode() is fed from g_config.security.readOnlyMode at
+/// exactly the same two sites as g_relays', so the one kill switch covers both. REST and MQTT both submit here (submitCommand below); rs485Task
 /// drains it alongside discovery and capture, the same "request only, the bus owner runs it"
 /// shape as everywhere else on this bus.
 CommandDispatcher     g_commandDispatcher{nowMs};
@@ -1722,7 +1721,7 @@ void rs485Task(void* /*arg*/) {
                 g_mqtt->loop(views, bridge, diag, nowMs());
             }
             if (g_rest) {
-                g_rest->notifyState(*first, nowMs());
+                g_rest->notifyState(nowMs());
             }
         }
         // Never a long delay: an unreachable inverter must not stall the task or the watchdog.

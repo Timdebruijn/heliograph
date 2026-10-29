@@ -34,16 +34,6 @@ bool parseIpv4(const std::string& text, uint32_t& out) {
     return true;
 }
 
-std::string formatIpv4(uint32_t addr) {
-    std::string out;
-    out.reserve(15);
-    for (int shift = 24; shift >= 0; shift -= 8) {
-        if (shift != 24) out.push_back('.');
-        out += std::to_string((addr >> shift) & 0xFFu);
-    }
-    return out;
-}
-
 bool isContiguousMask(uint32_t mask) {
     // Ones then zeros: the complement plus one must be a power of two. 0.0.0.0 is not a usable
     // mask here (it would put every address in one subnet and defeat every check below), and

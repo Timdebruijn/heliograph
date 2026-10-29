@@ -61,7 +61,7 @@ void sendError(AsyncWebServerRequest* request, const ApiError& error) {
 
 }  // namespace
 
-RestApi::RestApi(RestContext context, uint16_t port) : context_(std::move(context)), port_(port) {}
+RestApi::RestApi(RestContext context) : context_(std::move(context)) {}
 
 /// Accumulates a chunked request body. Returns true when the body is complete and `out` holds
 /// it; false means "keep waiting" or "already answered with an error".
@@ -168,8 +168,7 @@ bool RestApi::saveAndApply(AsyncWebServerRequest* request, const Configuration& 
 
 RestApi::~RestApi() { stop(); }
 
-void RestApi::notifyState(const DeviceState& state, uint64_t nowMs) {
-    (void)state;
+void RestApi::notifyState(uint64_t nowMs) {
     if (g_events == nullptr || !started_) {
         return;
     }
@@ -186,7 +185,7 @@ bool RestApi::begin() {
     if (started_) {
         return true;
     }
-    g_server = new AsyncWebServer(port_);
+    g_server = new AsyncWebServer(80);
     g_events = new AsyncEventSource("/api/v1/events");
     // Enforce the client bound instead of merely declaring it: every SSE client holds a TCP
     // socket and a send queue for as long as the tab lives, and a device that is up for
@@ -1455,11 +1454,11 @@ namespace heliograph::rest {
 // Host builds have no TCP stack to bind to. Everything worth testing -- the payloads, the
 // config redaction, the Prometheus text -- lives in pure units and is covered by test_rest.
 
-RestApi::RestApi(RestContext context, uint16_t port) : context_(std::move(context)), port_(port) {}
+RestApi::RestApi(RestContext context) : context_(std::move(context)) {}
 RestApi::~RestApi() = default;
 bool RestApi::begin() { return false; }
 void RestApi::stop() { started_ = false; }
-void RestApi::notifyState(const DeviceState&, uint64_t) {}
+void RestApi::notifyState(uint64_t) {}
 
 bool RestApi::collectBody(AsyncWebServerRequest*, const uint8_t*, size_t, size_t, size_t,
                           std::string*& out, size_t) {

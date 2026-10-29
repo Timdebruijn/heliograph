@@ -152,7 +152,6 @@ public:
         ++unlockCalls;
     }
 
-    const TransportStats& stats() const override { return stats_; }
 
     // --- scripting ---
 
@@ -201,7 +200,6 @@ private:
     };
     TransportType        type_ = TransportType::Mock;
     SerialProfile        profile_{};
-    TransportStats       stats_{};
     Responder            responder_;
     std::deque<Reply>    replies_;
     std::vector<uint8_t> rx_;

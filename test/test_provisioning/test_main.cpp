@@ -1133,7 +1133,6 @@ static void test_the_renamed_profile_driver_id_is_migrated_everywhere() {
     // The profile selection rides along. It is the register map, so losing it would silently
     // fall back to the default profile -- another vendor's map, reporting plausible wrong values.
     TEST_ASSERT_EQUAL_STRING("mic_tl_x", loaded.driver.options.at("profile").c_str());
-    TEST_ASSERT_EQUAL_UINT16(kConfigVersion, loaded.version);
 }
 
 // Which device ids were announced to the broker is the one fact nothing else survives a reboot

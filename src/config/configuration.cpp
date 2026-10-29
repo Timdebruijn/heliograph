@@ -530,7 +530,6 @@ void writeCommon(JsonDocument& doc, const Configuration& config) {
 
     JsonObject driver     = doc["driver"].to<JsonObject>();
     driver["id"]          = config.driver.id;
-    driver["auto_detect"] = config.driver.autoDetect;
     driver["label"]       = config.driver.label;
     JsonObject options    = driver["options"].to<JsonObject>();
     for (const auto& [key, value] : config.driver.options) {
@@ -575,13 +574,7 @@ void writeCommon(JsonDocument& doc, const Configuration& config) {
 bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes,
                      const bool* rebootRequired) {
     JsonDocument doc;
-    // Reads from the struct where serializeConfigForStorage writes kConfigVersion directly.
-    // In practice these are the same number -- Configuration::version defaults to
-    // kConfigVersion and deserializeConfigFromStorage stamps it back to kConfigVersion after a
-    // migration, so nothing can currently make them differ -- but the store must write the
-    // version it is WRITING regardless of what the struct happens to hold, so the two stay
-    // apart rather than being folded into writeCommon().
-    doc["version"] = config.version;
+    doc["version"] = kConfigVersion;
     config_sections::writeCommon(doc, config);
 
     // Not the password, not a mask of it. Only whether one is stored.
@@ -726,7 +719,6 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
 
     if (JsonObjectConst driver = doc["driver"]; !driver.isNull()) {
         if (!patchString(driver["id"], merged.driver.id, "driver.id", error)) return false;
-        if (!patchBool(driver["auto_detect"], merged.driver.autoDetect, "driver.auto_detect", error)) return false;
         if (!patchString(driver["label"], merged.driver.label, "driver.label", error)) return false;
         if (JsonObjectConst options = driver["options"]; !options.isNull()) {
             for (JsonPairConst kv : options) {

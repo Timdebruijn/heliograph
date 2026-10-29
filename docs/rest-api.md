@@ -228,7 +228,7 @@ authenticate must ask the user for it rather than read it back; the factory valu
   "serial": { "override": false, "baud_rate": 9600, "parity": "none",
               "data_bits": 8, "stop_bits": 1 },
   "security": { "password_set": true, "read_only_mode": false },
-  "driver": { "id": "eversolar_legacy", "auto_detect": false, "label": "Schuur" },
+  "driver": { "id": "eversolar_legacy", "label": "Schuur" },
   "logging": { "level": "info" }
 }
 ```

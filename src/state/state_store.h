@@ -49,18 +49,14 @@ private:
 /// added stretches the poll cycle by its own transaction time.
 class DeviceManager {
 public:
-    static constexpr size_t kMaxActiveDevices = kMaxDevices;
-
-    /// Returns nullptr when kMaxActiveDevices is reached. Re-adding an existing id returns
+    /// Returns nullptr when kMaxDevices is reached. Re-adding an existing id returns
     /// the existing store.
     StateStore* add(const DeviceId& id);
 
     std::vector<DeviceId> devices() const;
     StateHandle           state(const DeviceId& id) const;
-    StateStore*           store(const DeviceId& id);
     bool                  contains(const DeviceId& id) const;
     size_t                size() const;
-    void                  clear();
 
 private:
     struct Entry {

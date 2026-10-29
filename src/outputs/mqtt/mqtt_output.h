@@ -52,7 +52,7 @@ struct MqttConfig {
 
 class MqttOutput {
 public:
-    explicit MqttOutput(MqttConfig config, PublishPolicy publishPolicy = {});
+    explicit MqttOutput(MqttConfig config);
 
     /// Sets up the client and starts connecting. Non-blocking.
     bool begin(const BridgeInfo& bridge);
@@ -201,7 +201,6 @@ private:
     /// throttle, discoveryPublished, discoveredSignature) stays single-task (only loop()/
     /// channelFor() ever touch them), so nothing else needs to take this lock.
     std::mutex channelsMutex_;
-    PublishPolicy        publishPolicy_;
 
     // espMqttClient's setClientId/setWill/setServer/setCredentials store the POINTER, not a
     // copy (MqttClientSetup.h: `_clientId = clientId;`). Every string handed to them must

@@ -110,9 +110,8 @@ std::string MemoryBackend::raw(const std::string& key) const {
 
 bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     JsonDocument doc;
-    // kConfigVersion directly, not config.version: this records the version the blob is being
-    // WRITTEN in, which is what the migration chain reads back on the next boot. Reading it
-    // from the struct would make a corrupted or hand-set field able to mislabel the format.
+    // The version the blob is WRITTEN in, which is what the migration chain reads back on the
+    // next boot.
     doc["version"] = kConfigVersion;
     config_sections::writeCommon(doc, config);
 
@@ -189,7 +188,6 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
     }
 
     Configuration parsed;
-    parsed.version = kConfigVersion;
     if (doc["bridge_name"].is<const char*>()) parsed.bridgeName = doc["bridge_name"].as<const char*>();
 
     if (JsonObjectConst wifi = doc["wifi"]; !wifi.isNull()) {
@@ -235,7 +233,6 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
     }
     if (JsonObjectConst driver = doc["driver"]; !driver.isNull()) {
         if (driver["id"].is<const char*>())    parsed.driver.id = driver["id"].as<const char*>();
-        if (driver["auto_detect"].is<bool>())  parsed.driver.autoDetect = driver["auto_detect"].as<bool>();
         if (driver["label"].is<const char*>()) parsed.driver.label = driver["label"].as<const char*>();
         if (JsonObjectConst options = driver["options"]; !options.isNull()) {
             for (JsonPairConst kv : options) {

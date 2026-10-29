@@ -168,7 +168,6 @@ public:
     virtual size_t   read(uint8_t* buf, size_t len, uint32_t timeoutMs) = 0;
     virtual bool     lock(uint32_t timeoutMs) = 0;
     virtual void     unlock() = 0;
-    virtual const TransportStats& stats() const = 0;
 };
 ```
 
@@ -635,7 +634,6 @@ And the configuration carries them along opaquely:
 ```cpp
 struct DriverSettings {
     std::string   id;       // empty = highest probePriority that was compiled in
-    bool          autoDetect = false;
     DriverOptions options;  // std::map<std::string, std::string>
 };
 ```

@@ -35,10 +35,7 @@ public:
     bool lock(uint32_t timeoutMs) override;
     void unlock() override;
 
-    const TransportStats& stats() const override { return stats_; }
-
 private:
-    TransportStats stats_;
     // Exactly one component may talk on the bus at a time. std::mutex maps onto pthreads on
     // ESP32, so this is the same primitive the host tests exercise.
     std::timed_mutex busMutex_;

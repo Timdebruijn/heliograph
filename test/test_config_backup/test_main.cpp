@@ -48,9 +48,8 @@ static Configuration populated() {
     c.polling.intervalSeconds = 30;
     c.driver.id              = "mock";
     c.driver.label           = "Schuur";
-    c.driver.autoDetect      = true;
     c.driver.options["unit_id"] = "3";
-    c.additionalDevices.push_back({"mock", false, {{"unit_id", "4"}}, "Balkon"});
+    c.additionalDevices.push_back({"mock", {{"unit_id", "4"}}, "Balkon"});
     c.relays.enabled         = true;
     c.relays.roles           = {"drm0", "none"};
     c.ntp.enabled            = false;

@@ -52,10 +52,8 @@ bool MqttOutput::publishTracked(const char* topic, uint8_t qos, bool retain, con
     return false;
 }
 
-MqttOutput::MqttOutput(MqttConfig config, PublishPolicy publishPolicy)
-    : config_(std::move(config)),
-      topics_(config_.baseTopic, "pending"),
-      publishPolicy_(publishPolicy) {}
+MqttOutput::MqttOutput(MqttConfig config)
+    : config_(std::move(config)), topics_(config_.baseTopic, "pending") {}
 
 bool MqttOutput::begin(const BridgeInfo& bridge) {
     if (!config_.enabled || config_.host.empty()) {
@@ -256,7 +254,7 @@ MqttOutput::Channel& MqttOutput::channelFor(const DeviceView& view, const Bridge
               MqttTopics(config_.baseTopic, bridge.bridgeId,
                          deviceTopicKey(view.primary, view.id)),
               deviceUniqueBase(view.primary, bridge.bridgeId, view.id),
-              PublishThrottle(publishPolicy_),
+              PublishThrottle(),
               false,
               0,
               {}};
@@ -598,9 +596,8 @@ void MqttOutput::stop() {
 
 namespace heliograph::mqtt {
 
-MqttOutput::MqttOutput(MqttConfig config, PublishPolicy publishPolicy)
-    : config_(std::move(config)), topics_(config_.baseTopic, "host"),
-      publishPolicy_(publishPolicy) {}
+MqttOutput::MqttOutput(MqttConfig config)
+    : config_(std::move(config)), topics_(config_.baseTopic, "host") {}
 
 bool MqttOutput::begin(const BridgeInfo&) { return false; }
 void MqttOutput::loop(const std::vector<DeviceView>&, const BridgeInfo&,

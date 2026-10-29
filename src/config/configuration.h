@@ -99,7 +99,6 @@ struct DriverSettings {
     /// Not a hardcoded id -- a default naming one manufacturer is that manufacturer leaking
     /// into the config model.
     std::string id;
-    bool        autoDetect = false;
     /// Driver-specific settings, opaque here. The driver declares which keys exist and what
     /// they accept (DriverDescriptor::options); validateDriverOptions checks them against it.
     DriverOptions options;
@@ -122,8 +121,7 @@ struct DriverSettings {
         // announced to Home Assistant at connect, so a changed label needs a restart like every
         // other property of a device row. Leaving it out would make the settings page report no
         // restart needed and then show the old name until the next reboot anyway.
-        return a.id == b.id && a.autoDetect == b.autoDetect && a.label == b.label &&
-               a.options == b.options;
+        return a.id == b.id && a.label == b.label && a.options == b.options;
     }
     friend bool operator!=(const DriverSettings& a, const DriverSettings& b) { return !(a == b); }
 };
@@ -216,7 +214,6 @@ struct SerialOverride {
 };
 
 struct Configuration {
-    uint16_t         version = kConfigVersion;
     std::string      bridgeName = "Heliograph";
     WifiConfig       wifi;
     MqttSettings     mqtt;

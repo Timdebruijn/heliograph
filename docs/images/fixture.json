@@ -190,7 +190,6 @@
     },
     "driver": {
       "id": "eversolar_legacy",
-      "auto_detect": false,
       "label": "Roof array",
       "options": {}
     },

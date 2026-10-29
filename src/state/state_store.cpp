@@ -37,7 +37,7 @@ StateStore* DeviceManager::add(const DeviceId& id) {
     if (Entry* existing = find(id)) {
         return existing->store.get();
     }
-    if (entries_.size() >= kMaxActiveDevices) {
+    if (entries_.size() >= kMaxDevices) {
         return nullptr;
     }
     entries_.push_back(Entry{id, std::make_unique<StateStore>()});
@@ -60,12 +60,6 @@ StateHandle DeviceManager::state(const DeviceId& id) const {
     return e == nullptr ? nullptr : e->store->snapshot();
 }
 
-StateStore* DeviceManager::store(const DeviceId& id) {
-    std::lock_guard<std::mutex> lock(m_);
-    Entry* e = find(id);
-    return e == nullptr ? nullptr : e->store.get();
-}
-
 bool DeviceManager::contains(const DeviceId& id) const {
     std::lock_guard<std::mutex> lock(m_);
     return find(id) != nullptr;
@@ -74,11 +68,6 @@ bool DeviceManager::contains(const DeviceId& id) const {
 size_t DeviceManager::size() const {
     std::lock_guard<std::mutex> lock(m_);
     return entries_.size();
-}
-
-void DeviceManager::clear() {
-    std::lock_guard<std::mutex> lock(m_);
-    entries_.clear();
 }
 
 }  // namespace heliograph

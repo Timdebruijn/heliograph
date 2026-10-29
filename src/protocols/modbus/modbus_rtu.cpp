@@ -127,10 +127,6 @@ BuildResult buildWriteMultipleRegisters(uint8_t unitId, uint16_t startAddress,
     return BuildResult::Ok;
 }
 
-size_t expectedReadResponseLength(uint16_t quantity) {
-    return 5 + static_cast<size_t>(quantity) * 2;  // unit + fn + bytecount + data + crc
-}
-
 
 ParseResult parseReadResponse(const uint8_t* buf, size_t len, uint8_t expectedUnit,
                               uint8_t expectedFunction, uint16_t* regsOut, size_t regsCapacity,
