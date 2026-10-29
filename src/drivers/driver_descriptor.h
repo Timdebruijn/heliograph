@@ -126,7 +126,10 @@ struct DriverDescriptor {
     ///     nine addresses in a row rather than discover anything.
     ///
     /// Empty means there is nothing to sweep, and that is the safe default for a new driver.
-    /// Extended discovery sweeps this option; nothing else reads it.
+    /// Two readers. Extended discovery sweeps this option, and the register reader takes
+    /// "unit_id" here to mean the driver speaks Modbus (registerReadFitsBus). So a non-Modbus
+    /// driver must not borrow "unit_id" as the name of its address, and a Modbus driver that
+    /// leaves this empty gets its register reads refused.
     std::string addressOptionKey;
 
     /// The option declared under this key, or nullptr. Every other lookup below goes through
