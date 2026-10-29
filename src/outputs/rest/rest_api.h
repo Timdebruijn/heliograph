@@ -97,6 +97,8 @@ struct RestContext {
     /// Queue one register read for the bus task. False when one is already waiting, or when
     /// discovery or a capture has the bus.
     std::function<bool(const RegisterReadRequest&)> requestRegisterRead;
+    /// False when the configured inverter does not speak Modbus. Null is taken as yes.
+    std::function<bool()> registerReadFitsBus;
     /// The last register read, for the page to poll.
     std::function<RegisterReadReport()> registerReadReport;
     /// Wipes stored configuration including credentials, then reboots into the setup portal.

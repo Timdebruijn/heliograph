@@ -583,6 +583,10 @@ curl http://bridge/api/v1/registers
 - **One read in place of one poll**, on the line settings the bridge is already using.
   A second request while one waits gets 409, as does a request while discovery or a
   capture has the bus.
+- **Modbus buses only.** When the configured inverter speaks something else — the
+  EverSolar/Zeversolar registration protocol, or MaxTalk — the request is refused with 409
+  `not_modbus` instead of putting Modbus frames on its line. With no driver configured at all
+  the read is allowed: that is how a map for an unsupported device gets worked out.
 - `result` is `ok`, `timeout`, `exception` (with `exception_code`), `crc`, `protocol` or
   `transport_error`. `values` holds raw 16-bit words, only when `result` is `ok`.
 - `unit` 1–247 (default 1), `space` defaults to `holding`, `count` 1–16 (default 1).

@@ -1095,6 +1095,12 @@ bool RestApi::begin() {
             sendError(request, *error);
             return;
         }
+        if (context_.registerReadFitsBus && !context_.registerReadFitsBus()) {
+            sendError(request, {409, "not_modbus",
+                                "the inverter on this bus does not speak Modbus, so a register "
+                                "read would only put foreign frames on its line"});
+            return;
+        }
         if (!context_.requestRegisterRead(parsed)) {
             sendError(request, {409, "bus_busy",
                                 "a read, capture or discovery run is already using the bus"});
