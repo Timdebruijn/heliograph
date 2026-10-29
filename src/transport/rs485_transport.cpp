@@ -80,10 +80,6 @@ size_t Rs485Transport::write(const uint8_t* data, size_t len) {
     // Block until the last bit is on the wire. Without this the UART could drop RTS while
     // the tail of the frame is still shifting out.
     uart_.flush();
-    stats_.bytesWritten += static_cast<uint32_t>(n);
-    if (n != len) {
-        ++stats_.writeErrors;
-    }
     // Raw request as sent. TRACE only (self-gated), and driver-agnostic: this is where Phase 3
     // reads what actually goes onto the bus, without the transport learning any protocol. The
     // bus carries no secrets.
@@ -113,10 +109,6 @@ size_t Rs485Transport::read(uint8_t* buf, size_t len, uint32_t timeoutMs) {
         delay(1);  // yields to the scheduler; never a busy-wait
     }
 
-    if (got == 0) {
-        ++stats_.readTimeouts;
-    }
-    stats_.bytesRead += static_cast<uint32_t>(got);
     // Deliberately NOT traced here. A reply arrives one or two bytes per read(), so per-read
     // tracing turned a single frame into ~40 log lines -- fine on a serial console, useless in
     // the bounded in-memory ring the REST log serves, where it evicted all surrounding
@@ -132,11 +124,7 @@ size_t Rs485Transport::read(uint8_t* buf, size_t len, uint32_t timeoutMs) {
 }
 
 bool Rs485Transport::lock(uint32_t timeoutMs) {
-    if (busMutex_.try_lock_for(std::chrono::milliseconds(timeoutMs))) {
-        return true;
-    }
-    ++stats_.lockTimeouts;
-    return false;
+    return busMutex_.try_lock_for(std::chrono::milliseconds(timeoutMs));
 }
 
 void Rs485Transport::unlock() { busMutex_.unlock(); }

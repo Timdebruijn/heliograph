@@ -9,7 +9,7 @@
 //
 // Platform independent by construction: no Arduino, no ESP-IDF, so the whole codec is tested
 // on the host. Register framing (when a reply is complete) is the caller's job, exactly as the
-// transport contract states -- expectedReadResponseLength() exists to help with that.
+// transport contract states.
 
 #pragma once
 
@@ -59,11 +59,6 @@ BuildResult buildWriteSingleRegister(uint8_t unitId, uint16_t address, uint16_t 
 BuildResult buildWriteMultipleRegisters(uint8_t unitId, uint16_t startAddress,
                                         const uint16_t* values, uint16_t count, uint8_t* out,
                                         size_t capacity, size_t& outLen);
-
-/// Bytes a well-formed read reply of `quantity` registers occupies: unit + function + byte
-/// count + 2*quantity data + 2 CRC. An exception reply is always 5 bytes and shorter, so a
-/// caller that has read this many bytes has either the full reply or an exception.
-size_t expectedReadResponseLength(uint16_t quantity);
 
 enum class ParseResult : uint8_t {
     Ok,

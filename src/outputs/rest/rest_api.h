@@ -152,7 +152,7 @@ struct RestContext {
 
 class RestApi {
 public:
-    explicit RestApi(RestContext context, uint16_t port = 80);
+    explicit RestApi(RestContext context);
     ~RestApi();
 
     RestApi(const RestApi&)            = delete;
@@ -163,7 +163,7 @@ public:
 
     /// Pushes a state update to any Server-Sent Events subscribers. Rate limited internally.
     /// SSE is an optimisation: the UI falls back to polling /status if it is unavailable.
-    void notifyState(const DeviceState& state, uint64_t nowMs);
+    void notifyState(uint64_t nowMs);
 
 private:
     /// Accumulates a chunked body into bodyBuffer_. See the note on bodyBuffer_.
@@ -223,7 +223,6 @@ private:
     bool saveAndApply(AsyncWebServerRequest* request, const Configuration& updated);
 
     RestContext context_;
-    uint16_t    port_;
     bool        started_        = false;
     uint64_t    lastSseMs_      = 0;
     uint64_t    lastActionMs_   = 0;

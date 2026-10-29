@@ -24,8 +24,6 @@ namespace heliograph::net {
 /// decimal octets in 0..255: no shorthand, no leading zeros, no whitespace, no trailing text.
 bool parseIpv4(const std::string& text, uint32_t& out);
 
-std::string formatIpv4(uint32_t addr);
-
 /// True for a contiguous netmask -- a run of ones followed by a run of zeros. 255.255.255.0 and
 /// 255.255.254.0 yes; 255.0.255.0 no. A non-contiguous mask is not a mask anyone means to type,
 /// and lwip's behaviour with one is not something to find out in production.

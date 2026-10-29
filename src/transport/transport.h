@@ -38,14 +38,6 @@ class BusTap;
 /// The cost of leaving them undocumented is that nobody can tell which ones work.
 enum class TransportType : uint8_t { Rs485, Rs232, Can, Tcp, Mock };
 
-struct TransportStats {
-    uint32_t bytesWritten   = 0;
-    uint32_t bytesRead      = 0;
-    uint32_t readTimeouts   = 0;
-    uint32_t writeErrors    = 0;
-    uint32_t lockTimeouts   = 0;
-};
-
 class Transport {
 public:
     virtual ~Transport() = default;
@@ -81,8 +73,6 @@ public:
     /// extended on the strength of who takes this lock.)
     virtual bool lock(uint32_t timeoutMs) = 0;
     virtual void unlock() = 0;
-
-    virtual const TransportStats& stats() const = 0;
 
     /// Installs a recorder that sees every byte, with the direction it went. `nullptr` removes
     /// it, which is the normal state.

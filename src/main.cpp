@@ -1722,7 +1722,7 @@ void rs485Task(void* /*arg*/) {
                 g_mqtt->loop(views, bridge, diag, nowMs());
             }
             if (g_rest) {
-                g_rest->notifyState(*first, nowMs());
+                g_rest->notifyState(nowMs());
             }
         }
         // Never a long delay: an unreachable inverter must not stall the task or the watchdog.

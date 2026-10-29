@@ -67,7 +67,6 @@ public:
     uint8_t count() const { return count_; }
     bool    energised(uint8_t index) const { return index < count_ && state_[index]; }
     bool    enabled() const { return enabled_; }
-    bool    readOnlyMode() const { return readOnly_; }
 
 private:
     /// The gates every relay operation passes, whatever it is asking for: the global kill

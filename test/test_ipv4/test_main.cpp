@@ -65,12 +65,6 @@ static void test_the_octet_boundary() {
     TEST_ASSERT_FALSE(parseIpv4("99999.1.1.1", v));
 }
 
-static void test_format_round_trips_the_parse() {
-    for (const char* text : {"0.0.0.0", "192.168.1.1", "255.255.255.255", "10.20.0.24"}) {
-        TEST_ASSERT_EQUAL_STRING(text, formatIpv4(ip(text)).c_str());
-    }
-}
-
 // --- masks ------------------------------------------------------------------------------------
 
 static void test_contiguous_masks_are_accepted() {
@@ -145,7 +139,6 @@ int main() {
     RUN_TEST(test_the_shorthands_the_c_library_accepts_are_refused);
     RUN_TEST(test_malformed_input_is_refused);
     RUN_TEST(test_the_octet_boundary);
-    RUN_TEST(test_format_round_trips_the_parse);
     RUN_TEST(test_contiguous_masks_are_accepted);
     RUN_TEST(test_a_mask_with_a_hole_is_refused);
     RUN_TEST(test_the_degenerate_masks_are_refused);

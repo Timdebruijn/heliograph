@@ -91,10 +91,10 @@ bool ModbusProfileDriver::begin(Transport& transport) {
     return !profiles.empty() && transport.configure(profiles.front());
 }
 
-ModbusProfileDriver::ReadResult ModbusProfileDriver::readBlock(RegSpace space, uint16_t start, uint16_t count,
+modbus::ReadOutcome ModbusProfileDriver::readBlock(RegSpace space, uint16_t start, uint16_t count,
                                                    uint16_t* out, bool probe) {
     if (transport_ == nullptr) {
-        return ReadResult::TransportError;
+        return {};  // TransportError
     }
     const uint8_t fn = space == RegSpace::Input ? modbus::kReadInputRegisters
                                                 : modbus::kReadHoldingRegisters;
@@ -118,23 +118,10 @@ ModbusProfileDriver::ReadResult ModbusProfileDriver::readBlock(RegSpace space, u
         tallyModbusRead(busErrors_, outcome.status);
     }
 
-    switch (outcome.status) {
-        case modbus::ReadStatus::Ok:
-            traceBlock(options_.unitId, space, start, count, out);
-            return ReadResult::Ok;
-        case modbus::ReadStatus::Exception:
-            lastException_ = outcome.exceptionCode;
-            return ReadResult::Exception;
-        case modbus::ReadStatus::Timeout:
-            return ReadResult::Timeout;
-        case modbus::ReadStatus::TransportError:
-            return ReadResult::TransportError;
-        case modbus::ReadStatus::Crc:
-            return ReadResult::Crc;
-        case modbus::ReadStatus::Protocol:
-            break;
+    if (outcome.status == modbus::ReadStatus::Ok) {
+        traceBlock(options_.unitId, space, start, count, out);
     }
-    return ReadResult::Protocol;
+    return outcome;
 }
 
 PollResult ModbusProfileDriver::poll(DeviceState& state) {
@@ -159,31 +146,31 @@ PollResult ModbusProfileDriver::poll(DeviceState& state) {
         data.space = b.space;
         data.start = b.start;
         data.count = b.count;
-        const ReadResult r = readBlock(b.space, b.start, b.count, data.values, b.probe);
-        switch (r) {
-            case ReadResult::Ok:
+        const modbus::ReadOutcome r = readBlock(b.space, b.start, b.count, data.values, b.probe);
+        switch (r.status) {
+            case modbus::ReadStatus::Ok:
                 ++validCount;
                 break;
-            case ReadResult::Exception:
+            case modbus::ReadStatus::Exception:
                 sawResponse = true;
                 log::warn("MODBUS unit %u block %u+%u refused (exception 0x%02X) -- skipped",
-                          options_.unitId, b.start, b.count, lastException_);
+                          options_.unitId, b.start, b.count, r.exceptionCode);
                 break;
-            case ReadResult::Crc:
+            case modbus::ReadStatus::Crc:
                 sawResponse = true;
                 sawCrcError = true;
                 log::warn("MODBUS unit %u block %u+%u failed checksum -- check ground, termination "
                           "and cable routing", options_.unitId, b.start, b.count);
                 break;
-            case ReadResult::Protocol:
+            case modbus::ReadStatus::Protocol:
                 sawResponse = true;
                 sawBadFrame = true;
                 log::warn("MODBUS unit %u block %u+%u unreadable (bad frame) -- skipped",
                           options_.unitId, b.start, b.count);
                 break;
-            case ReadResult::Timeout:
+            case modbus::ReadStatus::Timeout:
                 break;  // silence on this block; only total silence is a timeout verdict
-            case ReadResult::TransportError:
+            case modbus::ReadStatus::TransportError:
                 return PollResult::TransportError;
         }
     }
@@ -250,9 +237,9 @@ ProbeResult ModbusProfileDriver::probe() {
     // from silence. Read-only and cheap. Deeper identification waits until the map is trusted.
     const RegBlock& first = options_.profile->blocks[0];
     uint16_t        scratch[125];
-    const ReadResult r = readBlock(first.space, first.start,
-                                   first.count < 8 ? first.count : 8, scratch);
-    if (r == ReadResult::Ok) {
+    const modbus::ReadStatus r =
+        readBlock(first.space, first.start, first.count < 8 ? first.count : 8, scratch).status;
+    if (r == modbus::ReadStatus::Ok) {
         result.responded      = true;
         result.checksumValid  = true;
         result.confidenceScore += 40;
@@ -263,12 +250,12 @@ ProbeResult ModbusProfileDriver::probe() {
         // be harmless because there was only one family of profiles -- with several vendors in
         // the tree it would assert an identification the probe cannot make.
         result.detectedManufacturer = options_.profile->manufacturer;
-    } else if (r == ReadResult::Exception) {
+    } else if (r == modbus::ReadStatus::Exception) {
         // It answered, just not for that range: still a Modbus device on this unit id.
         result.responded = true;
         result.confidenceScore += 20;
         result.evidence.push_back("Modbus device answered with an exception (wrong register?)");
-    } else if (r == ReadResult::Crc) {
+    } else if (r == modbus::ReadStatus::Crc) {
         // Bytes DID come back, they just did not survive the CRC. Deliberately still
         // responded=false: the discovery engine stops sweeping the remaining serial profiles as
         // soon as a candidate responds, and garbage that happens to frame up as a bad-CRC reply
