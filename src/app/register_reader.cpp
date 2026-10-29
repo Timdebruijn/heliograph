@@ -13,6 +13,15 @@ const char* registerReadStatusName(RegisterReadStatus status) {
     return "unknown";
 }
 
+bool registerReadFitsBus(const std::vector<const DriverDescriptor*>& drivers) {
+    for (const DriverDescriptor* d : drivers) {
+        if (d->addressOptionKey != "unit_id") {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool RegisterReader::request(const RegisterReadRequest& request) {
     const bool readFunction = request.functionCode == modbus::kReadHoldingRegisters ||
                               request.functionCode == modbus::kReadInputRegisters;

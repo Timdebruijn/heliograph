@@ -16,6 +16,7 @@
 #include <mutex>
 #include <vector>
 
+#include "drivers/driver_descriptor.h"
 #include "protocols/modbus/modbus_client.h"
 #include "transport/transport.h"
 
@@ -39,6 +40,13 @@ enum class RegisterReadStatus : uint8_t {
 };
 
 const char* registerReadStatusName(RegisterReadStatus status);
+
+/// Whether a register read belongs on a bus these drivers are using: only when every one of them
+/// speaks Modbus, recognised by its address being a Modbus unit id. On a line running a
+/// registration protocol or an ASCII one, a Modbus frame is foreign traffic in the middle of
+/// another conversation, and the timeout it earns explains nothing. No driver at all is allowed:
+/// that is the bridge someone uses to work out a map for a device nothing supports yet.
+bool registerReadFitsBus(const std::vector<const DriverDescriptor*>& drivers);
 
 struct RegisterReadReport {
     RegisterReadStatus    status = RegisterReadStatus::Idle;

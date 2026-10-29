@@ -20,6 +20,7 @@
 #include "drivers/driver_registry.h"
 #include "drivers/eversolar_legacy/eversolar_driver.h"
 #include "drivers/mock/mock_driver.h"
+#include "drivers/modbus_profile/modbus_profile_driver.h"
 #include "outputs/prometheus/prometheus_metrics.h"
 #include <map>
 #include <optional>
@@ -3132,6 +3133,19 @@ static void test_the_register_reader_sends_nothing_but_reads() {
     TEST_ASSERT_FALSE(reader.busy());
 }
 
+// The reader belongs on a Modbus line only. Both descriptors are the real ones, so the check
+// breaks if either driver's address option is ever renamed.
+static void test_a_register_read_fits_only_a_bus_where_every_driver_speaks_modbus() {
+    const DriverDescriptor& modbus       = profile::descriptor();
+    const DriverDescriptor& registration = eversolar::descriptor();
+
+    TEST_ASSERT_TRUE(registerReadFitsBus({}));  // nothing configured: mapping a new device
+    TEST_ASSERT_TRUE(registerReadFitsBus({&modbus}));
+    TEST_ASSERT_TRUE(registerReadFitsBus({&modbus, &modbus}));
+    TEST_ASSERT_FALSE(registerReadFitsBus({&registration}));
+    TEST_ASSERT_FALSE(registerReadFitsBus({&modbus, &registration}));  // one foreign driver is enough
+}
+
 static void test_a_silent_unit_is_reported_as_a_timeout_with_no_values() {
     test::MockTransport transport;  // no responder: silence
     RegisterReader      reader;
@@ -3364,6 +3378,7 @@ int main(int, char**) {
     RUN_TEST(test_a_register_read_refuses_what_is_not_a_plain_number);
     RUN_TEST(test_a_register_read_runs_on_the_bus_task_and_reports_the_words);
     RUN_TEST(test_the_register_reader_sends_nothing_but_reads);
+    RUN_TEST(test_a_register_read_fits_only_a_bus_where_every_driver_speaks_modbus);
     RUN_TEST(test_a_silent_unit_is_reported_as_a_timeout_with_no_values);
     RUN_TEST(test_a_register_read_payload_carries_the_raw_words);
     RUN_TEST(test_an_unused_register_reader_reports_idle_and_nothing_else);

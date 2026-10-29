@@ -1347,6 +1347,13 @@ void startRestApi() {
         return g_registerReader.request(request);
     };
     ctx.registerReadReport = [] { return g_registerReader.report(); };
+    ctx.registerReadFitsBus = [] {
+        std::vector<const DriverDescriptor*> drivers;
+        for (const auto& d : g_drivers) {
+            drivers.push_back(&d->descriptor());
+        }
+        return registerReadFitsBus(drivers);
+    };
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
     // The undo behind a configuration restore. Straight through to the store, which owns both
     // the stash and the swap; the REST layer only decides when.
