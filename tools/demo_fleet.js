@@ -21,9 +21,9 @@
   const batt = window.__demoBattery || {soc:68, power:-1240};
   const status = {
     device:{manufacturer:'EverSolar',model:'TL3000',serial_number:'EU00T112345678',
-      driver_id:'eversolar_legacy',support_level:'beta',online:true,data_valid:true,
+      driver_id:'eversolar_legacy',support_level:'stable',online:true,data_valid:true,
       data_stale:false,last_successful_poll_seconds_ago:3},
-    bridge:{firmware_version:'0.14.0',board_id:'waveshare-rs485-can',
+    bridge:{firmware_version:'0.30.2',board_id:'waveshare-rs485-can',
       board_name:'Waveshare ESP32-S3-RS485-CAN',hostname:'heliograph-a1b2c3',
       uptime_seconds:5061,wifi_connected:true,wifi_rssi_dbm:-54,mqtt_connected:true,
       modbus_listening:true,modbus_clients:0,time_synced:true,time:'2026-07-26 '+now(),
@@ -79,7 +79,7 @@
       identity:{manufacturer:'EverSolar',model:'TL3000',serial_number:'EU00T112345678',
         driver_id:'eversolar_legacy',protocol_name:'AA55'},
       driver:{id:'eversolar_legacy',display_name:'EverSolar / Zeversolar legacy',
-        support_level:'beta',supports_write:false},
+        support_level:'stable',supports_write:false},
       online:true,data_valid:true,data_stale:false,last_successful_poll_seconds_ago:3,
       consecutive_poll_failures:0},
     'modbus_profile-GW2400ABC':{id:'modbus_profile-GW2400ABC',label:'Garage',config_slot:1,
@@ -130,7 +130,7 @@
     relays:{enabled:false,roles:[]}
   };
   const driversDoc = {drivers:[
-    {id:'eversolar_legacy',supports_multiple_devices:true,display_name:'EverSolar / Zeversolar legacy',support_level:'beta',
+    {id:'eversolar_legacy',supports_multiple_devices:true,display_name:'EverSolar / Zeversolar legacy',support_level:'stable',
       description:'AA55 framing over RS485, for TL-series inverters abandoned by their portal.',
       serial_profiles:[{baud_rate:9600,parity:'none',data_bits:8,stop_bits:1}],
       options:[
@@ -162,7 +162,7 @@
          description:'Address this bridge hands its inverter at registration.'}]}
   ]};
   const diagnostics = {
-    uptime_seconds:5061,firmware_version:'0.14.0',board:'Waveshare ESP32-S3-RS485-CAN',
+    uptime_seconds:5061,firmware_version:'0.30.2',board:'Waveshare ESP32-S3-RS485-CAN',
     free_heap_bytes:182364,minimum_free_heap_bytes:168920,max_alloc_heap_bytes:114676,
     psram_size_bytes:null,psram_free_bytes:null,reset_reason:'power-on',ota_image_state:'valid',
     coredump_present:false,coredump_task:null,coredump_pc:null,coredump_cause:null,
