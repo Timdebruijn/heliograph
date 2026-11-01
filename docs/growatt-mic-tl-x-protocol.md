@@ -65,6 +65,18 @@ input — with the group label `Use for TL-X and TL-XH`. So the vendor considers
 applicable to the plain TL-X as well. Splitting them off into a hybrid-only table is the HA
 integration's implementation choice, not a statement by Growatt.
 
+**A second widely deployed integration makes the opposite choice.**
+wills106/homeassistant-solax-modbus — the same project that classifies MIC and MIN as GEN4 PV
+above — reads that class mainly from the 3000 range: PV voltage, current and power per string at
+3003–3009, total PV power at 3001, grid power, frequency, voltage and current at 3023–3028. Below
+3000 it keeps only a handful of registers for GEN4 PV (total PV power at 1, output power at 35,
+fault and warning codes at 105–112). See `custom_components/solax_modbus/plugin_growatt.py` at
+[28ca3ad](https://github.com/wills106/homeassistant-solax-modbus/blob/28ca3ad01fb2056e56c5abcd682087be84618f24/custom_components/solax_modbus/plugin_growatt.py).
+So two hardware-exercised integrations disagree on exactly the question this section leaves
+open, which is why neither can settle it. The 3000 probe below spans 3000–3039, which takes in
+every live reading wills106 maps there for a single-phase unit (its registers from 3041 up fall
+outside it), so the first bring-up dump still decides between them.
+
 **Therefore the profile probes both.** Alongside the mapped 0–124 block it reads 40 registers
 at 3000, mapping nothing from them. The only purpose is that the first bring-up dump answers
 the question directly: does this unit populate 0–124, 3000+, or both? A block the device
