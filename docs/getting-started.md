@@ -288,7 +288,7 @@ never be guessed.
 
 ## Help support your own inverter
 
-If your inverter is not in [the table on the front page](../README.md#does-it-work-with-my-inverter),
+If your inverter is not in [the table on the front page](../README.md#will-it-work-with-my-inverter),
 you are exactly the person this project needs. There are three ways to help, and only one of
 them involves writing code:
 

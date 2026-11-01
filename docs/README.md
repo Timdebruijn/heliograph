@@ -27,7 +27,7 @@ inverter" first. Come back here when you need detail.
 
 ## Does it work with my inverter?
 
-The per-family table in [../README.md](../README.md#does-it-work-with-my-inverter) is the short
+The per-family table in [../README.md](../README.md#will-it-work-with-my-inverter) is the short
 answer. These are the long ones — sources, register maps, and what each map does **not** publish
 and why.
 
