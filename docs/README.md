@@ -101,8 +101,9 @@ once denied a feature the firmware had, each written when it was true. Two thing
 **Some of this is generated and must not be hand-edited.**
 [drivers/coverage.md](drivers/coverage.md) comes from `tools/gen_coverage.py`, and
 `tools/check_layering.sh` fails the build if it is stale. The five dashboard screenshots come
-from `tools/make_screenshots.py --bridge <ip>`. (`discovery.png` does not — it needs a live bus
-and a human clicking, so it is the one image that ages without anyone noticing.)
+from `tools/make_screenshots.py --bridge <ip>`, and the README's tour GIFs from
+`tools/make_screenshots.py --gif` (the demo fleet; needs Pillow). (`discovery.png` does not — it
+needs a live bus and a human clicking, so it is the one image that ages without anyone noticing.)
 
 **The rest is prose, and nothing checks prose.** When you change what the firmware *can do*,
 search the docs for the sentence saying it cannot. That is where the errors live.

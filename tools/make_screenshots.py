@@ -15,6 +15,9 @@ out again from the results. Committed for that reason rather than because it run
     # re-shoot from the captured fixture, no bridge needed
     python3 tools/make_screenshots.py
 
+    # the README's looping tour, light and dark, from the demo fleet (needs Pillow)
+    python3 tools/make_screenshots.py --gif
+
 DATA IS SANITISED ON CAPTURE, not on render: serial numbers, the MAC-derived hostname, the WiFi
 SSID and the NTP server are replaced before anything is written to disk. The fixture is
 committed and a screenshot is published, so a real serial reaching either is a real leak, and
@@ -31,6 +34,7 @@ import re
 import socketserver
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -38,6 +42,7 @@ from typing import ClassVar
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build_web
+import preview_web
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSET = ROOT / "src/web/assets/index_html.h"
@@ -287,6 +292,88 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(encoded)
 
 
+def shoot(
+    chrome: str,
+    url: str,
+    target: pathlib.Path,
+    width: int,
+    height: int,
+    extra: tuple[str, ...] = (),
+) -> int:
+    """One headless screenshot; returns its size in bytes, 0 when nothing was written."""
+    subprocess.run(
+        [
+            chrome,
+            "--headless",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--hide-scrollbars",
+            f"--window-size={width},{height}",
+            "--virtual-time-budget=4000",
+            f"--screenshot={target}",
+            *extra,
+            url,
+        ],
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    return target.stat().st_size if target.exists() else 0
+
+
+# The tour in the README's hero. The DEMO fleet, not the fixture: three inverters, one a hybrid
+# with a battery and one that never answers, which shows more of the page than one real bridge.
+# It was a one-off Playwright run for #254, so the GIFs went stale silently while the PNGs above
+# could be re-shot with one command; now both can.
+# Five frames, the first held longest: it is the one people actually read.
+TOUR_DURATIONS_MS = [3000, 2500, 2500, 2500, 2500]
+# The <img width> in README.md. Shot wider and scaled down, so the text stays crisp.
+TOUR_WIDTH = 900
+
+
+def make_tour(
+    chrome: str, port: int, out_dir: pathlib.Path, workdir: pathlib.Path
+) -> int:
+    try:
+        from PIL import Image
+    except ImportError:
+        raise SystemExit("--gif needs Pillow: pip install pillow") from None
+
+    # Explicit both ways: left alone, headless Chrome follows the OS, and the "light" GIF
+    # would come out dark on a machine set to dark mode.
+    schemes = {"light": "1", "dark": "0"}
+    for scheme, value in schemes.items():
+        frames = []
+        for tab in TABS:
+            png = workdir / f"{scheme}-{tab}.png"
+            if not shoot(
+                chrome,
+                f"http://127.0.0.1:{port}/?tab={tab}",
+                png,
+                980,
+                785,
+                (f"--blink-settings=preferredColorScheme={value}",),
+            ):
+                print(f"  {png.name}: empty -- the page did not render")
+                return 1
+            im = Image.open(png).convert("RGB")
+            im = im.resize(
+                (TOUR_WIDTH, round(im.height * TOUR_WIDTH / im.width)), Image.LANCZOS
+            )
+            frames.append(im.quantize(colors=128, method=Image.Quantize.MEDIANCUT))
+        target = out_dir / f"tour-{scheme}.gif"
+        frames[0].save(
+            target,
+            save_all=True,
+            append_images=frames[1:],
+            duration=TOUR_DURATIONS_MS,
+            loop=0,
+            optimize=True,
+        )
+        print(f"  {target.name:18s} {target.stat().st_size // 1024:4d} KB")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -297,6 +384,11 @@ def main() -> int:
         "--fixture",
         default=str(FIXTURE),
         help="captured data to render from; --bridge OVERWRITES this file",
+    )
+    parser.add_argument(
+        "--gif",
+        action="store_true",
+        help="render the README tour GIFs from the demo fleet instead of the PNGs",
     )
     parser.add_argument("--width", type=int, default=1100)
     parser.add_argument("--height", type=int, default=900)
@@ -310,6 +402,23 @@ def main() -> int:
     # directory quietly rewrote a repository file. Noticed only because a mid-test restore from
     # a backup was needed and the reason was not obvious.
     fixture = pathlib.Path(args.fixture)
+    chrome = build_web.find_chrome()
+    if chrome is None:
+        raise SystemExit("no Chrome or Chromium on PATH to render with")
+
+    if args.gif:
+        # The demo stub answers the page's API calls itself, so the server only hands out the page.
+        Handler.page = preview_web.page().decode("utf-8")
+        Handler.data = {}
+        with (
+            socketserver.TCPServer(("127.0.0.1", 0), Handler) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            return make_tour(
+                chrome, server.server_address[1], out_dir, pathlib.Path(tmp)
+            )
+
     if args.bridge:
         print(f"capturing from {args.bridge}")
         data = capture(args.bridge)
@@ -335,32 +444,19 @@ def main() -> int:
 
     Handler.page = extract_page()
     Handler.data = data
-    chrome = build_web.find_chrome()
-    if chrome is None:
-        raise SystemExit("no Chrome or Chromium on PATH to render with")
 
     with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
         port = server.server_address[1]
         threading.Thread(target=server.serve_forever, daemon=True).start()
         for tab, filename in TABS.items():
             target = out_dir / filename
-            subprocess.run(
-                [
-                    chrome,
-                    "--headless",
-                    "--disable-gpu",
-                    "--no-sandbox",
-                    "--hide-scrollbars",
-                    f"--window-size={args.width},{args.height}",
-                    "--virtual-time-budget=4000",
-                    f"--screenshot={target}",
-                    f"http://127.0.0.1:{port}/?tab={tab}",
-                ],
-                capture_output=True,
-                timeout=120,
-                check=False,
+            size = shoot(
+                chrome,
+                f"http://127.0.0.1:{port}/?tab={tab}",
+                target,
+                args.width,
+                args.height,
             )
-            size = target.stat().st_size if target.exists() else 0
             print(f"  {filename:18s} {size // 1024:4d} KB")
             if size == 0:
                 print("    (empty -- the page did not render)")
