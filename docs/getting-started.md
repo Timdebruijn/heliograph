@@ -301,7 +301,7 @@ them involves writing code:
    [docs/adding-a-device.md](adding-a-device.md) walks through it, including a script
    for probing a device you have in front of you.
 3. **Confirm something Experimental.** Every Modbus profile and every driver but the EverSolar
-   one is unproven on real hardware — eleven profiles, plus SunSpec, SolarMax and SolaX X1. If
+   one is unproven on real hardware — thirteen profiles, plus SunSpec, SolarMax and SolaX X1. If
    you own any of them, running it and reporting what happened — including "it returned
    nothing" — is genuinely valuable. That is how the SolaX findings already in the docs came to
    be.

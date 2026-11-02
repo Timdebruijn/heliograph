@@ -14,6 +14,8 @@ driver must not promote a map nobody has confirmed.
 
 | Profile | Vendor | Status | AC W | AC V | AC A | Hz | PV W | PV1 V/A | PV2 V/A | E day | E tot | Temp | Bat % | Bat W | Bat V | Bat °C | Load W |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `deye_sg0x_lp3` | Deye | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| `deye_sg0x_lp3_dual` | Deye | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `deye_sun_xk_sg` | Deye | experimental | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ | ✔ | · |
 | `goodwe_et_hybrid` | GoodWe | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | · |
 | `mic_tl_x` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | · | · | · | · | · |
@@ -50,6 +52,8 @@ the profile's own comments — see [Why a channel is missing](#why-a-channel-is-
 
 | Profile | Sources | Cross-checked | Hardware |
 |---|---|---|---|
+| `deye_sg0x_lp3` | see profile header | see profile header | **no** |
+| `deye_sg0x_lp3_dual` | see profile header | see profile header | **no** |
 | `deye_sun_xk_sg` | see profile header | see profile header | **no** |
 | `goodwe_et_hybrid` | see profile header | see profile header | **no** |
 | `mic_tl_x` | see profile header | see profile header | **no** |

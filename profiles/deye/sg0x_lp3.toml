@@ -1,0 +1,435 @@
+# SPDX-License-Identifier: MIT
+#
+# Deye / Sunsynk SUN-xK-SG04LP3 and SG05LP3 — three-phase hybrid, low-voltage battery — Modbus RTU
+# register profile.
+#
+# STATUS: transcribed from two independent implementations and the vendor's own protocol
+# document, which agree on every row below unless the row says otherwise. NOT confirmed against
+# a real inverter by this project.
+#
+# TWIN: deye/sg0x_lp3_dual.toml is this map plus each battery input apart (#242). Every row here
+# exists there unchanged, and test_modbus_profile asserts it -- change one, change both.
+#
+# SOURCES (read directly, not summarised):
+#   A. kellerza/sunsynk, src/sunsynk/definitions/three_phase_common.py + three_phase_lv.py
+#      A NEGATIVE factor there means "read as signed", not "negate" (see sun_xk_sg.toml).
+#   B. kbialek/deye-inverter-mqtt, src/deye_sensors_deye_sg04lp3.py
+#      Independent implementation with its own Modbus codec.
+#   C. Deye, "MODBUS RTU 三相储能通信规约" V105.1 (2023-10-06), the three-phase storage protocol:
+#      github.com/user-attachments/files/16798469/MODBUS.RTU.V105.1-20231006.pdf
+#      Used as the tie-breaker, and as the second source where B carries no row.
+#   ha-solarman's deye_p3.yaml is consulted for the battery SIGN only (see battery.power).
+#
+# REGISTER SPACE: holding (function 03) for everything; C opens only 03H and 10H.
+#
+# HV is NOT this map. The SG01HP3 family shares the addresses but scales battery voltage at
+# 0.1 V and battery and PV power at 10 W (C, "L: / H:" columns). Selecting this profile on an HV
+# unit publishes a battery at a tenth of its voltage. A separate profile, not a scale option.
+#
+# 16-bit power. C widened the AC power registers to 32 bits in V104 (high words at 687-709);
+# every LP3 is at most 20 kW, which fits a signed 16-bit word, so the low words alone are read.
+
+[profile]
+driver = "modbus_profile"
+id = "deye_sg0x_lp3"
+display_name = "Deye/Sunsynk SUN-xK-SG04LP3/SG05LP3 hybrid (three phase, LV battery)"
+manufacturer = "Deye"
+
+# Two implementations and the vendor document agree, and no Deye has answered this map.
+status = "experimental"
+default = false
+phases = 3
+mppts = 4
+battery = true
+transports = ["rtu"]
+
+[serial]
+baud = 9600
+parity = "none"
+stop_bits = 1
+
+# ------------------------------------------------------------------------------------------
+# Read blocks. Wider than the mapped rows on purpose: the driver TRACE-dumps every raw block,
+# and the unmapped neighbours (grid flow, CT powers, generator port, running state at 500) are
+# exactly what a first bring-up needs to see.
+# ------------------------------------------------------------------------------------------
+
+[[block]]
+space = "holding"
+start = 500
+count = 42      # 500-541: running state, energy counters, PV energy, both temperatures
+
+[[block]]
+space = "holding"
+start = 586
+count = 98      # 586-683: battery, grid side, inverter output, load, PV strings
+
+# --- DC / PV side -------------------------------------------------------------------------
+#
+# Four trackers, A and C (B maps two). Power is 1 W on LV units (C: "L:1W H:10W"); A reads it
+# signed, B unsigned, and the two agree at every power a string can produce.
+
+[[register]]                    # A, B, C
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 Voltage"
+space = "holding"
+address = 676
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # A, B, C
+measurement = "dc.mppt_1.current"
+display_name = "PV1 Current"
+space = "holding"
+address = 677
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # A, B, C
+measurement = "dc.mppt_1.power"
+display_name = "PV1 Power"
+space = "holding"
+address = 672
+type = "u16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # A, B, C
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 Voltage"
+space = "holding"
+address = 678
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # A, B, C
+measurement = "dc.mppt_2.current"
+display_name = "PV2 Current"
+space = "holding"
+address = 679
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # A, B, C
+measurement = "dc.mppt_2.power"
+display_name = "PV2 Power"
+space = "holding"
+address = 673
+type = "u16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # A, C
+measurement = "dc.mppt_3.voltage"
+display_name = "PV3 Voltage"
+space = "holding"
+address = 680
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # A, C
+measurement = "dc.mppt_3.current"
+display_name = "PV3 Current"
+space = "holding"
+address = 681
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # A, C
+measurement = "dc.mppt_3.power"
+display_name = "PV3 Power"
+space = "holding"
+address = 674
+type = "u16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # A, C
+measurement = "dc.mppt_4.voltage"
+display_name = "PV4 Voltage"
+space = "holding"
+address = 682
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # A, C
+measurement = "dc.mppt_4.current"
+display_name = "PV4 Current"
+space = "holding"
+address = 683
+type = "u16"
+scale = 0.1
+unit = "A"
+
+[[register]]                    # A, C
+measurement = "dc.mppt_4.power"
+display_name = "PV4 Power"
+space = "holding"
+address = 675
+type = "u16"
+scale = 1.0
+unit = "W"
+
+# --- AC side ------------------------------------------------------------------------------
+#
+# The INVERTER's output, as in sun_xk_sg.toml: grid flow (625) and the CT powers are a different
+# quantity on a hybrid, and which of them is "the grid" depends on whether the installation uses
+# the internal CT or an external meter. They stay in the dump, unmapped.
+
+[[register]]                    # A, C (B has the phases, not the total)
+measurement = "ac.power.total"
+display_name = "AC Power"
+space = "holding"
+address = 636
+type = "s16"
+scale = 1.0
+unit = "W"
+
+# Grid-side phase voltage, as the single-phase profile uses grid voltage. A also carries the
+# inverter-output voltages at 627-629; B and C name 598-600 the grid side.
+[[register]]                    # A, B, C
+measurement = "ac.phase_l1.voltage"
+display_name = "Voltage L1"
+space = "holding"
+address = 598
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # A, B, C
+measurement = "ac.phase_l2.voltage"
+display_name = "Voltage L2"
+space = "holding"
+address = 599
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # A, B, C
+measurement = "ac.phase_l3.voltage"
+display_name = "Voltage L3"
+space = "holding"
+address = 600
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # A, B, C (C: S16)
+measurement = "ac.phase_l1.current"
+display_name = "Current L1"
+space = "holding"
+address = 630
+type = "s16"
+scale = 0.01
+unit = "A"
+
+[[register]]                    # A, B, C (C: S16)
+measurement = "ac.phase_l2.current"
+display_name = "Current L2"
+space = "holding"
+address = 631
+type = "s16"
+scale = 0.01
+unit = "A"
+
+[[register]]                    # A, B, C (C: S16)
+measurement = "ac.phase_l3.current"
+display_name = "Current L3"
+space = "holding"
+address = 632
+type = "s16"
+scale = 0.01
+unit = "A"
+
+[[register]]                    # A, B, C (C: S16)
+measurement = "ac.phase_l1.power"
+display_name = "Power L1"
+space = "holding"
+address = 633
+type = "s16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # A, B, C (C: S16)
+measurement = "ac.phase_l2.power"
+display_name = "Power L2"
+space = "holding"
+address = 634
+type = "s16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # A, B, C (C: S16)
+measurement = "ac.phase_l3.power"
+display_name = "Power L3"
+space = "holding"
+address = 635
+type = "s16"
+scale = 1.0
+unit = "W"
+
+# Address and meaning from A and C; the 0.01 Hz scale from A alone (C's row gives none). A wrong
+# scale here is loud rather than subtle -- 500 Hz or 0.5 Hz -- which is why one source will do.
+[[register]]                    # A, C; scale A only
+measurement = "ac.frequency"
+display_name = "Grid Frequency"
+space = "holding"
+address = 609
+type = "u16"
+scale = 0.01
+unit = "Hz"
+
+# The house, as the inverter measures it. Signed in A and C; neither says what a negative
+# reading means, so a bring-up should look at it once with the battery discharging.
+[[register]]                    # A, C
+measurement = "load.power"
+display_name = "Load Power"
+space = "holding"
+address = 653
+type = "s16"
+scale = 1.0
+unit = "W"
+
+# --- Energy -------------------------------------------------------------------------------
+
+[[register]]                    # A, B, C
+measurement = "energy.today"
+display_name = "Energy Today"
+space = "holding"
+address = 529
+type = "u16"
+scale = 0.1
+unit = "kWh"
+
+# Low word first, like every double word on this family: C names 534 the low word, A and B read
+# it that way. C marks the row 预留 ("reserved"); A and B both read it as total PV energy.
+[[register]]                    # A, B, C
+measurement = "energy.total"
+display_name = "Energy Total"
+space = "holding"
+address = 534
+type = "u32"
+scale = 0.1
+word_order = "low_first"
+unit = "kWh"
+
+# Heat sink. The single-phase map left inverter.temperature out because its two sources disagreed
+# about which of two registers was which, and B still does: it calls 540 "DC Temperature" (topic
+# radiator_temp) and 541 "AC Temperature". Here C decides -- 540 is the DC transformer, 541 the
+# heat sink -- and A agrees ("Radiator temperature"). The 1000 bias is A and B; C states it for
+# 540 only, but every Deye temperature carries it.
+[[register]]                    # A, C; B names it differently; bias A and B
+measurement = "inverter.temperature"
+display_name = "Heat Sink Temperature"
+space = "holding"
+address = 541
+type = "u16"
+scale = 0.1
+offset = -100.0
+unit = "°C"
+
+# --- Battery ------------------------------------------------------------------------------
+#
+# THE SIGN. Deye reports battery power and current positive while DISCHARGING; ours is positive
+# while charging, so both carry a negative scale. Three independent pointers:
+#   - C names 590 "Battery output power";
+#   - ha-solarman's sensor.py calls the battery "discharging" when 590 > +50 W (weaker than it
+#     looks: its yaml also gives the row an `inverse` attribute whose effect was not traced);
+#   - kellerza/sunsynk#645, a 20K LV with two batteries, logged 590 at -94 W while the two input
+#     currents read +1.88 A and -3.29 A: their sum, about -75 W at 53 V, has 590's sign. Not
+#     simultaneous samples, so the magnitudes differ; the signs are the point. Current and power
+#     point the same way, and the same correction applies to both.
+#
+# On an inverter with two inputs, 590 is probably the TOTAL: C gives it no index, unlike every
+# neighbour, and in #645 input 1 alone has the opposite sign to it. Against that, A's HV file
+# labels 590 "Battery 1 power" (its LV file says only "Battery power"). A dump with both inputs
+# working settles it. 586-588 and 591 are input 1 in every source. There is no combined SoC anywhere, so the plain
+# battery.* ids carry input 1 except for power -- see canonical-measurements.md. With one battery,
+# which is most of these units, the distinction does not exist.
+
+[[register]]                    # A, B, C
+measurement = "battery.soc"
+display_name = "Battery SoC"
+space = "holding"
+address = 588
+type = "u16"
+scale = 1.0
+unit = "%"
+
+[[register]]                    # A, B, C; sign: see above
+measurement = "battery.power"
+display_name = "Battery Power"
+space = "holding"
+address = 590
+type = "s16"
+scale = -1.0
+unit = "W"
+
+[[register]]                    # A, B, C (LV: 0.01 V)
+measurement = "battery.voltage"
+display_name = "Battery Voltage"
+space = "holding"
+address = 587
+type = "u16"
+scale = 0.01
+unit = "V"
+
+[[register]]                    # A, B, C (C: S16); sign: see above
+measurement = "battery.current"
+display_name = "Battery Current"
+space = "holding"
+address = 591
+type = "s16"
+scale = -0.01
+unit = "A"
+
+[[register]]                    # A, B, C; bias 1000 in A and B
+measurement = "battery.temperature"
+display_name = "Battery Temperature"
+space = "holding"
+address = 586
+type = "u16"
+scale = 0.1
+offset = -100.0
+unit = "°C"
+
+[[register]]                    # A, B, C
+measurement = "battery.energy_charged"
+display_name = "Battery Energy Charged"
+space = "holding"
+address = 516
+type = "u32"
+scale = 0.1
+word_order = "low_first"
+unit = "kWh"
+
+[[register]]                    # A, B, C
+measurement = "battery.energy_discharged"
+display_name = "Battery Energy Discharged"
+space = "holding"
+address = 518
+type = "u32"
+scale = 0.1
+word_order = "low_first"
+unit = "kWh"
+
+# ==============================================================================================
+# DELIBERATELY NOT MAPPED
+# ==============================================================================================
+#
+# grid.power / grid.import_power / grid.export_power. Three candidates (625 grid side, 607 inner
+# side, 619 external CT), and which one is the meter depends on the installation; no source says
+# which way positive points. All three are in block 2's dump.
+#
+# Running state (500) and faults (555-558). A decodes them, but a [status_register] table needs a
+# second source for its codes, and a tester's own table is not one yet.
+#
+# Writes. None declared. This map was researched for reading; a setpoint row needs its own
+# sources, and the write path still lacks FC16, which Deye uses for every write (sun_xk_sg.toml).
