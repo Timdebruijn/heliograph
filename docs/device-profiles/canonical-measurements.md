@@ -72,9 +72,12 @@ $ python3 tools/gen_profiles.py --list-measurements
 - **Two battery inputs.** The plain `battery.*` ids stay the battery as the inverter
   reports it; `battery.port_N.*` carry each input apart. Map a device's total to the plain
   id. Where the device has no total — no Deye register holds a combined state of charge —
-  map input 1 to the plain id as well and say so in the profile, so Home Assistant and the
-  dashboard still show a state of charge. A register may back two rows; a measurement may
-  not. Ports are the inverter's own inputs, not the modules stacked behind one BMS.
+  map input 1 to the plain id as well and say so in the profile. That is a requirement, not
+  a nicety: the dashboard's battery card reads only `battery.soc` and `battery.power`, so a
+  profile that maps ports alone shows no battery at all. A register may back two rows (the
+  generator only refuses a measurement mapped twice); give the two rows different
+  `display_name`s, or Home Assistant shows two entities with the same name. Ports are the
+  inverter's own inputs, not the modules stacked behind one BMS.
 - **Missing is not zero.** A channel your device does not have is simply left out of the
   profile — the outputs then never publish it. Never map a register you are unsure about
   "just in case": an invalid value published as authoritative is worse than an absent
