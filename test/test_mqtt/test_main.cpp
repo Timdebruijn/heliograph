@@ -303,6 +303,28 @@ static void test_the_mock_hybrid_payload_also_fits() {
     TEST_ASSERT_FALSE(doc["measurements"]["battery.soc"]["value"].isNull());
 }
 
+static void test_every_canonical_channel_at_once_fits() {
+    // The worst case the vocabulary allows, not the largest device we happen to know: every id
+    // in kAll supported and valid, with values that serialise long. A new id that pushes this
+    // over the ceiling would make buildStatePayload refuse -- and the device's whole MQTT state
+    // would stop updating, not just the new channel (review of #242).
+    DeviceState state;
+    state.inverterOnline        = true;
+    state.dataValid             = true;
+    state.identity.manufacturer = "Manufacturer Name Ltd";
+    state.identity.model        = "SUN-20K-SG05LP3-EU-SM2";
+    state.identity.serialNumber = "2512052525";
+    state.identity.driverId     = "modbus_profile";
+    for (const char* id : measurement_id::kAll) {
+        state.measurements.declare(id, MeasurementType::Power, Unit::Watt, id);
+        state.measurements.set(id, -12345.678901234567, 1'800'000'000'000ULL);
+    }
+    std::string json;
+    TEST_ASSERT_TRUE_MESSAGE(buildStatePayload(state, json), "state payload refused");
+    // Headroom, not "just fits": the next id added should not be the one that tips it.
+    TEST_ASSERT_TRUE(json.size() < kMaxStatePayloadBytes * 3 / 4);
+}
+
 // --- diagnostics / identity / capabilities -----------------------------------------------
 
 /// The crash cause travels over MQTT; the backtrace deliberately does not.
@@ -1658,6 +1680,7 @@ int main(int, char**) {
     RUN_TEST(test_oversized_payload_is_refused_rather_than_truncated);
     RUN_TEST(test_state_payload_stays_well_within_the_bound);
     RUN_TEST(test_the_mock_hybrid_payload_also_fits);
+    RUN_TEST(test_every_canonical_channel_at_once_fits);
     RUN_TEST(test_the_backtrace_stays_off_the_mqtt_payload);
     RUN_TEST(test_diagnostics_payload);
     RUN_TEST(test_rssi_is_null_when_wifi_is_down);

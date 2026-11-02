@@ -23,6 +23,13 @@ namespace heliograph::mqtt {
 /// so. Truncated JSON is worse than no JSON: a consumer cannot tell it apart from real data.
 inline constexpr size_t kMaxPayloadBytes = 4096;
 
+/// The state payload's own ceiling, the same as REST's for the same data. It grows with the
+/// vocabulary rather than with any one field: every canonical id at once came to ~4 KB before
+/// the battery-port ids and ~4.9 KB after, and a refusal here stops the device's whole MQTT
+/// state, not just the newest channel. Still a bound -- just one sized for the worst device the
+/// vocabulary can describe, which test_every_canonical_channel_at_once_fits measures.
+inline constexpr size_t kMaxStatePayloadBytes = 8192;
+
 /// Builds the state payload.
 ///
 /// Only `supported` measurements appear at all, and an unsupported/invalid/stale channel is
@@ -31,7 +38,7 @@ inline constexpr size_t kMaxPayloadBytes = 4096;
 ///
 /// Returns false if the payload would exceed `maxBytes`; `out` is then untouched.
 bool buildStatePayload(const DeviceState& state, std::string& out,
-                       size_t maxBytes = kMaxPayloadBytes);
+                       size_t maxBytes = kMaxStatePayloadBytes);
 
 bool buildDiagnosticsPayload(const DiagnosticsSnapshot& diagnostics, const BridgeInfo& bridge,
                              std::string& out, size_t maxBytes = kMaxPayloadBytes);

@@ -48,7 +48,7 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `battery.energy_discharged` | kWh | Lifetime energy discharged from the battery |
 | `battery.charge_power` | W | Charge rail, for a device that reads the two separately |
 | `battery.discharge_power` | W | Discharge rail, ditto |
-| `battery.port_1.soc` … `battery.port_2.temperature` | % / W / V / A / °C | One battery **input** of an inverter that has two: `soc`, `power`, `voltage`, `current`, `temperature` each. Same sign as `battery.power`. See below |
+| `battery.port_1.soc` … `battery.port_2.temperature` | % / W / V / A / °C | One battery **input** of an inverter that has two: `soc`, `power`, `voltage`, `current`, `temperature` each. `power` follows `battery.power`: positive = charging. See below |
 | `grid.import_power` | W | Power drawn from the grid, for a hybrid with a meter |
 | `grid.export_power` | W | Power fed back to the grid |
 | `grid.power` | W | **Net grid flow, signed**: positive = importing, negative = exporting. Prefer this where a device reports one bidirectional register; the two rails above are for devices that publish them separately. Where both exist, this one is what a controller acts on. |

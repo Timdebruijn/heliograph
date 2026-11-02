@@ -169,6 +169,33 @@ static void test_battery_inputs_are_labelled_and_apart_from_the_whole() {
                      == std::string::npos);
 }
 
+static void test_every_battery_port_gauge_lands_in_its_family_with_its_label() {
+    // Ten table rows written by hand: a copy-paste slip (port 2 labelled "1", or a row pointed at
+    // the wrong family) passes the id checker, which only asks that each id appears somewhere.
+    struct Row { const char* id; const char* series; };
+    const Row rows[] = {
+        {measurement_id::kBatteryPort1Soc, "heliograph_battery_port_state_of_charge_percent{device=\"inv-1\",port=\"1\"} 11.000"},
+        {measurement_id::kBatteryPort2Soc, "heliograph_battery_port_state_of_charge_percent{device=\"inv-1\",port=\"2\"} 12.000"},
+        {measurement_id::kBatteryPort1Power, "heliograph_battery_port_power_watts{device=\"inv-1\",port=\"1\"} 13.000"},
+        {measurement_id::kBatteryPort2Power, "heliograph_battery_port_power_watts{device=\"inv-1\",port=\"2\"} 14.000"},
+        {measurement_id::kBatteryPort1Voltage, "heliograph_battery_port_voltage_volts{device=\"inv-1\",port=\"1\"} 15.000"},
+        {measurement_id::kBatteryPort2Voltage, "heliograph_battery_port_voltage_volts{device=\"inv-1\",port=\"2\"} 16.000"},
+        {measurement_id::kBatteryPort1Current, "heliograph_battery_port_current_amperes{device=\"inv-1\",port=\"1\"} 17.000"},
+        {measurement_id::kBatteryPort2Current, "heliograph_battery_port_current_amperes{device=\"inv-1\",port=\"2\"} 18.000"},
+        {measurement_id::kBatteryPort1Temperature, "heliograph_battery_port_temperature_celsius{device=\"inv-1\",port=\"1\"} 19.000"},
+        {measurement_id::kBatteryPort2Temperature, "heliograph_battery_port_temperature_celsius{device=\"inv-1\",port=\"2\"} 20.000"},
+    };
+    DeviceState s = hybrid();
+    double v = 11;
+    for (const Row& r : rows) {
+        report(s, r.id, MeasurementType::Generic, Unit::None, r.id, v++);
+    }
+    const std::string text = metricsOf(s);
+    for (const Row& r : rows) {
+        TEST_ASSERT_TRUE_MESSAGE(text.find(r.series) != std::string::npos, r.series);
+    }
+}
+
 static void test_the_array_total_is_not_in_the_same_family_as_its_strings() {
     const std::string text = metricsOf(singlePhase());
     // Parts and their sum in one family is how a sum() silently double-counts.
@@ -199,6 +226,7 @@ int main() {
     RUN_TEST(test_one_help_and_one_type_however_many_phases);
     RUN_TEST(test_a_battery_is_its_own_metric_prefix);
     RUN_TEST(test_battery_inputs_are_labelled_and_apart_from_the_whole);
+    RUN_TEST(test_every_battery_port_gauge_lands_in_its_family_with_its_label);
     RUN_TEST(test_a_channel_the_inverter_lacks_produces_nothing_at_all);
     RUN_TEST(test_the_array_total_is_not_in_the_same_family_as_its_strings);
     RUN_TEST(test_an_invalidated_reading_is_omitted_rather_than_reported);
