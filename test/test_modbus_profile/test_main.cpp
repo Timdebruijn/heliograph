@@ -1799,7 +1799,8 @@ static void test_the_dual_battery_deye_map_is_the_single_one_plus_ports() {
 
 // The numbers kellerza/sunsynk#645 logged on a 20K LV with one battery per input: 590 at -94 W
 // raw, input 1 at +1.88 A raw, input 2 at -3.29 A raw. Deye counts discharge as positive and we
-// count charge, so every one of them flips -- and the totals then say what the inputs say.
+// count charge, so every one of them flips -- after which the total and the inputs' net current
+// agree on the direction, which the end of this test asserts.
 static void test_the_dual_deye_map_flips_battery_signs_and_splits_the_inputs() {
     BlockData blocks[2] = {{RegSpace::Holding, 500, 42, {}}, {RegSpace::Holding, 586, 98, {}}};
     setReg(blocks[1], 586, 1250);                              // input 1: 25.0 °C, biased
@@ -1808,7 +1809,10 @@ static void test_the_dual_deye_map_flips_battery_signs_and_splits_the_inputs() {
     setReg(blocks[1], 589, 71);                                // input 2 SoC
     setReg(blocks[1], 590, static_cast<uint16_t>(-94));        // total, Deye's sign
     setReg(blocks[1], 591, 188);                               // input 1, discharging
+    setReg(blocks[1], 593, 5298);                              // input 2: 52.98 V
     setReg(blocks[1], 594, static_cast<uint16_t>(-329));       // input 2, charging
+    setReg(blocks[1], 595, static_cast<uint16_t>(-174));       // input 2 power, Deye's sign
+    setReg(blocks[1], 596, 1180);                              // input 2: 18.0 °C, biased
 
     MeasurementSet m;
     applyProfile(*findProfile("deye_sg0x_lp3_dual"), blocks, 2, m, 1000);
@@ -1816,13 +1820,50 @@ static void test_the_dual_deye_map_flips_battery_signs_and_splits_the_inputs() {
     TEST_ASSERT_EQUAL_DOUBLE(94.0, m.find(measurement_id::kBatteryPower)->value);  // charging
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, -1.88, m.find(measurement_id::kBatteryPort1Current)->value);
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, 3.29, m.find(measurement_id::kBatteryPort2Current)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, -1.88, m.find(measurement_id::kBatteryCurrent)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(174.0, m.find(measurement_id::kBatteryPort2Power)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 52.98, m.find(measurement_id::kBatteryPort2Voltage)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 18.0, m.find(measurement_id::kBatteryPort2Temperature)->value);
+    // The point of the flip: the total and the inputs' net current now agree on charging.
+    const double net = m.find(measurement_id::kBatteryPort1Current)->value +
+                       m.find(measurement_id::kBatteryPort2Current)->value;
+    TEST_ASSERT_TRUE(net > 0.0);
     // Option 1 of #242: no combined SoC exists, so the plain id is input 1's.
     TEST_ASSERT_EQUAL_DOUBLE(64.0, m.find(measurement_id::kBatterySoc)->value);
     TEST_ASSERT_EQUAL_DOUBLE(64.0, m.find(measurement_id::kBatteryPort1Soc)->value);
     TEST_ASSERT_EQUAL_DOUBLE(71.0, m.find(measurement_id::kBatteryPort2Soc)->value);
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, 25.0, m.find(measurement_id::kBatteryPort1Temperature)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 25.0, m.find(measurement_id::kBatteryTemperature)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 53.12, m.find(measurement_id::kBatteryVoltage)->value);
     // Input 1 has no power register of its own; borrowing the total would double-count it.
     TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPort1Power));
+}
+
+// The single map on its own, through the decoder: the 32-bit counters (low word first), a
+// negative AC power on a hybrid charging from the grid, the load, and the heat sink's bias.
+static void test_the_single_deye_lp3_map_decodes_counters_signs_and_bias() {
+    BlockData blocks[2] = {{RegSpace::Holding, 500, 42, {}}, {RegSpace::Holding, 586, 98, {}}};
+    setReg(blocks[0], 516, 0x86A0);                            // 100000 -> 10000.0 kWh,
+    setReg(blocks[0], 517, 0x0001);                            //   only if low word comes first
+    setReg(blocks[0], 534, 41230);                             // 4123.0 kWh
+    setReg(blocks[0], 541, 1452);                              // 45.2 °C, biased
+    setReg(blocks[1], 633, static_cast<uint16_t>(-1500));      // L1 importing to charge
+    setReg(blocks[1], 636, static_cast<uint16_t>(-4500));
+    setReg(blocks[1], 653, 2300);
+    setReg(blocks[1], 591, static_cast<uint16_t>(-500));       // Deye: charging at 5 A
+
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sg0x_lp3"), blocks, 2, m, 1000);
+
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, 10000.0, m.find(measurement_id::kBatteryEnergyCharged)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-6, 4123.0, m.find(measurement_id::kEnergyTotal)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 45.2, m.find(measurement_id::kTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(-1500.0, m.find(measurement_id::kAcL1Power)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(-4500.0, m.find(measurement_id::kAcPowerTotal)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(2300.0, m.find(measurement_id::kLoadPower)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 5.0, m.find(measurement_id::kBatteryCurrent)->value);
+    // One battery: no input channels at all, which is why this profile exists apart from the dual.
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPort2Soc));
 }
 
 // Word order is a per-FAMILY property, and this pins it per family rather than per row.
@@ -2524,6 +2565,7 @@ int main(int, char**) {
     RUN_TEST(test_the_declared_word_order_is_consistent_within_each_family);
     RUN_TEST(test_the_dual_battery_deye_map_is_the_single_one_plus_ports);
     RUN_TEST(test_the_dual_deye_map_flips_battery_signs_and_splits_the_inputs);
+    RUN_TEST(test_the_single_deye_lp3_map_decodes_counters_signs_and_bias);
     RUN_TEST(test_promoting_the_driver_cannot_promote_a_profile);
     RUN_TEST(test_every_profile_status_has_a_stable_name);
     RUN_TEST(test_the_profile_option_labels_line_up_with_their_values);
