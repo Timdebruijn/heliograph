@@ -84,6 +84,10 @@ struct RegisterMapping {
     /// "missing is not zero" rule, applied to a device that says "missing" in numbers.
     bool     hasInvalid = false;
     uint32_t invalidRaw = 0;
+    /// One bit of a 16-bit flag register, or -1 for a whole-register value. When set, the
+    /// reading is (raw >> bit) & 1 and nothing else applies: scale, offset, sign and sentinel are
+    /// refused on such a row by the generator.
+    int8_t bit = -1;
 };
 
 /// A contiguous register range to read in one Modbus transaction. Kept small and explicit so a

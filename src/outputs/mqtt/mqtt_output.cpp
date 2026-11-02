@@ -562,8 +562,12 @@ bool MqttOutput::forgetDevice(const DeviceId& id, const BridgeInfo& bridge) {
     // measurement set, which is gone along with the device. Publishing an empty retained
     // payload to a topic that was never used is harmless -- Home Assistant has nothing to
     // remove and the broker drops the retained entry.
+    // Both components per id: which one an id was announced under depends on the type the
+    // driver declared it with (a flag is a binary_sensor), and that is gone too.
     for (const char* mid : measurement_id::kAll) {
-        clear(config_.discoveryPrefix + "/sensor/" + base + "/" + sanitizeId(mid) + "/config");
+        for (const char* component : {"/sensor/", "/binary_sensor/"}) {
+            clear(config_.discoveryPrefix + component + base + "/" + sanitizeId(mid) + "/config");
+        }
     }
     clear(config_.discoveryPrefix + "/sensor/" + base + "/status/config");
     clear(config_.discoveryPrefix + "/binary_sensor/" + base + "/inverter_online/config");

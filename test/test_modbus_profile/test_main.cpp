@@ -1866,6 +1866,36 @@ static void test_the_single_deye_lp3_map_decodes_counters_signs_and_bias() {
     TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPort2Soc));
 }
 
+// 552 is a relay bitmask and grid.connected is bit 2 of it. The values are the ones a tester
+// reported, which they read as phase presence: 7 is INV + load + grid relay closed, and 3 -- which
+// looked like "L3 dropped" -- is the grid relay open, i.e. running islanded. Bits either side of
+// bit 2 must not leak into it, which a decode of the whole register would get wrong.
+static void test_the_deye_lp3_grid_relay_bit_is_read_on_its_own() {
+    struct Case {
+        uint16_t raw;
+        double   connected;
+    };
+    static const Case kCases[] = {{7, 1.0}, {3, 0.0}, {0, 0.0}, {4, 1.0}, {0xFFFB, 0.0}};
+    for (const char* id : {"deye_sg0x_lp3", "deye_sg0x_lp3_dual"}) {
+        for (const Case& c : kCases) {
+            BlockData blocks[1] = {{RegSpace::Holding, 500, 53, {}}};
+            setReg(blocks[0], 552, c.raw);
+            MeasurementSet m;
+            applyProfile(*findProfile(id), blocks, 1, m, 1000);
+            const Measurement* g = m.find(measurement_id::kGridConnected);
+            TEST_ASSERT_NOT_NULL_MESSAGE(g, id);
+            TEST_ASSERT_EQUAL_DOUBLE_MESSAGE(c.connected, g->value, id);
+            TEST_ASSERT_TRUE(g->type == MeasurementType::Flag);
+            TEST_ASSERT_TRUE(g->unit == Unit::None);
+        }
+    }
+    // A poll that never reached 552 says nothing about the relay, rather than "disconnected".
+    BlockData shortRead[1] = {{RegSpace::Holding, 500, 42, {}}};
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sg0x_lp3"), shortRead, 1, m, 1000);
+    TEST_ASSERT_NULL(m.find(measurement_id::kGridConnected));
+}
+
 // Word order is a per-FAMILY property, and this pins it per family rather than per row.
 //
 // This is the test that would have caught the bug it exists because of. The Sungrow profile
@@ -2566,6 +2596,7 @@ int main(int, char**) {
     RUN_TEST(test_the_dual_battery_deye_map_is_the_single_one_plus_ports);
     RUN_TEST(test_the_dual_deye_map_flips_battery_signs_and_splits_the_inputs);
     RUN_TEST(test_the_single_deye_lp3_map_decodes_counters_signs_and_bias);
+    RUN_TEST(test_the_deye_lp3_grid_relay_bit_is_read_on_its_own);
     RUN_TEST(test_promoting_the_driver_cannot_promote_a_profile);
     RUN_TEST(test_every_profile_status_has_a_stable_name);
     RUN_TEST(test_the_profile_option_labels_line_up_with_their_values);

@@ -381,6 +381,42 @@ def parse_profile(
                 f"-- the driver would never read it (a {rtype} needs {words} "
                 f"consecutive registers)"
             )
+        # One bit of a flag register: the reading is that bit, 0 or 1, and nothing else on the
+        # row may apply to it. Refused rather than ignored, so a row that reads like it scales or
+        # offsets a bit never sits in the file looking honoured.
+        if "bitmask" in r:
+            raise ProfileError(
+                f"{rw}: bitmask is not a key; read one flag with bit = 0-15"
+            )
+        bit = r.get("bit")
+        if bit is not None:
+            if isinstance(bit, bool) or not isinstance(bit, int) or not 0 <= bit <= 15:
+                raise ProfileError(f"{rw}: bit must be an integer 0-15")
+            if rtype != "u16":
+                raise ProfileError(f"{rw}: bit needs type 'u16', got '{rtype}'")
+            extra = sorted(
+                {"scale", "offset", "invalid", "word_order", "unit"} & r.keys()
+            )
+            if extra:
+                raise ProfileError(
+                    f"{rw}: a bit row reads 0 or 1 and takes no {', '.join(extra)}"
+                )
+            parsed_regs.append(
+                {
+                    "measurement": mid,
+                    "display_name": name,
+                    "space": space,
+                    "address": address,
+                    "type": rtype,
+                    "scale": 1.0,
+                    "offset": 0.0,
+                    "word_order": "high_first",
+                    "invalid": None,
+                    "unit": None,
+                    "bit": bit,
+                }
+            )
+            continue
         scale = r.get("scale", 1.0)
         if isinstance(scale, bool) or not isinstance(scale, (int, float)):
             raise ProfileError(f"{rw}: scale must be a number")
@@ -439,6 +475,7 @@ def parse_profile(
                 "word_order": word_order,
                 "invalid": invalid,
                 "unit": unit,
+                "bit": None,
             }
         )
 
@@ -561,9 +598,9 @@ def parse_profile(
         # masked field would clear whatever shares the register with it. Several vendors do pack a
         # mode in beside unrelated flags, so the key is recognised and refused by name rather than
         # ignored -- an ignored `bitmask` would produce a row that looks masked and writes whole.
-        if "bitmask" in wr:
+        if "bitmask" in wr or "bit" in wr:
             raise ProfileError(
-                f"{ww}: bitmask is not supported -- FC06 writes the whole register, so setting "
+                f"{ww}: bit/bitmask is not supported -- FC06 writes the whole register, so setting "
                 f"part of one needs read-modify-write, which the write path does not do. A "
                 f"masked field would clear its neighbours in the same register"
             )
@@ -774,7 +811,9 @@ def generate(
         w(f"constexpr RegisterMapping k{sym}Mappings[] = {{")
         for r in p["registers"]:
             words, signed = TYPES[r["type"]]
-            unit_enum, mtype = UNITS[r["unit"]]
+            unit_enum, mtype = (
+                ("None", "Flag") if r["bit"] is not None else UNITS[r["unit"]]
+            )
             const = vocabulary[r["measurement"]]
             w(
                 f"    {{measurement_id::{const}, MeasurementType::{mtype}, "
@@ -785,7 +824,8 @@ def generate(
                 f"{cpp_float(r['scale'])}, {'true' if signed else 'false'}, "
                 f"{cpp_float(r['offset'])}, {WORD_ORDERS[r['word_order']]}, "
                 f"{'true' if r['invalid'] is not None else 'false'}, "
-                f"{r['invalid'] if r['invalid'] is not None else 0}}},"
+                f"{r['invalid'] if r['invalid'] is not None else 0}, "
+                f"{r['bit'] if r['bit'] is not None else -1}}},"
             )
         w("};")
         w(f"constexpr RegBlock k{sym}Blocks[] = {{")

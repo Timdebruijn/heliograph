@@ -53,6 +53,7 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `grid.export_power` | W | Power fed back to the grid |
 | `grid.power` | W | **Net grid flow, signed**: positive = importing, negative = exporting. Prefer this where a device reports one bidirectional register; the two rails above are for devices that publish them separately. Where both exist, this one is what a controller acts on. |
 | `load.power` | W | What the house is drawing, as the inverter measures it — **positive = consuming** |
+| `grid.connected` | — | **Flag** (1/0, map it with `bit`): 1 = the inverter's grid relay is closed, 0 = running islanded or disconnected. The inverter's own relay state, not a measurement of the grid. |
 
 ## Conventions
 

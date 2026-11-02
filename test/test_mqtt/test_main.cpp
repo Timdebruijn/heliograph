@@ -514,6 +514,35 @@ static void test_discovery_creates_an_entity_per_supported_measurement() {
     TEST_ASSERT_NULL(findEntity(entities, "heliograph-a1b2c3_ac_phase_l2_voltage"));
 }
 
+// A flag is a state, so it is a binary_sensor: as a sensor Home Assistant graphs a square wave and
+// keeps statistics of a yes/no. A null reading has to stay "unknown" -- a plain `'ON' if v` would
+// turn "no reading" into "disconnected".
+static void test_a_flag_measurement_is_a_binary_sensor_that_keeps_unknown() {
+    Rig  r;
+    auto state = r.poll();
+    state.measurements.declare(measurement_id::kGridConnected, MeasurementType::Flag, Unit::None,
+                               "Grid Connected");
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    const auto* e = findEntity(entities, "heliograph-a1b2c3_grid_connected");
+    TEST_ASSERT_NOT_NULL(e);
+    TEST_ASSERT_TRUE(e->configTopic.find("/binary_sensor/") != std::string::npos);
+    auto doc = parse(e->payload);
+    TEST_ASSERT_EQUAL_STRING("connectivity", doc["device_class"]);
+    TEST_ASSERT_EQUAL_STRING("ON", doc["payload_on"]);
+    TEST_ASSERT_EQUAL_STRING("OFF", doc["payload_off"]);
+    TEST_ASSERT_TRUE(doc["state_class"].isNull());
+    TEST_ASSERT_TRUE(doc["unit_of_measurement"].isNull());
+    const std::string tmpl = doc["value_template"].as<std::string>();
+    TEST_ASSERT_TRUE(tmpl.find("none if v is none") != std::string::npos);
+    // Numbers stay sensors.
+    const auto* power = findEntity(entities, "heliograph-a1b2c3_ac_power_total");
+    TEST_ASSERT_TRUE(power->configTopic.find("/sensor/") != std::string::npos);
+}
+
 static void test_discovery_metadata_matches_the_measurement_type() {
     Rig        r;
     const auto state  = r.poll();
@@ -1691,6 +1720,7 @@ int main(int, char**) {
     RUN_TEST(test_writable_driver_lists_its_bounds);
     RUN_TEST(test_discovery_creates_an_entity_per_supported_measurement);
     RUN_TEST(test_every_discovery_payload_fits_the_ceiling_it_now_shares);
+    RUN_TEST(test_a_flag_measurement_is_a_binary_sensor_that_keeps_unknown);
     RUN_TEST(test_discovery_metadata_matches_the_measurement_type);
     RUN_TEST(test_value_template_reads_the_right_key);
     RUN_TEST(test_availability_tracks_the_bridge_not_the_inverter);
