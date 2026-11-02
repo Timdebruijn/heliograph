@@ -106,7 +106,7 @@ You need an inverter with an **RS485 port**. Wi-Fi-only inverters are out, and s
 |---|---|---|
 | EverSolar / Zeversolar **TL** series | **Stable** | Yes. A TL3000-20 in production, the author's own |
 | Zeversolar **TLC** series | **Beta** | Yes. One TLC8000, on a contributor's hardware |
-| Modbus register maps: Deye, GoodWe, Growatt (×3), Huawei, Sofar (×2), Solis (×2), Sungrow | Experimental | The driver has read a Deye SG05 through its owner's map. None of the 11 shipped maps has met a device |
+| Modbus register maps: Deye (×3), GoodWe, Growatt (×3), Huawei, Sofar (×2), Solis (×2), Sungrow | Experimental | The driver has read a Deye SG05 through its owner's map. None of the 13 shipped maps has met a device |
 | SunSpec | Experimental | No |
 | SolarMax (MaxTalk) | Experimental | No |
 | SolaX X1 | Experimental | One field attempt. Zero bytes came back |
@@ -167,7 +167,7 @@ answer; the table above is the only evidence for that.
 <details>
 <summary><b>Where it stops</b>: the full list of limits</summary>
 
-- **Eleven of eleven Modbus maps have never met a device.** Nor have SunSpec or SolarMax.
+- **Thirteen of thirteen Modbus maps have never met a device.** Nor have SunSpec or SolarMax.
 - **No control path has ever reached a device**, by either route. The Relay-6CH was measured for
   order, polarity, failsafe and boot state. The 1CH switches, but its polarity has not been put on a meter.
 - **Finding an EverSolar or SolaX is not a read-only operation.** That family is discovered by being

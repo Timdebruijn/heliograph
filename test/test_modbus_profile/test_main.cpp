@@ -1753,6 +1753,78 @@ static void test_the_mic_and_min_profiles_share_a_layout_and_differ_in_strings()
     TEST_ASSERT_FALSE(min->writes[0].verified);
 }
 
+// --- Deye three-phase LV, one battery and two -----------------------------------------------
+//
+// Two profiles for one family (#242): the dual variant is the plain map plus each battery input.
+// Nothing ties them together except this test. A row fixed in one and not the other would make
+// the same inverter read differently depending on how many batteries its owner declared.
+static void test_the_dual_battery_deye_map_is_the_single_one_plus_ports() {
+    const DeviceProfile* single = findProfile("deye_sg0x_lp3");
+    const DeviceProfile* dual   = findProfile("deye_sg0x_lp3_dual");
+    TEST_ASSERT_NOT_NULL(single);
+    TEST_ASSERT_NOT_NULL(dual);
+    TEST_ASSERT_EQUAL(single->blockCount, dual->blockCount);
+    for (size_t b = 0; b < single->blockCount; ++b) {
+        TEST_ASSERT_EQUAL(single->blocks[b].start, dual->blocks[b].start);
+        TEST_ASSERT_EQUAL(single->blocks[b].count, dual->blocks[b].count);
+    }
+
+    size_t shared = 0;
+    for (size_t i = 0; i < dual->mappingCount; ++i) {
+        const RegisterMapping& d = dual->mappings[i];
+        const RegisterMapping* s = nullptr;
+        for (size_t k = 0; k < single->mappingCount; ++k) {
+            if (strcmp(single->mappings[k].measurementId, d.measurementId) == 0) {
+                s = &single->mappings[k];
+            }
+        }
+        if (s == nullptr) {
+            // The only thing the twin may add.
+            TEST_ASSERT_TRUE_MESSAGE(strncmp(d.measurementId, "battery.port_", 13) == 0,
+                                     d.measurementId);
+            continue;
+        }
+        ++shared;
+        TEST_ASSERT_EQUAL_MESSAGE(s->address, d.address, d.measurementId);
+        TEST_ASSERT_EQUAL_MESSAGE(s->words, d.words, d.measurementId);
+        TEST_ASSERT_EQUAL_MESSAGE(s->isSigned, d.isSigned, d.measurementId);
+        TEST_ASSERT_EQUAL_MESSAGE(s->lowWordFirst, d.lowWordFirst, d.measurementId);
+        TEST_ASSERT_EQUAL_DOUBLE_MESSAGE(s->scale, d.scale, d.measurementId);
+        TEST_ASSERT_EQUAL_DOUBLE_MESSAGE(s->offset, d.offset, d.measurementId);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(s->displayName, d.displayName, d.measurementId);
+    }
+    // Every single-battery row made it across, not just the ones the twin happens to list.
+    TEST_ASSERT_EQUAL(single->mappingCount, shared);
+}
+
+// The numbers kellerza/sunsynk#645 logged on a 20K LV with one battery per input: 590 at -94 W
+// raw, input 1 at +1.88 A raw, input 2 at -3.29 A raw. Deye counts discharge as positive and we
+// count charge, so every one of them flips -- and the totals then say what the inputs say.
+static void test_the_dual_deye_map_flips_battery_signs_and_splits_the_inputs() {
+    BlockData blocks[2] = {{RegSpace::Holding, 500, 42, {}}, {RegSpace::Holding, 586, 98, {}}};
+    setReg(blocks[1], 586, 1250);                              // input 1: 25.0 °C, biased
+    setReg(blocks[1], 587, 5312);                              // 53.12 V
+    setReg(blocks[1], 588, 64);                                // input 1 SoC
+    setReg(blocks[1], 589, 71);                                // input 2 SoC
+    setReg(blocks[1], 590, static_cast<uint16_t>(-94));        // total, Deye's sign
+    setReg(blocks[1], 591, 188);                               // input 1, discharging
+    setReg(blocks[1], 594, static_cast<uint16_t>(-329));       // input 2, charging
+
+    MeasurementSet m;
+    applyProfile(*findProfile("deye_sg0x_lp3_dual"), blocks, 2, m, 1000);
+
+    TEST_ASSERT_EQUAL_DOUBLE(94.0, m.find(measurement_id::kBatteryPower)->value);  // charging
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, -1.88, m.find(measurement_id::kBatteryPort1Current)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 3.29, m.find(measurement_id::kBatteryPort2Current)->value);
+    // Option 1 of #242: no combined SoC exists, so the plain id is input 1's.
+    TEST_ASSERT_EQUAL_DOUBLE(64.0, m.find(measurement_id::kBatterySoc)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(64.0, m.find(measurement_id::kBatteryPort1Soc)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(71.0, m.find(measurement_id::kBatteryPort2Soc)->value);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 25.0, m.find(measurement_id::kBatteryPort1Temperature)->value);
+    // Input 1 has no power register of its own; borrowing the total would double-count it.
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPort1Power));
+}
+
 // Word order is a per-FAMILY property, and this pins it per family rather than per row.
 //
 // This is the test that would have caught the bug it exists because of. The Sungrow profile
@@ -1774,6 +1846,8 @@ static void test_the_declared_word_order_is_consistent_within_each_family() {
     static const Family kFamilies[] = {
         {"sungrow_sh_hybrid", true, "all 21 of source B's 32-bit sensors carry swap: word"},
         {"deye_sun_xk_sg", true, "source A is little-endian; source B defaults low_word_first"},
+        {"deye_sg0x_lp3", true, "source C names the low word first; A and B read it so"},
+        {"deye_sg0x_lp3_dual", true, "the same rows as deye_sg0x_lp3"},
         {"solis_rhi_hybrid", false, "source B lists [low, high], so high sits at the lower address"},
         {"huawei_sun2000", false, "the library decodes with a big-endian struct format"},
         {"goodwe_et_hybrid", false, "read_bytes4 is int.from_bytes(..., byteorder='big')"},
@@ -2448,6 +2522,8 @@ int main(int, char**) {
     RUN_TEST(test_the_goodwe_profile_holds_back_the_unsourced_channels);
     RUN_TEST(test_the_mic_and_min_profiles_share_a_layout_and_differ_in_strings);
     RUN_TEST(test_the_declared_word_order_is_consistent_within_each_family);
+    RUN_TEST(test_the_dual_battery_deye_map_is_the_single_one_plus_ports);
+    RUN_TEST(test_the_dual_deye_map_flips_battery_signs_and_splits_the_inputs);
     RUN_TEST(test_promoting_the_driver_cannot_promote_a_profile);
     RUN_TEST(test_every_profile_status_has_a_stable_name);
     RUN_TEST(test_the_profile_option_labels_line_up_with_their_values);
