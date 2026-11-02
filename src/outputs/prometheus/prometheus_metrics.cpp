@@ -201,6 +201,28 @@ constexpr GaugeSpec kInverterGauges[] = {
      "Lifetime energy stored in the battery"},
     {measurement_id::kBatteryEnergyDischarged, "heliograph_battery_energy_discharged_kwh",
      "Lifetime energy taken from the battery"},
+    // One input of a multi-battery inverter: its own families with a port label, the same split
+    // as the MPPT strings, so sum() over the plain battery family never counts a port twice.
+    {measurement_id::kBatteryPort1Soc, "heliograph_battery_port_state_of_charge_percent",
+     "State of charge of one battery input", "port", "1"},
+    {measurement_id::kBatteryPort2Soc, "heliograph_battery_port_state_of_charge_percent",
+     "State of charge of one battery input", "port", "2"},
+    {measurement_id::kBatteryPort1Power, "heliograph_battery_port_power_watts",
+     "Power into one battery input, positive while charging", "port", "1"},
+    {measurement_id::kBatteryPort2Power, "heliograph_battery_port_power_watts",
+     "Power into one battery input, positive while charging", "port", "2"},
+    {measurement_id::kBatteryPort1Voltage, "heliograph_battery_port_voltage_volts",
+     "Voltage of one battery input", "port", "1"},
+    {measurement_id::kBatteryPort2Voltage, "heliograph_battery_port_voltage_volts",
+     "Voltage of one battery input", "port", "2"},
+    {measurement_id::kBatteryPort1Current, "heliograph_battery_port_current_amperes",
+     "Current of one battery input", "port", "1"},
+    {measurement_id::kBatteryPort2Current, "heliograph_battery_port_current_amperes",
+     "Current of one battery input", "port", "2"},
+    {measurement_id::kBatteryPort1Temperature, "heliograph_battery_port_temperature_celsius",
+     "Temperature of one battery input", "port", "1"},
+    {measurement_id::kBatteryPort2Temperature, "heliograph_battery_port_temperature_celsius",
+     "Temperature of one battery input", "port", "2"},
 
     // --- Grid meter --------------------------------------------------------------------------
     {measurement_id::kGridImportPower, "heliograph_grid_import_power_watts",

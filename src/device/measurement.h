@@ -154,6 +154,27 @@ inline constexpr const char* kBatteryEnergyDischarged = "battery.energy_discharg
 /// that cannot be enumerated is an entity that can never be cleared (review, 2026-07-26).
 inline constexpr const char* kBatteryChargePower    = "battery.charge_power";
 inline constexpr const char* kBatteryDischargePower = "battery.discharge_power";
+/// One battery input of an inverter that has more than one (#242). Some three-phase hybrids
+/// carry two, each with its own SoC, voltage, current, power and temperature; the plain
+/// battery.* ids above stay "the battery as the inverter reports it". Where the device has a
+/// total it goes there; where it has none (the first such map has no combined SoC register)
+/// the profile maps port 1 to the plain id as well, and says so -- a capacity-weighted SoC would
+/// need derived channels this codebase does not have.
+///
+/// "Port", not "pack": these are the inverter's own inputs, which it measures separately. The
+/// modules stacked behind one BMS are a different thing, and over RS485 they are not readable.
+/// Two, because two is what hardware has shown; no energy counters, because no device keeps
+/// them per input.
+inline constexpr const char* kBatteryPort1Soc         = "battery.port_1.soc";
+inline constexpr const char* kBatteryPort1Power       = "battery.port_1.power";
+inline constexpr const char* kBatteryPort1Voltage     = "battery.port_1.voltage";
+inline constexpr const char* kBatteryPort1Current     = "battery.port_1.current";
+inline constexpr const char* kBatteryPort1Temperature = "battery.port_1.temperature";
+inline constexpr const char* kBatteryPort2Soc         = "battery.port_2.soc";
+inline constexpr const char* kBatteryPort2Power       = "battery.port_2.power";
+inline constexpr const char* kBatteryPort2Voltage     = "battery.port_2.voltage";
+inline constexpr const char* kBatteryPort2Current     = "battery.port_2.current";
+inline constexpr const char* kBatteryPort2Temperature = "battery.port_2.temperature";
 /// House-level flows, for hybrids with a meter. Also long-standing Modbus registers.
 inline constexpr const char* kGridImportPower = "grid.import_power";
 inline constexpr const char* kGridExportPower = "grid.export_power";
@@ -220,7 +241,12 @@ inline constexpr const char* kAll[] = {
     kEnergyToday,    kEnergyTotal,
     kTemperature,    kOperatingHours, kBatterySoc,     kBatteryPower,   kBatteryVoltage,
     kBatteryCurrent, kBatteryTemperature, kBatteryEnergyCharged, kBatteryEnergyDischarged,
-    kBatteryChargePower, kBatteryDischargePower, kGridImportPower, kGridExportPower,
+    kBatteryChargePower, kBatteryDischargePower,
+    kBatteryPort1Soc, kBatteryPort1Power, kBatteryPort1Voltage, kBatteryPort1Current,
+    kBatteryPort1Temperature,
+    kBatteryPort2Soc, kBatteryPort2Power, kBatteryPort2Voltage, kBatteryPort2Current,
+    kBatteryPort2Temperature,
+    kGridImportPower, kGridExportPower,
     kGridPower,
     kLoadPower,
     kActivePowerLimitPct, kActivePowerLimitEnabled,

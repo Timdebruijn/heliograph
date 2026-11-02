@@ -48,6 +48,7 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `battery.energy_discharged` | kWh | Lifetime energy discharged from the battery |
 | `battery.charge_power` | W | Charge rail, for a device that reads the two separately |
 | `battery.discharge_power` | W | Discharge rail, ditto |
+| `battery.port_1.soc` … `battery.port_2.temperature` | % / W / V / A / °C | One battery **input** of an inverter that has two: `soc`, `power`, `voltage`, `current`, `temperature` each. `power` follows `battery.power`: positive = charging. See below |
 | `grid.import_power` | W | Power drawn from the grid, for a hybrid with a meter |
 | `grid.export_power` | W | Power fed back to the grid |
 | `grid.power` | W | **Net grid flow, signed**: positive = importing, negative = exporting. Prefer this where a device reports one bidirectional register; the two rails above are for devices that publish them separately. Where both exist, this one is what a controller acts on. |
@@ -68,6 +69,15 @@ $ python3 tools/gen_profiles.py --list-measurements
 - **Named after physics, not vendor registers.** The battery channels are shaped after
   the SunSpec storage model on purpose, so hybrids map onto a standard instead of every
   brand inventing its own vocabulary.
+- **Two battery inputs.** The plain `battery.*` ids stay the battery as the inverter
+  reports it; `battery.port_N.*` carry each input apart. Map a device's total to the plain
+  id. Where the device has no total — no Deye register holds a combined state of charge —
+  map input 1 to the plain id as well and say so in the profile. That is a requirement, not
+  a nicety: the dashboard's battery card reads only `battery.soc` and `battery.power`, so a
+  profile that maps ports alone shows no battery at all. A register may back two rows (the
+  generator only refuses a measurement mapped twice); give the two rows different
+  `display_name`s, or Home Assistant shows two entities with the same name. Ports are the
+  inverter's own inputs, not the modules stacked behind one BMS.
 - **Missing is not zero.** A channel your device does not have is simply left out of the
   profile — the outputs then never publish it. Never map a register you are unsure about
   "just in case": an invalid value published as authoritative is worse than an absent
@@ -75,8 +85,8 @@ $ python3 tools/gen_profiles.py --list-measurements
 
 ## Extending the vocabulary
 
-If your device has a channel that genuinely is not expressible (say a second battery, or
-three-phase L2/L3 channels), do **not** improvise an id — the build will reject it
+If your device has a channel that genuinely is not expressible (say a sixth MPPT string,
+or a third battery input), do **not** improvise an id — the build will reject it
 anyway. Open an issue or add the constant to `measurement.h` in the same PR, following
 the existing naming pattern (`domain.instance.quantity`). New ids should stay
 vendor-neutral: name the physical quantity, not the register.
