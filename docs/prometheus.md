@@ -184,6 +184,18 @@ battery's.
 | `heliograph_battery_energy_charged_kwh` | kWh, lifetime |
 | `heliograph_battery_energy_discharged_kwh` | kWh, lifetime |
 
+An inverter with two battery inputs adds a family per quantity with a `port` label (`"1"` or
+`"2"`), the same split as the MPPT strings. The plain families above stay the battery as the
+inverter reports it, so a `sum()` over them never counts an input twice.
+
+| Metric | Unit |
+|---|---|
+| `heliograph_battery_port_state_of_charge_percent` | % |
+| `heliograph_battery_port_power_watts` | W, positive charging |
+| `heliograph_battery_port_voltage_volts` | V |
+| `heliograph_battery_port_current_amperes` | A |
+| `heliograph_battery_port_temperature_celsius` | °C |
+
 **Grid meter**
 
 | Metric | Unit |

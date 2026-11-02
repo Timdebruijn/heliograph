@@ -150,6 +150,25 @@ static void test_a_channel_the_inverter_lacks_produces_nothing_at_all() {
     TEST_ASSERT_TRUE(text.find("string=\"2\"") == std::string::npos);
 }
 
+static void test_battery_inputs_are_labelled_and_apart_from_the_whole() {
+    DeviceState s = hybrid();
+    // The Deye shape (#242): the inverter's total in the plain id, each input beside it, with the
+    // two inputs working against each other -- which is exactly when a mixed family would lie.
+    report(s, measurement_id::kBatteryPort1Power, MeasurementType::Power, Unit::Watt, "P1 W", 98);
+    report(s, measurement_id::kBatteryPort2Power, MeasurementType::Power, Unit::Watt, "P2 W", -171);
+    const std::string text = metricsOf(s);
+
+    TEST_ASSERT_TRUE(text.find("heliograph_battery_port_power_watts{device=\"inv-1\","
+                               "port=\"1\"} 98.000") != std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_battery_port_power_watts{device=\"inv-1\","
+                               "port=\"2\"} -171.000") != std::string::npos);
+    TEST_ASSERT_EQUAL_UINT32(1, occurrences(text, "# TYPE heliograph_battery_port_power_watts"));
+    // The whole stays one unlabelled series, so sum() over it cannot count an input twice.
+    TEST_ASSERT_EQUAL_UINT32(1, occurrences(text, "heliograph_battery_power_watts{device="));
+    TEST_ASSERT_TRUE(text.find("heliograph_battery_power_watts{device=\"inv-1\",port=")
+                     == std::string::npos);
+}
+
 static void test_the_array_total_is_not_in_the_same_family_as_its_strings() {
     const std::string text = metricsOf(singlePhase());
     // Parts and their sum in one family is how a sum() silently double-counts.
@@ -179,6 +198,7 @@ int main() {
     RUN_TEST(test_a_phase_is_a_label_not_a_name);
     RUN_TEST(test_one_help_and_one_type_however_many_phases);
     RUN_TEST(test_a_battery_is_its_own_metric_prefix);
+    RUN_TEST(test_battery_inputs_are_labelled_and_apart_from_the_whole);
     RUN_TEST(test_a_channel_the_inverter_lacks_produces_nothing_at_all);
     RUN_TEST(test_the_array_total_is_not_in_the_same_family_as_its_strings);
     RUN_TEST(test_an_invalidated_reading_is_omitted_rather_than_reported);

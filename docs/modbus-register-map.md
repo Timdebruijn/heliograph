@@ -252,6 +252,9 @@ profile-driven hybrid populates whichever of these its register map declares.
 | 404 | 2 | float32 | `load.power` — what the house is drawing, positive = consuming |
 | 406 | 2 | float32 | `grid.power` — net grid flow, **signed**: positive = importing, negative = exporting |
 
+The per-input battery channels (`battery.port_1.*`, `battery.port_2.*`) are not on Modbus TCP;
+MQTT, REST measurements and Prometheus carry them. Appending them later moves no address.
+
 `load.power` sits here rather than in a region of its own: it is a house-level flow like the two
 grid rails above, and it is appended after them so no published address moves. It is **not**
 derivable from grid flow on a hybrid, where the house can be fed by PV, by the battery, by the
