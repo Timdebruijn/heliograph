@@ -66,6 +66,11 @@ MAX_ENUM_OPTIONS = 16
 # Unit symbol -> (C++ Unit enumerator, C++ MeasurementType enumerator).
 # Must stay in sync with unitSymbol() in src/device/measurement.cpp. The measurement type
 # is derived from the unit so contributors never touch internal enums.
+# Canonical ids that are yes/no (MeasurementType::Flag in measurement.h). Such an id is read with
+# `bit` and only with `bit`: a numeric row on one would be announced as a graphed sensor, and a
+# bit row on any other id would turn a quantity into a binary_sensor.
+FLAG_MEASUREMENTS = {"grid.connected"}
+
 UNITS: dict[str, tuple[str, str]] = {
     "W": ("Watt", "Power"),
     "V": ("Volt", "Voltage"),
@@ -389,6 +394,15 @@ def parse_profile(
                 f"{rw}: bitmask is not a key; read one flag with bit = 0-15"
             )
         bit = r.get("bit")
+        if (bit is not None) != (mid in FLAG_MEASUREMENTS):
+            raise ProfileError(
+                f"{rw}: '{mid}' "
+                + (
+                    "is a yes/no and needs bit = 0-15"
+                    if bit is None
+                    else f"is not a flag; bit is only for {sorted(FLAG_MEASUREMENTS)}"
+                )
+            )
         if bit is not None:
             if isinstance(bit, bool) or not isinstance(bit, int) or not 0 <= bit <= 15:
                 raise ProfileError(f"{rw}: bit must be an integer 0-15")

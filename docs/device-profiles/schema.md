@@ -139,7 +139,7 @@ Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`.
 | `offset` | number | no (0.0) | Added after scaling. For registers that store a *biased* value so it never goes negative on the wire: several vendors report `1000` for 0 °C, which is `scale = 0.1, offset = -100`. |
 | `word_order` | string | no (`"high_first"`) | 32-bit values only. `"low_first"` when the device stores the LOW half at the lower address. Refused on a 16-bit row and on write rows. |
 | `invalid` | int | no | A raw value the device uses to mean "not available" (e.g. `0x7FFF`, `0xFFFF`). A matching register is left **undeclared** rather than published. Compared before sign extension; must fit the register width. Refused on write rows. |
-| `bit` | int | no | `0`–`15`: read one bit of a flag register instead of its value. The reading is `(raw >> bit) & 1`, published as a yes/no (a `binary_sensor` in Home Assistant). Needs `type = "u16"`; `unit`, `scale`, `offset`, `invalid` and `word_order` are refused on such a row. |
+| `bit` | int | no | `0`–`15`: read one bit of a flag register instead of its value. The reading is `(raw >> bit) & 1`, published as a yes/no (a `binary_sensor` in Home Assistant). Required on, and only allowed on, a yes/no id such as `grid.connected`. Needs `type = "u16"`; `unit`, `scale`, `offset`, `invalid` and `word_order` are refused on such a row. |
 | `unit` | string | yes | One of `W` `V` `A` `Hz` `°C` (or `C`) `kWh` `h` `%` `dBm` `s`. The measurement *type* (Power, Voltage, …) is derived from the unit, so you never touch internal enums. |
 
 ### Sentinels: when a device says "unknown" in numbers
