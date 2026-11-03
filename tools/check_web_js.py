@@ -229,6 +229,20 @@ def extract_function(source, name):
     return None
 
 
+def run_node(label, filename, harness, scratch):
+    """Run a JS harness under node; print "<label>: OK|FAIL" and return 0/1."""
+    path = pathlib.Path(scratch) / filename
+    path.write_text(harness)
+    result = subprocess.run(
+        ["node", str(path)], capture_output=True, text=True, check=False
+    )
+    print(f"{label}: {'OK' if result.returncode == 0 else 'FAIL'}")
+    if result.returncode != 0:
+        print(result.stdout + result.stderr)
+        return 1
+    return 0
+
+
 def check_version_compare(script, scratch):
     parts = []
     for fn in ("semver", "isNewer"):
@@ -252,16 +266,7 @@ for (const [current, candidate, want] of {cases}) {{
 process.exit(bad === 0 ? 0 : 1);
 """
     )
-    path = pathlib.Path(scratch) / "version_compare.js"
-    path.write_text(harness)
-    result = subprocess.run(
-        ["node", str(path)], capture_output=True, text=True, check=False
-    )
-    print(f"version comparison: {'OK' if result.returncode == 0 else 'FAIL'}")
-    if result.returncode != 0:
-        print(result.stdout + result.stderr)
-        return 1
-    return 0
+    return run_node("version comparison", "version_compare.js", harness, scratch)
 
 
 def check_fleet_mode(script, scratch):
@@ -343,16 +348,7 @@ for (const [label, payload, want] of {cases}) {{
 process.exit(bad === 0 ? 0 : 1);
 """
     )
-    path = pathlib.Path(scratch) / "fleet_mode.js"
-    path.write_text(harness)
-    result = subprocess.run(
-        ["node", str(path)], capture_output=True, text=True, check=False
-    )
-    print(f"fleet mode: {'OK' if result.returncode == 0 else 'FAIL'}")
-    if result.returncode != 0:
-        print(result.stdout + result.stderr)
-        return 1
-    return 0
+    return run_node("fleet mode", "fleet_mode.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):
@@ -488,16 +484,7 @@ excl('a driver that says nothing either way', {
 process.exit(bad === 0 ? 0 : 1);
 """
     )
-    path = pathlib.Path(scratch) / "address_collision.js"
-    path.write_text(harness)
-    result = subprocess.run(
-        ["node", str(path)], capture_output=True, text=True, check=False
-    )
-    print(f"address collision: {'OK' if result.returncode == 0 else 'FAIL'}")
-    if result.returncode != 0:
-        print(result.stdout + result.stderr)
-        return 1
-    return 0
+    return run_node("address collision", "address_collision.js", harness, scratch)
 
 
 def check_auth_prompt_reentrancy(script, scratch):
@@ -578,16 +565,7 @@ const fail = m => {{ console.error(m); bad++; }};
   process.exit(bad === 0 ? 0 : 1);
 }})();
 """
-    path = pathlib.Path(scratch) / "auth_prompt.js"
-    path.write_text(harness)
-    result = subprocess.run(
-        ["node", str(path)], capture_output=True, text=True, check=False
-    )
-    print(f"auth prompt re-entrancy: {'OK' if result.returncode == 0 else 'FAIL'}")
-    if result.returncode != 0:
-        print(result.stdout + result.stderr)
-        return 1
-    return 0
+    return run_node("auth prompt re-entrancy", "auth_prompt.js", harness, scratch)
 
 
 def check_auth_fetch_race(script, scratch):
@@ -649,16 +627,7 @@ const fail = m => { console.error(m); bad++; };
 })();
 """
     )
-    path = pathlib.Path(scratch) / "auth_fetch_race.js"
-    path.write_text(harness)
-    result = subprocess.run(
-        ["node", str(path)], capture_output=True, text=True, check=False
-    )
-    print(f"auth fetch race: {'OK' if result.returncode == 0 else 'FAIL'}")
-    if result.returncode != 0:
-        print(result.stdout + result.stderr)
-        return 1
-    return 0
+    return run_node("auth fetch race", "auth_fetch_race.js", harness, scratch)
 
 
 if __name__ == "__main__":

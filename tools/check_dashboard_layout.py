@@ -42,6 +42,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # 0.19.1: something that only misbehaves when there is room to spare.
 WIDTHS = (390, 700, 780, 1000, 1200)
 
+# The battery state most scenarios render with.
+BATTERY_STATE = "{soc:68,power:-1240}"
+
 # Battery states, and what each must be able to say for itself. Rendered from the same page at
 # one width, because these are semantics and not layout.
 #
@@ -839,9 +842,7 @@ def build_page(stripped: str, stub: str, battery: str, extra_js: str) -> str:
     return page.replace("</body>", f"<script>{extra_js}</script></body>", 1)
 
 
-def render(
-    chrome: str, page: str, width: int, scratch: str, tag: str
-) -> tuple[str, str]:
+def render(chrome: str, page: str, width: int, scratch: str, tag: str) -> str:
     path = pathlib.Path(scratch) / f"page-{tag}.html"
     path.write_text(page, encoding="utf-8")
     result = subprocess.run(
@@ -861,7 +862,7 @@ def render(
         check=False,
     )
     verdict = re.search(r"<title>(LAYOUT-[^<]*)</title>", result.stdout)
-    return (verdict.group(1) if verdict else "", result.stdout)
+    return verdict.group(1) if verdict else ""
 
 
 def report(label: str, verdict: str) -> int:
@@ -970,9 +971,9 @@ def main() -> int:
 
     status = 0
     with tempfile.TemporaryDirectory(prefix="heliograph-layout-") as scratch:
-        page = build_page(stripped, stub, "{soc:68,power:-1240}", ASSERT_JS)
+        page = build_page(stripped, stub, BATTERY_STATE, ASSERT_JS)
         for width in WIDTHS:
-            verdict, _ = render(chrome, page, width, scratch, str(width))
+            verdict = render(chrome, page, width, scratch, str(width))
             status |= report(f"dashboard layout @{width}px", verdict)
 
         for label, soc, power, wanted, unwanted in BATTERY_CASES:
@@ -993,12 +994,12 @@ def main() -> int:
                 "},25);})();"
             )
             page = build_page(stripped, stub, f"{{soc:{soc},power:{power}}}", js)
-            verdict, _ = render(chrome, page, 1000, scratch, label)
+            verdict = render(chrome, page, 1000, scratch, label)
             status |= report(f"battery {label}", verdict)
 
         # The tab that takes input rather than only showing it.
-        page = build_page(stripped, stub, "{soc:68,power:-1240}", INVERTERS_JS)
-        verdict, _ = render(chrome, page, 1000, scratch, "inverters")
+        page = build_page(stripped, stub, BATTERY_STATE, INVERTERS_JS)
+        verdict = render(chrome, page, 1000, scratch, "inverters")
         status |= report("inverters tab interaction", verdict)
 
         # And the state every owner passes through exactly once, on a different stub: a bridge
@@ -1006,7 +1007,7 @@ def main() -> int:
         fresh = (ROOT / "tools" / "fresh_bridge.js").read_text(encoding="utf-8")
         page = build_web.inject_before_script(stripped, fresh)
         page = page.replace("</body>", f"<script>{FRESH_BRIDGE_JS}</script></body>", 1)
-        verdict, _ = render(chrome, page, 1000, scratch, "fresh")
+        verdict = render(chrome, page, 1000, scratch, "fresh")
         status |= report("first run, nothing configured", verdict)
 
         # The mirror image, and the reason the config alone is not the question: driver.id is
@@ -1014,20 +1015,20 @@ def main() -> int:
         auto = (ROOT / "tools" / "autopick_bridge.js").read_text(encoding="utf-8")
         page = build_web.inject_before_script(stripped, auto)
         page = page.replace("</body>", f"<script>{AUTOPICK_JS}</script></body>", 1)
-        verdict, _ = render(chrome, page, 1000, scratch, "autopick")
+        verdict = render(chrome, page, 1000, scratch, "autopick")
         status |= report("auto-picked driver, answering", verdict)
 
         # Data keeps moving; the page around it does not get rebuilt.
-        page = build_page(stripped, stub, "{soc:68,power:-1240}", BRIDGE_JS)
-        verdict, _ = render(chrome, page, 1000, scratch, "bridge")
+        page = build_page(stripped, stub, BATTERY_STATE, BRIDGE_JS)
+        verdict = render(chrome, page, 1000, scratch, "bridge")
         status |= report("bridge tab keeps what you typed", verdict)
 
-        page = build_page(stripped, stub, "{soc:68,power:-1240}", HEALTH_JS)
-        verdict, _ = render(chrome, page, 1000, scratch, "health")
+        page = build_page(stripped, stub, BATTERY_STATE, HEALTH_JS)
+        verdict = render(chrome, page, 1000, scratch, "health")
         status |= report("health keeps your place in the log", verdict)
 
-        page = build_page(stripped, stub, "{soc:68,power:-1240}", INTEGRATIONS_JS)
-        verdict, _ = render(chrome, page, 1000, scratch, "int")
+        page = build_page(stripped, stub, BATTERY_STATE, INTEGRATIONS_JS)
+        verdict = render(chrome, page, 1000, scratch, "int")
         status |= report("integrations still reports what changed", verdict)
 
         for case, label in (
@@ -1039,8 +1040,8 @@ def main() -> int:
             ("shim", "a clipboard shim whose writeText throws"),
             ("repeat", "plain HTTP, clicked twice in quick succession"),
         ):
-            page = build_page(stripped, stub, "{soc:68,power:-1240}", copy_js(case))
-            verdict, _ = render(chrome, page, 1000, scratch, f"copy-{case}")
+            page = build_page(stripped, stub, BATTERY_STATE, copy_js(case))
+            verdict = render(chrome, page, 1000, scratch, f"copy-{case}")
             status |= report(f"copy buttons work on {label}", verdict)
 
         # The one device on this fleet whose id came off the bus rather than out of a config.
@@ -1055,8 +1056,8 @@ def main() -> int:
             status |= 1
         else:
             js = HOSTILE_SERIAL_JS.replace("__PAYLOAD__", json.dumps(HOSTILE_SERIAL))
-            page = build_page(stripped, hostile, "{soc:68,power:-1240}", js)
-            verdict, _ = render(chrome, page, 1000, scratch, "hostile")
+            page = build_page(stripped, hostile, BATTERY_STATE, js)
+            verdict = render(chrome, page, 1000, scratch, "hostile")
             status |= report("a hostile serial number cannot run script", verdict)
 
     # A verdict, for the same reason check_web_js.py grew one: a failing check prints its
