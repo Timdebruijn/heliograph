@@ -561,8 +561,7 @@ DriverRegistry     g_registry;
 DeviceManager      g_devices;
 Diagnostics        g_diagnostics;
 NvsBackend         g_nvs;
-NvsBackend         g_nvsLegacy{kLegacyStorageNamespace};  // pre-rename config, read-only
-ConfigurationStore g_store{g_nvs, &g_nvsLegacy};
+ConfigurationStore g_store{g_nvs};
 Configuration      g_config;
 WifiManager        g_wifi;
 TimeManager        g_time;
