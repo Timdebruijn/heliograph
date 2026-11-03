@@ -87,30 +87,22 @@ else
 fi
 
 echo "==> 3. Fixtures are in sync with their generator"
-if command -v python3 >/dev/null 2>&1; then
-    before=$(cat test/fixtures/eversolar_frames.h 2>/dev/null)
-    python3 tools/gen_fixtures.py >/dev/null
-    if [ "$before" != "$(cat test/fixtures/eversolar_frames.h)" ]; then
-        echo "FAIL: test/fixtures/eversolar_frames.h is stale; commit the regenerated file"
-        status=1
-    else
-        echo "OK"
-    fi
+before=$(cat test/fixtures/eversolar_frames.h 2>/dev/null)
+python3 tools/gen_fixtures.py >/dev/null
+if [ "$before" != "$(cat test/fixtures/eversolar_frames.h)" ]; then
+    echo "FAIL: test/fixtures/eversolar_frames.h is stale; commit the regenerated file"
+    status=1
 else
-    echo "SKIP: python3 not available"
+    echo "OK"
 fi
 
 echo "==> 3b. The coverage matrix is in sync with the profiles"
 # Same rule as the fixtures above, for the same reason: a coverage table maintained by hand goes
 # wrong in the direction that matters, claiming a channel a profile stopped mapping.
-if command -v python3 >/dev/null 2>&1; then
-    if python3 tools/gen_coverage.py --check; then
-        :
-    else
-        status=1
-    fi
+if python3 tools/gen_coverage.py --check; then
+    :
 else
-    echo "SKIP: python3 not available"
+    status=1
 fi
 
 echo "==> 4. Every REST payload builder is reachable from a route"

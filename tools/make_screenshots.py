@@ -228,16 +228,6 @@ def capture(host: str) -> dict:
     return out
 
 
-def extract_page() -> str:
-    """The page as the DEVICE SERVES IT, not as it is authored.
-
-    Comments stripped, through the same tools/build_web.py that gzips it into flash. A
-    screenshot of the authored source would be a picture of something no browser ever receives,
-    and the one transformation between the two deletes lines for a living.
-    """
-    return build_web.served_page()
-
-
 class Handler(http.server.SimpleHTTPRequestHandler):
     # ClassVar, not an instance field: http.server builds a fresh Handler per request, so
     # class attributes are the channel through which the page and its API payloads reach
@@ -298,7 +288,6 @@ def shoot(
     target: pathlib.Path,
     width: int,
     height: int,
-    extra: tuple[str, ...] = (),
 ) -> int:
     """One headless screenshot; returns its size in bytes, 0 when nothing was written."""
     subprocess.run(
@@ -311,7 +300,6 @@ def shoot(
             f"--window-size={width},{height}",
             "--virtual-time-budget=4000",
             f"--screenshot={target}",
-            *extra,
             url,
         ],
         capture_output=True,
@@ -442,7 +430,9 @@ def main() -> int:
             raise SystemExit(f"no fixture at {fixture}; run once with --bridge <host>")
         data = json.loads(fixture.read_text())
 
-    Handler.page = extract_page()
+    # The page as the DEVICE SERVES IT (comments stripped by build_web), not as authored: a
+    # screenshot of the authored source would show something no browser ever receives.
+    Handler.page = build_web.served_page()
     Handler.data = data
 
     with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
