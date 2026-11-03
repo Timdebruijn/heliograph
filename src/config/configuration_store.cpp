@@ -309,33 +309,23 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
     return needsMigration ? LoadResult::Migrated : LoadResult::Ok;
 }
 
-ConfigurationStore::ConfigurationStore(KeyValueBackend& backend, KeyValueBackend* legacy)
-    : backend_(backend), legacy_(legacy) {}
+ConfigurationStore::ConfigurationStore(KeyValueBackend& backend) : backend_(backend) {}
 
 LoadResult ConfigurationStore::load(Configuration& out) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::string                 blob;
-    bool migratedFromLegacy = false;
+    // Only the current namespace is read. Before 0.5.0 the configuration lived under the
+    // project's previous name and load() used to adopt it from there. That fallback is gone
+    // because factoryReset() erases only this namespace: on a board that had ever run 0.4.x,
+    // the next boot quietly adopted the old configuration again -- a factory reset that
+    // brought back a pre-0.5.0 WiFi and admin password.
     if (!backend_.read(kStorageKeyConfig, blob) || blob.empty()) {
-        // Rename migration: the primary namespace is empty, but a pre-rename image may have
-        // left the configuration under the old one. Adopt it -- otherwise an OTA from 0.4.x
-        // boots "unprovisioned" with the config sitting intact in flash. The legacy copy is
-        // deliberately not erased, so a bootloader rollback to 0.4.x still finds it.
-        if (legacy_ == nullptr || !legacy_->read(kStorageKeyConfig, blob) || blob.empty()) {
-            return LoadResult::NotFound;
-        }
-        migratedFromLegacy = true;
+        return LoadResult::NotFound;
     }
     Configuration parsed;
     auto          result = deserializeConfigFromStorage(blob, parsed);
     if (result == LoadResult::Ok || result == LoadResult::Migrated) {
         out = parsed;
-        if (migratedFromLegacy) {
-            // Persist under the new namespace so the next boot reads it directly. A failed
-            // write is not fatal: the legacy copy remains, and this path simply runs again.
-            backend_.write(kStorageKeyConfig, blob);
-            result = LoadResult::Migrated;
-        }
     } else if (result == LoadResult::FutureVersion || result == LoadResult::Corrupt) {
         // The refused document may still have yielded a salvaged network identity (WiFi +
         // admin credentials -- see salvageIdentity). Carry exactly those five fields over

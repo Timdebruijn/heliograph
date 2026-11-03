@@ -11,8 +11,7 @@ namespace heliograph {
 
 class NvsBackend : public KeyValueBackend {
 public:
-    /// `ns` is the NVS namespace. Defaults to the current one; the legacy constructor
-    /// argument exists for the 0.4.x -> 0.5.x rename migration (see kLegacyStorageNamespace).
+    /// `ns` is the NVS namespace.
     explicit NvsBackend(const char* ns = kStorageNamespace) : namespace_(ns) {}
 
     bool read(const std::string& key, std::string& value) const override;
