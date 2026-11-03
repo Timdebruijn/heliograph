@@ -118,9 +118,6 @@ public:
 
     uint16_t activeClients() const;
 
-    /// Optional: lets the server bump modbus client counters.
-    void setDiagnostics(Diagnostics* diagnostics) { diagnostics_ = diagnostics; }
-
     const ModbusServerConfig& config() const { return config_; }
 
 private:
@@ -134,8 +131,6 @@ private:
     /// on a board with one inverter is 14 KB of heap for nothing.
     std::vector<RegisterMap> maps_;
     mutable std::mutex       mapMutex_;
-    Diagnostics*             diagnostics_     = nullptr;
-    uint16_t                 lastClientCount_ = 0;
     uint8_t                  servedDevices_   = 0;
     bool                     started_         = false;
 };

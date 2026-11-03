@@ -15,7 +15,6 @@ struct DeviceIdentity {
     std::string firmwareVersion;
     std::string hardwareVersion;
     std::string protocolName;
-    std::string protocolVersion;
     std::string driverId;
     /// What distinguishes THIS device from another one served by the same driver on the same
     /// bus: the Modbus unit id, the PMU address. Set by the driver from its own options, which

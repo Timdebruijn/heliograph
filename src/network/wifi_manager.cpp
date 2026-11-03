@@ -301,8 +301,9 @@ void WifiManager::loop(uint64_t nowMs) {
         startPortal();
     }
 
-    if (!attemptInFlight_ && nowMs >= nextAttemptMs_ &&
-        (policy_.keepRetryingWithPortalUp || !portalActive_)) {
+    // Stored credentials keep being retried even while the portal is up: a router that comes
+    // back must reconnect the bridge without anyone touching the portal.
+    if (!attemptInFlight_ && nowMs >= nextAttemptMs_) {
         attemptConnect();
     }
 }

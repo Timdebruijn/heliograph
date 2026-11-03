@@ -272,7 +272,6 @@ ProbeResult SolarmaxDriver::probe() {
         out.firmwareVersion  = std::to_string(swv->value);
         identity_.firmwareVersion = out.firmwareVersion;
     }
-    identified_ = true;
     out.evidence.push_back("MaxTalk frame with a valid checksum from address " +
                            std::to_string(options_.address));
     return out;

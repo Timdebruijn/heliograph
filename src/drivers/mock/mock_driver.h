@@ -23,12 +23,6 @@ struct MockOptions {
     /// Grants write capabilities. Used to test that the dispatcher rejects on capability
     /// rather than on driver identity.
     bool writable = false;
-    /// Simulates an inverter that has gone off the bus.
-    bool offline = false;
-    /// Simulates a corrupted reply.
-    bool failChecksum = false;
-    /// Simulates a device that never answers.
-    bool timeout = false;
     /// Length of the simulated solar day.
     ///
     /// Ten minutes, not 24 hours. The curve is driven by uptime, so a realistic day would sit

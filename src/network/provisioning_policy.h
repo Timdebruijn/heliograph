@@ -44,10 +44,6 @@ struct ProvisioningPolicy {
     /// moment and the bridge must notice within a minute, not an hour.
     uint32_t initialRetryMs = 2000;
     uint32_t maxRetryMs     = 60000;
-
-    /// Keep retrying the stored credentials even while the portal is up. A router that comes
-    /// back should reconnect the bridge without anyone touching the portal.
-    bool keepRetryingWithPortalUp = true;
 };
 
 /// Decides state from stored credentials and the failure count.

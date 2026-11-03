@@ -133,7 +133,6 @@ enum class ParseResult {
     WrongDestination, ///< not addressed to the PMU
     WrongSource,      ///< not from the expected inverter
     UnexpectedResponse, ///< control/function code is not the expected response
-    BadPayloadLength, ///< payload length not valid for this response type
 };
 
 struct Frame {

@@ -274,9 +274,6 @@ bool MockDriver::begin(Transport& transport) {
 
 ProbeResult MockDriver::probe() {
     ProbeResult r;
-    if (options_.offline || options_.timeout) {
-        return r;
-    }
     r.responded            = true;
     r.checksumValid        = true;
     // Never high enough to be auto-selected: a simulation must not win over a real device.
@@ -290,15 +287,6 @@ ProbeResult MockDriver::probe() {
 }
 
 PollResult MockDriver::poll(DeviceState& state) {
-    if (options_.timeout || options_.offline) {
-        ++busErrors_.timeouts;
-        return PollResult::Timeout;
-    }
-    if (options_.failChecksum) {
-        ++busErrors_.checksumErrors;
-        return PollResult::ChecksumError;
-    }
-
     const uint64_t now      = clock_ ? clock_() : 0;
     const SimDay   day      = simulatedDay(now, options_.dayLengthMs, options_.instance);
     const double   fraction = solarFraction(day.phase);
