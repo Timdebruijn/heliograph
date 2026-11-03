@@ -58,7 +58,6 @@ td,th{text-align:left;padding:6px 6px;border-bottom:1px solid var(--line);vertic
   word-break:break-word}
 th{color:var(--dim);font-weight:500;font-size:12px}
 tr:last-child td{border-bottom:0}
-button.alt{background:none;border:1px solid var(--line);color:var(--fg)}
 </style></head><body><div class="w">
 <h1>Heliograph setup</h1>
 <p class="sub">Connect this bridge to your network.</p>

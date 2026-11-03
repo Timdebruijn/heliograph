@@ -28,8 +28,6 @@ enum class DiscoveryStatus : uint8_t {
     Requested,
     Running,
     Done,
-    /// The engine could not run at all (no transport, bus busy).
-    Failed,
 };
 
 const char* discoveryStatusName(DiscoveryStatus status);
@@ -41,8 +39,6 @@ struct DiscoveryReport {
     uint64_t         requestedMs = 0;
     uint64_t         startedMs   = 0;
     uint64_t         finishedMs  = 0;
-    /// Only set when status == Failed.
-    std::string error;
 };
 
 class DiscoveryRunner {

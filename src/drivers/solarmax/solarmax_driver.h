@@ -72,7 +72,6 @@ private:
     BusErrorCounts       busErrors_;
     DeviceIdentity       identity_;
     InverterCapabilities capabilities_;
-    bool                 identified_ = false;
 };
 
 }  // namespace heliograph::solarmax

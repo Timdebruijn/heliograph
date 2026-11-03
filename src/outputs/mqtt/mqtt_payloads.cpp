@@ -69,7 +69,6 @@ bool buildIdentityPayload(const DeviceIdentity& identity, std::string& out, size
     addOptional(root, "firmware_version", identity.firmwareVersion);
     addOptional(root, "hardware_version", identity.hardwareVersion);
     addOptional(root, "protocol_name", identity.protocolName);
-    addOptional(root, "protocol_version", identity.protocolVersion);
     addOptional(root, "driver_id", identity.driverId);
     root["device_id"] = identity.deviceId();
     return finish(doc, out, maxBytes);

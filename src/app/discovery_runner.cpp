@@ -10,7 +10,6 @@ const char* discoveryStatusName(DiscoveryStatus status) {
         case DiscoveryStatus::Requested: return "requested";
         case DiscoveryStatus::Running:   return "running";
         case DiscoveryStatus::Done:      return "done";
-        case DiscoveryStatus::Failed:    return "failed";
     }
     return "unknown";
 }

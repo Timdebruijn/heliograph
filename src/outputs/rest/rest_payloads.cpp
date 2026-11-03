@@ -499,9 +499,6 @@ bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::s
             report.finishedMs > 0 ? report.finishedMs : (nowMs > report.startedMs ? nowMs : report.startedMs);
         doc["elapsed_ms"] = until - report.startedMs;
     }
-    if (!report.error.empty()) {
-        doc["error"] = report.error;
-    }
 
     if (report.status == DiscoveryStatus::Done) {
         doc["auto_selected"] = report.outcome.autoSelected;
