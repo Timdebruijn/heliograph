@@ -13,19 +13,21 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Heliograph — web installer</title>
 <style>
-:root{--bg:#0f1115;--card:#181b22;--fg:#e6e8ec;--dim:#8b93a3;--line:#262b36;--accent:#2f81f7}
-@media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d23;--dim:#5b6472;--line:#e3e6ea}}
+/* The dashboard's palette: grey surfaces, neutral controls. */
+:root{--bg:#141415;--card:#1b1b1d;--fg:#ededed;--dim:#a1a1a6;--line:#2c2c2f}
+@media(prefers-color-scheme:light){:root{--bg:#fafafa;--card:#fff;--fg:#171717;--dim:#5c5c61;--line:#e4e4e7}}
 *{box-sizing:border-box}
 body{margin:0;padding:24px;font:15px/1.55 system-ui,-apple-system,sans-serif;
 background:var(--bg);color:var(--fg);display:flex;justify-content:center}
 .w{max-width:520px;width:100%}
-h1{font-size:20px;margin:0 0 4px}
+h1{font-size:20px;font-weight:600;margin:0 0 4px}
+b{font-weight:600}
 p.sub{color:var(--dim);margin:0 0 20px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
 ol{margin:8px 0 0;padding-left:20px;color:var(--dim)}
 li{margin-bottom:6px}
-esp-web-install-button{--esp-tools-button-color:var(--accent);--esp-tools-button-text-color:#fff}
-a{color:var(--accent)}
+esp-web-install-button{--esp-tools-button-color:var(--fg);--esp-tools-button-text-color:var(--bg)}
+a{color:inherit;text-decoration-color:var(--dim);text-underline-offset:2px}
 .hint{font-size:13px;color:var(--dim);margin-top:10px}
 </style>
 </head>
@@ -53,8 +55,8 @@ a{color:var(--accent)}
   </select>
   <p class="hint">This writes a full factory image: a board that was already set up will lose
   its settings (WiFi, passwords) and start over at the setup portal. Updating an already
-  configured bridge is easier over the air: open its web page and use Settings &rarr;
-  Firmware update with the matching <code>heliograph-*-&lt;board&gt;.bin</code> from the
+  configured bridge is easier over the air: open its web page, go to Bridge &rarr; Firmware,
+  and it offers the update itself, or takes the matching <code>heliograph-*-&lt;board&gt;.bin</code> from the
   <a href="__REPO_URL__/releases/latest">latest release</a>.</p>
   <esp-web-install-button id="install" manifest="manifest-rs485-can.json"></esp-web-install-button>
   <p class="hint">After flashing: the device starts an access point named
