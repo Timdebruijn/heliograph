@@ -33,8 +33,8 @@ inline const char kSetupHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
      Thirteen bytes gzipped per page is a cheap answer to that. The amber is the same literal as the dashboard's icon, which
      takes it from that page's accent; this page has no accent of its own. -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ccircle%20cx='8'%20cy='8'%20r='3.4'%20fill='%23e0a028'/%3E%3Cg%20stroke='%23e0a028'%20stroke-width='2'%20stroke-linecap='butt'%3E%3Cpath%20d='M8%201v2M8%2013v2M1%208h2M13%208h2M3.05%203.05l1.4%201.4M11.55%2011.55l1.4%201.4M12.95%203.05l-1.4%201.4M4.45%2011.55l-1.4%201.4'/%3E%3C/g%3E%3C/svg%3E"><style>
-:root{--bg:#141415;--card:#1b1b1d;--fg:#ededed;--dim:#a1a1a6;--ok:#4cc38a;--bad:#e5484d;--line:#2c2c2f}
-@media(prefers-color-scheme:light){:root{--bg:#fafafa;--card:#fff;--fg:#171717;--dim:#5c5c61;--ok:#16a34a;--bad:#dc2626;--line:#e4e4e7}}
+:root{--bg:#141415;--card:#1b1b1d;--fg:#ededed;--dim:#a1a1a6;--ok:#4cc38a;--bad:#ec5d62;--line:#2c2c2f}
+@media(prefers-color-scheme:light){:root{--bg:#fafafa;--card:#fff;--fg:#171717;--dim:#5c5c61;--ok:#15803d;--bad:#dc2626;--line:#e4e4e7}}
 *{box-sizing:border-box}body{margin:0;padding:24px;font:15px/1.55 system-ui,-apple-system,sans-serif;
 background:var(--bg);color:var(--fg);display:flex;justify-content:center}
 .w{max-width:420px;width:100%}

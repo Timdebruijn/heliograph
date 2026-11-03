@@ -34,12 +34,12 @@ inline const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
      Thirteen bytes gzipped per page is a cheap answer to that. The amber is the accent from the
      palette below, set between its dark and light values: one icon has to serve both themes. -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ccircle%20cx='8'%20cy='8'%20r='3.4'%20fill='%23e0a028'/%3E%3Cg%20stroke='%23e0a028'%20stroke-width='2'%20stroke-linecap='butt'%3E%3Cpath%20d='M8%201v2M8%2013v2M1%208h2M13%208h2M3.05%203.05l1.4%201.4M11.55%2011.55l1.4%201.4M12.95%203.05l-1.4%201.4M4.45%2011.55l-1.4%201.4'/%3E%3C/g%3E%3C/svg%3E"><style>
-/* Grey surfaces; the colour is the sun's. The accent is amber and stays on the things that are
-   about the sun -- the output curves and the icon -- while buttons and links stay neutral, so
-   a control never looks like a reading. Warnings are orange rather than amber for the same
+/* Grey surfaces; the colour is the sun's. The accent is amber and stays on the curves, the
+   progress bar, the icon and the outline of a "this one" marker (update available, wizard
+   step), while buttons and links stay neutral, so a control never looks like a reading. Warnings are orange rather than amber for the same
    reason: the two must not be mistaken for each other at a glance. */
-:root{--bg:#141415;--card:#1b1b1d;--fg:#ededed;--dim:#a1a1a6;--mid:#cfcfd3;--ok:#4cc38a;--bad:#e5484d;--warn:#f0883e;--acc:#f5b335;--line:#2c2c2f;--hair:#222224}
-@media(prefers-color-scheme:light){:root{--bg:#fafafa;--card:#fff;--fg:#171717;--dim:#5c5c61;--mid:#3a3a3d;--ok:#16a34a;--bad:#dc2626;--warn:#c2410c;--acc:#cc8a12;--line:#e4e4e7;--hair:#f0f0f2}}
+:root{--bg:#141415;--card:#1b1b1d;--fg:#ededed;--dim:#a1a1a6;--mid:#cfcfd3;--ok:#4cc38a;--bad:#ec5d62;--warn:#f0883e;--acc:#f5b335;--line:#2c2c2f;--hair:#222224}
+@media(prefers-color-scheme:light){:root{--bg:#fafafa;--card:#fff;--fg:#171717;--dim:#5c5c61;--mid:#3a3a3d;--ok:#15803d;--bad:#dc2626;--warn:#c2410c;--acc:#c2820f;--line:#e4e4e7;--hair:#f0f0f2}}
 *{box-sizing:border-box}
 body{margin:0;font:15px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg)}
 b,strong{font-weight:600}
