@@ -42,7 +42,7 @@ inline const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
 @media(prefers-color-scheme:light){:root{--bg:#fafafa;--card:#fff;--fg:#171717;--dim:#5c5c61;--mid:#3a3a3d;--ok:#15803d;--bad:#dc2626;--warn:#c2410c;--acc:#c2820f;--line:#e4e4e7;--hair:#f0f0f2}}
 *{box-sizing:border-box}
 body{margin:0;font:15px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg)}
-b,strong{font-weight:600}
+b{font-weight:600}
 a{color:inherit;text-decoration-color:var(--dim);text-underline-offset:2px}a:hover{text-decoration-color:currentColor}
 code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
 /* --- chrome ------------------------------------------------------------------------ */
@@ -55,7 +55,7 @@ nav button.on{background:var(--card);color:var(--fg)}
 .chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--dim)}
 /* One centred column for the whole page, chrome included, so the header lines up with the
    content under it. The borders still run edge to edge; only the contents are held in. */
-header,nav,.chips,main{padding-left:max(20px,calc((100% - 1040px)/2));padding-right:max(20px,calc((100% - 1040px)/2))}
+header,nav,.chips,main{padding-inline:max(20px,calc((100% - 1040px)/2))}
 main{padding-top:20px;padding-bottom:20px}
 /* --- primitives -------------------------------------------------------------------- */
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
@@ -82,7 +82,6 @@ main{padding-top:20px;padding-bottom:20px}
 button{padding:9px 14px;border:0;border-radius:8px;background:var(--fg);color:var(--bg);font:inherit;font-weight:500;cursor:pointer;margin:0}
 button:disabled{opacity:.5;cursor:default}
 button.alt{background:none;border:1px solid var(--line);color:var(--fg)}
-button.link{background:none;border:1px solid var(--line);color:var(--fg)}
 button.danger{background:var(--bad);color:var(--bg)}
 button.dangerAlt{background:none;border:1px solid var(--bad);color:var(--bad)}
 button.sm{padding:7px 12px;font-size:13px;font-weight:400}
@@ -765,7 +764,7 @@ function paintInverters(){
       <div class="stack" style="margin-top:14px">
         <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
           <div class="between"><b>1 · Two inverters on the same address</b>
-            <button class="link sm" onclick="startDiscovery(true)">Sweep addresses 1–8</button></div>
+            <button class="alt sm" onclick="startDiscovery(true)">Sweep addresses 1–8</button></div>
           <div class="hint">Two units left on one address answer together and destroy each other's replies. The sweep reports which address each unit actually answers at — that is the check, and it takes about a minute. Polling stops while it runs.</div>
         </div>
         <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
