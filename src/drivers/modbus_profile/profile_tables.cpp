@@ -105,6 +105,11 @@ void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t 
         if (!findRegister(blocks, blockCount, mp.space, mp.address, hi)) {
             continue;  // block not read -> leave undeclared, never a fabricated zero
         }
+        if (mp.bit >= 0) {
+            measurements.declare(mp.measurementId, mp.type, mp.unit, mp.displayName);
+            measurements.set(mp.measurementId, (hi >> mp.bit) & 1U, ts);
+            continue;
+        }
         int64_t raw = hi;
         if (mp.words == 2) {
             uint16_t second = 0;

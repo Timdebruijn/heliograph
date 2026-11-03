@@ -233,6 +233,8 @@ constexpr GaugeSpec kInverterGauges[] = {
     // only ever count one way, this one is the net flow and its sign IS the direction.
     {measurement_id::kGridPower, "heliograph_grid_power_watts",
      "Net grid flow; positive means importing, negative means exporting"},
+    {measurement_id::kGridConnected, "heliograph_grid_connected",
+     "1 when the inverter's grid relay is closed, 0 when it runs islanded or disconnected"},
     {measurement_id::kLoadPower, "heliograph_load_power_watts",
      "Power the house is drawing, as the inverter measures it"},
 };

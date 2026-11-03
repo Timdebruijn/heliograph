@@ -6,6 +6,7 @@
 
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 
 #include "device/command.h"
 #include "json_limits.h"
@@ -30,7 +31,8 @@ const char* deviceClassFor(MeasurementType type) {
         case MeasurementType::Duration:       return "duration";
         case MeasurementType::SignalStrength: return "signal_strength";
         case MeasurementType::Ratio:          return "battery";  // SoC-style percentages
-        case MeasurementType::Generic:        break;
+        case MeasurementType::Generic:
+        case MeasurementType::Flag:           break;
     }
     return nullptr;
 }
@@ -51,6 +53,7 @@ const char* stateClassFor(MeasurementType type) {
         case MeasurementType::SignalStrength:
             return "measurement";
         case MeasurementType::Generic:
+        case MeasurementType::Flag:
             break;
     }
     return nullptr;
@@ -77,7 +80,8 @@ int displayPrecisionFor(MeasurementType type) {
         case MeasurementType::Energy:         return 2;
         case MeasurementType::Temperature:    return 1;
         case MeasurementType::Duration:       return 0;
-        case MeasurementType::Generic:        break;
+        case MeasurementType::Generic:
+        case MeasurementType::Flag:           break;
     }
     return -1;
 }
@@ -335,9 +339,19 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         e["name"]      = noName ? humanise(m.id) : std::string(m.displayName);
         e["state_topic"] = topics.state();
         // Yields None for a null value, which Home Assistant records as "unknown" rather
-        // than as a reading of 0.
+        // than as a reading of 0 -- or, for a flag, as "off".
+        const bool flag = m.type == MeasurementType::Flag;
+        const std::string value = std::string("value_json.measurements['") + m.id + "'].value";
         e["value_template"] =
-            std::string("{{ value_json.measurements['") + m.id + "'].value }}";
+            flag ? "{% set v = " + value + " %}{{ none if v is none else ('ON' if v else 'OFF') }}"
+                 : "{{ " + value + " }}";
+        if (flag) {
+            e["payload_on"]  = "ON";
+            e["payload_off"] = "OFF";
+            if (std::strcmp(m.id, measurement_id::kGridConnected) == 0) {
+                e["device_class"] = "connectivity";
+            }
+        }
         e["availability_topic"]  = availabilityTopic;
         e["payload_available"]   = kPayloadOnline;
         e["payload_not_available"] = kPayloadOffline;
@@ -362,7 +376,8 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         // The RETAINED config topic has to be per device too. With the bridge id in the node
         // name, device 2 published its config over device 1's and Home Assistant kept only
         // the last one -- the unique_id alone was not enough (caught by its own test).
-        entity.configTopic = discoveryPrefix + "/sensor/" + uniqueBase + "/" + slug + "/config";
+        entity.configTopic = discoveryPrefix + (flag ? "/binary_sensor/" : "/sensor/") +
+                             uniqueBase + "/" + slug + "/config";
         if (serialise(doc, entity.payload)) {
             entities.push_back(std::move(entity));
         }

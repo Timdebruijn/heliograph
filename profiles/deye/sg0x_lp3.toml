@@ -57,7 +57,7 @@ stop_bits = 1
 [[block]]
 space = "holding"
 start = 500
-count = 42      # 500-541: running state, energy counters, PV energy, both temperatures
+count = 53      # 500-552: running state, energy counters, PV energy, temperatures, relays
 
 [[block]]
 space = "holding"
@@ -296,6 +296,18 @@ address = 653
 type = "s16"
 scale = 1.0
 unit = "W"
+
+# 552 is a bitmask of AC relay states (C: bit 0 INV relay, 1 load relay, 2 grid relay, 3 generator
+# relay, 4 grid-give-power relay, 7/8 dry contacts). Bit 2 is the grid relay: A calls it "Grid
+# Connected", B "On-grid" (mask 0x4), C "grid relay". A relay state, not phase presence -- a value
+# of 3 means INV and load relays closed with the grid relay open, i.e. running islanded.
+[[register]]                    # A, B, C
+measurement = "grid.connected"
+display_name = "Grid Connected"
+space = "holding"
+address = 552
+type = "u16"
+bit = 2
 
 # --- Energy -------------------------------------------------------------------------------
 

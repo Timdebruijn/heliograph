@@ -204,6 +204,7 @@ inverter reports it, so a `sum()` over them never counts an input twice.
 | `heliograph_grid_export_power_watts` | W |
 | `heliograph_grid_power_watts` | Net grid flow. **Signed**: positive means importing, negative exporting. Present only when a device publishes `grid.power`. |
 | `heliograph_load_power_watts` | W, what the house is drawing |
+| `heliograph_grid_connected` | 1 when the inverter's grid relay is closed, 0 when it runs islanded or disconnected |
 
 Which of these appear depends on the inverter: a driver only reports what its device actually
 provides, so a single-phase inverter has no three-phase series and an inverter without a

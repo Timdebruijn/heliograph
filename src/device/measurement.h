@@ -36,6 +36,10 @@ enum class MeasurementType : uint8_t {
     Ratio,
     SignalStrength,
     Generic,
+    /// A yes/no state: 1 or 0, nothing in between. Published as a number like every other
+    /// reading, but Home Assistant gets a binary_sensor rather than a sensor graphing a square
+    /// wave.
+    Flag,
 };
 
 const char* unitSymbol(Unit unit);
@@ -213,6 +217,14 @@ inline constexpr const char* kGridPower = "grid.power";
 /// it as its own register and their sources agree on it -- it was blocked on this vocabulary
 /// rather than on any register, which is a bad reason for a channel to be missing.
 inline constexpr const char* kLoadPower = "load.power";
+/// Whether the inverter is tied to the grid right now: 1 = its grid relay is closed, 0 = it is
+/// running islanded (backup) or disconnected. A Flag.
+///
+/// What the device reports about its own relay, not a measurement of the grid: an inverter that
+/// opened its relay over a fault reads 0 while the grid itself is fine. Deliberately one yes/no
+/// rather than per phase -- the registers this comes from are relay states, and none of the
+/// sources found reports phase presence there.
+inline constexpr const char* kGridConnected = "grid.connected";
 
 /// What the inverter is currently limited TO, as a percentage of its nameplate maximum, and
 /// whether that limit is switched on at all.
@@ -247,7 +259,7 @@ inline constexpr const char* kAll[] = {
     kBatteryPort2Soc, kBatteryPort2Power, kBatteryPort2Voltage, kBatteryPort2Current,
     kBatteryPort2Temperature,
     kGridImportPower, kGridExportPower,
-    kGridPower,
+    kGridPower,      kGridConnected,
     kLoadPower,
     kActivePowerLimitPct, kActivePowerLimitEnabled,
 };

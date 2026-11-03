@@ -139,6 +139,7 @@ Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`.
 | `offset` | number | no (0.0) | Added after scaling. For registers that store a *biased* value so it never goes negative on the wire: several vendors report `1000` for 0 °C, which is `scale = 0.1, offset = -100`. |
 | `word_order` | string | no (`"high_first"`) | 32-bit values only. `"low_first"` when the device stores the LOW half at the lower address. Refused on a 16-bit row and on write rows. |
 | `invalid` | int | no | A raw value the device uses to mean "not available" (e.g. `0x7FFF`, `0xFFFF`). A matching register is left **undeclared** rather than published. Compared before sign extension; must fit the register width. Refused on write rows. |
+| `bit` | int | no | `0`–`15`: read one bit of a flag register instead of its value. The reading is `(raw >> bit) & 1`, published as a yes/no (a `binary_sensor` in Home Assistant). Required on, and only allowed on, a yes/no id such as `grid.connected`. Needs `type = "u16"`; `unit`, `scale`, `offset`, `invalid` and `word_order` are refused on such a row. |
 | `unit` | string | yes | One of `W` `V` `A` `Hz` `°C` (or `C`) `kWh` `h` `%` `dBm` `s`. The measurement *type* (Power, Voltage, …) is derived from the unit, so you never touch internal enums. |
 
 ### Sentinels: when a device says "unknown" in numbers
@@ -176,6 +177,26 @@ Neither `offset` nor a negative `scale` is accepted on a `[[write]]` row: the wr
 `raw = value / scale`, refuses a negative raw, and does not invert an offset. The build rejects
 both rather than emitting a row that passes review and then silently refuses or mis-writes every
 value.
+
+### Flag registers
+
+Some registers pack independent yes/no states into bits, such as which AC relays are closed. One
+row reads one bit, so a register with several useful bits is mapped once per bit, each to its
+own measurement:
+
+```toml
+[[register]]
+measurement  = "grid.connected"
+display_name = "Grid Connected"
+space        = "holding"
+address      = 552
+type         = "u16"
+bit          = 2
+```
+
+Read what a bit *is* from the source, not from the values you happen to see: a relay bitmask
+that reads `7` and later `3` looks like a phase dropping out, while it is the grid relay
+opening.
 
 ## `[status_register]` — optional: what the inverter is doing
 

@@ -364,8 +364,9 @@ function socColour(pct){
 }
 
 // ---------------- canonical measurements ----------------
-// Label, group and decimals per id. Order here IS the order on screen. Units are NOT here --
-// they arrive with each reading, so only one place decides what a watt is called.
+// Label, group and decimals per id ('flag' for a yes/no). Order here IS the order on screen.
+// Units are NOT here -- they arrive with each reading, so only one place decides what a watt is
+// called.
 // A new id in measurement.h without a row here is caught by tools/check_measurement_ids.py.
 const MEAS=[
   ['ac.power.total','AC power','H',0],
@@ -419,6 +420,7 @@ const MEAS=[
   ['grid.import_power','Importing','Grid',0],
   ['grid.export_power','Exporting','Grid',0],
   ['grid.power','Net flow','Grid',0],
+  ['grid.connected','Grid relay','Grid','flag'],
   ['load.power','House load','Grid',0],
   ['inverter.temperature','Temperature','Device',1],
   ['inverter.operating_hours','Operating hours','Device',0],
@@ -431,7 +433,8 @@ function shown(m,id){return m&&m[id]!==undefined}
 function reading(m,id){
   const r=m[id];if(!r)return '—';
   const d=(LABEL[id]||{}).dec??1;
-  return r.value===null||r.value===undefined?'—':(fmt(r.value,d)+' '+(r.unit||'')).trim();
+  if(r.value===null||r.value===undefined)return '—';
+  return d==='flag'?(r.value?'Closed':'Open'):(fmt(r.value,d)+' '+(r.unit||'')).trim();
 }
 /// The detail groups for one device's measurement map. Empty groups are not rendered: a heading
 /// over nothing is an empty card in a different shape.

@@ -254,6 +254,7 @@ profile-driven hybrid populates whichever of these its register map declares.
 
 The per-input battery channels (`battery.port_1.*`, `battery.port_2.*`) are not on Modbus TCP;
 MQTT, REST measurements and Prometheus carry them. Appending them later moves no address.
+Neither is `grid.connected`, a yes/no rather than a float32 reading.
 
 `load.power` sits here rather than in a region of its own: it is a house-level flow like the two
 grid rails above, and it is appended after them so no published address moves. It is **not**
