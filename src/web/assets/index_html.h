@@ -31,13 +31,19 @@ inline const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
      and hides exactly this.
      Spaces are percent-encoded: a raw space is not legal in a URI, and while every
      browser tolerates one here, two reviewers read the same line and stopped at it.
-     Thirteen bytes gzipped per page is a cheap answer to that. The amber is --warn from the palette below. -->
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ccircle%20cx='8'%20cy='8'%20r='3.4'%20fill='%23d29922'/%3E%3Cg%20stroke='%23d29922'%20stroke-width='2'%20stroke-linecap='butt'%3E%3Cpath%20d='M8%201v2M8%2013v2M1%208h2M13%208h2M3.05%203.05l1.4%201.4M11.55%2011.55l1.4%201.4M12.95%203.05l-1.4%201.4M4.45%2011.55l-1.4%201.4'/%3E%3C/g%3E%3C/svg%3E"><style>
-:root{--bg:#0f1115;--card:#181b22;--fg:#e6e8ec;--dim:#8b93a3;--mid:#c9ced8;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--acc:#2f81f7;--line:#262b36;--hair:#1d222b}
-@media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d23;--dim:#5b6472;--mid:#3a4149;--line:#e3e6ea;--hair:#eef0f3}}
+     Thirteen bytes gzipped per page is a cheap answer to that. The amber is the accent from the
+     palette below, set between its dark and light values: one icon has to serve both themes. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ccircle%20cx='8'%20cy='8'%20r='3.4'%20fill='%23e0a028'/%3E%3Cg%20stroke='%23e0a028'%20stroke-width='2'%20stroke-linecap='butt'%3E%3Cpath%20d='M8%201v2M8%2013v2M1%208h2M13%208h2M3.05%203.05l1.4%201.4M11.55%2011.55l1.4%201.4M12.95%203.05l-1.4%201.4M4.45%2011.55l-1.4%201.4'/%3E%3C/g%3E%3C/svg%3E"><style>
+/* Grey surfaces; the colour is the sun's. The accent is amber and stays on the things that are
+   about the sun -- the output curves and the icon -- while buttons and links stay neutral, so
+   a control never looks like a reading. Warnings are orange rather than amber for the same
+   reason: the two must not be mistaken for each other at a glance. */
+:root{--bg:#141415;--card:#1b1b1d;--fg:#ededed;--dim:#a1a1a6;--mid:#cfcfd3;--ok:#4cc38a;--bad:#e5484d;--warn:#f0883e;--acc:#f5b335;--line:#2c2c2f;--hair:#222224}
+@media(prefers-color-scheme:light){:root{--bg:#fafafa;--card:#fff;--fg:#171717;--dim:#5c5c61;--mid:#3a3a3d;--ok:#16a34a;--bad:#dc2626;--warn:#c2410c;--acc:#cc8a12;--line:#e4e4e7;--hair:#f0f0f2}}
 *{box-sizing:border-box}
 body{margin:0;font:15px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg)}
-a{color:var(--acc)}a:hover{color:#5aa0f9}
+b,strong{font-weight:600}
+a{color:inherit;text-decoration-color:var(--dim);text-underline-offset:2px}a:hover{text-decoration-color:currentColor}
 code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
 /* --- chrome ------------------------------------------------------------------------ */
 header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
@@ -47,18 +53,21 @@ nav button{background:none;border:0;color:var(--dim);padding:6px 12px;margin:0;b
 nav button.on{background:var(--card);color:var(--fg)}
 .chips{display:flex;gap:10px;padding:10px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
 .chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--dim)}
-main{padding:20px;max-width:960px}
+/* One centred column for the whole page, chrome included, so the header lines up with the
+   content under it. The borders still run edge to edge; only the contents are held in. */
+header,nav,.chips,main{padding-left:max(20px,calc((100% - 1040px)/2));padding-right:max(20px,calc((100% - 1040px)/2))}
+main{padding-top:20px;padding-bottom:20px}
 /* --- primitives -------------------------------------------------------------------- */
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
 .card.bad{border-color:var(--bad)}.card.warn{border-color:var(--warn)}
 .stack{display:flex;flex-direction:column;gap:12px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 auto}
 .dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}.dot.off{background:var(--dim)}
-.tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
 .tag.warn{border-color:var(--warn);color:var(--warn)}.tag.bad{border-color:var(--bad);color:var(--bad)}
 .dim{color:var(--dim)}.hide{display:none}.hair{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
-.k{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
-.v{font-size:22px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums}
+.k{color:var(--dim);font-size:13px}
+.v{font-size:20px;font-weight:500;margin-top:4px;font-variant-numeric:tabular-nums}
 .u{font-size:13px;color:var(--dim);font-weight:400}
 .hint{font-size:12px;color:var(--dim);margin-top:4px}
 .between{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
@@ -68,16 +77,16 @@ main{padding:20px;max-width:960px}
 .tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
 .cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
 .groups{display:grid;gap:18px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
-.fact .k{font-size:11px}.fact div+div{font-size:14px;margin-top:2px;overflow-wrap:anywhere}
+.fact .k{font-size:12px}.fact div+div{font-size:14px;margin-top:2px;overflow-wrap:anywhere}
 /* --- buttons and fields ------------------------------------------------------------ */
-button{padding:9px 14px;border:0;border-radius:8px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer;margin:0}
+button{padding:9px 14px;border:0;border-radius:8px;background:var(--fg);color:var(--bg);font:inherit;font-weight:500;cursor:pointer;margin:0}
 button:disabled{opacity:.5;cursor:default}
 button.alt{background:none;border:1px solid var(--line);color:var(--fg)}
-button.link{background:none;border:1px solid var(--acc);color:var(--acc)}
-button.danger{background:var(--bad)}
+button.link{background:none;border:1px solid var(--line);color:var(--fg)}
+button.danger{background:var(--bad);color:var(--bg)}
 button.dangerAlt{background:none;border:1px solid var(--bad);color:var(--bad)}
 button.sm{padding:7px 12px;font-size:13px;font-weight:400}
-button.pill{padding:4px 10px;font-size:12px;border-radius:99px;font-weight:400}
+button.pill{padding:4px 10px;font-size:12px;border-radius:6px;font-weight:400}
 button.pill.off{background:none;border:1px solid var(--line);color:var(--dim)}
 .acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
 label{display:block;font-size:13px;color:var(--dim);margin:12px 0 4px}
@@ -89,27 +98,27 @@ input:disabled,select:disabled{color:var(--dim)}
 select.tiny{width:auto;padding:4px 8px;border-radius:6px;font-size:12px}
 /* --- messages ---------------------------------------------------------------------- */
 .msg{padding:10px;border-radius:8px;margin-top:12px}
-.msg.err{background:#f8514922;border:1px solid var(--bad)}
-.msg.ok{background:#3fb95022;border:1px solid var(--ok)}
-.msg.warn{background:#d2992222;border:1px solid var(--warn)}
-.banner{margin:16px 20px 0;max-width:960px;background:#f8514922;border:1px solid var(--bad);border-radius:10px;padding:12px 14px}
+.msg.err{background:color-mix(in srgb,var(--bad) 12%,transparent);border:1px solid var(--bad)}
+.msg.ok{background:color-mix(in srgb,var(--ok) 12%,transparent);border:1px solid var(--ok)}
+.msg.warn{background:color-mix(in srgb,var(--warn) 12%,transparent);border:1px solid var(--warn)}
+.banner{margin:16px max(20px,calc((100% - 1040px)/2)) 0;background:color-mix(in srgb,var(--bad) 12%,transparent);border:1px solid var(--bad);border-radius:12px;padding:12px 14px}
 .note{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
 .note.ok{border-color:var(--ok)}
 /* --- live -------------------------------------------------------------------------- */
 .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;align-items:end}
-.big{font-size:56px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums}
+.big{font-size:56px;font-weight:500;letter-spacing:-.02em;line-height:1.05;font-variant-numeric:tabular-nums}
 .bar{margin-top:10px;height:6px;background:var(--card);border:1px solid var(--line);border-radius:99px;overflow:hidden}
 svg{display:block}
 .totals{display:flex;gap:24px;margin-top:8px;flex-wrap:wrap}
-.fleetrow{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:16px;align-items:center}
+.fleetrow{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:16px;align-items:center}
 .fleetrow.bad{border-color:var(--bad)}
 .fleetrow .name{flex:1 1 200px;min-width:0}
 .fleetrow .mini{flex:0 1 150px;min-width:90px}
 .fleetrow .num{flex:0 1 90px;text-align:right}
-.fleetrow .num b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;display:block}
+.fleetrow .num b{font-size:20px;font-weight:500;font-variant-numeric:tabular-nums;display:block}
 .fleetrow .when{flex:0 1 140px;text-align:right;font-size:13px}
 .soc{display:flex;align-items:center;gap:16px;margin-top:10px;flex-wrap:wrap}
-.soc .pct{font-size:34px;font-weight:600;font-variant-numeric:tabular-nums}
+.soc .pct{font-size:32px;font-weight:500;font-variant-numeric:tabular-nums}
 .soc .track{flex:1 1 200px;min-width:160px}
 .soc .track>.bar2{height:10px;background:var(--bg);border:1px solid var(--line);border-radius:99px;overflow:hidden}
 /* --- log --------------------------------------------------------------------------- */
@@ -119,11 +128,11 @@ svg{display:block}
 #logbox .lw{color:var(--warn)}#logbox .le{color:var(--bad)}
 table{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}
 td,th{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--dim);font-weight:500;font-size:12px;text-transform:uppercase}
+th{color:var(--dim);font-weight:500;font-size:13px}
 td.n{text-align:right;font-variant-numeric:tabular-nums}
 tr:last-child td{border-bottom:0}
 .prog{display:none;height:8px;max-width:420px;margin-top:12px;border:1px solid var(--line);border-radius:99px;overflow:hidden}
-.prog>div{height:100%;width:0%;background:var(--acc);transition:width .2s}
+.prog>div{height:100%;width:0%;background:var(--acc)}
 dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:20px;width:90%;max-width:340px}
 dialog::backdrop{background:#000a}
 </style></head><body>
@@ -132,7 +141,7 @@ dialog::backdrop{background:#000a}
 <span id="host" class="dim" style="font-size:12px"></span>
 <span style="flex:1"></span>
 <button id="pending" class="tag warn hide" style="cursor:pointer;background:none" onclick="goTab('bridge')"></button>
-<a id="updbadge" class="tag hide" href="#" onclick="gotoUpdate();return false" style="border-color:var(--acc);color:var(--acc);text-decoration:none">update available</a>
+<a id="updbadge" class="tag hide" href="#" onclick="gotoUpdate();return false" style="border-color:var(--acc);color:var(--fg);text-decoration:none">update available</a>
 <span id="ver" class="dim" style="font-size:12px"></span></header>
 
 <nav>
@@ -327,7 +336,7 @@ function saveHist(){
 /// curve rather than flattening it.
 function spark(key,w,h,opts={}){
   const a=hist[key]||[];
-  if(a.length<2)return `<div class="hint" style="height:${h}px">collecting… the curve fills in as this page stays open</div>`;
+  if(a.length<2)return `<div class="hint" style="height:${h}px">Collecting…</div>`;
   const max=Math.max(...a,1)*1.08, pad=2;
   const pts=a.map((y,i)=>((i/(a.length-1))*w).toFixed(1)+','+(h-pad-(y/max)*(h-pad)).toFixed(1));
   return `<svg class="spark" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
@@ -463,12 +472,12 @@ function paintChrome(){
   $('#host').textContent=b.hostname?b.hostname+'.local':location.hostname;
   $('#ver').textContent='v'+b.firmware_version;
   const chip=(cls,text)=>`<span class="chip"><span class="dot ${cls}"></span>${text}</span>`;
-  // Green means ALL of them are answering; anything less is red. An amber "some" is a state you
+  // Green means ALL of them are answering; anything less is red. An orange "some" is a state you
   // learn to ignore. With one device this is the header it has always been, stale tag included.
   const inv=multi
     ?chip(answering===expected?'ok':'bad',`Inverters ${esc(answering)}/${esc(expected)} answering`)
-    // Amber, not red, and no stale/no-data tags: a bridge nobody has configured is not failing
-    // at anything. It wants attention, which is what amber says, and the wiring alarm belongs
+    // Orange, not red, and no stale/no-data tags: a bridge nobody has configured is not failing
+    // at anything. It wants attention, which is what orange says, and the wiring alarm belongs
     // to a bus somebody has actually connected.
     :neverConfigured()?chip('warn','No inverter set up yet')
     :chip(d.online?'ok':'bad','Inverter'+(d.data_stale?' <span class="tag">stale</span>':'')+
@@ -537,7 +546,7 @@ function neverConfigured(){
 /// repeats the title above it and offers to take you where you are reads like a bug.
 function firstRunCard(here){
   return `<div class="card" style="margin-top:20px">
-    ${here?'':'<div style="font-size:17px;font-weight:600">No inverter set up yet</div>'}
+    ${here?'':'<div style="font-size:16px;font-weight:600">No inverter set up yet</div>'}
     <div class="hint" style="margin-top:6px">The bridge is on your network and reachable — that
       part is done. What it does not know yet is what is on the other end of the RS485 pair.</div>
     <div class="hint" style="margin-top:8px">Wire A, B and ground to the inverter first, then let
@@ -646,7 +655,7 @@ function paintLive(){
           <div class="between hint" style="margin-top:4px"><span>empty</span><span>full</span></div></div>
       </div>
       <div class="cols" style="margin-top:14px">${rows}</div>
-      <div class="hint" style="margin-top:12px">Up and green means the battery is filling; down and red means the house is running on stored sun. The arrow says it as well as the colour, so the meaning survives losing either one. The bar is the level and not the direction — red below ${SOC_LOW}%, amber below ${SOC_HALF}%, green above — and stays grey when the inverter reports power but no state of charge.</div>
+      <div class="hint" style="margin-top:12px">↑ filling, ↓ running on stored sun. The bar is the level and not the direction: red below ${SOC_LOW}%, orange below ${SOC_HALF}%.</div>
     </div>`;
   }
   if(multi){
@@ -659,11 +668,11 @@ function paintLive(){
       h+=`<div class="fleetrow${answering?'':' bad'}">
         <div class="name">
           <div style="display:flex;align-items:center;gap:8px"><span class="dot ${answering?'ok':'bad'}"></span><b>${esc(f.label||f.id)}</b></div>
-          ${f.label?`<div class="hint" style="font-size:11px;margin-top:2px">${esc(f.id)}</div>`:''}
+          ${f.label?`<div class="hint" style="margin-top:2px">${esc(f.id)}</div>`:''}
         </div>
         <div class="mini">${spark('d:'+f.id,150,34,{weight:1.5,stroke:answering?'var(--acc)':'var(--dim)'})}</div>
-        <div class="num"><b>${esc(f.ac_power_w==null?'—':sp(Math.round(f.ac_power_w)))}</b><span class="k" style="font-size:11px">W now</span></div>
-        <div class="num"><b>${fmt(f.energy_today_kwh,2)}</b><span class="k" style="font-size:11px">kWh today</span></div>
+        <div class="num"><b>${esc(f.ac_power_w==null?'—':sp(Math.round(f.ac_power_w)))}</b><span class="k" style="font-size:12px">W now</span></div>
+        <div class="num"><b>${fmt(f.energy_today_kwh,2)}</b><span class="k" style="font-size:12px">kWh today</span></div>
         <div class="when">${when}</div>
       </div>`;
     }
@@ -727,7 +736,7 @@ function paintInverters(){
   const b=S.bridge, problems=b.device_problems||[];
   const configured=b.devices_configured??invIds.length;
   let h=`<div class="between">
-    <div><div style="font-size:17px;font-weight:600">${neverConfigured()?'No inverter set up yet'
+    <div><div style="font-size:16px;font-weight:600">${neverConfigured()?'No inverter set up yet'
       :`${esc(invIds.length)} inverter${invIds.length===1?'':'s'} polled${
         configured!==invIds.length?` of ${esc(configured)} configured`:''}`}</div>
       <div class="hint">All on the onboard RS485 bus, polled in turn. Up to ${esc(b.max_devices||8)}.</div></div>
@@ -1281,7 +1290,7 @@ function paintBridge(){
     h+=`<div class="card warn">
       <b>${esc(pending.length)} saved change${pending.length===1?'':'s'} waiting for a restart</b>
       <div class="hint">${esc(pending.join(', '))}. The bridge keeps running on the old values until you restart — nothing is lost by waiting.</div>
-      <div class="acts"><button style="background:var(--warn);color:#0f1115" onclick="reboot('#br_msg')">Restart now</button></div>
+      <div class="acts"><button style="background:var(--warn);color:var(--bg)" onclick="reboot('#br_msg')">Restart now</button></div>
       <div id="br_msg" class="msg hide"></div></div>`;
   }
   h+=`<div class="stack" style="margin-top:${pending.length?'12px':'0'}">

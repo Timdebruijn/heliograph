@@ -69,7 +69,7 @@ BATTERY_CASES = [
     ("charging", 12, 1500, ["↑", "var(--ok)", 'title="charging"', "var(--bad)"], []),
     # A trickle that rounds away must not claim a direction next to a zero.
     ("idle", 55, 0.4, ["idle"], ["charging at 0 W", "discharging at 0 W"]),
-    # The middle band, so the amber threshold is not left to inspection.
+    # The middle band, so the orange threshold is not left to inspection.
     ("half full", 35, -200, ["var(--warn)"], []),
     # A device reporting power but no state of charge. Asserted on the BAR's own markup, not on
     # the card's text: this one is discharging, so var(--bad) is legitimately present on the

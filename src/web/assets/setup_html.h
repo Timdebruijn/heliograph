@@ -30,33 +30,33 @@ inline const char kSetupHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
      and hides exactly this.
      Spaces are percent-encoded: a raw space is not legal in a URI, and while every
      browser tolerates one here, two reviewers read the same line and stopped at it.
-     Thirteen bytes gzipped per page is a cheap answer to that. The amber matches the dashboard's --warn; this page's palette has no
-     warning colour of its own, so it is written out here as a literal. -->
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ccircle%20cx='8'%20cy='8'%20r='3.4'%20fill='%23d29922'/%3E%3Cg%20stroke='%23d29922'%20stroke-width='2'%20stroke-linecap='butt'%3E%3Cpath%20d='M8%201v2M8%2013v2M1%208h2M13%208h2M3.05%203.05l1.4%201.4M11.55%2011.55l1.4%201.4M12.95%203.05l-1.4%201.4M4.45%2011.55l-1.4%201.4'/%3E%3C/g%3E%3C/svg%3E"><style>
-:root{--bg:#0f1115;--card:#181b22;--fg:#e6e8ec;--dim:#8b93a3;--ok:#3fb950;--bad:#f85149;--line:#262b36}
-@media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d23;--dim:#5b6472;--line:#e3e6ea}}
+     Thirteen bytes gzipped per page is a cheap answer to that. The amber is the same literal as the dashboard's icon, which
+     takes it from that page's accent; this page has no accent of its own. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Ccircle%20cx='8'%20cy='8'%20r='3.4'%20fill='%23e0a028'/%3E%3Cg%20stroke='%23e0a028'%20stroke-width='2'%20stroke-linecap='butt'%3E%3Cpath%20d='M8%201v2M8%2013v2M1%208h2M13%208h2M3.05%203.05l1.4%201.4M11.55%2011.55l1.4%201.4M12.95%203.05l-1.4%201.4M4.45%2011.55l-1.4%201.4'/%3E%3C/g%3E%3C/svg%3E"><style>
+:root{--bg:#141415;--card:#1b1b1d;--fg:#ededed;--dim:#a1a1a6;--ok:#4cc38a;--bad:#e5484d;--line:#2c2c2f}
+@media(prefers-color-scheme:light){:root{--bg:#fafafa;--card:#fff;--fg:#171717;--dim:#5c5c61;--ok:#16a34a;--bad:#dc2626;--line:#e4e4e7}}
 *{box-sizing:border-box}body{margin:0;padding:24px;font:15px/1.55 system-ui,-apple-system,sans-serif;
 background:var(--bg);color:var(--fg);display:flex;justify-content:center}
 .w{max-width:420px;width:100%}
-h1{font-size:19px;margin:0 0 4px}
+h1{font-size:20px;font-weight:600;margin:0 0 4px}
 p.sub{color:var(--dim);margin:0 0 20px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
 label{display:block;font-size:13px;color:var(--dim);margin:12px 0 4px}
 input,select{width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);
 background:var(--bg);color:var(--fg);font:inherit}
-button{width:100%;margin-top:18px;padding:11px;border:0;border-radius:8px;background:#2f81f7;
-color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button{width:100%;margin-top:18px;padding:11px;border:0;border-radius:8px;background:var(--fg);
+color:var(--bg);font:inherit;font-weight:500;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}
 .msg{padding:10px;border-radius:8px;margin-top:12px;display:none}
-.msg.err{background:#f8514922;border:1px solid var(--bad);display:block}
-.msg.ok{background:#3fb95022;border:1px solid var(--ok);display:block}
+.msg.err{background:color-mix(in srgb,var(--bad) 12%,transparent);border:1px solid var(--bad);display:block}
+.msg.ok{background:color-mix(in srgb,var(--ok) 12%,transparent);border:1px solid var(--ok);display:block}
 .hint{font-size:12px;color:var(--dim);margin-top:6px}
 /* Only the restore preview uses a table here. Same rules as the dashboard's, so the two pages
    still read as one product. */
 table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
 td,th{text-align:left;padding:6px 6px;border-bottom:1px solid var(--line);vertical-align:top;
   word-break:break-word}
-th{color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase}
+th{color:var(--dim);font-weight:500;font-size:12px}
 tr:last-child td{border-bottom:0}
 button.alt{background:none;border:1px solid var(--line);color:var(--fg)}
 </style></head><body><div class="w">
