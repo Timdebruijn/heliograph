@@ -256,12 +256,7 @@ jobs:
             echo "updates=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Every `unpkg.com/NAME@VERSION/` in the web installer, compared against npm.
-      #
-      # The installer is the one page in this repository that runs third-party code in a
-      # visitor's browser, and it writes firmware to their board. Its loader used to ask for
-      # `@10` -- any 10.x unpkg served that day -- so it is now pinned exactly, and this step is
-      # what keeps an exact pin from turning into a forgotten one.
+      # Source 6 in the header.
       - name: Check CDN-pinned scripts in flasher/
         id: cdnpins
         run: |
