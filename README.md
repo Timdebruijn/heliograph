@@ -18,12 +18,12 @@ network as MQTT with Home Assistant discovery, Modbus TCP, REST and Prometheus.
 
 <sub>The dashboard runs on the board itself. Shown here with its built-in demo fleet: three inverters, one of them a hybrid with a battery.</sub>
 
-**[Flash it from your browser →](https://timdebruijn.github.io/heliograph/)** · [Does my inverter work?](#does-my-inverter-work) · [Releases](https://github.com/Timdebruijn/heliograph/releases) · [Docs](docs/README.md)
+**[Flash it from your browser →](https://timdebruijn.github.io/heliograph/)** · [Will it work with my inverter?](#will-it-work-with-my-inverter) · [Releases](https://github.com/Timdebruijn/heliograph/releases) · [Docs](docs/README.md)
 
 </div>
 
 > **Status:** pre-1.0, one maintainer. One inverter family is Stable today; the rest have a map and
-> need a tester. Check [your inverter](#does-my-inverter-work) before you order a board.
+> need a tester. Check [your inverter](#will-it-work-with-my-inverter) before you order a board.
 
 **Built for** owners of an RS485 inverter whose portal died, whose Wi-Fi stick keeps dropping out,
 or who simply want their data in Home Assistant, evcc or Grafana without a vendor in between.
@@ -78,7 +78,7 @@ capture with checksum verdicts.
 **No toolchain, ever.** Browser flasher, captive-portal Wi-Fi setup, a discovery wizard that
 proposes a driver, and over-the-air updates with a board check and SHA-256.
 
-## Does my inverter work?
+## Will it work with my inverter?
 
 You need an inverter with an **RS485 port**.
 
