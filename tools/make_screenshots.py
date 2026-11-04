@@ -288,6 +288,7 @@ def shoot(
     target: pathlib.Path,
     width: int,
     height: int,
+    extra: tuple[str, ...] = (),
 ) -> int:
     """One headless screenshot; returns its size in bytes, 0 when nothing was written."""
     subprocess.run(
@@ -300,6 +301,7 @@ def shoot(
             f"--window-size={width},{height}",
             "--virtual-time-budget=4000",
             f"--screenshot={target}",
+            *extra,
             url,
         ],
         capture_output=True,
