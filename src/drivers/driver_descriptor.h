@@ -219,7 +219,7 @@ inline DriverOption allowUnverifiedWritesOption() {
     DriverOption o{kAllowUnverifiedWritesKey, "Allow unverified writes",
                    "Offer write controls that have not been confirmed on real hardware for this "
                    "device. For a bench test: a wrong register or scaling can change settings "
-                   "on the inverter. Read-only mode and inverter writes must also be enabled.",
+                   "on the inverter. Allow control and inverter writes must also be on.",
                    "false",
                    {"false", "true"}};
     o.allowedLabels = {"No", "Yes -- unverified, at your own risk"};

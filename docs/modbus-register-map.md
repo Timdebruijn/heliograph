@@ -119,7 +119,8 @@ not: every unit reports the whole bus's totals. Registers 3 (`inverter_online`),
 
 FC3 (Read Holding Registers) mirrors the same content as FC4, so clients that can only do FC3
 (many PLCs, some EVCC configurations) also work. FC6/FC16 are disabled and
-return exception **0x01 (Illegal Function)**, in line with the read-only MVP.
+return exception **0x01 (Illegal Function)**: this server only serves readings, and inverter
+control goes through the command path (see [security.md](security.md)).
 
 ## Invalid values — never zero
 

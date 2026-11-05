@@ -520,7 +520,7 @@ enum class CommandResult { Ok, Unsupported, Rejected, ReadOnlyMode,
 
 The dispatcher is host-tested in Phase 4: every command type against a read-only mock must
 return `ReadOnlyMode`, and against a write-capable mock with an invalid value, `OutOfRange`.
-This makes the read-only guarantee a testable contract instead of a promise.
+This makes the gates a testable contract instead of a promise.
 
 ## Discovery model
 

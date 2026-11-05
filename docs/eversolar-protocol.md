@@ -137,7 +137,7 @@ From `%CTRL_FUNC_CODES` (`eversolar.pl:190-223`):
 Responses set bit 7 of the function code (`0x02` → `0x82`).
 
 **`0x12` WRITE and `0x13` EXECUTE are empty in the reference.** There is therefore no known
-write operation for this inverter at all. This fits seamlessly with the read-only MVP: the
+write operation for this inverter at all. So it is never a control target: the
 EverSolar driver returns `Unsupported` for every command, and that is not a temporary
 limitation but a property of what we know about this protocol.
 
