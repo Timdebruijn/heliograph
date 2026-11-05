@@ -30,7 +30,7 @@ Physical  →  Transport  →  Driver  →  State (DeviceContext/DeviceState)  �
 | Transport | `src/transport/` | Physical only |
 | Driver | `src/drivers/<driver>/` | Transport, protocols, device model |
 | State | `src/device/`, `src/state/` | Device model only |
-| Outputs | `src/outputs/` | State snapshots only (read-only) |
+| Outputs | `src/outputs/` | Read state snapshots; commands go to the dispatcher, never to a driver |
 | Protocols | `src/protocols/` | Nothing above Transport |
 
 Outputs read immutable `DeviceState` snapshots via `StateStore::snapshot()`. They never
@@ -124,11 +124,14 @@ map and what the support-level progression means.
 | SolaX X1 series | PMU (AA55) over RS485 | `src/drivers/solax_x1/` |
 | SunSpec-capable devices | Modbus RTU | `src/drivers/sunspec/` |
 
-Do not describe this firmware as read-only. Two drivers (`modbus_profile`, `sunspec`)
-declare `supportsWrite` and implement `execute()`. What prevents writes today is a chain
-of gates: no profile ships a `verified` write row; SunSpec additionally requires the
-device to publish model 123; and `security.read_only_mode` is **on by default** and
-blocks the whole path regardless. Describe the gates, not a blanket limitation.
+Do not describe this firmware as read-only. It monitors by default and **controls on opt-in**.
+Two drivers (`modbus_profile`, `sunspec`) declare `supportsWrite` and implement `execute()`, and
+the DRM relays can move. What holds is a chain of gates, all closed by default:
+`security.read_only_mode` (the UI's *Allow control*, inverted) refuses everything; under it each
+path has its own switch, `relays.enabled` for DRM and `control.inverter_writes_enabled` for
+setpoints; and a setpoint is served only when its profile reads it back and the row is
+`verified = true` or the device's `allow_unverified_writes` option is on (SunSpec: always the
+opt-in, plus model 123). Describe the gates, not a blanket limitation.
 
 ---
 

@@ -840,7 +840,7 @@ function paintInverters(){
         <div class="hint" style="margin:0 0 8px">Everything this driver declares it can read. A channel is listed because the inverter <i>has</i> it; an em dash means it has it but is not reporting a value right now.
         ${count<6?' <b>A handful of readings where a dozen were expected is the wrong-register-map tell.</b>':''}</div>
         ${groupsFor(m,false)||'<div class="dim">Nothing published yet.</div>'}
-        ${caps&&(caps.write||[]).length===0?'<div class="hint">This driver cannot write to the inverter. Nothing in this build can.</div>':''}
+        ${caps&&(caps.write||[]).length===0?'<div class="hint">No controls are offered for this device: its driver or profile has no setpoint it can serve here. See Access &amp; safety for the switches that gate control.</div>':''}
       </div>`:''}
       ${panel==='s:'+id?deviceForm(slotOf(id)):''}
     </div>`;
@@ -1354,12 +1354,12 @@ function paintBridge(){
     <div class="note ${c.security.read_only_mode!==false?'ok':''}" style="${c.security.read_only_mode===false?'border-color:var(--warn)':''}">
       <span class="dot ${c.security.read_only_mode!==false?'ok':'warn'}"></span>
       <span>${c.security.read_only_mode!==false
-        ?'<b>Read-only mode is on.</b> The bridge only observes: every inverter command is refused and no relay moves. This is the right setting unless you are deliberately using DRM curtailment.'
-        :`<b>Read-only mode is off.</b> Each control path still has its own switch: relays ${(c.relays||{}).enabled?'enabled':'off'}, inverter writes ${(c.control||{}).inverter_writes_enabled?'enabled':'off'}.`}</span>
+        ?'<b>Monitoring only.</b> Control is not allowed: every inverter command is refused and no relay moves. This is the default; turn on <i>Allow control</i> only when you mean to steer an inverter or use DRM curtailment.'
+        :`<b>Control is allowed.</b> Each control path still has its own switch: relays ${(c.relays||{}).enabled?'enabled':'off'}, inverter writes ${(c.control||{}).inverter_writes_enabled?'enabled':'off'}.`}</span>
     </div>
     ${(b.relays||[]).length?`<div class="hint">This board has ${esc(b.relays.length)} relay${b.relays.length===1?'':'s'}. ${
       (c.relays||{}).enabled?'Relays are enabled.':'Relays are switched off.'}${
-      (c.relays||{}).enabled&&c.security.read_only_mode!==false?' <b style="color:var(--warn)">Both gates must be open before a contact can move — no relay will move while read-only mode is on.</b>':''}</div>`
+      (c.relays||{}).enabled&&c.security.read_only_mode!==false?' <b style="color:var(--warn)">Both gates must be open before a contact can move — no relay will move until control is allowed.</b>':''}</div>`
       :'<div class="hint">This board has no relays.</div>'}
     ${panel==='access'?accessForm(c,b):''}
   </div>
@@ -1472,12 +1472,12 @@ function accessForm(c,b){
     ${credField('ac_user','Admin username',true)}
     ${pwField('ac_pw','Admin password',c.security.password_set)}
     <div class="hint">Neither half is ever sent back to this page. <b>Write down anything other than “admin”: a forgotten username needs a factory reset.</b></div>
-    <label class="check"><input id="ac_ro" type="checkbox" ${c.security.read_only_mode!==false?'checked':''}> Read-only mode — the global write kill switch</label>
-    <div class="hint">On by default, and the outermost gate on everything this bridge can change. Turning it off opens nothing by itself: the relays and inverter writes each have their own switch.</div>
+    <label class="check"><input id="ac_ctl" type="checkbox" ${c.security.read_only_mode===false?'checked':''}> Allow control</label>
+    <div class="hint">Off by default: the bridge only monitors. This is the outermost gate on everything it can change (stored as <code>security.read_only_mode</code>, inverted). Turning it on opens nothing by itself: the relays and inverter writes each have their own switch below.</div>
     <label class="check"><input id="ac_iw" type="checkbox" ${(c.control||{}).inverter_writes_enabled?'checked':''}> Inverter writes enabled</label>
-    <div class="hint">Lets Home Assistant, MQTT and the REST API send setpoints (such as a power limit) to an inverter. Read-only mode must also be off. A control appears only where the device has one confirmed on real hardware, or where its device settings allow unverified writes.</div>
+    <div class="hint">Lets Home Assistant, MQTT and the REST API send setpoints (such as a power limit) to an inverter. <i>Allow control</i> must also be on. A control appears only where the device has one confirmed on real hardware, or where its device settings allow unverified writes.</div>
     ${(b.relays||[]).length?`<label class="check"><input id="ac_rl" type="checkbox" ${(c.relays||{}).enabled?'checked':''}> Relays enabled</label>
-      <div class="hint">Both this and read-only mode being off are required before a contact can move. Disabling releases every relay. See docs/drm.md for the wiring rule: a dead bridge must leave the inverter running.</div>
+      <div class="hint">Both this and <i>Allow control</i> are required before a contact can move. Disabling releases every relay. See docs/drm.md for the wiring rule: a dead bridge must leave the inverter running.</div>
       ${b.relays.map((_,i)=>`<label for="ac_r${i}">Relay ${i+1} role</label>
         <select id="ac_r${i}" data-role="${i}" class="sh">${['none','drm0','drm1','drm2','drm3','drm4','drm5','drm6','drm7','drm8'].map(r=>
           `<option ${r===(((c.relays||{}).roles||[])[i]||'none')?'selected':''}>${r}</option>`).join('')}</select>`).join('')}`:''}
@@ -1636,7 +1636,7 @@ async function saveNetwork(){
   say('#nw_msg','ok','Saved.'+(r.body.reboot_required?' The network settings take effect after a restart.':''));
 }
 async function saveAccess(){
-  const body={security:{read_only_mode:chk('ac_ro')},control:{inverter_writes_enabled:chk('ac_iw')}};
+  const body={security:{read_only_mode:!chk('ac_ctl')},control:{inverter_writes_enabled:chk('ac_iw')}};
   if(val('ac_user').trim())body.security.admin_username=val('ac_user').trim();
   if(val('ac_pw'))body.security.admin_password=val('ac_pw');
   const relays=document.querySelectorAll('[data-role]');

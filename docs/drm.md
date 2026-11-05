@@ -22,8 +22,9 @@ for an inverter that cannot be curtailed over RS485.
 
 Three layers, all of which must agree before a contact moves:
 
-1. `security.read_only_mode` — the global kill switch, on by default. Turn it off in
-   *Settings → Security* (or `{"security":{"read_only_mode":false}}` over the API).
+1. `security.read_only_mode` — the global kill switch, on by default. The web UI shows it
+   inverted as *Allow control* under *Access & safety*; turn that on (or send
+   `{"security":{"read_only_mode":false}}` over the API). It opens nothing on its own.
 2. `relays.enabled` — the feature flag, off by default. A relay board with factory
    settings is inert. *Settings → Relays* warns while this one is open and the first
    is still closed; enabling relays alone actuates nothing.
@@ -83,7 +84,7 @@ a half-asserted mode is worse than none.
 
 ## Before first use on a real inverter
 
-1. Flash the board, turn off read-only mode, enable relays, and click the switches with
+1. Flash the board, turn on *Allow control*, enable relays, and click the switches with
    **nothing connected**:
    you should hear the coils and see the states follow in Home Assistant.
 2. Confirm polarity with a multimeter across NO/COM: de-energised must read open.

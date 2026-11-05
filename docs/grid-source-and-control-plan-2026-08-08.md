@@ -55,6 +55,13 @@ What stands between today and "HA curtails an inverter" is **two gates and no co
 
 The `verified` flag moves only after a bench check on real hardware. No design work removes that.
 
+> **Correction, 2026-11-05.** `modbus.writeEnabled` in the table above never gated inverter
+> writes: it only concerns the Modbus TCP *server* accepting FC06/16 from its clients. The
+> inverter write path's runtime gates are now `security.read_only_mode` plus its own
+> `control.inverter_writes_enabled` (#283); a row is served only when its profile reads the
+> setpoint back (#286); and an unverified row or any SunSpec control needs the device's
+> `allow_unverified_writes` opt-in. See [device-profiles/write-path.md](device-profiles/write-path.md).
+
 **The state store is medium-agnostic; the driver binding is one level up.** `StateStore` holds a
 `DeviceState` behind a mutex and knows nothing about drivers. The binding lives in
 `DeviceContext`, which is documented as the only writer of a device's state and runs on the bus

@@ -64,7 +64,11 @@ layout, verified against the official definitions, so all three are handled iden
 ## What can be controlled today
 
 **Model 123 (immediate controls)** — read on every poll, and writable when the device publishes
-it. This is the one control surface here that needed no per-vendor research: the device says
+it **and** the device's `allow_unverified_writes` driver option is on. SunSpec has no per-row
+`verified` flag, so until a device has been confirmed on the bench every SunSpec control is an
+unverified one; read-only mode and `control.inverter_writes_enabled` gate it as well. Before
+writing a limit, the driver reads it live and skips a value the device already holds and has
+enabled. This is the one control surface here that needed no per-vendor research: the device says
 where its own registers are, so the addresses come from the standard and from the chain rather
 than from a transcribed vendor table. A wrong address in a power-limit map does not cost yield,
 it lands in grid protection.

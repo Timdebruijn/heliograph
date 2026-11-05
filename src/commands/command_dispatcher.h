@@ -2,12 +2,10 @@
 //
 // The single gate every write must pass through, whatever asked for it.
 //
-// Fully implemented before anything could use it. Two drivers now declare a write path --
-// see docs/security.md -- and both are gated behind something else; the read-only guarantee
-// is worth having as a tested contract rather than as an absence of code.
-// When a writable driver is added later, the safety checks already exist and are already
-// proven, instead of being written under pressure alongside the first thing that can move a
-// real inverter.
+// Built and proven before anything could use it, so the safety checks were not written under
+// pressure alongside the first thing that can move a real inverter. Two drivers now declare a
+// write path -- see docs/security.md -- and every command still passes these gates first: they
+// are a tested contract rather than an absence of code.
 
 #pragma once
 
@@ -35,7 +33,8 @@ class CommandDispatcher {
 public:
     explicit CommandDispatcher(ClockFn clock, RateLimitPolicy rateLimit = {});
 
-    /// Global kill switch, independent of driver capabilities. On in the MVP.
+    /// Global kill switch, independent of driver capabilities. On by default (the web UI shows it
+    /// inverted, as "Allow control").
     ///
     /// Atomic rather than mutex-guarded: it is one bool, and the whole point of a kill switch is
     /// that reaching it never waits. Guarding it with the same mutex as the rate limiter would

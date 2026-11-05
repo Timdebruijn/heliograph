@@ -109,7 +109,7 @@ The bridge subscribes to **three** things:
 |---|---|
 | `relay/<n>/set` (relay boards only) | `security.read_only_mode` off **and** `relays.enabled` on |
 | `drm/set` (relay boards only) | the same two gates |
-| `<device>/command/set` | `security.read_only_mode` off, then the driver's own capability check |
+| `<device>/command/set` | `security.read_only_mode` off **and** `control.inverter_writes_enabled` on, then the driver's own capability check |
 
 Relay commands pass the RelayController's gates, and the acknowledged state follows on
 `relay/<n>/state`, so a refused command visibly snaps the Home Assistant switch back.
@@ -118,8 +118,17 @@ Relay commands pass the RelayController's gates, and the acknowledged state foll
 command topics for the inverter because the active driver had no write capabilities.** Both
 stopped being true when the command queue landed: the subscription is unconditional wherever a
 handler is wired, which it always is. What is still true is that no shipped register map has a
-`verified` write row, so a command on that topic ends in `unsupported` rather than a register
-write for every Modbus profile — SunSpec is the exception, and its gate is the device, not a flag — and `read_only_mode` refuses the whole path before a driver is reached. See
+`verified` write row, so without a device's `allow_unverified_writes` opt-in a command on that
+topic ends in `unsupported` for every Modbus profile and for SunSpec. Before that,
+`read_only_mode` and `control.inverter_writes_enabled` refuse the whole path before a driver is
+reached.
+
+**Home Assistant entities follow the gates.** A control entity (number, select, button, relay
+switch, DRM select) is announced only while every gate in front of it is open; when one closes,
+or a device's opt-in is withdrawn, its discovery config is replaced by an empty retained payload
+and the entity disappears instead of bouncing back on every click. Because anyone who may publish
+to these topics can steer the bridge once control is allowed, restrict them with your broker's
+ACLs (see [security.md](security.md#what-can-reach-the-inverter)). See
 [docs/security.md](security.md#what-can-reach-the-inverter) for which drivers can write and under
 what conditions; the honest summary is "gated", not "absent".
 

@@ -372,9 +372,13 @@ bool validate(const Configuration& config, ConfigError& error) {
         error = {"modbus.idle_timeout_seconds", "must be 0 (never) or between 5 and 3600"};
         return false;
     }
-    // The MVP has no writable driver; allowing this would advertise something untrue.
+    // This flag is the Modbus TCP SERVER accepting FC06/16 from its clients -- not the inverter
+    // write path. The server never forwards a write, so allowing it would advertise a
+    // capability that does not exist.
     if (config.modbus.writeEnabled) {
-        error = {"modbus.write_enabled", "no writable driver exists in this build"};
+        error = {"modbus.write_enabled",
+                 "the Modbus TCP server does not accept writes; inverter control is "
+                 "control.inverter_writes_enabled"};
         return false;
     }
     // driver.id may be empty: that means "pick the highest-priority driver compiled in".

@@ -28,7 +28,7 @@ Physical  → Transport → Driver → State (DeviceContext/DeviceState) → Out
 | Transport | `src/transport/` | Physical only |
 | Driver | `src/drivers/<driver>/` | Transport, protocols, device model |
 | State | `src/device/`, `src/state/` | Device model only |
-| Outputs | `src/outputs/` | State snapshots only (read-only) |
+| Outputs | `src/outputs/` | Read state snapshots; commands go to the dispatcher, never to a driver |
 | Protocols | `src/protocols/` | Nothing above Transport |
 
 Outputs read immutable `DeviceState` snapshots. They never talk to a driver directly.
@@ -111,11 +111,14 @@ CI runs the same checks plus a firmware build for each of the four environments.
 | Growatt SPH hybrid, MIC TL-X | Modbus RTU | `src/drivers/modbus_profile/` (profile-driven) |
 | SolaX X1 series | PMU (AA55) over RS485 | `src/drivers/solax_x1/` |
 
-**Do not describe this firmware as read-only.** Two drivers (`modbus_profile`, `sunspec`)
-declare `supportsWrite` and implement a real `execute()`. What holds today is a chain of gates,
-not an absence of capability: no profile ships a `verified` write row, so no profile writes;
-SunSpec's path additionally needs the device to publish model 123; and `security.read_only_mode`
-is **on by default** and refuses the whole path regardless. Describe the gates, not a blanket.
+**Do not describe this firmware as read-only.** It monitors by default and **controls on opt-in**.
+Two drivers (`modbus_profile`, `sunspec`) declare `supportsWrite` and implement `execute()`, and
+the DRM relays can move. What holds is a chain of gates, all closed by default:
+`security.read_only_mode` (the UI's *Allow control*, inverted) refuses everything; under it each
+path has its own switch, `relays.enabled` for DRM and `control.inverter_writes_enabled` for
+setpoints; and a setpoint is served only when its profile reads it back and the row is
+`verified = true` or the device's `allow_unverified_writes` option is on (SunSpec: always the
+opt-in, plus model 123). Describe the gates, not a blanket limitation.
 
 ## Licensing
 

@@ -470,10 +470,11 @@ MQTT / REST / Modbus / HA
           ▼
    CommandDispatcher
      1. global read-only mode?           → ReadOnlyMode
-     2. capabilities.write[type]?        → Unsupported
-     3. range/step validation            → OutOfRange / Unsupported
-     4. rate limit                       → RateLimited
-     5. driver->execute(command)
+     2. control.inverter_writes_enabled? → Rejected
+     3. capabilities.write[type]?        → Unsupported
+     4. range/step validation            → OutOfRange / Unsupported
+     5. rate limit                       → RateLimited
+     6. driver->execute(command)         (1 and 2 re-checked just before)
           │
           ▼
        Driver → Unsupported, for most of them (see below)
@@ -519,7 +520,7 @@ enum class CommandResult { Ok, Unsupported, Rejected, ReadOnlyMode,
 
 The dispatcher is host-tested in Phase 4: every command type against a read-only mock must
 return `ReadOnlyMode`, and against a write-capable mock with an invalid value, `OutOfRange`.
-This makes the read-only guarantee a testable contract instead of a promise.
+This makes the gates a testable contract instead of a promise.
 
 ## Discovery model
 
@@ -671,8 +672,8 @@ Elaborated in `docs/security.md`. Core:
 
 | Topic | MVP |
 |---|---|
-| Global read-only mode | **On** by default; opt-out in *Settings → Security*, which unlocks the relay/DRM outputs **and the inverter write path** — two drivers implement one, see docs/security.md |
-| Modbus writing | Off; FC6/16 → exception 0x01 |
+| Global read-only mode | **On** by default; shown inverted as *Allow control* under *Access & safety*. Turning it off opens nothing by itself: the relay/DRM outputs (`relays.enabled`) and the inverter write path (`control.inverter_writes_enabled`) each have their own switch, see docs/security.md |
+| Modbus TCP server writing | Off; FC6/16 from a TCP client → exception 0x01 (`modbus.write_enabled`, unrelated to inverter writes) |
 | Raw TCP bridge | Off (not implemented) |
 | REST GET | Unsecured (local network) |
 | REST PATCH/POST | HTTP Basic auth required |

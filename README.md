@@ -171,7 +171,8 @@ not a rival.
   every release.
 - A production bridge ran 16.4 days without a restart, and its free heap did not shrink
   ([decisions.md](docs/decisions.md)).
-- Read-only mode is on by default and refuses every command and relay move before a driver sees it.
+- Control is opt-in. By default the bridge only monitors: *Allow control* is off and refuses every
+  command and relay move before a driver sees it, and each control path has its own switch on top.
   Finishing setup requires an admin password.
 
 Host tests prove the code does what its author intended. They do not prove your inverter will answer.
@@ -179,7 +180,7 @@ Host tests prove the code does what its author intended. They do not prove your 
 <details>
 <summary><b>Where it stops</b>: the full list of limits</summary>
 
-- **Local and read-only by default, not "secure".** No authentication on Modbus TCP, REST reads or
+- **Local and monitoring-only by default, not "secure".** No authentication on Modbus TCP, REST reads or
   `/metrics`; admin auth is HTTP Basic over plain HTTP; OTA images are unsigned (SHA-256 checks
   integrity, not origin). Keep it on a network you trust: [security.md](docs/security.md).
 - **None of the 13 Modbus maps, SunSpec or SolarMax has met a device.**
