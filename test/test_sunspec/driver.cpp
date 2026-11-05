@@ -514,6 +514,29 @@ static void test_setting_a_limit_writes_the_value_before_it_arms_the_limit() {
     TEST_ASSERT_EQUAL_UINT16(sunspec::controls::kEnabled, r.device.lastWriteValue);
 }
 
+/// The same limit again, already armed: nothing is written (EEPROM wear). A different value is.
+static void test_a_limit_the_device_already_holds_is_not_written_again() {
+    Rig r;
+    buildWithControls(r.device, /*sf=*/-1);
+    r.arm();
+    auto d = r.makeDriver();
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(state));
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 62.5;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, d.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(2, r.device.writes);
+
+    TEST_ASSERT_EQUAL(CommandResult::Ok, d.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(2, r.device.writes);  // unchanged: skipped
+
+    cmd.numericValue = 40.0;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, d.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(4, r.device.writes);
+}
+
 /// Out of range is refused, not clamped, and nothing goes onto the bus. A caller that asked for
 /// 150% has made a mistake; running at 100% instead hides it behind a successful command.
 static void test_a_limit_outside_the_devices_range_never_reaches_the_bus() {
@@ -692,6 +715,7 @@ void run_sunspec_driver() {
     RUN_TEST(test_model_123_offers_no_controls_without_the_unverified_opt_in);
     RUN_TEST(test_the_capability_is_absent_until_the_controls_block_has_been_read);
     RUN_TEST(test_setting_a_limit_writes_the_value_before_it_arms_the_limit);
+    RUN_TEST(test_a_limit_the_device_already_holds_is_not_written_again);
     RUN_TEST(test_a_limit_outside_the_devices_range_never_reaches_the_bus);
     RUN_TEST(test_a_refused_write_is_reported_as_a_refusal);
     RUN_TEST(test_a_write_whose_echo_disagrees_is_not_success);

@@ -72,6 +72,11 @@ space = "holding"
 start = 37760
 count = 24      # 37760-37783: LUNA2000 battery. Absent on an inverter without one -- see below
 
+[[block]]
+space = "holding"
+start = 40125
+count = 1       # 40125: the active-power limit, read back -- see the [[write]] row
+
 # ------------------------------------------------------------------------------------------
 # THE SENTINEL, and the reason `invalid` exists in this schema.
 #
@@ -267,6 +272,18 @@ type = "u32"
 scale = 0.01
 invalid = 0xFFFFFFFF
 unit = "kWh"
+
+# The active-power limit (40125), READ: what the inverter is limited to now, as opposed to what it
+# was last asked for. Required before the [[write]] row below can be served (see
+# docs/device-profiles/write-path.md). Same type and gain as the write row; unverified like it.
+[[register]]
+measurement = "control.active_power_limit"
+display_name = "Active Power Limit"
+space = "holding"
+address = 40125
+type = "s16"
+scale = 0.1
+unit = "%"
 
 # ==============================================================================================
 # DELIBERATELY NOT MAPPED

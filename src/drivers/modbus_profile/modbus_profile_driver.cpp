@@ -305,6 +305,11 @@ const WriteMapping* ModbusProfileDriver::writeFor(InverterCommandType type) cons
         if (!w.verified && !options_.allowUnverifiedWrites) {
             return nullptr;
         }
+        // A setpoint nobody can read back is not served, opt-in or not: neither the bench check
+        // behind `verified` nor Home Assistant can then tell what the device is actually doing.
+        if (!w.hasReadback) {
+            return nullptr;
+        }
         // The Modbus client speaks FC06 only. A row needing FC16 -- more than one register, or
         // a firmware that demands write-multiple for a single one -- cannot be served, and
         // pretending otherwise would send a frame the device never asked for.
@@ -405,6 +410,21 @@ CommandResult ModbusProfileDriver::execute(const InverterCommand& command) {
             return CommandResult::OutOfRange;
         }
         raw = static_cast<uint16_t>(scaled + 0.5);
+    }
+
+    // Skip a write the register already holds. Many inverters keep such a limit in EEPROM, and
+    // a Home Assistant automation re-sending the same value every minute would wear it out for
+    // nothing. Read live rather than taken from the last poll, which can be a cycle stale -- or
+    // set by a second controller since. A failed read is not a reason to refuse: the write
+    // still goes out and its echo is verified as before.
+    uint16_t current = 0;
+    if (readBlock(RegSpace::Holding, w->address, 1, &current, /*probe=*/false).status ==
+            modbus::ReadStatus::Ok &&
+        current == raw) {
+        log::info("MODBUS unit %u register %u already holds %u, write skipped",
+                  static_cast<unsigned>(options_.unitId), static_cast<unsigned>(w->address),
+                  static_cast<unsigned>(raw));
+        return CommandResult::Ok;
     }
 
     const modbus::TransactionOutcome outcome = modbus::writeSingleRegister(

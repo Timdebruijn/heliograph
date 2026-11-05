@@ -47,7 +47,13 @@ against the row itself.
   inverter that is limited and one everybody believes is limited.
 - **Scaling**, via the row's `scale`: `raw = value / scale`.
 - **Bounds**, mandatory and enforced twice (dispatcher and driver).
-- **Reversal**, if the register is also mapped as a read row — see "no read-back" below.
+- **Reversal**, because the register is also mapped as a read row — see "A read-back is
+  required" below.
+- **No pointless writes.** Just before writing, the driver reads the register live (FC03). If it
+  already holds the value, the write is skipped and the command still reports `Ok`. Many inverters
+  keep such a limit in EEPROM, and an automation that re-sends the same value every minute would
+  otherwise wear it for nothing. The live read is used, not the last poll, because that can be a
+  cycle stale or overwritten by a second controller. If the read fails, the write goes out anyway.
 
 ## What it cannot do
 
@@ -122,13 +128,24 @@ review and then misbehaves:
 Both remain legal on **read** rows, where a negative scale is the supported way to correct a
 device that reports the opposite sign convention.
 
-### No read-back, unless you map one
+### A read-back is required
 
-Writing a register does not make its value readable. If you want to see what the inverter is
-actually limited to — as opposed to what it was last asked for — map the same register as a
-`[[register]]` row too (`control.active_power_limit` exists for exactly this). The two differ
-whenever a write was refused, a second controller is on the bus, or the inverter reverted the
-limit on its own timer, which several do by design.
+Writing a register does not make its value readable. A row is therefore served only when the
+profile **also reads the setpoint back** as the command's canonical measurement, for example
+`control.active_power_limit` for `set_active_power_limit_percent`. The pairs are listed in
+`READBACK` in `tools/gen_profiles.py`. The requirement holds with or without the
+`allow_unverified_writes` opt-in, and the generator refuses `verified = true` on a row without a
+read-back.
+
+The reason: the read-back shows what the inverter is actually limited to, as opposed to what it
+was last asked for. The two differ whenever a write was refused, a second controller is on the
+bus, or the inverter reverted the limit on its own timer, which several do by design. Without the
+read-back, the bench check behind `verified` (write, read back, compare) cannot be done, and Home
+Assistant shows only the request.
+
+A command with no canonical read-back measurement yet (today: the export limit and battery mode)
+stays dormant research. It needs the measurement in `measurement.h` and an entry in `READBACK`
+first.
 
 ### `supportsWrite` on the descriptor is not per-device
 
@@ -147,9 +164,11 @@ for listing drivers in the UI.
    comment above the row.
 3. Check it is a single 16-bit register and a numeric setpoint. If it is not, see above — declare
    it anyway with the reason, and expect it to stay dormant.
-4. Leave `verified = false`. That is not a formality: it is the flag that keeps unproven research
+4. Map the same setpoint as a `[[register]]` row with the command's read-back measurement —
+   see above. Without it the row is never served.
+5. Leave `verified = false`. That is not a formality: it is the flag that keeps unproven research
    out of somebody's inverter.
-5. To flip it, on a bench, with the inverter in view: write a value, read the register back,
+6. To flip it, on a bench, with the inverter in view: write a value, read the register back,
    and confirm from the inverter's own reported output that it took effect. Then flip the flag in
    the same change as the evidence.
 

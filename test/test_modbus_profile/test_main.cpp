@@ -887,13 +887,19 @@ namespace {
 /// claim that on a device's behalf.
 const WriteMapping kTestWrites[] = {
     {InverterCommandType::SetActivePowerLimitPercent, "Active Power Limit", RegSpace::Holding, 3,
-     1, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, true},
+     1, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, true, nullptr, 0, true},
+};
+
+/// The same verified row WITHOUT a read-back mapping, which the driver must not serve.
+const WriteMapping kNoReadbackWrites[] = {
+    {InverterCommandType::SetActivePowerLimitPercent, "Active Power Limit", RegSpace::Holding, 3,
+     1, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, true, nullptr, 0, false},
 };
 
 /// The same row, needing FC16 -- which the Modbus client cannot send.
 const WriteMapping kMultiWordWrites[] = {
     {InverterCommandType::SetActivePowerLimitPercent, "Active Power Limit", RegSpace::Holding, 3,
-     2, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, true},
+     2, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, true, nullptr, 0, true},
 };
 
 DeviceProfile profileWith(const WriteMapping* writes, size_t count) {
@@ -915,6 +921,35 @@ void echoWrites(MockTransport& t) {
     });
 }
 
+/// FC06 frames sent, ignoring the FC03 read the driver makes first to skip a write the register
+/// already holds -- so a test about the WRITE says exactly that.
+size_t fc06Frames(const MockTransport& t) {
+    size_t n = 0;
+    for (const auto& f : t.writes) {
+        n += f.size() > 1 && f[1] == 0x06 ? 1 : 0;
+    }
+    return n;
+}
+
+/// Echoes FC06 like echoWrites(), and answers an FC03 read of one register with `current`.
+void echoWritesHolding(MockTransport& t, uint16_t current) {
+    t.setResponder([current](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req.size() < 6) {
+            return false;
+        }
+        if (req[1] == 0x06) {
+            reply.assign(req.begin(), req.begin() + 6);
+        } else if (req[1] == 0x03) {
+            reply = {req[0], 0x03, 0x02, static_cast<uint8_t>(current >> 8),
+                     static_cast<uint8_t>(current & 0xFF)};
+        } else {
+            return false;
+        }
+        test::appendModbusCrc(reply);
+        return true;
+    });
+}
+
 /// A mode setpoint: selects from a list rather than moving along a range. The values are
 /// deliberately NOT 0,1,2 -- a real EMS-mode register numbers its modes with gaps where a mode was
 /// retired, and an implementation that sent the selection INDEX instead of the option's value
@@ -926,19 +961,19 @@ const EnumOption kModeOptions[] = {
 };
 const WriteMapping kModeWrites[] = {
     {InverterCommandType::SetBatteryOperatingMode, "EMS mode", RegSpace::Holding, 13049, 1, false,
-     1.0, 0.0, 0.0, 0.0, Unit::None, true, kModeOptions, 3},
+     1.0, 0.0, 0.0, 0.0, Unit::None, true, kModeOptions, 3, true},
 };
 
 /// The same row with no modes declared, which must never become a control surface.
 const WriteMapping kModeWritesNoOptions[] = {
     {InverterCommandType::SetBatteryOperatingMode, "EMS mode", RegSpace::Holding, 13049, 1, false,
-     1.0, 0.0, 0.0, 0.0, Unit::None, true, nullptr, 0},
+     1.0, 0.0, 0.0, 0.0, Unit::None, true, nullptr, 0, true},
 };
 
 /// The same row with verified = false, which is how every shipped profile carries it.
 const WriteMapping kUnverifiedWrites[] = {
     {InverterCommandType::SetActivePowerLimitPercent, "Active Power Limit", RegSpace::Holding, 3,
-     1, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, false},
+     1, false, 1.0, 0.0, 100.0, 1.0, Unit::Percent, false, nullptr, 0, true},
 };
 
 }  // namespace
@@ -2054,7 +2089,51 @@ static void test_an_unverified_row_goes_live_only_with_the_devices_opt_in() {
     cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
     cmd.numericValue = 60.0;
     TEST_ASSERT_EQUAL(CommandResult::Ok, driver.execute(cmd));
-    TEST_ASSERT_EQUAL_UINT32(1, transport.writes.size());
+    TEST_ASSERT_EQUAL_UINT32(1, fc06Frames(transport));
+}
+
+/// A setpoint nobody can read back is not served -- verified or not -- because neither the bench
+/// check nor Home Assistant could then tell what the device is actually doing.
+static void test_a_row_without_a_read_back_is_neither_advertised_nor_executed() {
+    MockTransport transport;
+    echoWrites(transport);
+    DeviceProfile profile = profileWith(kNoReadbackWrites, 1);
+    ProfileOptions options;
+    options.profile               = &profile;
+    options.allowUnverifiedWrites = true;
+    ModbusProfileDriver driver(transport, options);
+
+    TEST_ASSERT_FALSE(driver.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 60.0;
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, driver.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(0, transport.writes.size());
+}
+
+/// The register already holds the value: the write is skipped (EEPROM wear), and reported Ok.
+/// A different value still goes out. Read live, so the decision does not rest on the last poll.
+static void test_a_write_the_register_already_holds_is_skipped() {
+    DeviceProfile profile = profileWith(kTestWrites, 1);
+    ProfileOptions options;
+    options.profile = &profile;
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 60.0;
+
+    MockTransport same;
+    echoWritesHolding(same, 60);
+    ModbusProfileDriver unchanged(same, options);
+    TEST_ASSERT_EQUAL(CommandResult::Ok, unchanged.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(1, same.writes.size());  // the read
+    TEST_ASSERT_EQUAL_UINT8(0x03, same.writes[0][1]);
+    TEST_ASSERT_EQUAL_UINT32(0, fc06Frames(same));
+
+    MockTransport different;
+    echoWritesHolding(different, 40);
+    ModbusProfileDriver changed(different, options);
+    TEST_ASSERT_EQUAL(CommandResult::Ok, changed.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(1, fc06Frames(different));
 }
 
 static void test_a_verified_row_becomes_an_advertised_setpoint() {
@@ -2091,7 +2170,7 @@ static void test_a_verified_row_writes_the_register_it_names() {
 
     // unit 2, FC06, register 3, value 60 -- the frame the profile row describes, not a frame
     // that happens to be accepted.
-    TEST_ASSERT_EQUAL_UINT32(1, transport.writes.size());
+    TEST_ASSERT_EQUAL_UINT32(1, fc06Frames(transport));
     const auto& f = transport.writes.back();
     TEST_ASSERT_EQUAL_UINT8(0x02, f[0]);
     TEST_ASSERT_EQUAL_UINT8(0x06, f[1]);
@@ -2117,7 +2196,7 @@ static void test_a_mode_row_writes_the_declared_value_not_the_selection_index() 
     cmd.enumValue = 3;
     TEST_ASSERT_EQUAL(CommandResult::Ok, driver.execute(cmd));
 
-    TEST_ASSERT_EQUAL_UINT32(1, transport.writes.size());
+    TEST_ASSERT_EQUAL_UINT32(1, fc06Frames(transport));
     const auto& f = transport.writes.back();
     TEST_ASSERT_EQUAL_UINT8(0x06, f[1]);
     TEST_ASSERT_EQUAL_UINT16(13049, (f[2] << 8) | f[3]);
@@ -2629,6 +2708,8 @@ int main(int, char**) {
     RUN_TEST(test_the_profile_option_labels_line_up_with_their_values);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
     RUN_TEST(test_an_unverified_row_goes_live_only_with_the_devices_opt_in);
+    RUN_TEST(test_a_row_without_a_read_back_is_neither_advertised_nor_executed);
+    RUN_TEST(test_a_write_the_register_already_holds_is_skipped);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);
     RUN_TEST(test_a_mode_row_writes_the_declared_value_not_the_selection_index);

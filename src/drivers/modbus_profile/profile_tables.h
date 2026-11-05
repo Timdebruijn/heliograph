@@ -137,6 +137,12 @@ struct WriteMapping {
     /// rather than emitting one that damages settings nobody asked it to touch.
     const EnumOption* options     = nullptr;
     size_t            optionCount = 0;
+    /// The profile also READS this setpoint back, as the command's canonical measurement
+    /// (gen_profiles.py's READBACK table). A control that cannot be read back cannot be verified
+    /// and cannot be shown truthfully in Home Assistant -- only what it was last asked to do --
+    /// so the driver does not serve a row without one, opt-in or not, and the generator refuses
+    /// `verified = true` on one. Computed by the generator, never hand-set in a profile.
+    bool hasReadback = false;
 };
 
 /// The register that says what the inverter is doing, and what each of its values means, from a

@@ -228,10 +228,12 @@ section a profile reports no status at all, as before.
 **Read-only is the default.** A register is writable only when declared here — and even then
 it is *dormant* until the row carries `verified = true`, meaning somebody wrote it on real
 hardware, read it back, and confirmed the device acted on it. No row in this repository sets
-that today. The one exception is deliberate and per device: the driver option
-`allow_unverified_writes = true` serves unverified rows on that device only, so the bench check
-can run through the bridge itself. The section exists so write-register research can be recorded, reviewed and
-bounds-checked long before anything acts on it.
+that today, and the generator refuses it on a row whose setpoint the profile does not also read
+back as a `[[register]]` (see [write-path.md](write-path.md#a-read-back-is-required)). The one
+exception to "dormant" is deliberate and per device: the driver option
+`allow_unverified_writes = true` serves unverified rows (those with a read-back) on that device
+only, so the bench check can run through the bridge itself. The section exists so write-register
+research can be recorded, reviewed and bounds-checked long before anything acts on it.
 
 The driver's write path itself is implemented (FC06, one holding register, echo verified).
 **What it cannot do — 32-bit setpoints, FC16, enum modes like a battery work mode — is in
