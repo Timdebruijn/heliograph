@@ -1101,7 +1101,28 @@ function credField(id,label,isSet){
 
 // ---------------- Health ----------------
 let diag=null;
-async function loadDiag(){try{diag=await getJson('/api/v1/diagnostics')}catch(e){}}
+async function loadDiag(){try{diag=await getJson('/api/v1/diagnostics');diagAt=Date.now()}catch(e){}}
+// Health used to refetch /diagnostics on every refresh -- once a second, doubling the requests to
+// a board that is slow to answer anything over one segment. The bus counters move only with a poll,
+// and /status already carries the poll totals: so refetch when they differ from the ones in the
+// diagnostics we hold. Uptime, free memory and signal come fresh from /status (liveDiag below);
+// the 30 s floor covers the rest (reconnect and request counters) and a bridge with nothing to
+// poll.
+let diagAt=0;
+const pollsOf=o=>o?(o.poll_success_total||0)+(o.poll_failure_total||0):-1;
+const diagStale=()=>!diag||pollsOf(S)!==pollsOf(diag)||Date.now()-diagAt>30000;
+// What Health draws: the held diagnostics, overlaid with the fields /status carries fresh every
+// second. Without this, uptime, free memory and signal would step every 30 s now that
+// /diagnostics is not refetched on every refresh. The overlay keeps the low-water mark honest:
+// a fresher "free now" below the held minimum IS the new minimum.
+function liveDiag(){
+  const d={...(diag||{})}, b=(S&&S.bridge)||{};
+  for(const k of ['uptime_seconds','free_heap_bytes','wifi_rssi_dbm'])if(b[k]!=null)d[k]=b[k];
+  if(S&&S.poll_success_total!=null){d.poll_success_total=S.poll_success_total;d.poll_failure_total=S.poll_failure_total}
+  if(d.free_heap_bytes!=null&&d.minimum_free_heap_bytes!=null)
+    d.minimum_free_heap_bytes=Math.min(d.minimum_free_heap_bytes,d.free_heap_bytes);
+  return d;
+}
 // The names a person would ask for. The raw field stays on /api/v1/diagnostics untouched for
 // anything scraping it -- this map is presentation, not a second source of truth.
 const DIAGGROUPS=[
@@ -1200,7 +1221,7 @@ async function loadLogs(force){
 /// entire purpose is to be watched live while somebody wiggles a wire. Rebuilding the whole tab
 /// to move them would take the log -- and the reader's place in it -- with it.
 function countersHtml(){
-  const d=diag||{};
+  const d=liveDiag();
   return DIAGGROUPS.map(([title,rows])=>
     `<div><div class="k" style="margin-bottom:6px">${esc(title)}</div>${rows.map(([key,label,unit])=>{
       let v=d[key];
@@ -2582,7 +2603,7 @@ function liveFields(){
   const wifi=$('#bridge_wifi'), clock=$('#bridge_clock');
   if(wifi)wifi.textContent=b.wifi_rssi_dbm!=null?' · '+b.wifi_rssi_dbm+' dBm':'';
   if(clock)clock.textContent=b.time_synced?(b.time||'—'):'not synced';
-  const d=diag||{};
+  const d=liveDiag();
   const set=(id,html)=>{const e=$(id);if(e)e.innerHTML=html};
   set('#h_polls',`${esc(sp(d.poll_success_total??'—'))}<span class="u"> · ${esc(sp(d.poll_failure_total??0))} failed</span>`);
   set('#h_bus',`${esc(sp((d.checksum_error_total||0)+(d.rs485_timeout_total||0)+(d.invalid_frame_total||0)))}<span class="u"> since boot</span>`);
@@ -2686,7 +2707,7 @@ async function refreshOnce(){
       window.__updChecked=true;
       updatesEnabled().then(on=>{if(on)checkForUpdate(false).then(()=>{if(tab==='bridge')updRender()})});
     }
-    if(tab==='health'){await loadDiag();paintTick();if(!logPaused)loadLogs(false);return}
+    if(tab==='health'){if(diagStale())await loadDiag();paintTick();if(!logPaused)loadLogs(false);return}
     if(tab==='inv')loadInverters(false);
     paintTick();
   }catch(e){
