@@ -51,6 +51,7 @@ static Configuration populated() {
     c.driver.options["unit_id"] = "3";
     c.additionalDevices.push_back({"mock", {{"unit_id", "4"}}, "Balkon"});
     c.relays.enabled         = true;
+    c.control.inverterWritesEnabled = true;
     c.relays.roles           = {"drm0", "none"};
     c.ntp.enabled            = false;
     c.ntp.useDhcp            = false;
@@ -117,6 +118,7 @@ static void test_round_trip_with_secrets_is_lossless() {
     TEST_ASSERT_EQUAL_size_t(1, restored.additionalDevices.size());
     TEST_ASSERT_EQUAL_STRING("4", restored.additionalDevices[0].options.at("unit_id").c_str());
     TEST_ASSERT_TRUE(restored.relays.enabled);
+    TEST_ASSERT_TRUE(restored.control.inverterWritesEnabled);
     TEST_ASSERT_EQUAL_size_t(2, restored.relays.roles.size());
     TEST_ASSERT_EQUAL_STRING("drm0", restored.relays.roles[0].c_str());
     TEST_ASSERT_FALSE(restored.ntp.enabled);

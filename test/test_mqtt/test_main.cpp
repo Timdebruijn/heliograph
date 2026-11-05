@@ -144,7 +144,7 @@ static void test_discovery_signature_changes_when_the_set_changes_at_equal_size(
                            "Yield today");
 
     TEST_ASSERT_EQUAL_size_t(a.measurements.size(), b.measurements.size());
-    TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
+    TEST_ASSERT_TRUE(discoverySignature(a, true) != discoverySignature(b, true));
 }
 
 static void test_discovery_signature_ignores_unsupported_channels() {
@@ -158,7 +158,7 @@ static void test_discovery_signature_ignores_unsupported_channels() {
     b.measurements.declareUnsupported("battery.soc", MeasurementType::Ratio, Unit::Percent,
                                       "Battery SoC");
 
-    TEST_ASSERT_TRUE(discoverySignature(a) == discoverySignature(b));
+    TEST_ASSERT_TRUE(discoverySignature(a, true) == discoverySignature(b, true));
 }
 
 static void test_error_code_is_null_when_the_protocol_has_none() {
@@ -699,6 +699,47 @@ static void test_no_control_entities_for_a_read_only_driver() {
     }
 }
 
+static DeviceState pollWritableMockState();
+
+/// The write path's gates decide whether a writable driver's controls appear at all. Closing
+/// either one moves the control from the announcements to the removals, on the SAME config
+/// topic, so Home Assistant drops the entity instead of keeping a control that bounces back.
+static void test_control_entities_follow_the_write_gates() {
+    const auto       state  = pollWritableMockState();
+    auto             bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const char*      id = "heliograph-a1b2c3_set_active_power_limit_percent";
+
+    const auto open = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                                             kDefaultDiscoveryPrefix, bridge.bridgeId);
+    const auto* announced = findEntity(open, id);
+    TEST_ASSERT_NOT_NULL(announced);
+    TEST_ASSERT_FALSE(announced->payload.empty());
+    const std::string topic = announced->configTopic;
+    // Open: the announced control is not also removed.
+    TEST_ASSERT_NULL(findEntity(
+        buildCommandRemovals(state, bridge, kDefaultDiscoveryPrefix, bridge.bridgeId), id));
+
+    for (int gate = 0; gate < 2; ++gate) {
+        bridge                       = makeBridge();
+        // gate 0: read-only mode on, writes enabled; gate 1: read-only off, writes disabled.
+        bridge.readOnlyMode          = gate == 0;
+        bridge.inverterWritesEnabled = gate == 0;
+        const auto closed = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                                                   kDefaultDiscoveryPrefix, bridge.bridgeId);
+        TEST_ASSERT_NULL(findEntity(closed, id));
+        const auto removals =
+            buildCommandRemovals(state, bridge, kDefaultDiscoveryPrefix, bridge.bridgeId);
+        const auto* removed = findEntity(removals, id);
+        TEST_ASSERT_NOT_NULL(removed);
+        TEST_ASSERT_TRUE(removed->payload.empty());
+        TEST_ASSERT_EQUAL_STRING(topic.c_str(), removed->configTopic.c_str());
+        // And the fingerprint moves, so the MQTT output actually republishes.
+        TEST_ASSERT_TRUE(discoverySignature(state, true) !=
+                         discoverySignature(state, bridge.inverterWritesOpen()));
+    }
+}
+
 static void test_config_topics_are_well_formed() {
     Rig        r;
     const auto state  = r.poll();
@@ -847,11 +888,11 @@ static void test_discovery_signature_changes_when_a_mode_is_renumbered() {
     // the top half of the hash and then compared it against full 64-bit values, so the
     // assertions below were true whatever the signature did -- a test that could not fail,
     // guarding the one invariant most worth guarding.
-    const uint64_t base = discoverySignature(modeState(kTestModes, 3));
-    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenumbered, 3)));
-    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenamed, 3)));
+    const uint64_t base = discoverySignature(modeState(kTestModes, 3), true);
+    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenumbered, 3), true));
+    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kRenamed, 3), true));
     // And dropping one is a change too, not merely a shorter list that hashes the same.
-    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kTestModes, 2)));
+    TEST_ASSERT_TRUE(base != discoverySignature(modeState(kTestModes, 2), true));
 }
 
 static void test_discovery_signature_changes_when_a_writable_bound_changes() {
@@ -860,7 +901,7 @@ static void test_discovery_signature_changes_when_a_writable_bound_changes() {
     b.capabilities.numeric[static_cast<size_t>(InverterCommandType::SetActivePowerLimitPercent)]
         .maximum = 50.0;
 
-    TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
+    TEST_ASSERT_TRUE(discoverySignature(a, true) != discoverySignature(b, true));
 }
 
 // The exact scenario a review caught the signature missing (2026-07-30): a NumericCapability
@@ -879,7 +920,7 @@ static void test_discovery_signature_changes_when_supported_flips_with_unchanged
     b.capabilities.numeric[idx].supported = true;
     // Bounds deliberately IDENTICAL to a's -- only `supported` differs.
 
-    TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
+    TEST_ASSERT_TRUE(discoverySignature(a, true) != discoverySignature(b, true));
 }
 
 // The mirror image: writable=false must behave the same way, and a command with no numeric
@@ -894,7 +935,7 @@ static void test_discovery_signature_changes_when_writable_flips_with_unchanged_
     DeviceState b = a;
     b.capabilities.numeric[idx].writable = true;
 
-    TEST_ASSERT_TRUE(discoverySignature(a) != discoverySignature(b));
+    TEST_ASSERT_TRUE(discoverySignature(a, true) != discoverySignature(b, true));
 }
 
 static void test_the_mock_hybrid_gets_battery_and_phase_entities_for_free() {
@@ -1216,6 +1257,16 @@ static void test_relay_entities_follow_count_and_enabled() {
                              removed[0].configTopic.c_str());
     TEST_ASSERT_EQUAL_STRING("homeassistant/select/heliograph-a1b2c3/drm_mode/config",
                              removed[2].configTopic.c_str());
+
+    // Enabled but read-only mode on: still removals -- the relays cannot move, so the switches
+    // must not be offered.
+    bridge.relaysEnabled = true;
+    bridge.readOnlyMode  = true;
+    auto blocked = buildRelayEntities(bridge, topics, kDefaultDiscoveryPrefix);
+    TEST_ASSERT_EQUAL_UINT32(3, blocked.size());
+    TEST_ASSERT_TRUE(blocked[0].payload.empty());
+    TEST_ASSERT_TRUE(blocked[2].payload.empty());
+    bridge.readOnlyMode = false;
 
     // Enabled without roles: real switches, plain names, and a select REMOVAL (no roles =
     // no modes to offer).
@@ -1729,6 +1780,7 @@ int main(int, char**) {
     RUN_TEST(test_an_inverter_without_a_model_still_gets_a_usable_name);
     RUN_TEST(test_every_entity_on_a_device_has_a_distinct_display_name);
     RUN_TEST(test_no_control_entities_for_a_read_only_driver);
+    RUN_TEST(test_control_entities_follow_the_write_gates);
     RUN_TEST(test_config_topics_are_well_formed);
     RUN_TEST(test_a_writable_numeric_command_gets_a_number_entity);
     RUN_TEST(test_start_and_stop_get_button_entities);

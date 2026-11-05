@@ -25,6 +25,10 @@ struct Rig {
     FakeSunspecDevice     device;
     sunspec::SunspecOptions options;
 
+    // Opted in, because most of this file is about what the controls DO once offered. The one
+    // test about whether they are offered at all turns it back off.
+    Rig() { options.allowUnverifiedWrites = true; }
+
     void arm() {
         transport.setResponder([this](const std::vector<uint8_t>& req, std::vector<uint8_t>& rep) {
             return device.respond(req, rep);
@@ -448,6 +452,25 @@ static void test_model_123_grants_a_power_limit_bounded_by_the_devices_scale_fac
     TEST_ASSERT_EQUAL(Unit::Percent, n.unit);
 }
 
+/// Without the device's opt-in, a readable model 123 still offers nothing: SunSpec has no
+/// per-row `verified` flag, so every SunSpec write counts as unverified until benched.
+static void test_model_123_offers_no_controls_without_the_unverified_opt_in() {
+    Rig r;
+    r.options.allowUnverifiedWrites = false;
+    buildWithControls(r.device, /*sf=*/-1);
+    r.arm();
+    auto d = r.makeDriver();
+
+    DeviceState state;
+    TEST_ASSERT_EQUAL(PollResult::Ok, d.poll(state));
+    TEST_ASSERT_TRUE(d.capabilities().isReadOnly());
+
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 50.0;
+    TEST_ASSERT_EQUAL(CommandResult::Unsupported, d.execute(cmd));
+}
+
 /// Before the block has been read there is no scale factor, and therefore no honest bounds to
 /// advertise. A capability offered at that point is a control with invented limits.
 static void test_the_capability_is_absent_until_the_controls_block_has_been_read() {
@@ -666,6 +689,7 @@ void run_sunspec_driver() {
     RUN_TEST(test_a_silent_device_does_not_poll);
     RUN_TEST(test_a_device_without_model_123_offers_no_controls);
     RUN_TEST(test_model_123_grants_a_power_limit_bounded_by_the_devices_scale_factor);
+    RUN_TEST(test_model_123_offers_no_controls_without_the_unverified_opt_in);
     RUN_TEST(test_the_capability_is_absent_until_the_controls_block_has_been_read);
     RUN_TEST(test_setting_a_limit_writes_the_value_before_it_arms_the_limit);
     RUN_TEST(test_a_limit_outside_the_devices_range_never_reaches_the_bus);

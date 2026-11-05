@@ -137,6 +137,13 @@ struct BridgeInfo {
     uint8_t relayCount    = 0;
     uint8_t relayMask     = 0;
     bool    relaysEnabled = false;
+    /// The control gates as discovery needs them: a control entity is announced only while every
+    /// gate in front of it is open, so Home Assistant never shows a control that bounces back.
+    /// Closed by default, like the configuration they mirror.
+    bool readOnlyMode          = true;
+    bool inverterWritesEnabled = false;
+    bool relaysOpen() const { return relaysEnabled && !readOnlyMode; }
+    bool inverterWritesOpen() const { return inverterWritesEnabled && !readOnlyMode; }
     /// Per-relay DRM role from the configuration (index-aligned; may be shorter than
     /// relayCount, missing = "none"). Drives switch names and the DRM mode select.
     std::vector<std::string> relayRoles;

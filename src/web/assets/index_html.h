@@ -1355,7 +1355,7 @@ function paintBridge(){
       <span class="dot ${c.security.read_only_mode!==false?'ok':'warn'}"></span>
       <span>${c.security.read_only_mode!==false
         ?'<b>Read-only mode is on.</b> The bridge only observes: every inverter command is refused and no relay moves. This is the right setting unless you are deliberately using DRM curtailment.'
-        :'<b>Read-only mode is off.</b> Writes to the relay outputs are permitted. No driver in this build can write to an inverter, so this unlocks the DRM contacts and nothing else.'}</span>
+        :`<b>Read-only mode is off.</b> Each control path still has its own switch: relays ${(c.relays||{}).enabled?'enabled':'off'}, inverter writes ${(c.control||{}).inverter_writes_enabled?'enabled':'off'}.`}</span>
     </div>
     ${(b.relays||[]).length?`<div class="hint">This board has ${esc(b.relays.length)} relay${b.relays.length===1?'':'s'}. ${
       (c.relays||{}).enabled?'Relays are enabled.':'Relays are switched off.'}${
@@ -1473,7 +1473,9 @@ function accessForm(c,b){
     ${pwField('ac_pw','Admin password',c.security.password_set)}
     <div class="hint">Neither half is ever sent back to this page. <b>Write down anything other than “admin”: a forgotten username needs a factory reset.</b></div>
     <label class="check"><input id="ac_ro" type="checkbox" ${c.security.read_only_mode!==false?'checked':''}> Read-only mode — the global write kill switch</label>
-    <div class="hint">On by default, and the outermost gate on everything this bridge can change. Turning it off permits writes to the relay outputs; no driver in this build can write to an inverter. Leave it on unless you are deliberately using DRM curtailment.</div>
+    <div class="hint">On by default, and the outermost gate on everything this bridge can change. Turning it off opens nothing by itself: the relays and inverter writes each have their own switch.</div>
+    <label class="check"><input id="ac_iw" type="checkbox" ${(c.control||{}).inverter_writes_enabled?'checked':''}> Inverter writes enabled</label>
+    <div class="hint">Lets Home Assistant, MQTT and the REST API send setpoints (such as a power limit) to an inverter. Read-only mode must also be off. A control appears only where the device has one confirmed on real hardware, or where its device settings allow unverified writes.</div>
     ${(b.relays||[]).length?`<label class="check"><input id="ac_rl" type="checkbox" ${(c.relays||{}).enabled?'checked':''}> Relays enabled</label>
       <div class="hint">Both this and read-only mode being off are required before a contact can move. Disabling releases every relay. See docs/drm.md for the wiring rule: a dead bridge must leave the inverter running.</div>
       ${b.relays.map((_,i)=>`<label for="ac_r${i}">Relay ${i+1} role</label>
@@ -1634,7 +1636,7 @@ async function saveNetwork(){
   say('#nw_msg','ok','Saved.'+(r.body.reboot_required?' The network settings take effect after a restart.':''));
 }
 async function saveAccess(){
-  const body={security:{read_only_mode:chk('ac_ro')}};
+  const body={security:{read_only_mode:chk('ac_ro')},control:{inverter_writes_enabled:chk('ac_iw')}};
   if(val('ac_user').trim())body.security.admin_username=val('ac_user').trim();
   if(val('ac_pw'))body.security.admin_password=val('ac_pw');
   const relays=document.querySelectorAll('[data-role]');

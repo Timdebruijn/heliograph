@@ -109,6 +109,7 @@ const DriverDescriptor& descriptor() {
                          {},
                          1, 247},
             profileOption(),
+            allowUnverifiedWritesOption(),
         };
         return x;
     }();

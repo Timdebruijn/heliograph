@@ -597,7 +597,7 @@ curl http://bridge/api/v1/registers
 Most settings — WiFi, MQTT, Modbus, the polling interval, the driver, NTP, the RS485 line
 override — are read once at boot, so a `PATCH` stores them but they take effect only after a
 restart. A few
-(`bridge_name`, `relays.*`, `security.*`, `logging.level`) are applied live.
+(`bridge_name`, `relays.*`, `control.*`, `security.*`, `logging.level`) are applied live.
 
 The `PATCH /api/v1/config` response therefore carries a top-level `reboot_required` boolean so
 a client knows whether to call `POST /api/v1/actions/reboot`:

@@ -233,10 +233,10 @@ uint64_t fnv1aAppend(uint64_t hash, const char* s) {
 
 }  // namespace
 
-uint64_t discoverySignature(const DeviceState& state) {
+uint64_t discoverySignature(const DeviceState& state, bool commandsOpen) {
     // Only supported channels count: unsupported ones produce no entity (see below), so a
     // change in them must not trigger a republish.
-    uint64_t sig = kFnvOffset;
+    uint64_t sig = fnv1aAppend(kFnvOffset, commandsOpen ? "commands:open" : "commands:closed");
     for (const auto& m : state.measurements.all()) {
         if (!m.supported) {
             continue;
@@ -312,6 +312,65 @@ uint64_t stringListFingerprint(const std::vector<std::string>& items) {
         sig = fnv1aAppend(sig, item.c_str());
     }
     return sig;
+}
+
+namespace {
+
+/// Whether a control entity for `type` is announced. One predicate for the announcement and the
+/// removal, so the two cannot disagree about which controls exist.
+///
+/// The write bit is the SAME bitset CommandDispatcher::dispatch's capability gate checks; the
+/// range/modes checks mirror its own refusals (a write bit with no published range or modes
+/// can never succeed, and a select with no options is a dropdown nobody can choose from); and
+/// the write path's gates come first, so Home Assistant never shows a control that bounces back.
+bool commandAnnounced(const DeviceState& state, const BridgeInfo& bridge,
+                      InverterCommandType type) {
+    const auto capability = requiredCapability(type);
+    if (!bridge.inverterWritesOpen() || capability == InverterCapability::_Count ||
+        !state.capabilities.write.test(static_cast<size_t>(capability))) {
+        return false;
+    }
+    const size_t i = static_cast<size_t>(type);
+    if (commandTakesNumericValue(type)) {
+        const NumericCapability& cap = state.capabilities.numeric[i];
+        return cap.supported && cap.writable;
+    }
+    if (commandTakesEnumValue(type)) {
+        const EnumCapability& cap = state.capabilities.enums[i];
+        return cap.supported && cap.writable && cap.optionCount > 0;
+    }
+    return true;
+}
+
+/// The domain follows from the command type alone, so a removal names the same topic an earlier
+/// announcement used without knowing what was announced.
+std::string commandConfigTopic(InverterCommandType type, const std::string& discoveryPrefix,
+                               const std::string& uniqueBase) {
+    const char* domain = commandTakesNumericValue(type) ? "number"
+                         : commandTakesEnumValue(type)  ? "select"
+                                                        : "button";
+    return discoveryPrefix + "/" + domain + "/" + uniqueBase + "/" + commandTypeName(type) +
+           "/config";
+}
+
+}  // namespace
+
+std::vector<DiscoveryEntity> buildCommandRemovals(const DeviceState& state,
+                                                  const BridgeInfo&  bridge,
+                                                  const std::string& discoveryPrefix,
+                                                  const std::string& uniqueBase) {
+    std::vector<DiscoveryEntity> removals;
+    for (size_t i = 0; i < kCommandTypeCount; ++i) {
+        const auto type = static_cast<InverterCommandType>(i);
+        if (commandAnnounced(state, bridge, type)) {
+            continue;
+        }
+        DiscoveryEntity entity;
+        entity.uniqueId    = uniqueBase + "_" + commandTypeName(type);
+        entity.configTopic = commandConfigTopic(type, discoveryPrefix, uniqueBase);
+        removals.push_back(std::move(entity));  // empty retained payload = HA removes it
+    }
+    return removals;
 }
 
 std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
@@ -430,13 +489,12 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
     // Control entities: one per command type the active driver's capabilities.write bit
     // actually grants -- the SAME bitset CommandDispatcher::dispatch's gate 2 checks, so an
     // entity exists in Home Assistant exactly when the command behind it could reach a driver.
-    // On every driver shipping today the bit is never set, so this loop produces nothing, the
-    // same way the sensor loop above produces nothing for an unsupported measurement.
+    //
+    // And only while the write path is open (read-only mode off, inverter writes on); what is
+    // not announced here is removed by buildCommandRemovals(), from the same predicate.
     for (size_t i = 0; i < kCommandTypeCount; ++i) {
-        const auto type       = static_cast<InverterCommandType>(i);
-        const auto capability = requiredCapability(type);
-        if (capability == InverterCapability::_Count ||
-            !state.capabilities.write.test(static_cast<size_t>(capability))) {
+        const auto type = static_cast<InverterCommandType>(i);
+        if (!commandAnnounced(state, bridge, type)) {
             continue;
         }
 
@@ -455,17 +513,8 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         addDeviceBlock(e, bridge, state.identity, /*isBridgeEntity=*/false, uniqueBase,
                       state.label);
 
-        std::string domain;
         if (commandTakesNumericValue(type)) {
             const NumericCapability& cap = state.capabilities.numeric[i];
-            if (!cap.supported || !cap.writable) {
-                // The write bit is set but no range was published. CommandDispatcher itself
-                // refuses this at dispatch time -- see command.h's note on why a missing
-                // bound is a refusal rather than a bypass -- so no entity either: nothing
-                // that reached this driver could ever succeed.
-                continue;
-            }
-            domain                 = "number";
             e["command_template"]  = jsonPrefix + ",\"value\":{{ value }}}";
             e["min"]                = cap.minimum;
             e["max"]                = cap.maximum;
@@ -480,13 +529,6 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
             e["optimistic"] = true;
         } else if (commandTakesEnumValue(type)) {
             const EnumCapability& cap = state.capabilities.enums[i];
-            if (!cap.supported || !cap.writable || cap.optionCount == 0) {
-                // The write bit is set but no modes were published. Same refusal as the missing
-                // numeric range above, and for a sharper reason: a select with no options is a
-                // dropdown a user can open and not choose anything from.
-                continue;
-            }
-            domain = "select";
 
             // Home Assistant sends the LABEL a user picked; the device wants its own mode
             // number. The template carries the mapping, so the translation happens once here
@@ -517,14 +559,12 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         } else {
             // Neither numeric nor enum: Start, Stop, SynchronizeTime -- a bare press, no
             // payload to configure beyond the fixed command type.
-            domain             = "button";
             e["payload_press"] = jsonPrefix + "}";
         }
 
         DiscoveryEntity entity;
-        entity.uniqueId = e["unique_id"].as<std::string>();
-        entity.configTopic =
-            discoveryPrefix + "/" + domain + "/" + uniqueBase + "/" + name + "/config";
+        entity.uniqueId    = e["unique_id"].as<std::string>();
+        entity.configTopic = commandConfigTopic(type, discoveryPrefix, uniqueBase);
         if (serialise(doc, entity.payload)) {
             entities.push_back(std::move(entity));
         }
@@ -707,17 +747,18 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
 std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
                                                 const MqttTopics&  topics,
                                                 const std::string& discoveryPrefix) {
-    // Switches are announced only when the relays can actually act (board has them AND the
-    // config flag is on). For a board that HAS relays but keeps them disabled, empty
-    // retained payloads are published instead, so previously announced switches disappear
-    // from Home Assistant rather than lingering as controls that silently reject.
+    // Switches are announced only when the relays can actually act (board has them, the
+    // config flag is on AND read-only mode is off). For a board that HAS relays behind a
+    // closed gate, empty retained payloads are published instead, so previously announced
+    // switches disappear from Home Assistant rather than lingering as controls that silently
+    // reject.
     std::vector<DiscoveryEntity> entities;
     for (uint8_t i = 0; i < bridge.relayCount; ++i) {
         const std::string slug = "relay_" + std::to_string(i + 1);
         DiscoveryEntity   entity;
         entity.configTopic =
             discoveryPrefix + "/switch/" + bridge.bridgeId + "/" + slug + "/config";
-        if (!bridge.relaysEnabled) {
+        if (!bridge.relaysOpen()) {
             entity.uniqueId = bridge.bridgeId + "_" + slug;
             entity.payload.clear();  // empty retained payload = HA removes the entity
             entities.push_back(std::move(entity));
@@ -768,7 +809,7 @@ std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
         DiscoveryEntity entity;
         entity.uniqueId    = bridge.bridgeId + "_drm_mode";
         entity.configTopic = discoveryPrefix + "/select/" + bridge.bridgeId + "/drm_mode/config";
-        if (!bridge.relaysEnabled || options.empty()) {
+        if (!bridge.relaysOpen() || options.empty()) {
             entity.payload.clear();
             entities.push_back(std::move(entity));
             return entities;

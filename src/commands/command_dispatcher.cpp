@@ -80,6 +80,13 @@ DispatchOutcome CommandDispatcher::dispatch(const InverterCommand& command,
                 "bridge is in read-only mode; no write commands are accepted"};
     }
 
+    // 1b. The write path's own enable. Rejected rather than ReadOnlyMode: the bridge is not in
+    //     read-only mode -- the DRM relays may well be live -- this one path is switched off.
+    if (!writesEnabled_) {
+        return {CommandResult::Rejected,
+                "inverter writes are disabled (control.inverter_writes_enabled is off)"};
+    }
+
     const auto caps         = driver.capabilities();
     const auto needed       = requiredCapability(command.type);
     const std::string cname = commandTypeName(command.type);
@@ -148,12 +155,16 @@ DispatchOutcome CommandDispatcher::dispatch(const InverterCommand& command,
         }
     }
 
-    // Re-read the kill switch as late as possible: it is not held across the gates, so it can
-    // have been thrown while this command was being checked. Narrows the window to the call
+    // Re-read both switches as late as possible: neither is held across the gates, so either
+    // can have been thrown while this command was being checked. Narrows the window to the call
     // itself -- a command already on the bus cannot be recalled either way.
     if (readOnly_) {
         return {CommandResult::ReadOnlyMode,
                 "bridge is in read-only mode; no write commands are accepted"};
+    }
+    if (!writesEnabled_) {
+        return {CommandResult::Rejected,
+                "inverter writes are disabled (control.inverter_writes_enabled is off)"};
     }
 
     const auto result = driver.execute(command);

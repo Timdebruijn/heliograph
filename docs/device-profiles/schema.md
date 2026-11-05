@@ -228,7 +228,9 @@ section a profile reports no status at all, as before.
 **Read-only is the default.** A register is writable only when declared here — and even then
 it is *dormant* until the row carries `verified = true`, meaning somebody wrote it on real
 hardware, read it back, and confirmed the device acted on it. No row in this repository sets
-that today. The section exists so write-register research can be recorded, reviewed and
+that today. The one exception is deliberate and per device: the driver option
+`allow_unverified_writes = true` serves unverified rows on that device only, so the bench check
+can run through the bridge itself. The section exists so write-register research can be recorded, reviewed and
 bounds-checked long before anything acts on it.
 
 The driver's write path itself is implemented (FC06, one holding register, echo verified).
@@ -250,7 +252,7 @@ be dispatched.
 | `minimum` / `maximum` | number | **yes** (numeric rows) | Bounds in canonical units. Mandatory — the dispatcher refuses unbounded writes, so the schema refuses unbounded rows. Refused on a mode row. |
 | `options` | array | **yes** (mode rows) | The selectable modes: `[{ value = 0, label = "Self-consumption" }, …]`, with the vendor's own numbering. Only for `set_battery_operating_mode`; refused on a numeric row, and required on a mode one. At most 16. |
 | `step` | number | no (1) | Setpoint granularity. Refused on a mode row, like `minimum`/`maximum`/`unit`: all four describe a range, and a mode row is a list. |
-| `verified` | bool | no (**false**) | `true` only after the row is confirmed on real hardware. An unverified row is documentation, never a capability. |
+| `verified` | bool | no (**false**) | `true` only after the row is confirmed on real hardware. An unverified row is documentation, not a capability — unless the device opts in with `allow_unverified_writes`. |
 
 Value-less commands (`start`, `stop`, `synchronize_time`) cannot be expressed as a write row —
 "which value means start?" is driver semantics, not a register mapping. If a first device needs
@@ -274,8 +276,8 @@ By design. Being honest about the boundary saves contributors wasted effort:
   `dc.power.total` gets the sum of those strings, marked `derived`. It is left out for
   any poll in which one of the strings was not read.
 - **Acting on writes.** A `[[write]]` row *records* a writable register; it cannot
-  *enable* writing. That requires `verified = true` plus a driver write path — see the
-  `[[write]]` section above.
+  *enable* writing. That requires `verified = true` (or the device's
+  `allow_unverified_writes` opt-in) plus the write gates — see the `[[write]]` section above.
 - ~~**Word-order variants.**~~ Supported since a vendor datasheet turned up specifying
   low-word-first for a register that same datasheet recommends using — see `word_order`
   above. High-word-first remains the default and is what nearly every device does. Getting

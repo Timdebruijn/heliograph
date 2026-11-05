@@ -206,6 +206,30 @@ struct DriverDescriptor {
     }
 };
 
+/// Per-device opt-in to write rows nobody has yet confirmed on real hardware.
+///
+/// A write row goes live by default only once it is marked verified. Until then, the only way
+/// to verify one was an external Modbus tool; this lets the bench check run through the bridge
+/// itself, on one device, by somebody who has said so. It does not bypass any dispatcher gate:
+/// read-only mode and control.inverter_writes_enabled still have to be open. Shared by every
+/// driver with a write path, so the key and its wording are the same wherever it appears.
+inline constexpr const char* kAllowUnverifiedWritesKey = "allow_unverified_writes";
+
+inline DriverOption allowUnverifiedWritesOption() {
+    DriverOption o{kAllowUnverifiedWritesKey, "Allow unverified writes",
+                   "Offer write controls that have not been confirmed on real hardware for this "
+                   "device. For a bench test: a wrong register or scaling can change settings "
+                   "on the inverter. Read-only mode and inverter writes must also be enabled.",
+                   "false",
+                   {"false", "true"}};
+    o.allowedLabels = {"No", "Yes -- unverified, at your own risk"};
+    return o;
+}
+
+inline bool allowsUnverifiedWrites(const DriverDescriptor& descriptor, const DriverOptions& values) {
+    return descriptor.optionOr(values, kAllowUnverifiedWritesKey) == "true";
+}
+
 struct DriverOptionError {
     std::string key;
     std::string message;
