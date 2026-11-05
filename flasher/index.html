@@ -11,7 +11,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Heliograph — web installer</title>
+<title>Heliograph web installer</title>
 <style>
 /* The dashboard's palette: grey surfaces, neutral controls. */
 :root{--bg:#141415;--card:#1b1b1d;--fg:#ededed;--dim:#a1a1a6;--line:#2c2c2f}
@@ -23,16 +23,17 @@ background:var(--bg);color:var(--fg);display:flex;justify-content:center}
 h1{font-size:20px;font-weight:600;margin:0 0 4px}
 b{font-weight:600}
 p.sub{color:var(--dim);margin:0 0 20px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
 ol{margin:8px 0 0;padding-left:20px;color:var(--dim)}
-li{margin-bottom:6px}
-esp-web-install-button{--esp-tools-button-color:var(--fg);--esp-tools-button-text-color:var(--bg)}
+li{margin-bottom:4px}
+esp-web-install-button{--esp-tools-button-color:var(--fg);--esp-tools-button-text-color:var(--bg);
+  --esp-tools-button-border-radius:8px}
 a{color:inherit;text-decoration-color:var(--dim);text-underline-offset:2px}
-.hint{font-size:13px;color:var(--dim);margin-top:10px}
+.hint{font-size:13px;color:var(--dim);margin-top:12px}
 </style>
 </head>
 <body><div class="w">
-<h1>Heliograph — web installer</h1>
+<h1>Heliograph web installer</h1>
 <p class="sub">Flash the latest firmware straight from your browser. No tools to install.</p>
 
 <div class="card">
@@ -48,7 +49,7 @@ a{color:inherit;text-decoration-color:var(--dim);text-underline-offset:2px}
   <b>Install</b>
   <label for="board" style="display:block;font-size:13px;color:var(--dim);margin:8px 0 4px">
     Which board do you have? It is printed on the PCB.</label>
-  <select id="board" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;margin-bottom:12px">
+  <select id="board" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;margin-bottom:12px">
     <option value="rs485-can">Waveshare ESP32-S3-RS485-CAN</option>
     <option value="relay-1ch">Waveshare ESP32-S3-Relay-1CH</option>
     <option value="relay-6ch">Waveshare ESP32-S3-Relay-6CH</option>

@@ -46,13 +46,13 @@ b{font-weight:600}
 a{color:inherit;text-decoration-color:var(--dim);text-underline-offset:2px}a:hover{text-decoration-color:currentColor}
 code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
 /* --- chrome ------------------------------------------------------------------------ */
-header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 header b{font-size:16px}
 nav{display:flex;gap:4px;padding:8px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 nav button{background:none;border:0;color:var(--dim);padding:6px 12px;margin:0;border-radius:6px;cursor:pointer;font:inherit}
 nav button.on{background:var(--card);color:var(--fg)}
-.chips{display:flex;gap:10px;padding:10px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
-.chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--dim)}
+.chips{display:flex;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--dim)}
 /* One centred column for the whole page, chrome included, so the header lines up with the
    content under it. The borders still run edge to edge; only the contents are held in. */
 header,nav,.chips,main{padding-inline:max(20px,calc((100% - 1040px)/2))}
@@ -65,70 +65,70 @@ main{padding-top:20px;padding-bottom:20px}
 .dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}.dot.off{background:var(--dim)}
 .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
 .tag.warn{border-color:var(--warn);color:var(--warn)}.tag.bad{border-color:var(--bad);color:var(--bad)}
-.dim{color:var(--dim)}.hide{display:none}.hair{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
+.dim{color:var(--dim)}.hide{display:none}.hair{border-top:1px solid var(--line);margin-top:16px;padding-top:16px}
 .k{color:var(--dim);font-size:13px}
 .v{font-size:20px;font-weight:500;margin-top:4px;font-variant-numeric:tabular-nums}
 .u{font-size:13px;color:var(--dim);font-weight:400}
 .hint{font-size:12px;color:var(--dim);margin-top:4px}
 .between{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
-.row{display:flex;justify-content:space-between;gap:14px;padding:3px 0}
+.row{display:flex;justify-content:space-between;gap:16px;padding:4px 0}
 .row span:last-child{font-variant-numeric:tabular-nums}
 .row.rule{border-bottom:1px solid var(--hair)}
 .tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
-.cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
-.groups{display:grid;gap:18px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.cols{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+.groups{display:grid;gap:20px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
 .fact .k{font-size:12px}.fact div+div{font-size:14px;margin-top:2px;overflow-wrap:anywhere}
 /* --- buttons and fields ------------------------------------------------------------ */
-button{padding:9px 14px;border:0;border-radius:8px;background:var(--fg);color:var(--bg);font:inherit;font-weight:500;cursor:pointer;margin:0}
+button{padding:8px 16px;border:0;border-radius:8px;background:var(--fg);color:var(--bg);font:inherit;font-weight:500;cursor:pointer;margin:0}
 button:disabled{opacity:.5;cursor:default}
 button.alt{background:none;border:1px solid var(--line);color:var(--fg)}
 button.danger{background:var(--bad);color:var(--bg)}
 button.dangerAlt{background:none;border:1px solid var(--bad);color:var(--bad)}
-button.sm{padding:7px 12px;font-size:13px;font-weight:400}
-button.pill{padding:4px 10px;font-size:12px;border-radius:6px;font-weight:400}
+button.sm{padding:6px 12px;font-size:13px;font-weight:400}
+button.pill{padding:4px 8px;font-size:12px;border-radius:6px;font-weight:400}
 button.pill.off{background:none;border:1px solid var(--line);color:var(--dim)}
-.acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
 label{display:block;font-size:13px;color:var(--dim);margin:12px 0 4px}
 label.check{display:flex;gap:8px;align-items:center;color:var(--fg);font-size:14px;margin:12px 0 0}
-input,select{width:100%;max-width:420px;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit}
+input,select{width:100%;max-width:420px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit}
 input[type=checkbox]{width:auto}
 input.sh,select.sh{max-width:200px}
 input:disabled,select:disabled{color:var(--dim)}
 select.tiny{width:auto;padding:4px 8px;border-radius:6px;font-size:12px}
 /* --- messages ---------------------------------------------------------------------- */
-.msg{padding:10px;border-radius:8px;margin-top:12px}
+.msg{padding:12px;border-radius:8px;margin-top:12px}
 .msg.err{background:color-mix(in srgb,var(--bad) 12%,transparent);border:1px solid var(--bad)}
 .msg.ok{background:color-mix(in srgb,var(--ok) 12%,transparent);border:1px solid var(--ok)}
 .msg.warn{background:color-mix(in srgb,var(--warn) 12%,transparent);border:1px solid var(--warn)}
-.banner{margin:16px max(20px,calc((100% - 1040px)/2)) 0;background:color-mix(in srgb,var(--bad) 12%,transparent);border:1px solid var(--bad);border-radius:12px;padding:12px 14px}
-.note{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+.banner{margin:16px max(20px,calc((100% - 1040px)/2)) 0;background:color-mix(in srgb,var(--bad) 12%,transparent);border:1px solid var(--bad);border-radius:12px;padding:12px 16px}
+.note{display:flex;align-items:center;gap:8px;margin-top:12px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
 .note.ok{border-color:var(--ok)}
 /* --- live -------------------------------------------------------------------------- */
 .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;align-items:end}
 .big{font-size:56px;font-weight:500;letter-spacing:-.02em;line-height:1.05;font-variant-numeric:tabular-nums}
-.bar{margin-top:10px;height:6px;background:var(--card);border:1px solid var(--line);border-radius:99px;overflow:hidden}
+.bar{margin-top:8px;height:6px;background:var(--card);border:1px solid var(--line);border-radius:99px;overflow:hidden}
 svg{display:block}
 .totals{display:flex;gap:24px;margin-top:8px;flex-wrap:wrap}
-.fleetrow{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-wrap:wrap;gap:16px;align-items:center}
+.fleetrow{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-wrap:wrap;gap:16px;align-items:center}
 .fleetrow.bad{border-color:var(--bad)}
 .fleetrow .name{flex:1 1 200px;min-width:0}
 .fleetrow .mini{flex:0 1 150px;min-width:90px}
 .fleetrow .num{flex:0 1 90px;text-align:right}
 .fleetrow .num b{font-size:20px;font-weight:500;font-variant-numeric:tabular-nums;display:block}
 .fleetrow .when{flex:0 1 140px;text-align:right;font-size:13px}
-.soc{display:flex;align-items:center;gap:16px;margin-top:10px;flex-wrap:wrap}
+.soc{display:flex;align-items:center;gap:16px;margin-top:12px;flex-wrap:wrap}
 .soc .pct{font-size:32px;font-weight:500;font-variant-numeric:tabular-nums}
 .soc .track{flex:1 1 200px;min-width:160px}
 .soc .track>.bar2{height:10px;background:var(--bg);border:1px solid var(--line);border-radius:99px;overflow:hidden}
 /* --- log --------------------------------------------------------------------------- */
 #logbox{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;
   font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-all;
-  max-height:320px;overflow-y:auto;margin-top:10px}
+  max-height:320px;overflow-y:auto;margin-top:12px}
 #logbox .lw{color:var(--warn)}#logbox .le{color:var(--bad)}
-table{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}
-td,th{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+td,th{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--dim);font-weight:500;font-size:13px}
-td.n{text-align:right;font-variant-numeric:tabular-nums}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 tr:last-child td{border-bottom:0}
 .prog{display:none;height:8px;max-width:420px;margin-top:12px;border:1px solid var(--line);border-radius:99px;overflow:hidden}
 .prog>div{height:100%;width:0%;background:var(--acc)}
@@ -186,7 +186,9 @@ dialog::backdrop{background:#000a}
 const $=s=>document.querySelector(s[0]==='#'||s[0]==='.'?s:'#'+s);
 const esc=s=>String(s??'').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
 // null must never render as 0 -- that is why the firmware sends null in the first place.
-const fmt=(v,d=1)=>v===null||v===undefined?'—':Number(v).toFixed(d);
+// Grouped like sp(), so 36 494.1 kWh on Live matches 14 522 on Health. Only the integer part:
+// the decimals are never grouped.
+const fmt=(v,d=1)=>{if(v===null||v===undefined)return '—';const [i,f]=Number(v).toFixed(d).split('.');return sp(i)+(f?'.'+f:'');};
 // esc() makes a URL safe to SIT in an attribute; it does not make it safe to FOLLOW.
 // javascript: and data: survive HTML-escaping intact and run on click. Only http(s)
 // is linked; anything else renders as plain text, which is the honest failure -- the
@@ -196,7 +198,12 @@ const safeUrl=u=>{if(!u)return null;  // String(null) would resolve to a link re
   return p==='http:'||p==='https:'?String(u):null}catch(e){return null}};
 const sp=n=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,'\u2009');
 const up=s=>s<3600?Math.floor(s/60)+' m':s<86400?(s/3600).toFixed(1)+' h':Math.floor(s/86400)+' d '+Math.round(s%86400/3600)+' h';
-const kb=b=>b===null||b===undefined?'—':Math.round(b/1024)+' kB';
+const kb=b=>b===null||b===undefined?'—':sp(Math.round(b/1024))+' kB';
+// esp_reset_reason_t, in enum order (ESP-IDF esp_system.h). A code past the end prints as one.
+const RESETS=['unknown','power-on','reset pin','software restart','crash','interrupt watchdog',
+  'task watchdog','other watchdog','deep sleep','brownout','SDIO','USB','JTAG','eFuse error',
+  'power glitch','CPU lockup'];
+const why=r=>r===null||r===undefined?'—':Number.isInteger(r)&&RESETS[r]||'code '+r;
 
 let tab='live', panel=null, logFilter='all', logPaused=false;
 let S=null;              // last /api/v1/status
@@ -628,7 +635,7 @@ function paintLive(){
   for(const f of batts){
     const soc=f.single?(m['battery.soc']||{}).value:f.battery_soc_pct;
     const p=f.single?(m['battery.power']||{}).value:f.battery_power_w;
-    const idle=p==null||Math.abs(Number(fmt(Math.abs(p),0)))===0;
+    const idle=p==null||Math.round(Math.abs(p))===0;
     const state=idle?'idle':(p>0?'charging':'discharging');
     // Direction, not level -- the bar below answers the other question. Up and green is the
     // battery gaining, down and red is it giving back, so every cue on this card points the
@@ -653,7 +660,7 @@ function paintLive(){
           <rect x="0" y="0" width="${Math.max(0,Math.min(100,Number(soc)||0))}" height="8" fill="${socColour(soc)}"></rect></svg></div>
           <div class="between hint" style="margin-top:4px"><span>empty</span><span>full</span></div></div>
       </div>
-      <div class="cols" style="margin-top:14px">${rows}</div>
+      <div class="cols" style="margin-top:16px">${rows}</div>
       <div class="hint" style="margin-top:12px">↑ filling, ↓ running on stored sun. The bar is the level and not the direction: red below ${SOC_LOW}%, orange below ${SOC_HALF}%.</div>
     </div>`;
   }
@@ -677,7 +684,7 @@ function paintLive(){
     }
     h+='</div>';
     const each=(cfg&&cfg.polling?cfg.polling.interval_seconds:10)*fleet.length;
-    h+=`<div class="hint" style="margin-top:10px">One bus, one poll interval: with ${esc(fleet.length)} inverters each is read about every ${esc(each)} s. Every number above is that inverter's own last reply, never an average.</div>`;
+    h+=`<div class="hint" style="margin-top:12px">One bus, one poll interval: with ${esc(fleet.length)} inverters each is read about every ${esc(each)} s. Every number above is that inverter's own last reply, never an average.</div>`;
     // The detail groups belong to ONE inverter -- s.measurements is the first device's -- so
     // presenting them as the bridge's would be the lie the fleet totals exist to avoid.
     const g=groupsFor(m,true);
@@ -686,7 +693,7 @@ function paintLive(){
   }else{
     const g=groupsFor(m,true);
     if(g)h+=`<div style="margin-top:20px">${g}</div>
-      <div class="hint" style="margin-top:10px">Only what this driver declares it can read. A driver that reports no battery shows no battery, rather than a row of dashes.</div>`;
+      <div class="hint" style="margin-top:12px">Only what this driver declares it can read. A driver that reports no battery shows no battery, rather than a row of dashes.</div>`;
   }
   $('#live').innerHTML=h;
 }
@@ -743,7 +750,7 @@ function paintInverters(){
       <button onclick="togglePanel('wiz')">${panel==='wiz'?'Close':'Find inverters'}</button>
       <button class="alt" onclick="addExtra()">Add one by hand</button>
     </div></div>`;
-  if(panel==='wiz')h+=`<div class="card" style="margin-top:14px" id="wizcard">${wizardHtml()}</div>`;
+  if(panel==='wiz')h+=`<div class="card" style="margin-top:12px" id="wizcard">${wizardHtml()}</div>`;
 
   // The diagnosis. Discovery having named nothing, or a configured device never having replied,
   // is where the wizard's old advice ran out at "check your wiring" -- these are the three
@@ -756,24 +763,24 @@ function paintInverters(){
     h+=firstRunCard(true);
   }else if(problems.length||configured!==invIds.length||silent.length){
     const who=silent.map(id=>esc((devCache[id]||{}).label||id)).join(', ');
-    h+=`<div class="card bad" style="margin-top:14px">
+    h+=`<div class="card bad" style="margin-top:12px">
       <b>${silent.length?who+(silent.length===1?' has':' have')+' never replied':'Not every configured inverter started'}</b>
-      ${problems.length?`<ul style="margin:6px 0 0 18px;color:var(--dim);font-size:13px">${problems.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>`
+      ${problems.length?`<ul style="margin:8px 0 0 20px;color:var(--dim);font-size:13px">${problems.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>`
         :`<div class="hint">Started at boot, so the driver was built — it is the bus reply that is missing.${
           invIds.length>silent.length?' The others answer on this bus, so the bridge and the line speed are fine.':''}</div>`}
-      <div class="stack" style="margin-top:14px">
-        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
+      <div class="stack" style="margin-top:16px">
+        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 16px">
           <div class="between"><b>1 · Two inverters on the same address</b>
             <button class="alt sm" onclick="startDiscovery(true)">Sweep addresses 1–8</button></div>
           <div class="hint">Two units left on one address answer together and destroy each other's replies. The sweep reports which address each unit actually answers at — that is the check, and it takes about a minute. Polling stops while it runs.</div>
         </div>
-        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
+        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 16px">
           <div class="between"><b>2 · A and B swapped</b>
             <button class="alt sm" onclick="togglePanel('cap')">${panel==='cap'?'Close':'Record the raw bus'}</button></div>
           <div class="hint">The single most common cause, and swapping them back cannot damage anything — sometimes labelled D+ / D−. A recording with bytes but no valid checksum means the line speed is wrong instead; one with nothing at all points back at the wiring. Connect the ground too: without a shared reference the bus can stay silent however the data wires are arranged.</div>
           ${panel==='cap'?captureHtml():''}
         </div>
-        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
+        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 16px">
           <div class="between"><b>3 · Termination in the wrong place</b>
             <span class="hint" style="margin:0">no test — check the jumpers</span></div>
           <div class="hint">120 Ω belongs at the <b>two ends of the chain</b>, not on every device. A middle unit with its jumper still closed loads the bus, and the one that drops out is usually the one furthest from the bridge.</div>
@@ -784,7 +791,7 @@ function paintInverters(){
   // Nothing configured means nothing to list. The firmware still started its default driver --
   // something has to be polled -- but showing that placeholder in red as "never answered"
   // contradicts the invitation directly above it, and the reader never asked for it.
-  h+='<div class="stack" style="margin-top:14px">';
+  h+='<div class="stack" style="margin-top:16px">';
   for(const id of (neverConfigured()?[]:invIds)){
     const dev=devCache[id]||{}, m=measCache[id]||{}, caps=capsCache[id];
     const ident=dev.identity||{}, drv=dev.driver||{};
@@ -802,19 +809,19 @@ function paintInverters(){
         </div>
         <span style="font-size:13px">${live}</span>
       </div>
-      <div class="cols" style="margin-top:14px">
+      <div class="cols" style="margin-top:16px">
         <div class="fact"><div class="k">Driver</div><div>${esc(drv.display_name||ident.driver_id||'—')}</div></div>
         <div class="fact"><div class="k">Model</div><div>${esc(ident.manufacturer||'—')} ${esc(ident.model||'')}</div></div>
         <div class="fact"><div class="k">Serial</div><div>${esc(ident.serial_number||'—')}</div></div>
         <div class="fact"><div class="k">Shape</div><div>${esc(shapeOf(caps))}</div></div>
       </div>
-      ${!dev.label?`<div class="hint" style="margin-top:10px">Id <code>${esc(id)}</code> — this is what the API, the MQTT topics and the Modbus unit mapping use.</div>`:''}
+      ${!dev.label?`<div class="hint" style="margin-top:12px">Id <code>${esc(id)}</code> — this is what the API, the MQTT topics and the Modbus unit mapping use.</div>`:''}
       <div class="acts">
         <button class="alt sm" data-act="panel" data-val="m:${esc(id)}">${panel==='m:'+id?'Hide readings':`All ${esc(count)} reading${count===1?'':'s'}`}</button>
         <button class="alt sm" data-act="panel" data-val="s:${esc(id)}">${panel==='s:'+id?'Close settings':'Name, driver and address'}</button>
       </div>
       ${panel==='m:'+id?`<div class="hair">
-        <div class="hint" style="margin:0 0 10px">Everything this driver declares it can read. A channel is listed because the inverter <i>has</i> it; an em dash means it has it but is not reporting a value right now.
+        <div class="hint" style="margin:0 0 8px">Everything this driver declares it can read. A channel is listed because the inverter <i>has</i> it; an em dash means it has it but is not reporting a value right now.
         ${count<6?' <b>A handful of readings where a dozen were expected is the wrong-register-map tell.</b>':''}</div>
         ${groupsFor(m,false)||'<div class="dim">Nothing published yet.</div>'}
         ${caps&&(caps.write||[]).length===0?'<div class="hint">This driver cannot write to the inverter. Nothing in this build can.</div>':''}
@@ -1005,7 +1012,7 @@ function paintInt(){
       <span class="hint" style="margin:0">${c.mqtt.enabled?(b.mqtt_connected?'connected':'enabled, not connected'):'off'}${
         c.mqtt.discovery_enabled?' · discovery on':''}</span></div>
     <div class="hint">Each inverter appears in Home Assistant as its own device, named by the name you gave it here.</div>
-    <div class="cols" style="margin-top:14px">
+    <div class="cols" style="margin-top:16px">
       <div class="fact"><div class="k">Broker</div><div>${esc(c.mqtt.host||'—')}:${esc(c.mqtt.port)}</div></div>
       <div class="fact"><div class="k">Base topic</div><div><code>${esc(c.mqtt.base_topic)}</code></div></div>
       <div class="fact"><div class="k">Publishes refused</div><div>${esc(diag&&diag.mqtt_publish_failure_total!=null?diag.mqtt_publish_failure_total:'—')}</div></div>
@@ -1018,8 +1025,8 @@ function paintInt(){
       <span class="dot ${b.modbus_listening?'ok':(c.modbus.enabled?'bad':'off')}"></span><b>Modbus TCP</b></div>
       <span class="hint" style="margin:0">${c.modbus.enabled?`listening on :${esc(c.modbus.port)} · ${esc(b.modbus_clients??0)} of ${esc(c.modbus.max_clients)} clients`:'off'}</span></div>
     <div class="hint">One unit id per inverter, consecutively from ${esc(c.modbus.unit_id)} — the register map is the same at each. Writing is permanently disabled: no driver in this build can write to an inverter.</div>
-    <table><tr><th>Unit id</th><th>Inverter</th></tr>
-      ${units.map((f,i)=>`<tr><td class="n">${esc(Number(c.modbus.unit_id)+i)}</td><td>${esc(f.label||f.id)}</td></tr>`).join('')}
+    <table><tr><th style="width:96px">Unit id</th><th>Inverter</th></tr>
+      ${units.map((f,i)=>`<tr><td>${esc(Number(c.modbus.unit_id)+i)}</td><td>${esc(f.label||f.id)}</td></tr>`).join('')}
     </table>
     <div class="acts"><button class="alt sm" onclick="togglePanel('modbus')">${panel==='modbus'?'Close':'Change Modbus settings'}</button></div>
     ${panel==='modbus'?modbusForm(c):''}
@@ -1091,7 +1098,7 @@ const DIAGGROUPS=[
   ['Memory',[['free_heap_bytes','Free now','kB'],['minimum_free_heap_bytes','Lowest it has ever been','kB'],
     ['max_alloc_heap_bytes','Largest single block','kB'],['psram_free_bytes','PSRAM free','kB'],
     ['rs485_stack_free_bytes','RS485 task stack spare','kB'],['loop_stack_free_bytes','Main task stack spare','kB']]],
-  ['This boot',[['uptime_seconds','Running for','up'],['reset_reason','Why it started'],
+  ['This boot',[['uptime_seconds','Running for','up'],['reset_reason','Why it started','why'],
     ['ota_image_state','Firmware image'],['coredump_present','Crash dump stored'],
     ['board','Board'],['last_error','Last error']]],
 ];
@@ -1132,7 +1139,7 @@ function paintHealth(){
   <div class="card" style="margin-top:12px">
     <div class="between"><b>Counters</b><button class="alt pill" onclick="copyCounters(this)">Copy as text</button></div>
     <div class="hint">Named the way a person would ask for them; the raw field name is still on <code>/api/v1/diagnostics</code>, unchanged.</div>
-    <div class="groups" id="h_counters" style="margin-top:14px"></div>
+    <div class="groups" id="h_counters" style="margin-top:16px"></div>
   </div>
   ${driverCaptureHtml()}
   ${regReadHtml()}`;
@@ -1185,6 +1192,7 @@ function countersHtml(){
       if(v===null)v='—';
       else if(unit==='kB')v=kb(v);
       else if(unit==='up')v=up(v);
+      else if(unit==='why')v=why(v);
       else if(unit)v=v+' '+unit;
       else if(typeof v==='boolean')v=v?'yes':'no';
       else if(typeof v==='number')v=sp(v);
@@ -1370,7 +1378,7 @@ function netForm(c){
   return `<div class="hair" data-form="net">
     <span class="tag warn">changes here need a restart</span>
     <label for="nw_ssid">WiFi network</label>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;max-width:420px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;max-width:420px">
       <input id="nw_ssid" value="${esc(c.wifi.ssid||'')}" autocomplete="off" style="flex:1 1 220px">
       <button class="alt sm" id="nw_scanbtn" onclick="scanNetworks()">Scan</button>
     </div>
@@ -1809,7 +1817,7 @@ let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null, wizOptions={}, wizF
     wizSavedSerial=null, wizStoredDriverId=null, wizStoredOptions={};
 const STEPS=['Mode','Probing','Candidates','Confirm','Test poll','Save'];
 function stepBar(){
-  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">'+STEPS.map((n,i)=>
+  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">'+STEPS.map((n,i)=>
     `<span class="tag" style="${i+1===wizStep?'border-color:var(--acc);color:var(--fg)':''}">${i+1}. ${n}</span>`).join('')+'</div>';
 }
 function wizardHtml(){
@@ -1836,7 +1844,7 @@ function wizardHtml(){
     const unk=(wizReport&&wizReport.unidentified_addresses)||[];
     if(unk.length){
       h+=`<div class="msg err" style="display:block"><b>Traffic at ${unk.length===1?'an address':'addresses'} with no device identified.</b>
-        <ul style="margin:6px 0 0 18px">${unk.map(u=>`<li>Address <b>${esc(u.address)}</b> (${esc(u.driver_id)}): ${esc(u.note)}</li>`).join('')}</ul>
+        <ul style="margin:8px 0 0 20px">${unk.map(u=>`<li>Address <b>${esc(u.address)}</b> (${esc(u.driver_id)}): ${esc(u.note)}</li>`).join('')}</ul>
         <div class="hint">On a chain of identical inverters this usually means two are still on the same address — their replies collide. Put one unit on the bus at a time to confirm, then reassign.</div></div>`;
     }
     // Devices, not cards: two drivers can both claim one physical inverter, and telling someone
@@ -1846,7 +1854,7 @@ function wizardHtml(){
     if(deviceCount>1)h+=`<div class="hint" style="margin-top:8px">${esc(deviceCount)} devices answered. ${sweptText} This configures one — add the rest afterwards, using the addresses below.</div>`;
     if(wizReport&&wizReport.candidates_omitted>0)h+=`<div class="hint">${esc(wizReport.candidates_omitted)} further lower-scoring candidate(s) are not shown.</div>`;
     for(const x of c){
-      h+=`<div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:10px">
+      h+=`<div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:12px">
         <div class="between"><b>${esc(x.display_name)}</b><span class="tag">${esc(x.confidence)}/100</span></div>
         <table>
         <tr><td class="dim">Driver</td><td>${esc(x.driver_id)} <span class="tag">${esc(x.support_level)}</span></td></tr>
@@ -2043,7 +2051,7 @@ function renderCapture(d){
     ' with a valid checksum at '+esc(d.line.baud_rate)+' baud. That is the right line speed.');
   $('#cap_out').innerHTML=`
     ${s.truncated?'<div class="msg err" style="display:block">Stopped early — the frame limit was reached. The beginning is kept, which is the part a handshake needs.</div>':''}
-    <table><thead><tr><th>Time</th><th>Gap</th><th>Len</th><th>Checksum</th><th>Bytes</th></tr></thead><tbody>
+    <table><thead><tr><th class="n">Time</th><th class="n">Gap</th><th class="n">Len</th><th>Checksum</th><th>Bytes</th></tr></thead><tbody>
       ${(d.frames||[]).map(f=>`<tr><td class="n">${esc(f.offset_ms)} ms</td><td class="n dim">${esc(f.gap_before_ms)} ms</td>
         <td class="n">${esc(f.length)}</td>
         <td>${f.modbus_crc_ok?'<span style="color:var(--ok)">Modbus</span>':f.aa55_ok?'<span style="color:var(--ok)">AA55</span>':'<span class="dim">—</span>'}</td>
@@ -2075,7 +2083,7 @@ function regReadHtml(){
     <div class="between"><b>Read registers</b>
       <button class="alt pill" onclick="startRegRead()">Read</button></div>
     <div class="hint"><b>Read-only.</b> One read takes the place of one poll, on the line settings the bridge is already using. Every view of the raw words is shown, because signedness, scale and word order are usually what you are trying to find out.</div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
       <label for="rr_unit" style="margin:0">Unit</label>
       <input id="rr_unit" class="tiny" type="number" value="1" min="1" max="247" style="width:64px">
       <select id="rr_space" class="tiny"><option value="holding">holding (03)</option><option value="input">input (04)</option></select>
@@ -2130,7 +2138,7 @@ function renderRegRead(d){
       <td>${esc(x)}</td><td>${esc(s16(x))}</td>
       <td>${hi===null?'—':esc(hi)+' / '+esc(s32(hi))}</td><td>${lo===null?'—':esc(lo)+' / '+esc(s32(lo))}</td></tr>`;
   }).join('');
-  $('#rr_out').innerHTML=`<div style="overflow-x:auto"><table style="margin-top:10px"><tr><th>Register</th><th>Hex</th><th>u16</th><th>s16</th>
+  $('#rr_out').innerHTML=`<div style="overflow-x:auto"><table style="margin-top:12px"><tr><th>Register</th><th>Hex</th><th>u16</th><th>s16</th>
     <th>32-bit, this word high<br><span class="dim">u32 / s32</span></th><th>32-bit, this word low<br><span class="dim">u32 / s32</span></th></tr>${rows}</table></div>
     <div class="hint">Raw words, before any scale. A 32-bit value spans this register and the next.</div>`;
 }
@@ -2147,7 +2155,7 @@ function driverCaptureHtml(){
       interrupted and the inverter keeps reporting throughout. Use this to check what the bridge
       actually puts on the wire against the protocol document, or to attach real bytes to a bug
       report when you have no RS485 tap at the inverter.</div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
       <label for="dcap_secs" style="margin:0">Record for</label>
       <input id="dcap_secs" class="tiny" type="number" value="30" min="1" max="300" style="width:80px">
       <span class="hint" style="margin:0">seconds — a poll cycle or two is usually enough</span>
@@ -2193,7 +2201,7 @@ function renderDriverCapture(d){
   else say('#dcap_msg','ok',esc(sent)+' requests, '+esc(got)+' replies, '+esc(s.bytes)+' bytes at '+esc(d.line.baud_rate)+' baud.');
   $('#dcap_out').innerHTML=`
     ${s.truncated?'<div class="msg err" style="display:block">Stopped early — a limit was reached. The beginning is kept.</div>':''}
-    <table><thead><tr><th>Time</th><th></th><th>Gap</th><th>Len</th><th>Checksum</th><th>Cut by</th><th>Bytes</th></tr></thead><tbody>
+    <table><thead><tr><th class="n">Time</th><th></th><th class="n">Gap</th><th class="n">Len</th><th>Checksum</th><th>Cut by</th><th>Bytes</th></tr></thead><tbody>
       ${(d.frames||[]).map(f=>`<tr><td class="n">${esc(f.offset_ms)} ms</td>
         <td>${f.direction==='tx'?'<b>→</b>':'<span style="color:var(--ok)">←</span>'}</td>
         <td class="n dim">${esc(f.gap_before_ms)} ms</td>
@@ -2543,10 +2551,10 @@ function liveFields(){
   if(clock)clock.textContent=b.time_synced?(b.time||'—'):'not synced';
   const d=diag||{};
   const set=(id,html)=>{const e=$(id);if(e)e.innerHTML=html};
-  set('#h_polls',`${esc(d.poll_success_total??'—')}<span class="u"> · ${esc(d.poll_failure_total??0)} failed</span>`);
-  set('#h_bus',`${esc((d.checksum_error_total||0)+(d.rs485_timeout_total||0)+(d.invalid_frame_total||0))}<span class="u"> since boot</span>`);
+  set('#h_polls',`${esc(sp(d.poll_success_total??'—'))}<span class="u"> · ${esc(sp(d.poll_failure_total??0))} failed</span>`);
+  set('#h_bus',`${esc(sp((d.checksum_error_total||0)+(d.rs485_timeout_total||0)+(d.invalid_frame_total||0)))}<span class="u"> since boot</span>`);
   set('#h_mem',`${esc(kb(d.free_heap_bytes))}<span class="u"> · low ${esc(kb(d.minimum_free_heap_bytes))}</span>`);
-  set('#h_up',`${esc(d.uptime_seconds!=null?up(d.uptime_seconds):'—')}<span class="u"> · ${esc(d.reset_reason||'')}</span>`);
+  set('#h_up',`${esc(d.uptime_seconds!=null?up(d.uptime_seconds):'—')}<span class="u"> · ${esc(why(d.reset_reason))}</span>`);
   // The whole Counters card, not four tiles: everything in it moves, and the tile above it
   // showing a different uptime from the row below was the tell that half of it had frozen.
   const counters=$('#h_counters');
