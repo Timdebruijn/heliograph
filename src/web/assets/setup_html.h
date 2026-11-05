@@ -40,21 +40,21 @@ background:var(--bg);color:var(--fg);display:flex;justify-content:center}
 .w{max-width:420px;width:100%}
 h1{font-size:20px;font-weight:600;margin:0 0 4px}
 p.sub{color:var(--dim);margin:0 0 20px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
 label{display:block;font-size:13px;color:var(--dim);margin:12px 0 4px}
-input,select{width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);
+input,select{width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--line);
 background:var(--bg);color:var(--fg);font:inherit}
-button{width:100%;margin-top:18px;padding:11px;border:0;border-radius:8px;background:var(--fg);
+button{width:100%;margin-top:16px;padding:12px;border:0;border-radius:8px;background:var(--fg);
 color:var(--bg);font:inherit;font-weight:500;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}
-.msg{padding:10px;border-radius:8px;margin-top:12px;display:none}
+.msg{padding:12px;border-radius:8px;margin-top:12px;display:none}
 .msg.err{background:color-mix(in srgb,var(--bad) 12%,transparent);border:1px solid var(--bad);display:block}
 .msg.ok{background:color-mix(in srgb,var(--ok) 12%,transparent);border:1px solid var(--ok);display:block}
-.hint{font-size:12px;color:var(--dim);margin-top:6px}
+.hint{font-size:12px;color:var(--dim);margin-top:4px}
 /* Only the restore preview uses a table here. Same rules as the dashboard's, so the two pages
    still read as one product. */
-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
-td,th{text-align:left;padding:6px 6px;border-bottom:1px solid var(--line);vertical-align:top;
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+td,th{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);vertical-align:top;
   word-break:break-word}
 th{color:var(--dim);font-weight:500;font-size:12px}
 tr:last-child td{border-bottom:0}
