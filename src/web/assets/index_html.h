@@ -2618,7 +2618,19 @@ function drawTab(){
     [cfg,panel,pending,b.firmware_version,b.hostname,b.board_id,b.time_synced,updLatest],
     paintBridge);
 }
+// One refresh in flight at a time. Every SSE event calls this, about once a second, and on WiFi
+// a /status reply can take two or three seconds: without the guard the requests piled up four
+// deep on the bridge, and the first refresh raced the first event so /config, /diagnostics and
+// /drivers were each fetched more than once. A call that lands mid-flight is not dropped -- it
+// asks for exactly one more pass when the current one finishes, so nothing goes stale.
+let refreshBusy=false, refreshAgain=false;
 async function refresh(){
+  if(refreshBusy){refreshAgain=true;return}
+  refreshBusy=true;
+  try{await refreshOnce()}
+  finally{refreshBusy=false;if(refreshAgain){refreshAgain=false;refresh()}}
+}
+async function refreshOnce(){
   try{
     S=await getJson('/api/v1/status');
     // One request feeds the whole Live tab: /status already carries devices[] and totals, so
