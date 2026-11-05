@@ -207,7 +207,7 @@ const RESETS=['unknown','power-on','reset pin','software restart','crash','inter
 // breadcrumb says better: previous_firmware is what ran before this boot, and when it differs
 // from what runs now, this boot was the update (seen live after 0.31.2 -> 0.31.4: "software
 // restart" where anyone would expect "update"). Only on code 3 -- a USB flash resets differently.
-const why=(r,d={})=>{
+const why=(r,d)=>{
   if(r===null||r===undefined)return '—';
   const was=d.previous_firmware, now=(d.firmware_version||'').split(' ')[0];
   if(r===3&&was&&now&&was!==now)return 'update from '+was;

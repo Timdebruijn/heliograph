@@ -602,9 +602,8 @@ const tick=setInterval(async()=>{
       for(let i=0;i<5;i++){
         // Minutes, not seconds: up() renders 100..104 s as the same "1 m", so an assertion on
         // those would have watched a value that cannot move and called it frozen.
-        // Uptime, free memory and the poll totals are drawn from /status (liveDiag), the rest
-        // from /diagnostics: move both, as the bridge would.
-        diag.uptime_seconds=60*(i+1); diag.free_heap_bytes=180000+i; diag.poll_success_total=500+i;
+        // Uptime, free memory and the poll totals are drawn from /status (liveDiag), so that
+        // is where they move.
         S.bridge=S.bridge||{}; S.bridge.uptime_seconds=60*(i+1); S.bridge.free_heap_bytes=180000+i;
         S.poll_success_total=500+i;
         paintTick();
