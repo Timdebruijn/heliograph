@@ -606,9 +606,10 @@ static void test_the_stored_blob_fits_nvs_comfortably() {
     // free, so the next field to be added is not a cliff. Measured 1822 of 3900 when static
     // addressing was added (0.16.0); the assertion was half the cap, so it had room to drift and
     // still failed before anything was at risk. It tripped at 1972 when
-    // control.inverter_writes_enabled was added (1928 before it, +44): raised to 2100 --
-    // deliberately and with the numbers written down, like the typical-blob canary below --
-    // which still leaves more than 45% of the entry free.
+    // control.inverter_writes_enabled was added (1928 before it, +44, most of it the JSON
+    // nesting): raised to 2100, deliberately and with the numbers written down, like the
+    // typical-blob canary below. That gives up "most of the entry free" -- 2100 leaves 46% --
+    // so the next trip is the moment to look at the blob's shape rather than raise it again.
     TEST_ASSERT_TRUE_MESSAGE(blob.size() < 2100, std::to_string(blob.size()).c_str());
 
     std::string typical;

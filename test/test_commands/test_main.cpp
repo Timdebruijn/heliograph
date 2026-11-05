@@ -95,6 +95,34 @@ static void test_write_path_is_closed_by_default_even_without_read_only_mode() {
     TEST_ASSERT_EQUAL_UINT32(1, driver.acceptedCommands());
 }
 
+/// A driver that closes the write gate while the dispatcher is reading its capabilities -- i.e.
+/// after the first check has passed. Only the late re-check before execute() can catch it.
+class GateClosingDriver : public mock::MockDriver {
+public:
+    GateClosingDriver(CommandDispatcher& d, mock::MockOptions o)
+        : mock::MockDriver(clockFn, o), dispatcher_(d) {}
+    InverterCapabilities capabilities() const override {
+        dispatcher_.setWritesEnabled(false);
+        return mock::MockDriver::capabilities();
+    }
+
+private:
+    CommandDispatcher& dispatcher_;
+};
+
+static void test_a_write_gate_closed_mid_dispatch_stops_the_command() {
+    CommandDispatcher d(clockFn);
+    d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
+    mock::MockOptions o;
+    o.writable = true;
+    GateClosingDriver driver(d, o);
+
+    const auto out = d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 50.0), driver);
+    TEST_ASSERT_EQUAL(CommandResult::Rejected, out.result);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.acceptedCommands());
+}
+
 static void test_read_only_mode_beats_an_enabled_write_path() {
     mock::MockOptions o;
     o.writable = true;
@@ -942,6 +970,7 @@ int main(int, char**) {
     RUN_TEST(test_read_only_mode_is_the_default);
     RUN_TEST(test_write_path_is_closed_by_default_even_without_read_only_mode);
     RUN_TEST(test_read_only_mode_beats_an_enabled_write_path);
+    RUN_TEST(test_a_write_gate_closed_mid_dispatch_stops_the_command);
     RUN_TEST(test_read_only_driver_rejects_on_capability_not_identity);
     RUN_TEST(test_eversolar_driver_rejects_everything_even_with_the_gate_open);
     RUN_TEST(test_a_capability_the_driver_lacks_is_rejected);

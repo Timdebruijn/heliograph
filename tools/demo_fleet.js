@@ -124,6 +124,7 @@
       {driver_id:'modbus_profile',label:'Dak achter',options:{profile:'mic_tl_x',unit_id:'3'}}],
     ntp:{enabled:true,use_dhcp:true,server:'pool.ntp.org',
       timezone:'CET-1CEST,M3.5.0,M10.5.0/3',timezone_name:'Europe/Amsterdam'},
+    control:{inverter_writes_enabled:false},
     security:{password_set:true,read_only_mode:true},
     logging:{level:'info'},
     updates:{check_enabled:true},

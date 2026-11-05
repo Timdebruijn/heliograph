@@ -611,8 +611,8 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
     // any of these via PATCH updates NVS but not the running object, so it needs a restart.
     //
     // Deliberately NOT here (applied live by ctx.applyConfig): bridge_name (read fresh on
-    // every status), relays.* and control.* (gates re-applied immediately), security.* (read per request),
-    // logging.level (setLevel called from applyConfig), updates.check_enabled (the dashboard
+    // every status), relays.* and control.* (gates re-applied immediately), security.* (read
+    // per request), logging.level (setLevel called from applyConfig), updates.check_enabled (the dashboard
     // reads it when it renders, and the check runs in the browser -- the firmware never acts on
     // it). timezone_name and write_enabled carry no runtime effect. This set mirrors
     // RESTART_NEEDED in the web UI.

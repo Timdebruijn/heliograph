@@ -67,9 +67,9 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
                                                            const std::string& discoveryPrefix);
 
 /// Switch entities for the bridge's own relays (DRM contacts). Announced only while
-/// bridge.relaysOpen() -- relays enabled AND read-only mode off; for a relay board with the feature disabled the same config
-/// topics get EMPTY payloads so stale switches are removed from Home Assistant. A board
-/// without relays (relayCount 0) produces nothing at all.
+/// bridge.relaysOpen() -- relays enabled AND read-only mode off; for a relay board behind a
+/// closed gate the same config topics get EMPTY payloads so stale switches are removed from
+/// Home Assistant. A board without relays (relayCount 0) produces nothing at all.
 std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
                                                 const MqttTopics&  topics,
                                                 const std::string& discoveryPrefix);

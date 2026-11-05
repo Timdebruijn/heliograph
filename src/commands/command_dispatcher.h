@@ -50,8 +50,8 @@ public:
     void setWritesEnabled(bool enabled) { writesEnabled_ = enabled; }
     bool writesEnabled() const { return writesEnabled_; }
 
-    /// Checks, in order: read-only mode, the write path's enable, capability, value range, rate limit. Only then does
-    /// the command reach the driver.
+    /// Checks, in order: read-only mode, the write path's enable, capability, value range, rate
+    /// limit. Only then does the command reach the driver.
     ///
     /// Thread-safe for its own state. CommandSource names Mqtt, Rest, ModbusTcp and Web, and the
     /// burst counter is read-modify-write, so two concurrent commands could each see the last

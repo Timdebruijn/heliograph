@@ -214,6 +214,9 @@
     "logging": {
       "level": "info"
     },
+    "control": {
+      "inverter_writes_enabled": false
+    },
     "security": {
       "password_set": true,
       "read_only_mode": true

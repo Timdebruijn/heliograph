@@ -749,8 +749,9 @@ std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
                                                 const std::string& discoveryPrefix) {
     // Switches are announced only when the relays can actually act (board has them, the
     // config flag is on AND read-only mode is off). For a board that HAS relays behind a
-    // closed gate, empty retained payloads are published instead, so previously announced switches disappear
-    // from Home Assistant rather than lingering as controls that silently reject.
+    // closed gate, empty retained payloads are published instead, so previously announced
+    // switches disappear from Home Assistant rather than lingering as controls that silently
+    // reject.
     std::vector<DiscoveryEntity> entities;
     for (uint8_t i = 0; i < bridge.relayCount; ++i) {
         const std::string slug = "relay_" + std::to_string(i + 1);

@@ -12,7 +12,7 @@ Read this before adding a `[[write]]` row.
 ```
 REST  POST /api/v1/devices/<id>/commands   ─┐
 MQTT  <prefix>/command/set                  ├─> CommandQueue ─> rs485Task ─> CommandDispatcher ─> driver execute()
-HA    number / button entity ──(MQTT)──────┘        (one in flight)   (owns the bus)   (4 gates)      (FC06)
+HA    number / button entity ──(MQTT)──────┘        (one in flight)   (owns the bus)   (5 gates)      (FC06)
 ```
 
 Nothing writes on its own. A command is *submitted*, queued, and executed by the task that owns
@@ -22,14 +22,18 @@ multi-second bus transaction and running it from a network callback races the po
 The outcome comes back asynchronously: `GET /api/v1/devices/<id>/commands/<requestId>` over
 REST, or a republish on `<prefix>/command/result` over MQTT.
 
-### The four gates, in order
+### The five gates, in order
 
 `CommandDispatcher` refuses before the driver is ever reached:
 
-1. **Read-only mode.** `security.readOnlyMode` is the global kill switch and defaults to **on**.
-2. **Capability.** The driver must advertise the command in `capabilities()`.
-3. **Range.** The value must sit inside the bounds the profile declared.
-4. **Rate limit.** One command per interval, so a stuck automation cannot hammer a setpoint.
+1. **Read-only mode.** `security.read_only_mode` is the global kill switch and defaults to **on**.
+2. **Inverter writes enabled.** `control.inverter_writes_enabled`, this path's own switch, off by
+   default — so turning read-only mode off for the DRM relays does not open it as well.
+3. **Capability.** The driver must advertise the command in `capabilities()`. A profile row is
+   advertised only when it carries `verified = true`, or when the device's driver option
+   `allow_unverified_writes` is `true` (a per-device opt-in for the bench check itself).
+4. **Range.** The value must sit inside the bounds the profile declared.
+5. **Rate limit.** One command per interval, so a stuck automation cannot hammer a setpoint.
 
 Then the driver applies its own checks (below), and the register bounds are re-checked there
 against the row itself.
