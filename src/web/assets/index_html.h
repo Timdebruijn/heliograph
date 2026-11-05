@@ -2446,13 +2446,18 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
   send(true);
 }
 // Prove the password BEFORE any work: the OTA POST is the first request that checks it, so a
-// typo used to cost a 1.3 MB download (and its upload) before the bridge said 401. /logs is
-// the cheapest admin-gated GET; authFetch() re-asks on a wrong password, as everywhere else.
+// typo used to cost a 1.3 MB download (and its upload) before the bridge said 401. /logs is a
+// cheap admin-gated GET behind the same check as /ota; authFetch() re-asks on a wrong password,
+// as everywhere else. Never throws: both callers re-enable their button on false.
 async function adminProven(msgSel){
-  const r=await authFetch('/api/v1/logs?limit=1');
+  let r;
+  try{r=await authFetch('/api/v1/logs?limit=1')}
+  catch(e){say(msgSel,'err','Could not reach the bridge: '+esc(e.message)+' — nothing was sent.');return false}
   if(r.ok)return true;
   const d=await r.json().catch(()=>({}));
-  say(msgSel,'err',esc((d.error&&d.error.message)||(r.status===401?'Wrong password':httpWhy(r)))+' — nothing was downloaded or sent.');
+  const why=r.cancelled?'Cancelled':r.status===401&&!(d.error&&d.error.message)?'Wrong password':
+    esc((d.error&&d.error.message)||httpWhy(r)).replace(/\.$/,'');
+  say(msgSel,'err',why+' — nothing was sent.');
   return false;
 }
 async function otaUpload(){
