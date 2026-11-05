@@ -203,7 +203,16 @@ const kb=b=>b===null||b===undefined?'—':sp(Math.round(b/1024))+' kB';
 const RESETS=['unknown','power-on','reset pin','software restart','crash','interrupt watchdog',
   'task watchdog','other watchdog','deep sleep','brownout','SDIO','USB','JTAG','eFuse error',
   'power glitch','CPU lockup'];
-const why=r=>r===null||r===undefined?'—':Number.isInteger(r)&&RESETS[r]||'code '+r;
+// An OTA ends in esp_restart(), so the chip reports a plain software restart. The boot
+// breadcrumb says better: previous_firmware is what ran before this boot, and when it differs
+// from what runs now, this boot was the update (seen live after 0.31.2 -> 0.31.4: "software
+// restart" where anyone would expect "update"). Only on code 3 -- a USB flash resets differently.
+const why=(r,d={})=>{
+  if(r===null||r===undefined)return '—';
+  const was=d.previous_firmware, now=(d.firmware_version||'').split(' ')[0];
+  if(r===3&&was&&now&&was!==now)return 'update from '+was;
+  return Number.isInteger(r)&&RESETS[r]||'code '+r;
+};
 
 let tab='live', panel=null, logFilter='all', logPaused=false;
 let S=null;              // last /api/v1/status
@@ -1195,7 +1204,7 @@ function countersHtml(){
       if(v===null)v='—';
       else if(unit==='kB')v=kb(v);
       else if(unit==='up')v=up(v);
-      else if(unit==='why')v=why(v);
+      else if(unit==='why')v=why(v,d);
       else if(unit)v=v+' '+unit;
       else if(typeof v==='boolean')v=v?'yes':'no';
       else if(typeof v==='number')v=sp(v);
@@ -2557,7 +2566,7 @@ function liveFields(){
   set('#h_polls',`${esc(sp(d.poll_success_total??'—'))}<span class="u"> · ${esc(sp(d.poll_failure_total??0))} failed</span>`);
   set('#h_bus',`${esc(sp((d.checksum_error_total||0)+(d.rs485_timeout_total||0)+(d.invalid_frame_total||0)))}<span class="u"> since boot</span>`);
   set('#h_mem',`${esc(kb(d.free_heap_bytes))}<span class="u"> · low ${esc(kb(d.minimum_free_heap_bytes))}</span>`);
-  set('#h_up',`${esc(d.uptime_seconds!=null?up(d.uptime_seconds):'—')}<span class="u"> · ${esc(why(d.reset_reason))}</span>`);
+  set('#h_up',`${esc(d.uptime_seconds!=null?up(d.uptime_seconds):'—')}<span class="u"> · ${esc(why(d.reset_reason,d))}</span>`);
   // The whole Counters card, not four tiles: everything in it moves, and the tile above it
   // showing a different uptime from the row below was the tell that half of it had frozen.
   const counters=$('#h_counters');
