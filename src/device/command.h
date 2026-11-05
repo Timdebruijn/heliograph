@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 //
-// Generic command model. Fully defined in the MVP even though the only shipping driver
-// rejects every command: the read-only guarantee is a tested contract, not a promise.
+// Generic command model. Every command passes the dispatcher's gates (read-only mode, the
+// write path's own switch, capability, range, rate limit) before a driver sees it, and those
+// gates are a tested contract rather than a promise. See docs/device-profiles/write-path.md.
 
 #pragma once
 

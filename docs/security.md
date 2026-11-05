@@ -7,8 +7,10 @@ the same LAN", not "someone holding the PCB in their hands".
 
 | Topic | Status |
 |---|---|
-| Global read-only mode | On by default; a deliberate opt-out in *Settings → Security*. While on, every inverter command and every relay move is refused. **This is the protection that actually holds** — see [What can reach the inverter](#what-can-reach-the-inverter) below, because it is not true that no driver is capable of writing |
-| Modbus writes | Off; FC6/FC16 → exception 0x01. `write_enabled=true` is rejected by config validation |
+| Global read-only mode | On by default (`security.read_only_mode`); the web UI shows it inverted as *Allow control* under *Access & safety*. While on, every inverter command and every relay move is refused. **This is the outermost gate** — see [What can reach the inverter](#what-can-reach-the-inverter) below, because it is not true that no driver is capable of writing |
+| Control paths | Each has its own switch under the global one, off by default: `relays.enabled` (DRM contacts) and `control.inverter_writes_enabled` (inverter setpoints). Opening one does not open the other |
+| Unverified setpoints | Served only on a device whose driver option `allow_unverified_writes` is on, and only when the profile reads the setpoint back |
+| Modbus TCP server writes | Off; FC6/FC16 from a Modbus TCP *client* → exception 0x01. `modbus.write_enabled` concerns only this server — it has nothing to do with writing to the inverter — and `true` is rejected by config validation |
 | Raw TCP bridge | Not implemented |
 | REST GET | Unsecured (local network) |
 | REST PATCH/POST | HTTP Basic required; **rejected** without a configured password, not left open |
@@ -31,8 +33,8 @@ matters here: it said no driver in this build can write to an inverter. Two of t
 | `eversolar_legacy` | No. `supportsWrite = false`, and the protocol defines no writes at all |
 | `solax_x1` | No. `supportsWrite = false` |
 | `solarmax` | No. Neither source documents a write, so none is declared |
-| `modbus_profile` | **Declares it and implements it** — `execute()` writes one holding register over FC06 and verifies the device's echo. But every `[[write]]` row in every shipped profile is `verified = false`, and the driver refuses an unverified row, so **no profile writes today** |
-| `sunspec` | **Declares it and implements it, and its gate is a device property rather than a review flag.** `execute()` writes the power-limit registers and the connect/disconnect register. It requires that the inverter published SunSpec model 123 and that the block was read. Attach a SunSpec inverter that implements model 123, turn read-only mode off, send the command, and it will write |
+| `modbus_profile` | **Declares it and implements it** — `execute()` writes one holding register over FC06 and verifies the device's echo. A row is served only when the profile also reads the setpoint back, and only when it is `verified = true` or the device opted in with `allow_unverified_writes`. Every shipped row is `verified = false`, so **no profile writes without that opt-in** |
+| `sunspec` | **Declares it and implements it.** `execute()` writes the power-limit registers and the connect/disconnect register. It requires that the inverter published SunSpec model 123, that the block was read, **and** the device's `allow_unverified_writes` opt-in, because SunSpec has no per-row `verified` flag |
 
 One thing bypasses all of this, because it is not a command. The AA55/PMU family — EverSolar
 and SolaX — is discovered by being *assigned* a bus address, so `probe()` transmits a
@@ -41,12 +43,18 @@ re-register broadcast and an address assignment by design, outside the dispatche
 and the address is volatile, but a second inverter of that family on the same line is made to
 forget its address and re-register. See [architecture.md](architecture.md) § discovery.
 
-**So what actually protects the inverter with the shipped configuration is
-`security.read_only_mode`, which is `true` by default and refuses every command before a driver
-is reached.** Not an absence of capability. If you are relying on this bridge being unable to
-act on your inverter — for a rented installation, a warranty condition, or a site where you are
-not the only one with LAN access — rely on that flag, keep it on, and note that it is reachable
-by anyone who has the admin password.
+**So what protects the inverter with the shipped configuration is a chain of gates, all closed
+by default:** `security.read_only_mode` (*Allow control* off), then `control.inverter_writes_enabled`,
+then the per-device `allow_unverified_writes` opt-in for any setpoint not yet verified on
+hardware. Not an absence of capability. If you are relying on this bridge being unable to act on
+your inverter — for a rented installation, a warranty condition, or a site where you are not the
+only one with LAN access — keep *Allow control* off, and note that every one of these switches is
+reachable by anyone who has the admin password.
+
+**Commands over MQTT are only as protected as your broker.** Once control is allowed, anything
+that may publish to a bridge's `command/set`, `relay/<n>/set` or `drm/set` topics can steer it;
+the bridge does not authenticate MQTT messages itself. Restrict those topics with the broker's
+ACLs to the clients that should command it (typically Home Assistant).
 
 The relay/DRM outputs are governed by the same flag plus their own `relays.enabled`, and are
 covered in [docs/drm.md](drm.md).
@@ -209,7 +217,8 @@ admin password strong and the network trusted.
 
 | Can | Cannot |
 |---|---|
-| Read all measurements (REST, Modbus, Prometheus) | Control the inverter — refused while read-only mode is on, which is the default |
+| Read all measurements (REST, Modbus, Prometheus) | Control the inverter while *Allow control* is off, which is the default |
+| Command the inverter over MQTT once control is allowed, if the broker lets them publish to the command topics | Command it over REST without the admin password |
 | Read the configuration **without secrets** | Read passwords via the API |
 | DoS the device with traffic | Disrupt the RS485 polling (separate core, separate task) |
 | — | Change settings, OTA, or reboot without the admin password |

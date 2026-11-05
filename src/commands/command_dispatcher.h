@@ -35,7 +35,8 @@ class CommandDispatcher {
 public:
     explicit CommandDispatcher(ClockFn clock, RateLimitPolicy rateLimit = {});
 
-    /// Global kill switch, independent of driver capabilities. On in the MVP.
+    /// Global kill switch, independent of driver capabilities. On by default (the web UI shows it
+    /// inverted, as "Allow control").
     ///
     /// Atomic rather than mutex-guarded: it is one bool, and the whole point of a kill switch is
     /// that reaching it never waits. Guarding it with the same mutex as the rate limiter would
