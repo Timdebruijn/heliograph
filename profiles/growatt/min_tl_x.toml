@@ -228,12 +228,27 @@ type = "s16"
 scale = 0.1
 unit = "°C"
 
+# The same holding register 3, READ: what the inverter is limited to right now, as opposed to
+# what it was last asked for. Required before the [[write]] row below can be served (see
+# docs/device-profiles/write-path.md). Inside the holding block 0-88 already polled, so it costs
+# no extra transaction. 255 is "limit disabled" on some revisions -- not a percentage, so it is
+# reported as unavailable rather than as 255 %. Unverified, like the write row.
+[[register]]
+measurement = "control.active_power_limit"
+display_name = "Active Power Limit"
+space = "holding"
+address = 3
+type = "u16"
+scale = 1.0
+invalid = 255
+unit = "%"
+
 # ------------------------------------------------------------------------------------------
 # Writable setpoint — the same holding register 3 the MIC profile declares, and dormant for the
 # same reason. Reversible by writing 100, touches no grid-protection setting, and the natural way
 # to curtail from Home Assistant when prices go negative.
 #
-# `verified = false` until a bench session writes a limit, reads register 3 back, and confirms
+# `verified = false` until a bench session writes a limit, reads register 3 back (the control.active_power_limit row above), and confirms
 # against the inverter's own reported output that it took effect. Note that verifying it on a MIC
 # does NOT verify it here: same register, different hardware, and the flag is per profile.
 #

@@ -166,14 +166,18 @@ device so far:
 - it needs no DRM wiring and no relay board, so it works on the plain RS485-CAN board.
 
 It is declared in the profile as a `[[write]]` row against the canonical
-`set_active_power_limit_percent` command — and it is **dormant**, held by a single gate:
-`verified = false` in the profile. Only a bench session flips it.
+`set_active_power_limit_percent` command, and the same register is also mapped as a
+`[[register]]` row reading `control.active_power_limit`. That read-back is required before the
+write row can be served at all (see
+[write-path.md](device-profiles/write-path.md#a-read-back-is-required)), and it is what the bench
+session compares against. It sits inside the holding block that is already polled, so it costs
+no extra transaction.
 
-That used to be two gates. The second was "the driver has no write path at all", which stopped
-being true when mode setpoints landed: `execute()` now writes a single holding register over
-FC06 and the descriptor declares `supportsWrite = true`. So this row is one confirmed bench
-session away from being live, not two — see
-[write-path.md](device-profiles/write-path.md) for what that path can and cannot do.
+The row is **dormant** while it carries `verified = false`. Two things can lift that. A bench
+session sets `verified = true` for every device. Before that, the per-device driver option
+`allow_unverified_writes` serves it on one device, so the bench session itself can run through
+the bridge. The control gates (`read_only_mode` off, `control.inverter_writes_enabled` on) apply
+either way.
 
 The gate is asserted in `test/test_modbus_profile/test_main.cpp`, both as a fact about the row
 and as a fact about the driver: a device on this profile advertises no setpoint and refuses the
@@ -181,8 +185,9 @@ command.
 
 One note for whoever does the bench session: some protocol revisions describe **255** as
 "limit disabled". The declared bound stops at 100 rather than allowing 255, because a
-percentage value that silently means "off" is a footgun. If the bench confirms 255 is needed,
-it gets its own explicit handling rather than a widened range.
+percentage value that silently means "off" is a footgun. On the read-back row, 255 is declared
+`invalid`, so it is reported as unavailable rather than as 255 %. If the bench confirms 255 is
+needed as a written value, it gets its own explicit handling rather than a widened range.
 
 ## Giving each inverter an address
 

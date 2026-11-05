@@ -91,13 +91,17 @@ unit = "W"
 # ------------------------------------------------------------------------------------------
 # OPTIONAL: writable setpoint registers. Read-only is the default — a register is writable
 # only when declared here, with mandatory bounds. Declaring one does NOT enable writing:
-# the row stays dormant until `verified = true` (confirmed on real hardware) AND the driver
-# has a write path. Record your write-register research here; nothing will act on it.
+# the row stays dormant until `verified = true` (confirmed on real hardware). It is served
+# at all only when this profile ALSO reads the setpoint back as a [[register]] with the
+# command's read-back measurement -- `--list-commands` shows it, e.g. "read back as
+# control.active_power_limit" -- and verified = true is refused without one.
+# Record your write-register research here; nothing will act on it.
 #
 #   command   canonical setpoint id (python3 tools/gen_profiles.py --list-commands)
 #   function  optional: write_single (FC06, 1 word) | write_multiple (FC16); default derived
 #   minimum/maximum/step  bounds in canonical units — REQUIRED, enforced centrally
-#   verified  leave false until the row is confirmed against the device on the bench
+#   verified  leave false until the row is confirmed against the device on the bench;
+#             needs the read-back [[register]] described above
 #
 # A MODE setpoint (set_battery_operating_mode) declares `options` instead of bounds:
 #   options = [{ value = 0, label = "Self-consumption" }, { value = 2, label = "Forced" }]

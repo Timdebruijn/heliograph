@@ -513,6 +513,20 @@ CommandResult SunspecDriver::execute(const InverterCommand& command) {
                 // it behind an apparently successful command.
                 return CommandResult::OutOfRange;
             }
+            // Skip a limit the device already holds AND has armed: many keep it in EEPROM, and an
+            // automation re-sending the same value every minute would wear it for nothing. Read
+            // live (WMaxLimPct..WMaxLim_Ena, one transaction), not from the last poll. A failed
+            // read is no reason to refuse -- the writes go out and their echoes are checked.
+            constexpr size_t kSpan = controls::kWMaxLim_Ena - controls::kWMaxLimPct + 1;
+            uint16_t         now[kSpan] = {};
+            const auto       at =
+                static_cast<uint16_t>(controlsEntry_->address + controls::kWMaxLimPct);
+            if (read(at, kSpan, now, kSpan).status == modbus::ReadStatus::Ok && now[0] == raw &&
+                now[kSpan - 1] == controls::kEnabled) {
+                log::info("SUNSPEC limit already %u and enabled, write skipped",
+                          static_cast<unsigned>(raw));
+                return CommandResult::Ok;
+            }
             // Value first, enable second. The other order arms whatever limit the register
             // happened to be holding -- possibly one set by somebody else, possibly the 0% that
             // a device ships with -- for however long the two writes are apart.

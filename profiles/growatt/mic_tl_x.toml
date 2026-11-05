@@ -234,6 +234,21 @@ unit = "°C"
 # IPM temperature (94) and boost temperature (95) are real but redundant for monitoring, and
 # there is one canonical inverter.temperature. They stay in the raw dump.
 
+# The same holding register 3, READ: what the inverter is limited to right now, as opposed to
+# what it was last asked for. Required before the [[write]] row below can be served (see
+# docs/device-profiles/write-path.md). Inside the holding block 0-88 already polled, so it costs
+# no extra transaction. 255 is "limit disabled" on some revisions -- not a percentage, so it is
+# reported as unavailable rather than as 255 %. Unverified, like the write row.
+[[register]]
+measurement = "control.active_power_limit"
+display_name = "Active Power Limit"
+space = "holding"
+address = 3
+type = "u16"
+scale = 1.0
+invalid = 255
+unit = "%"
+
 # ------------------------------------------------------------------------------------------
 # Writable setpoint.
 #
@@ -244,7 +259,7 @@ unit = "°C"
 # wiring and no relay board involved.
 #
 # Declaring it here does NOT enable anything. The row stays dormant until `verified = true`,
-# which requires a bench session: write a limit, read register 3 back, and confirm against
+# which requires a bench session: write a limit, read register 3 back (the control.active_power_limit row above), and confirm against
 # the inverter's own reported output that the limit actually took effect. Until then this is
 # documented research, not a control surface.
 #

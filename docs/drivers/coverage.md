@@ -39,10 +39,10 @@ the profile's own comments — see [Why a channel is missing](#why-a-channel-is-
 | `mic_tl_x` | `set_active_power_limit_percent` | holding 3 | yes | **no** |
 | `min_tl_x` | `set_active_power_limit_percent` | holding 3 | yes | **no** |
 | `huawei_sun2000` | `set_active_power_limit_percent` | holding 40125 | yes | **no** |
-| `solis_rhi_hybrid` | `set_export_limit_watts` | holding 43074 | yes | **no** |
-| `solis_rhi_hybrid` | `set_battery_operating_mode` | holding 43110 | yes | **no** |
-| `sungrow_sh_hybrid` | `set_export_limit_watts` | holding 13073 | yes | **no** |
-| `sungrow_sh_hybrid` | `set_battery_operating_mode` | holding 13049 | yes | **no** |
+| `solis_rhi_hybrid` | `set_export_limit_watts` | holding 43074 | no — no read-back | **no** |
+| `solis_rhi_hybrid` | `set_battery_operating_mode` | holding 43110 | no — no read-back | **no** |
+| `sungrow_sh_hybrid` | `set_export_limit_watts` | holding 13073 | no — no read-back | **no** |
+| `sungrow_sh_hybrid` | `set_battery_operating_mode` | holding 13049 | no — no read-back | **no** |
 
 **Nothing in this table can move an inverter today.** A row reaches the bus only when
 `Verified` is yes *and* `Dispatchable` is yes, and no profile sets the first. See

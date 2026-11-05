@@ -105,6 +105,14 @@ else
     status=1
 fi
 
+echo "==> 3c. The generator refuses a verified write row without a read-back"
+# No shipped profile sets verified = true, so nothing else ever executes that refusal.
+if python3 tools/check_readback_rule.py; then
+    :
+else
+    status=1
+fi
+
 echo "==> 4. Every REST payload builder is reachable from a route"
 # A builder with no route is dead code that unit tests happily cover. Three of them shipped
 # that way in Phase 7 -- buildDevicePayload, buildMeasurementsPayload and

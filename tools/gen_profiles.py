@@ -123,6 +123,14 @@ PROFILE_STATUSES = {
 # "start"?) — a schema extension when a first device requires one, not a guess now.
 NON_NUMERIC_COMMANDS = {"start", "stop", "synchronize_time"}
 
+# The canonical measurement each setpoint command is read back as. A [[write]] row is served by
+# the driver -- and may carry verified = true -- only when its profile maps this measurement as a
+# [[register]]. A command missing here has no read-back yet, so its rows stay dormant research
+# until somebody adds the measurement (measurement.h) and the entry below.
+READBACK = {
+    "set_active_power_limit_percent": "control.active_power_limit",
+}
+
 ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -621,6 +629,24 @@ def parse_profile(
         verified = wr.get("verified", False)
         if not isinstance(verified, bool):
             raise ProfileError(f"{ww}: verified must be a boolean")
+        # A setpoint must be readable as its canonical measurement, or nobody can tell what the
+        # device is doing -- only what it was last asked to do -- and the bench check behind
+        # `verified` (write, READ BACK, compare) cannot be done. Unverified rows without one stay
+        # valid research; the driver just never serves them, opt-in or not.
+        readback = READBACK.get(cmd)
+        has_readback = readback is not None and any(
+            r["measurement"] == readback for r in parsed_regs
+        )
+        if verified and not has_readback:
+            raise ProfileError(
+                f"{ww}: verified = true needs a read-back -- map the setpoint as a [[register]] "
+                + (
+                    f'with measurement = "{readback}"'
+                    if readback
+                    else f"(no canonical read-back measurement exists for '{cmd}' yet; add one "
+                    f"to measurement.h and to READBACK in this script)"
+                )
+            )
 
         row = {
             "command": cmd,
@@ -630,6 +656,7 @@ def parse_profile(
             "function": function,
             "scale": float(scale),
             "verified": verified,
+            "has_readback": has_readback,
         }
 
         if cmd in enum_command_names:
@@ -882,12 +909,16 @@ def generate(
                         f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
                         f"{'true' if wr['verified'] else 'false'},"
                     )
-                    w(f"     {osym}, sizeof({osym}) / sizeof({osym}[0])}},")
+                    w(
+                        f"     {osym}, sizeof({osym}) / sizeof({osym}[0]), "
+                        f"{'true' if wr['has_readback'] else 'false'}}},"
+                    )
                 else:
                     w(
                         f"     {cpp_float(wr['minimum'])}, {cpp_float(wr['maximum'])}, "
                         f"{cpp_float(wr['step'])}, Unit::{unit_enum}, "
-                        f"{'true' if wr['verified'] else 'false'}}},"
+                        f"{'true' if wr['verified'] else 'false'}, nullptr, 0, "
+                        f"{'true' if wr['has_readback'] else 'false'}}},"
                     )
             w("};")
         if p["status_register"]:
@@ -1052,7 +1083,10 @@ def main(argv: list[str]) -> int:
         return 0
     if "--list-commands" in argv:
         for cmd, enum in sorted(load_command_vocabulary().items()):
-            print(f"{cmd:36} ({enum})")
+            readback = READBACK.get(cmd)
+            print(
+                f"{cmd:36} ({enum})" + (f" read back as {readback}" if readback else "")
+            )
         return 0
     return run(check_only="--check" in argv)
 
