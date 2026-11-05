@@ -1101,7 +1101,15 @@ function credField(id,label,isSet){
 
 // ---------------- Health ----------------
 let diag=null;
-async function loadDiag(){try{diag=await getJson('/api/v1/diagnostics')}catch(e){}}
+async function loadDiag(){try{diag=await getJson('/api/v1/diagnostics');diagAt=Date.now()}catch(e){}}
+// Health used to refetch /diagnostics on every refresh -- once a second, doubling the requests to
+// a board that is slow to answer anything over one segment. Everything on that tab that moves
+// quickly moves with a poll, and /status already carries the poll totals: so refetch when they
+// differ from the ones in the diagnostics we hold. The 30 s floor covers what changes without a
+// poll (memory, signal, uptime), and a bridge with nothing to poll.
+let diagAt=0;
+const pollsOf=o=>o?(o.poll_success_total||0)+(o.poll_failure_total||0):-1;
+const diagStale=()=>!diag||pollsOf(S)!==pollsOf(diag)||Date.now()-diagAt>30000;
 // The names a person would ask for. The raw field stays on /api/v1/diagnostics untouched for
 // anything scraping it -- this map is presentation, not a second source of truth.
 const DIAGGROUPS=[
@@ -2686,7 +2694,7 @@ async function refreshOnce(){
       window.__updChecked=true;
       updatesEnabled().then(on=>{if(on)checkForUpdate(false).then(()=>{if(tab==='bridge')updRender()})});
     }
-    if(tab==='health'){await loadDiag();paintTick();if(!logPaused)loadLogs(false);return}
+    if(tab==='health'){if(diagStale())await loadDiag();paintTick();if(!logPaused)loadLogs(false);return}
     if(tab==='inv')loadInverters(false);
     paintTick();
   }catch(e){
