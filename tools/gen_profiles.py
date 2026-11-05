@@ -641,7 +641,7 @@ def parse_profile(
             raise ProfileError(
                 f"{ww}: verified = true needs a read-back -- map the setpoint as a [[register]] "
                 + (
-                    f"with measurement = \"{readback}\""
+                    f'with measurement = "{readback}"'
                     if readback
                     else f"(no canonical read-back measurement exists for '{cmd}' yet; add one "
                     f"to measurement.h and to READBACK in this script)"
@@ -1084,7 +1084,9 @@ def main(argv: list[str]) -> int:
     if "--list-commands" in argv:
         for cmd, enum in sorted(load_command_vocabulary().items()):
             readback = READBACK.get(cmd)
-            print(f"{cmd:36} ({enum})" + (f" read back as {readback}" if readback else ""))
+            print(
+                f"{cmd:36} ({enum})" + (f" read back as {readback}" if readback else "")
+            )
         return 0
     return run(check_only="--check" in argv)
 

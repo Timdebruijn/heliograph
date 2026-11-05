@@ -68,7 +68,9 @@ def main() -> int:
     else:
         raise AssertionError("a verified row WITHOUT a read-back must be refused")
     dormant = parse(no_readback)["writes"][0]
-    assert not dormant["has_readback"], "an unverified row without a read-back stays dormant"
+    assert not dormant["has_readback"], (
+        "an unverified row without a read-back stays dormant"
+    )
     print("read-back rule: OK")
     return 0
 
