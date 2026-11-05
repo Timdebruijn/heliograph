@@ -2445,10 +2445,20 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
   };
   send(true);
 }
+// Prove the password BEFORE any work: the OTA POST is the first request that checks it, so a
+// typo used to cost a 1.3 MB download (and its upload) before the bridge said 401. /logs is
+// the cheapest admin-gated GET; authFetch() re-asks on a wrong password, as everywhere else.
+async function adminProven(msgSel){
+  const r=await authFetch('/api/v1/logs?limit=1');
+  if(r.ok)return true;
+  const d=await r.json().catch(()=>({}));
+  say(msgSel,'err',esc((d.error&&d.error.message)||(r.status===401?'Wrong password':httpWhy(r)))+' — nothing was downloaded or sent.');
+  return false;
+}
 async function otaUpload(){
   const f=$('#ota_file').files[0];
   if(!f){say('#ota_msg','err','Choose a firmware .bin first.');return}
-  if(!sessionStorage.getItem('hg_auth')&&!await askAuth(false)){say('#ota_msg','err','Cancelled.');return}
+  if(!await adminProven('#ota_msg'))return;
   upload('/api/v1/ota',f,f.name,'#ota_btn','#ota_prog','#ota_msg',
     'Verified and installed. Rebooting into the new firmware — reload this page in ~15 seconds.');
 }
@@ -2456,8 +2466,9 @@ async function installUpdate(){
   const board=(S&&S.bridge&&S.bridge.board_id)||'';
   const asset=(updLatest&&(updLatest.boards||{})[board])||null;
   if(!asset)return;
-  say('#upd_msg','','Downloading '+esc(asset.file)+'…');
   $('#upd_btn').disabled=true;
+  if(!await adminProven('#upd_msg')){$('#upd_btn').disabled=false;return}
+  say('#upd_msg','','Downloading '+esc(asset.file)+'…');
   let blob;
   try{
     const r=await fetch(UPDATE_FEED+asset.file,{cache:'no-store'});
@@ -2475,9 +2486,6 @@ async function installUpdate(){
     $('#upd_btn').disabled=false;
     say('#upd_msg','err','Download is '+blob.size+' bytes, expected '+asset.size+' — truncated. Nothing was sent to the bridge.');
     return;
-  }
-  if(!sessionStorage.getItem('hg_auth')&&!await askAuth(false)){
-    $('#upd_btn').disabled=false;say('#upd_msg','err','Cancelled.');return;
   }
   // board and sha256 both travel: the firmware refuses an image built for another board, and one
   // that does not hash to what the release promised -- before the boot partition flips.
