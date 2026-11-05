@@ -480,11 +480,13 @@ MQTT / REST / Modbus / HA
 ```
 
 Two drivers do not answer `Unsupported`. `modbus_profile` declares `supportsWrite` and writes
-one holding register over FC06, and is dormant only because every `[[write]]` row in every
-shipped profile is `verified = false`. `sunspec` declares it too, implements `execute()` for the
-power limit (`WMaxLimPct` / `WMaxLim_Ena`) and connect/disconnect (`Conn`), and its gate is a
-device property rather than a review flag: it needs the inverter to have published SunSpec model
-123. Neither has ever written to a device.
+one holding register over FC06. It is dormant because every `[[write]]` row in every shipped
+profile is `verified = false`, and a row is served only when its profile also reads the setpoint
+back (see [write-path.md](device-profiles/write-path.md#a-read-back-is-required)). `sunspec`
+declares it too, implements `execute()` for the power limit (`WMaxLimPct` / `WMaxLim_Ena`) and
+connect/disconnect (`Conn`), and needs the inverter to have published SunSpec model 123. Both
+serve an unverified control only on a device whose `allow_unverified_writes` option is on, and
+only behind `read_only_mode` and `control.inverter_writes_enabled`. Neither has ever written to a device.
 
 The gate that holds for all of them is `security.read_only_mode`, earlier in the chain — with
 the exception named above under discovery, which is not a command and does not pass through it.

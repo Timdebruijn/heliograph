@@ -75,7 +75,8 @@ count = 24      # 37760-37783: LUNA2000 battery. Absent on an inverter without o
 [[block]]
 space = "holding"
 start = 40125
-count = 1       # 40125: the active-power limit, read back -- see the [[write]] row
+count = 1       # 40125: the active-power limit, read back for the [[write]] row. Its own block
+                # because 40125 is far from every other range; one transaction per poll
 
 # ------------------------------------------------------------------------------------------
 # THE SENTINEL, and the reason `invalid` exists in this schema.
@@ -283,6 +284,7 @@ space = "holding"
 address = 40125
 type = "s16"
 scale = 0.1
+invalid = 0x7FFF
 unit = "%"
 
 # ==============================================================================================

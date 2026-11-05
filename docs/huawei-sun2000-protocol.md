@@ -138,6 +138,13 @@ bidirectional values, where our canonical grid channels are two unsigned rails.
 The standard curtailment control on this family, and a single 16-bit register — the one shape this
 firmware's write path can serve. Dormant until `verified = true`.
 
+The same register is also **read**, as `control.active_power_limit` (s16, gain 10, `0x7FFF` =
+unavailable), from a one-register block of its own at 40125. That read-back is required before
+the write row can be served (see
+[write-path.md](device-profiles/write-path.md#a-read-back-is-required)). It costs one transaction
+per poll. A unit that does not answer it counts a timeout each cycle, which is the signal to
+drop the block again if a device turns out not to implement the read.
+
 Two things to establish on the bench before that flag moves:
 
 1. **Does the inverter accept FC06 for it?** This firmware sends nothing else.

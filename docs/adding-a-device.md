@@ -393,6 +393,10 @@ forum post. So the schema treats writes as *research to record*, not behavior to
   device, on a bench, by someone watching the inverter respond. A data file that could make
   an unreviewed device writable is not a feature but a liability, which is why this gate is
   in the data and not only in the code.
+- A row is served at all only when the profile **also reads the setpoint back** as a
+  `[[register]]` with the command's read-back measurement (`--list-commands` shows it), and
+  `verified = true` is refused without one — see
+  [write-path.md](device-profiles/write-path.md#a-read-back-is-required).
 - The driver's write path itself exists (one holding register, FC06, echo verified). What it
   deliberately **cannot** do — 32-bit setpoints, FC16, and a mode packed into part of a shared
   register

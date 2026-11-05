@@ -1083,7 +1083,8 @@ def main(argv: list[str]) -> int:
         return 0
     if "--list-commands" in argv:
         for cmd, enum in sorted(load_command_vocabulary().items()):
-            print(f"{cmd:36} ({enum})")
+            readback = READBACK.get(cmd)
+            print(f"{cmd:36} ({enum})" + (f" read back as {readback}" if readback else ""))
         return 0
     return run(check_only="--check" in argv)
 

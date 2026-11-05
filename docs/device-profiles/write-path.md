@@ -30,7 +30,8 @@ REST, or a republish on `<prefix>/command/result` over MQTT.
 2. **Inverter writes enabled.** `control.inverter_writes_enabled`, this path's own switch, off by
    default — so turning read-only mode off for the DRM relays does not open it as well.
 3. **Capability.** The driver must advertise the command in `capabilities()`. A profile row is
-   advertised only when it carries `verified = true`, or when the device's driver option
+   advertised only when the profile reads its setpoint back (see "A read-back is required"
+   below) AND it carries `verified = true` or the device's driver option
    `allow_unverified_writes` is `true` (a per-device opt-in for the bench check itself).
 4. **Range.** The value must sit inside the bounds the profile declared.
 5. **Rate limit.** One command per interval, so a stuck automation cannot hammer a setpoint.
@@ -133,7 +134,7 @@ device that reports the opposite sign convention.
 Writing a register does not make its value readable. A row is therefore served only when the
 profile **also reads the setpoint back** as the command's canonical measurement, for example
 `control.active_power_limit` for `set_active_power_limit_percent`. The pairs are listed in
-`READBACK` in `tools/gen_profiles.py`. The requirement holds with or without the
+`READBACK` in `tools/gen_profiles.py`, and `--list-commands` prints each one. The requirement holds with or without the
 `allow_unverified_writes` opt-in, and the generator refuses `verified = true` on a row without a
 read-back.
 

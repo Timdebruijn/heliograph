@@ -289,7 +289,7 @@ DeviceIdentity ModbusProfileDriver::identity() const {
 
 /// The write row for a command, or nullptr when this profile has none it can actually serve.
 ///
-/// Three separate reasons to say no, and they are checked here so that capabilities() and
+/// Four separate reasons to say no, and they are checked here so that capabilities() and
 /// execute() can never disagree about which commands exist -- a driver that ADVERTISES a
 /// setpoint and then refuses it is worse than one that never offered.
 const WriteMapping* ModbusProfileDriver::writeFor(InverterCommandType type) const {

@@ -259,7 +259,7 @@ unit = "%"
 # wiring and no relay board involved.
 #
 # Declaring it here does NOT enable anything. The row stays dormant until `verified = true`,
-# which requires a bench session: write a limit, read register 3 back, and confirm against
+# which requires a bench session: write a limit, read register 3 back (the control.active_power_limit row above), and confirm against
 # the inverter's own reported output that the limit actually took effect. Until then this is
 # documented research, not a control surface.
 #

@@ -910,6 +910,9 @@ DeviceProfile profileWith(const WriteMapping* writes, size_t count) {
 }
 
 /// Echoes a well-formed FC06 confirmation, which is what a device that accepted the write sends.
+///
+/// It does NOT answer the FC03 read execute() makes first to skip a value already held, so every
+/// test using it also proves that a failed pre-read never blocks the write.
 void echoWrites(MockTransport& t) {
     t.setResponder([](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
         if (req.size() < 6 || req[1] != 0x06) {

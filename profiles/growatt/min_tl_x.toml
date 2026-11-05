@@ -248,7 +248,7 @@ unit = "%"
 # same reason. Reversible by writing 100, touches no grid-protection setting, and the natural way
 # to curtail from Home Assistant when prices go negative.
 #
-# `verified = false` until a bench session writes a limit, reads register 3 back, and confirms
+# `verified = false` until a bench session writes a limit, reads register 3 back (the control.active_power_limit row above), and confirms
 # against the inverter's own reported output that it took effect. Note that verifying it on a MIC
 # does NOT verify it here: same register, different hardware, and the flag is per profile.
 #

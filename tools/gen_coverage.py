@@ -126,9 +126,14 @@ def render(profiles: list[dict]) -> str:
         for wr in p["writes"]:
             any_writes = True
             words, _ = gen_profiles.TYPES[wr["type"]]
-            # writeFor() serves a single-register FC06 row and nothing else.
-            servable = words == 1 and wr["function"] == "write_single"
-            reason = "yes" if servable else "no — needs FC16"
+            # writeFor() serves a single-register FC06 row whose setpoint the profile also reads
+            # back, and nothing else.
+            if not (words == 1 and wr["function"] == "write_single"):
+                reason = "no — needs FC16"
+            elif not wr["has_readback"]:
+                reason = "no — no read-back"
+            else:
+                reason = "yes"
             w(
                 f"| `{p['id']}` | `{wr['command']}` | holding {wr['address']} | "
                 f"{reason} | {'yes' if wr['verified'] else '**no**'} |"
