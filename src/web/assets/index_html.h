@@ -301,7 +301,10 @@ async function authFetch(url,opts={}){
   return r;
 }
 async function getJson(url){
-  const r=await fetch(url);
+  // A timeout, because refresh() runs one pass at a time: a reply that never comes (a
+  // half-dead WiFi socket can hang for minutes) would otherwise hold that pass open and freeze
+  // every tab. 10 s is several times the slowest /status measured on the prod bridge.
+  const r=await fetch(url,{signal:AbortSignal.timeout(10000)});
   // fetch does not reject on 5xx, and the error body is valid JSON -- rendering it would
   // fabricate a device with undefined everything, or a measurement count of 0, which is the
   // wrong-register-map tell.
@@ -2618,7 +2621,19 @@ function drawTab(){
     [cfg,panel,pending,b.firmware_version,b.hostname,b.board_id,b.time_synced,updLatest],
     paintBridge);
 }
+// One refresh in flight at a time. Every SSE event calls this, about once a second, and on WiFi
+// a /status reply can take two or three seconds: without the guard the requests piled up four
+// deep on the bridge, and the first refresh raced the first event so /config, /diagnostics and
+// /drivers were each fetched more than once. A call that lands mid-flight is not dropped -- it
+// asks for exactly one more pass when the current one finishes, so nothing goes stale.
+let refreshBusy=false, refreshAgain=false;
 async function refresh(){
+  if(refreshBusy){refreshAgain=true;return}
+  refreshBusy=true;
+  try{await refreshOnce()}
+  finally{refreshBusy=false;if(refreshAgain){refreshAgain=false;refresh()}}
+}
+async function refreshOnce(){
   try{
     S=await getJson('/api/v1/status');
     // One request feeds the whole Live tab: /status already carries devices[] and totals, so
