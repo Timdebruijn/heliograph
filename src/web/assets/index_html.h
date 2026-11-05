@@ -293,10 +293,14 @@ const authCancelled=()=>({ok:false,status:0,cancelled:true,
   json:async()=>({error:{code:'cancelled',message:'Admin password required.'}}),text:async()=>'',
   headers:{get:()=>null}});
 const httpWhy=r=>r.cancelled?'cancelled (admin password required)':'HTTP '+r.status;
-async function authFetch(url,opts={}){
+// timeoutMs, when given, bounds each request on its own: a single AbortSignal would also count
+// the time someone spends typing into the password dialog between the two fetches.
+async function authFetch(url,{timeoutMs,...opts}={}){
+  const go=()=>fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()},
+    ...(timeoutMs?{signal:AbortSignal.timeout(timeoutMs)}:{})});
   if(!sessionStorage.getItem('hg_auth')&&!await askAuth(false))return authCancelled();
   const used=sessionStorage.getItem('hg_auth');
-  let r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()}});
+  let r=await go();
   if(r.status===401){
     // Only discard what THIS request used: two tabs can be in flight with the same bad
     // credentials, and the second 401 must not wipe the ones just accepted.
@@ -304,7 +308,7 @@ async function authFetch(url,opts={}){
       clearAuth();
       if(!await askAuth(true))return authCancelled();
     }
-    r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()}});
+    r=await go();
   }
   if(r.status!==401)rememberUser();
   return r;
@@ -2445,10 +2449,29 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
   };
   send(true);
 }
+// Prove the password BEFORE any work: the OTA POST is the first request that checks it, so a
+// typo used to cost a 1.3 MB download (and its upload) before the bridge said 401. /logs is a
+// cheap admin-gated GET behind the same check as /ota; authFetch() re-asks on a wrong password,
+// as everywhere else. Times out after 10 s and never throws: both callers re-enable their
+// button on false.
+async function adminProven(msgSel){
+  let r;
+  try{r=await authFetch('/api/v1/logs?limit=1',{timeoutMs:10000})}
+  catch(e){say(msgSel,'err','Could not reach the bridge: '+esc(e.message)+' — nothing was sent.');return false}
+  if(r.ok)return true;
+  const d=await r.json().catch(()=>({}));
+  const why=r.cancelled?'Cancelled':r.status===401&&!(d.error&&d.error.message)?'Wrong password':
+    esc((d.error&&d.error.message)||httpWhy(r)).replace(/\.$/,'');
+  say(msgSel,'err',why+' — nothing was sent.');
+  return false;
+}
 async function otaUpload(){
   const f=$('#ota_file').files[0];
   if(!f){say('#ota_msg','err','Choose a firmware .bin first.');return}
-  if(!sessionStorage.getItem('hg_auth')&&!await askAuth(false)){say('#ota_msg','err','Cancelled.');return}
+  // Disabled across the check: upload() disables it too, but only once the check is done, and a
+  // second click in between would start a second OTA sharing this progress bar.
+  $('#ota_btn').disabled=true;
+  if(!await adminProven('#ota_msg')){$('#ota_btn').disabled=false;return}
   upload('/api/v1/ota',f,f.name,'#ota_btn','#ota_prog','#ota_msg',
     'Verified and installed. Rebooting into the new firmware — reload this page in ~15 seconds.');
 }
@@ -2456,8 +2479,9 @@ async function installUpdate(){
   const board=(S&&S.bridge&&S.bridge.board_id)||'';
   const asset=(updLatest&&(updLatest.boards||{})[board])||null;
   if(!asset)return;
-  say('#upd_msg','','Downloading '+esc(asset.file)+'…');
   $('#upd_btn').disabled=true;
+  if(!await adminProven('#upd_msg')){$('#upd_btn').disabled=false;return}
+  say('#upd_msg','','Downloading '+esc(asset.file)+'…');
   let blob;
   try{
     const r=await fetch(UPDATE_FEED+asset.file,{cache:'no-store'});
@@ -2475,9 +2499,6 @@ async function installUpdate(){
     $('#upd_btn').disabled=false;
     say('#upd_msg','err','Download is '+blob.size+' bytes, expected '+asset.size+' — truncated. Nothing was sent to the bridge.');
     return;
-  }
-  if(!sessionStorage.getItem('hg_auth')&&!await askAuth(false)){
-    $('#upd_btn').disabled=false;say('#upd_msg','err','Cancelled.');return;
   }
   // board and sha256 both travel: the firmware refuses an image built for another board, and one
   // that does not hash to what the release promised -- before the boot partition flips.
