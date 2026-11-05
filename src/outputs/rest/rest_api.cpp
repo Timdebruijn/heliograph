@@ -251,6 +251,20 @@ bool RestApi::begin() {
         // client asked: `curl /` needs --compressed, where it did not before.
         const uint8_t* html    = portal ? web::kSetupHtmlGz : web::kIndexHtmlGz;
         const size_t   htmlLen = portal ? web::kSetupHtmlGzLen : web::kIndexHtmlGzLen;
+        const char*    etag    = portal ? web::kSetupHtmlGzEtag : web::kIndexHtmlGzEtag;
+        // no-cache, or an OTA that changes the UI keeps showing the old page until the user
+        // happens to hard-refresh (seen live: the freshly added update card stayed invisible).
+        // no-cache means "revalidate", and the ETag is what makes revalidating cheap: without
+        // one every reload pulled the whole 39 KB again over WiFi, measured at 1.7 s in a
+        // browser on the prod bridge (2026-11-05). The tag is a hash of these exact bytes, so
+        // it moves with any change to the page and with the portal/dashboard switch.
+        if (request->header("If-None-Match") == etag) {
+            auto* notModified = request->beginResponse(304);
+            notModified->addHeader("ETag", etag);
+            notModified->addHeader("Cache-Control", "no-cache");
+            request->send(notModified);
+            return;
+        }
         auto* response = request->beginResponse(
             "text/html", htmlLen,
             [html, htmlLen](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
@@ -260,9 +274,7 @@ bool RestApi::begin() {
                 return n;
             });
         response->addHeader("Content-Encoding", "gzip");
-        // no-cache, or an OTA that changes the UI keeps showing the old page until the user
-        // happens to hard-refresh (seen live: the freshly added update card stayed invisible).
-        // The browser may still cache but must revalidate; the page is a few KB on a LAN.
+        response->addHeader("ETag", etag);
         response->addHeader("Cache-Control", "no-cache");
         request->send(response);
     });

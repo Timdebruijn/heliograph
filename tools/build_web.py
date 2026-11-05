@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import hashlib
 import pathlib
 import re
 import shutil
@@ -226,6 +227,9 @@ def as_c_array(name: str, data: bytes) -> str:
     return (
         f"inline const uint8_t {name}[] PROGMEM = {{\n{body}\n}};\n"
         f"inline constexpr size_t {name}Len = {len(data)};\n"
+        # A hash of the bytes served, so the ETag changes exactly when the page does: an OTA
+        # that changes the UI gets a fresh page, one that does not keeps answering 304.
+        f'inline constexpr char {name}Etag[] = "\\"{hashlib.sha256(data).hexdigest()[:16]}\\"";\n'
     )
 
 
