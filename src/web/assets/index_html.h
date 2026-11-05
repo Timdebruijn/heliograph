@@ -293,10 +293,14 @@ const authCancelled=()=>({ok:false,status:0,cancelled:true,
   json:async()=>({error:{code:'cancelled',message:'Admin password required.'}}),text:async()=>'',
   headers:{get:()=>null}});
 const httpWhy=r=>r.cancelled?'cancelled (admin password required)':'HTTP '+r.status;
-async function authFetch(url,opts={}){
+// timeoutMs, when given, bounds each request on its own: a single AbortSignal would also count
+// the time someone spends typing into the password dialog between the two fetches.
+async function authFetch(url,{timeoutMs,...opts}={}){
+  const go=()=>fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()},
+    ...(timeoutMs?{signal:AbortSignal.timeout(timeoutMs)}:{})});
   if(!sessionStorage.getItem('hg_auth')&&!await askAuth(false))return authCancelled();
   const used=sessionStorage.getItem('hg_auth');
-  let r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()}});
+  let r=await go();
   if(r.status===401){
     // Only discard what THIS request used: two tabs can be in flight with the same bad
     // credentials, and the second 401 must not wipe the ones just accepted.
@@ -304,7 +308,7 @@ async function authFetch(url,opts={}){
       clearAuth();
       if(!await askAuth(true))return authCancelled();
     }
-    r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()}});
+    r=await go();
   }
   if(r.status!==401)rememberUser();
   return r;
@@ -2448,10 +2452,11 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
 // Prove the password BEFORE any work: the OTA POST is the first request that checks it, so a
 // typo used to cost a 1.3 MB download (and its upload) before the bridge said 401. /logs is a
 // cheap admin-gated GET behind the same check as /ota; authFetch() re-asks on a wrong password,
-// as everywhere else. Never throws: both callers re-enable their button on false.
+// as everywhere else. Times out after 10 s and never throws: both callers re-enable their
+// button on false.
 async function adminProven(msgSel){
   let r;
-  try{r=await authFetch('/api/v1/logs?limit=1')}
+  try{r=await authFetch('/api/v1/logs?limit=1',{timeoutMs:10000})}
   catch(e){say(msgSel,'err','Could not reach the bridge: '+esc(e.message)+' — nothing was sent.');return false}
   if(r.ok)return true;
   const d=await r.json().catch(()=>({}));
@@ -2463,7 +2468,10 @@ async function adminProven(msgSel){
 async function otaUpload(){
   const f=$('#ota_file').files[0];
   if(!f){say('#ota_msg','err','Choose a firmware .bin first.');return}
-  if(!await adminProven('#ota_msg'))return;
+  // Disabled across the check: upload() disables it too, but only once the check is done, and a
+  // second click in between would start a second OTA sharing this progress bar.
+  $('#ota_btn').disabled=true;
+  if(!await adminProven('#ota_msg')){$('#ota_btn').disabled=false;return}
   upload('/api/v1/ota',f,f.name,'#ota_btn','#ota_prog','#ota_msg',
     'Verified and installed. Rebooting into the new firmware — reload this page in ~15 seconds.');
 }
