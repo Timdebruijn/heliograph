@@ -2030,6 +2030,33 @@ static void test_an_unverified_row_is_neither_advertised_nor_executed() {
     TEST_ASSERT_EQUAL_UINT32(0, transport.writes.size());
 }
 
+/// The bench-test opt-in: the same unverified row goes live on a device whose admin has said so,
+/// and only there. The option is parsed through the descriptor, as a stored config would be.
+static void test_an_unverified_row_goes_live_only_with_the_devices_opt_in() {
+    DriverOptions values{{"allow_unverified_writes", "true"}};
+    TEST_ASSERT_TRUE(optionsFrom(values).allowUnverifiedWrites);
+    TEST_ASSERT_FALSE(optionsFrom({}).allowUnverifiedWrites);
+    DriverOptionError error;
+    TEST_ASSERT_TRUE(validateDriverOptions(descriptor(), values, error));
+    values["allow_unverified_writes"] = "yes";
+    TEST_ASSERT_FALSE(validateDriverOptions(descriptor(), values, error));
+
+    MockTransport transport;
+    echoWrites(transport);
+    DeviceProfile profile = profileWith(kUnverifiedWrites, 1);
+    ProfileOptions options;
+    options.profile               = &profile;
+    options.allowUnverifiedWrites = true;
+    ModbusProfileDriver driver(transport, options);
+
+    TEST_ASSERT_TRUE(driver.capabilities().canWrite(InverterCapability::SetActivePowerLimit));
+    InverterCommand cmd;
+    cmd.type         = InverterCommandType::SetActivePowerLimitPercent;
+    cmd.numericValue = 60.0;
+    TEST_ASSERT_EQUAL(CommandResult::Ok, driver.execute(cmd));
+    TEST_ASSERT_EQUAL_UINT32(1, transport.writes.size());
+}
+
 static void test_a_verified_row_becomes_an_advertised_setpoint() {
     MockTransport  transport;
     DeviceProfile profile = profileWith(kTestWrites, 1);
@@ -2601,6 +2628,7 @@ int main(int, char**) {
     RUN_TEST(test_every_profile_status_has_a_stable_name);
     RUN_TEST(test_the_profile_option_labels_line_up_with_their_values);
     RUN_TEST(test_an_unverified_row_is_neither_advertised_nor_executed);
+    RUN_TEST(test_an_unverified_row_goes_live_only_with_the_devices_opt_in);
     RUN_TEST(test_a_verified_row_becomes_an_advertised_setpoint);
     RUN_TEST(test_a_verified_row_writes_the_register_it_names);
     RUN_TEST(test_a_mode_row_writes_the_declared_value_not_the_selection_index);

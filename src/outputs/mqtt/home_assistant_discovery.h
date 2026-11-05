@@ -51,13 +51,23 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
                                                     const std::string& discoveryPrefix,
                                                     const std::string& uniqueBase);
 
+/// Empty retained configs for every control entity buildDiscoveryEntities() does NOT announce
+/// for this device, so a control disappears from Home Assistant when a write gate closes or its
+/// capability goes away (e.g. a device's unverified-writes opt-in turned off), instead of
+/// lingering as a control that bounces back. Publishing an empty config to a topic that was
+/// never announced is a no-op for Home Assistant.
+std::vector<DiscoveryEntity> buildCommandRemovals(const DeviceState& state,
+                                                  const BridgeInfo&  bridge,
+                                                  const std::string& discoveryPrefix,
+                                                  const std::string& uniqueBase);
+
 /// Diagnostic entities for the bridge itself (RSSI, uptime, heap, poll counters).
 std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  bridge,
                                                            const MqttTopics&  topics,
                                                            const std::string& discoveryPrefix);
 
 /// Switch entities for the bridge's own relays (DRM contacts). Announced only while
-/// bridge.relaysEnabled; for a relay board with the feature disabled the same config
+/// bridge.relaysOpen() -- relays enabled AND read-only mode off; for a relay board with the feature disabled the same config
 /// topics get EMPTY payloads so stale switches are removed from Home Assistant. A board
 /// without relays (relayCount 0) produces nothing at all.
 std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
@@ -76,7 +86,10 @@ std::string sanitizeId(const std::string& measurementId);
 /// every pass (~4 Hz), and a std::string here meant a heap allocation per pass, forever --
 /// ~350k/day of steady churn on a months-uptime device for a value that only ever gets
 /// compared. Collisions are theoretical at the scale of "a few dozen short ids".
-uint64_t discoverySignature(const DeviceState& state);
+///
+/// `commandsOpen` is bridge.inverterWritesOpen(): the control entities come and go with that
+/// gate, so it has to move the fingerprint too, or closing it would leave them in place.
+uint64_t discoverySignature(const DeviceState& state, bool commandsOpen);
 
 /// Same idea for an ordered list of strings (the configured relay roles): order-sensitive,
 /// allocation-free change detection.

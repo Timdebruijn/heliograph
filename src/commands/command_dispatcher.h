@@ -43,7 +43,14 @@ public:
     void setReadOnlyMode(bool readOnly) { readOnly_ = readOnly; }
     bool readOnlyMode() const { return readOnly_; }
 
-    /// Checks, in order: read-only mode, capability, value range, rate limit. Only then does
+    /// The inverter-write path's own enable (control.inverter_writes_enabled), checked right
+    /// after the kill switch. Separate from it so that turning read-only mode off for the DRM
+    /// relays does not, by itself, open the inverter-write path as well. Off by default and
+    /// atomic for the same reason readOnly_ is.
+    void setWritesEnabled(bool enabled) { writesEnabled_ = enabled; }
+    bool writesEnabled() const { return writesEnabled_; }
+
+    /// Checks, in order: read-only mode, the write path's enable, capability, value range, rate limit. Only then does
     /// the command reach the driver.
     ///
     /// Thread-safe for its own state. CommandSource names Mqtt, Rest, ModbusTcp and Web, and the
@@ -75,6 +82,7 @@ private:
     /// stays because allowedAsRelease() needs the interval and is not a RateLimiter.
     RateLimitPolicy   rateLimit_;
     std::atomic<bool> readOnly_{true};
+    std::atomic<bool> writesEnabled_{false};
 
     /// Guards the rate-limiter fields below, and nothing else.
     std::mutex m_;

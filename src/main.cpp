@@ -881,6 +881,11 @@ BridgeInfo bridgeInfo() {
                                       g_coredump.backtrace + g_coredump.backtraceDepth);
         info.coredumpBacktraceCorrupted = g_coredump.backtraceCorrupted;
     }
+    {
+        std::lock_guard<std::mutex> lock(g_configMutex);
+        info.readOnlyMode          = g_config.security.readOnlyMode;
+        info.inverterWritesEnabled = g_config.control.inverterWritesEnabled;
+    }
     if (g_relays.count() > 0) {
         {
             std::lock_guard<std::mutex> lock(g_relayMutex);
@@ -1248,6 +1253,7 @@ void startRestApi() {
             }
         }
         g_commandDispatcher.setReadOnlyMode(c.security.readOnlyMode);
+        g_commandDispatcher.setWritesEnabled(c.control.inverterWritesEnabled);
     };
     ctx.bridgeInfo  = bridgeInfo;
     ctx.clock       = nowMs;
@@ -1842,6 +1848,7 @@ void setup() {
     g_relays.setReadOnlyMode(g_config.security.readOnlyMode);
     g_relays.setEnabled(g_config.relays.enabled);
     g_commandDispatcher.setReadOnlyMode(g_config.security.readOnlyMode);
+    g_commandDispatcher.setWritesEnabled(g_config.control.inverterWritesEnabled);
 
     // BOOT button, status LED and buzzer on boards that have them (6CH). No-op elsewhere.
     initOnboardIndicators();

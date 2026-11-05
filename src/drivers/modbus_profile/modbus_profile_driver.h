@@ -32,6 +32,8 @@ struct ProfileOptions {
     /// Which register-map profile to use. Profiles are data (profiles/<vendor>/*.toml), not code
     /// paths, so a new family or a new brand slots in as a new TOML file.
     const DeviceProfile* profile = &defaultProfile();
+    /// Serve `[[write]]` rows still marked `verified = false`. See allowUnverifiedWritesOption().
+    bool allowUnverifiedWrites = false;
 };
 
 ProfileOptions optionsFrom(const heliograph::DriverOptions& values);

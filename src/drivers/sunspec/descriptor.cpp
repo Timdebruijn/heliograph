@@ -67,7 +67,8 @@ const DriverDescriptor& descriptor() {
                                          // its own parser and locked out base 0, which is one
                                          // of the standard SunSpec bases. The marker is two
                                          // registers, so 65534 still fits (review).
-                                         0, 65534}};
+                                         0, 65534},
+            allowUnverifiedWritesOption()};
         return x;
     }();
     return d;
@@ -96,6 +97,7 @@ std::unique_ptr<InverterDriver> factory(Transport& transport, const DriverOption
         log::warn("SUNSPEC base_address '%s' invalid, using %u",
                   d.optionOr(options, "base_address").c_str(), static_cast<unsigned>(o.baseAddress));
     }
+    o.allowUnverifiedWrites = allowsUnverifiedWrites(d, options);
     return std::make_unique<SunspecDriver>(o);
 }
 

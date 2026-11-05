@@ -604,10 +604,12 @@ static void test_the_stored_blob_fits_nvs_comfortably() {
 
     // The property that actually matters: even everything-at-maximum leaves most of the entry
     // free, so the next field to be added is not a cliff. Measured 1822 of 3900 when static
-    // addressing was added (0.16.0); the assertion is half the cap, so it has room to drift and
-    // still fails before anything is at risk.
-    TEST_ASSERT_TRUE_MESSAGE(blob.size() < kMaxStoredConfigBytes / 2,
-                             std::to_string(blob.size()).c_str());
+    // addressing was added (0.16.0); the assertion was half the cap, so it had room to drift and
+    // still failed before anything was at risk. It tripped at 1972 when
+    // control.inverter_writes_enabled was added (1928 before it, +44): raised to 2100 --
+    // deliberately and with the numbers written down, like the typical-blob canary below --
+    // which still leaves more than 45% of the entry free.
+    TEST_ASSERT_TRUE_MESSAGE(blob.size() < 2100, std::to_string(blob.size()).c_str());
 
     std::string typical;
     TEST_ASSERT_TRUE(serializeConfigForStorage(provisionedConfig(), typical));

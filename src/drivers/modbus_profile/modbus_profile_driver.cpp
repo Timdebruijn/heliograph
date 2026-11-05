@@ -68,6 +68,7 @@ ProfileOptions optionsFrom(const heliograph::DriverOptions& values) {
                       defaultProfile().id);
         }
     }
+    o.allowUnverifiedWrites = allowsUnverifiedWrites(descriptor(), values);
     return o;
 }
 
@@ -299,8 +300,9 @@ const WriteMapping* ModbusProfileDriver::writeFor(InverterCommandType type) cons
         }
         // Unverified rows are documented research, not a control surface. A row goes live only
         // when somebody has written the register on real hardware, read it back, and confirmed
-        // against the inverter's own reported output that it took effect.
-        if (!w.verified) {
+        // against the inverter's own reported output that it took effect -- or, for that bench
+        // check itself, when the admin has opted this one device in.
+        if (!w.verified && !options_.allowUnverifiedWrites) {
             return nullptr;
         }
         // The Modbus client speaks FC06 only. A row needing FC16 -- more than one register, or

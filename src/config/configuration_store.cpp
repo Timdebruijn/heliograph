@@ -223,6 +223,10 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
     if (JsonObjectConst polling = doc["polling"]; !polling.isNull()) {
         if (polling["interval_seconds"].is<uint32_t>()) parsed.polling.intervalSeconds = polling["interval_seconds"].as<uint32_t>();
     }
+    if (JsonObjectConst control = doc["control"]; !control.isNull()) {
+        if (control["inverter_writes_enabled"].is<bool>())
+            parsed.control.inverterWritesEnabled = control["inverter_writes_enabled"].as<bool>();
+    }
     if (JsonObjectConst relays = doc["relays"]; !relays.isNull()) {
         if (relays["enabled"].is<bool>()) parsed.relays.enabled = relays["enabled"].as<bool>();
         if (JsonArrayConst roles = relays["roles"]; !roles.isNull()) {

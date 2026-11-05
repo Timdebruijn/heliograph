@@ -435,7 +435,9 @@ InverterCapabilities SunspecDriver::capabilities() const {
     // from the scale factor inside it. A capability offered before that would be a control
     // surface with invented limits, and the first thing anybody does with a power limit is
     // drag it to a number.
-    if (!controlsRead_) {
+    //
+    // And only for a device the admin has opted in: see SunspecOptions::allowUnverifiedWrites.
+    if (!controlsRead_ || !options_.allowUnverifiedWrites) {
         return c;
     }
     const LimitBounds bounds = limitBounds(controls_.limitScale);
@@ -495,7 +497,7 @@ CommandResult SunspecDriver::execute(const InverterCommand& command) {
     // Every gate is a real one: the capability set above is what the dispatcher checks, and it
     // is absent unless this device published a model 123 that could be read. The checks here
     // are the driver's own, for a caller that reached execute() another way.
-    if (controlsEntry_ == nullptr || !controlsRead_) {
+    if (controlsEntry_ == nullptr || !controlsRead_ || !options_.allowUnverifiedWrites) {
         return CommandResult::Unsupported;
     }
 

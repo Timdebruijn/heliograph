@@ -42,6 +42,10 @@ inline BridgeInfo makeBridge() {
     b.uptimeSeconds   = 86400;
     b.freeHeapBytes   = 180000;
     b.firmwareVersion = "0.1.0";
+    // Gates open, so a test about what a control entity LOOKS like is not silently a test of
+    // the gates. The gates' own tests close them explicitly.
+    b.readOnlyMode          = false;
+    b.inverterWritesEnabled = true;
     return b;
 }
 

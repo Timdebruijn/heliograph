@@ -523,6 +523,7 @@ void writeCommon(JsonDocument& doc, const Configuration& config) {
     doc["polling"]["interval_seconds"] = config.polling.intervalSeconds;
 
     doc["relays"]["enabled"] = config.relays.enabled;
+    doc["control"]["inverter_writes_enabled"] = config.control.inverterWritesEnabled;
     JsonArray relayRoles     = doc["relays"]["roles"].to<JsonArray>();
     for (const auto& role : config.relays.roles) {
         relayRoles.add(role);
@@ -610,7 +611,7 @@ bool configChangeRequiresReboot(const Configuration& a, const Configuration& b) 
     // any of these via PATCH updates NVS but not the running object, so it needs a restart.
     //
     // Deliberately NOT here (applied live by ctx.applyConfig): bridge_name (read fresh on
-    // every status), relays.* (gates re-applied immediately), security.* (read per request),
+    // every status), relays.* and control.* (gates re-applied immediately), security.* (read per request),
     // logging.level (setLevel called from applyConfig), updates.check_enabled (the dashboard
     // reads it when it renders, and the check runs in the browser -- the firmware never acts on
     // it). timezone_name and write_enabled carry no runtime effect. This set mirrors
@@ -922,6 +923,11 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
         merged.serial.enabled = false;
     }
 
+
+    if (JsonObjectConst control = doc["control"]; !control.isNull()) {
+        if (!patchBool(control["inverter_writes_enabled"], merged.control.inverterWritesEnabled,
+                       "control.inverter_writes_enabled", error)) return false;
+    }
 
     if (JsonObjectConst ntp = doc["ntp"]; !ntp.isNull()) {
         if (!patchBool(ntp["enabled"], merged.ntp.enabled, "ntp.enabled", error)) return false;

@@ -164,6 +164,16 @@ struct RelaySettings {
     std::vector<std::string> roles;
 };
 
+/// The inverter-write path's own switch, beside relays.enabled for the DRM path.
+///
+/// security.readOnlyMode is the master switch and refuses everything. Under it, each control
+/// path has its own enable, so opening one does not open the other: an installation that
+/// curtails over DRM relays must not also start accepting Modbus/SunSpec setpoints because the
+/// master switch went off. Off by default, like every other gate.
+struct ControlSettings {
+    bool inverterWritesEnabled = false;
+};
+
 /// Whether the dashboard looks for a newer firmware release.
 ///
 /// The check runs in the BROWSER, not on the bridge: the page fetches a small JSON from the
@@ -230,6 +240,7 @@ struct Configuration {
     /// as "all of them", and a client that iterated it would silently skip the first inverter.
     std::vector<DriverSettings> additionalDevices;
     RelaySettings    relays;
+    ControlSettings  control;
     NtpSettings      ntp;
     UpdateSettings   updates;
     SerialOverride   serial;

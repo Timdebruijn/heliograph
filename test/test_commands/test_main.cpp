@@ -75,6 +75,38 @@ static void test_read_only_mode_is_the_default() {
     TEST_ASSERT_TRUE(d.readOnlyMode());
 }
 
+static void test_write_path_is_closed_by_default_even_without_read_only_mode() {
+    // Turning read-only mode off -- which the DRM relays need -- must not by itself open the
+    // inverter-write path. A writable driver behind a closed write gate is never reached.
+    mock::MockOptions o;
+    o.writable = true;
+    mock::MockDriver driver(clockFn, o);
+
+    CommandDispatcher d(clockFn);
+    TEST_ASSERT_FALSE(d.writesEnabled());
+    d.setReadOnlyMode(false);
+    const auto out = d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 50.0), driver);
+    TEST_ASSERT_EQUAL(CommandResult::Rejected, out.result);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.acceptedCommands());
+
+    d.setWritesEnabled(true);
+    const auto open = d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 50.0), driver);
+    TEST_ASSERT_EQUAL(CommandResult::Ok, open.result);
+    TEST_ASSERT_EQUAL_UINT32(1, driver.acceptedCommands());
+}
+
+static void test_read_only_mode_beats_an_enabled_write_path() {
+    mock::MockOptions o;
+    o.writable = true;
+    mock::MockDriver driver(clockFn, o);
+
+    CommandDispatcher d(clockFn);
+    d.setWritesEnabled(true);  // read-only mode stays at its default, on
+    const auto out = d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 50.0), driver);
+    TEST_ASSERT_EQUAL(CommandResult::ReadOnlyMode, out.result);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.acceptedCommands());
+}
+
 // --- capability gating ---------------------------------------------------------------------
 
 static void test_read_only_driver_rejects_on_capability_not_identity() {
@@ -84,6 +116,7 @@ static void test_read_only_driver_rejects_on_capability_not_identity() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     for (size_t i = 0; i < kCommandTypeCount; ++i) {
         const auto out = d.dispatch(cmd(static_cast<InverterCommandType>(i), 50.0), driver);
@@ -100,6 +133,7 @@ static void test_eversolar_driver_rejects_everything_even_with_the_gate_open() {
 
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     for (size_t i = 0; i < kCommandTypeCount; ++i) {
         const auto out = d.dispatch(cmd(static_cast<InverterCommandType>(i), 50.0), driver);
@@ -114,6 +148,7 @@ static void test_a_capability_the_driver_lacks_is_rejected() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     const auto out = d.dispatch(cmd(InverterCommandType::SetMinimumSoc, 20.0), driver);
     TEST_ASSERT_EQUAL(CommandResult::Unsupported, out.result);
@@ -125,6 +160,7 @@ static void test_a_granted_capability_reaches_the_driver() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     const auto out = d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 60.0), driver);
     TEST_ASSERT_EQUAL(CommandResult::Ok, out.result);
@@ -140,6 +176,7 @@ static void test_value_above_the_maximum_is_rejected() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     const auto out = d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 101.0), driver);
     TEST_ASSERT_EQUAL(CommandResult::OutOfRange, out.result);
@@ -152,6 +189,7 @@ static void test_value_below_the_minimum_is_rejected() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     TEST_ASSERT_EQUAL(CommandResult::OutOfRange,
                       d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, -1.0), driver)
@@ -164,6 +202,7 @@ static void test_the_bounds_themselves_are_accepted() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     TEST_ASSERT_EQUAL(CommandResult::Ok,
                       d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 0.0), driver)
@@ -179,6 +218,7 @@ static void test_nan_is_rejected() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     const auto out =
         d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, std::nan("")), driver);
@@ -191,6 +231,7 @@ static void test_a_value_off_the_step_grid_is_rejected() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     // Watts have a step of 10.
     TEST_ASSERT_EQUAL(CommandResult::OutOfRange,
@@ -207,6 +248,7 @@ static void test_a_missing_value_for_a_numeric_command_is_rejected() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     InverterCommand c;
     c.type = InverterCommandType::SetActivePowerLimitPercent;  // no numericValue
@@ -219,6 +261,7 @@ static void test_a_non_numeric_command_needs_no_value() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     InverterCommand c;
     c.type = InverterCommandType::Stop;  // StartStop has no numeric bounds
@@ -236,6 +279,7 @@ static void test_burst_is_allowed_then_throttled() {
     rl.burst         = 3;
     CommandDispatcher d(clockFn, rl);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     for (int i = 0; i < 3; ++i) {
         TEST_ASSERT_EQUAL(CommandResult::Ok,
@@ -257,6 +301,7 @@ static void test_the_allowance_refills_after_a_quiet_period() {
     rl.burst         = 3;
     CommandDispatcher d(clockFn, rl);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     for (int i = 0; i < 4; ++i) {
         d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 50.0), driver);
@@ -291,6 +336,7 @@ static void test_a_rejected_command_does_not_consume_the_allowance() {
     rl.burst         = 3;
     CommandDispatcher d(clockFn, rl);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     for (int i = 0; i < 10; ++i) {
         d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 999.0), driver);  // invalid
@@ -317,6 +363,7 @@ static void test_every_rejection_explains_itself() {
     TEST_ASSERT_TRUE(out.reason.find("read-only") != std::string::npos);
 
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
     out = d.dispatch(cmd(InverterCommandType::SetMinimumSoc, 20.0), driver);
     TEST_ASSERT_TRUE(out.reason.find("set_minimum_soc") != std::string::npos);
 
@@ -364,6 +411,7 @@ static void test_a_declared_write_without_published_bounds_is_refused_not_waved_
     BoundlessDriver   driver;
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     const auto out = d.dispatch(cmd(InverterCommandType::SetActivePowerLimitWatts, 1e9), driver);
 
@@ -375,6 +423,7 @@ static void test_a_value_less_command_on_a_boundless_driver_is_also_refused() {
     BoundlessDriver   driver;
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     InverterCommand c;
     c.type = InverterCommandType::SetActivePowerLimitPercent;  // no numericValue at all
@@ -428,6 +477,7 @@ static void test_a_declared_mode_write_without_published_modes_is_refused() {
     BoundlessModeDriver driver;
     CommandDispatcher   d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     InverterCommand c;
     c.type      = InverterCommandType::SetBatteryOperatingMode;
@@ -443,6 +493,7 @@ static void test_an_undeclared_mode_is_refused_by_the_gate() {
     ModeDriver        driver;
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     InverterCommand c;
     c.type      = InverterCommandType::SetBatteryOperatingMode;
@@ -457,6 +508,7 @@ static void test_a_mode_command_without_a_selection_is_refused() {
     ModeDriver        driver;
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     InverterCommand c;
     c.type = InverterCommandType::SetBatteryOperatingMode;  // no enumValue
@@ -470,6 +522,7 @@ static void test_a_mode_command_with_a_selection_reaches_the_driver() {
     ModeDriver        driver;
     CommandDispatcher d(clockFn);
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     InverterCommand c;
     c.type      = InverterCommandType::SetBatteryOperatingMode;
@@ -493,6 +546,7 @@ static void test_start_is_never_throttled() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn, RateLimitPolicy{1000, 1});
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     // Burn the whole allowance on a restricting command.
     TEST_ASSERT_EQUAL(CommandResult::Ok,
@@ -518,6 +572,7 @@ static void test_a_limit_at_its_maximum_still_pays_for_a_token() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn, RateLimitPolicy{1000, 1});
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     TEST_ASSERT_EQUAL(CommandResult::Ok,
                       d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 20.0),
@@ -535,6 +590,7 @@ static void test_run_state_commands_are_spaced_but_never_starved() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn, RateLimitPolicy{1000, 2});
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     InverterCommand start;
     start.type = InverterCommandType::Start;
@@ -566,6 +622,7 @@ static void test_stop_is_not_starved_by_restricting_traffic() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn, RateLimitPolicy{1000, 1});
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     TEST_ASSERT_EQUAL(CommandResult::Ok,
                       d.dispatch(cmd(InverterCommandType::SetActivePowerLimitPercent, 20.0),
@@ -588,6 +645,7 @@ static void test_a_backwards_clock_does_not_refill_the_allowance() {
     mock::MockDriver  driver(clockFn, o);
     CommandDispatcher d(clockFn, RateLimitPolicy{1000, 1});
     d.setReadOnlyMode(false);
+    d.setWritesEnabled(true);
 
     g_now = 100000;
     TEST_ASSERT_EQUAL(CommandResult::Ok,
@@ -882,6 +940,8 @@ int main(int, char**) {
     RUN_TEST(test_read_only_mode_rejects_every_command_type);
     RUN_TEST(test_read_only_mode_beats_a_driver_that_claims_write_capability);
     RUN_TEST(test_read_only_mode_is_the_default);
+    RUN_TEST(test_write_path_is_closed_by_default_even_without_read_only_mode);
+    RUN_TEST(test_read_only_mode_beats_an_enabled_write_path);
     RUN_TEST(test_read_only_driver_rejects_on_capability_not_identity);
     RUN_TEST(test_eversolar_driver_rejects_everything_even_with_the_gate_open);
     RUN_TEST(test_a_capability_the_driver_lacks_is_rejected);

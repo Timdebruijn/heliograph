@@ -44,6 +44,10 @@ inline constexpr size_t kMaxChainEntries = 32;
 struct SunspecOptions {
     uint8_t  unitId      = 1;
     uint16_t baseAddress = kDefaultBaseAddress;
+    /// Model 123 controls are offered only with this set. SunSpec has no per-row `verified`
+    /// flag, and a standard model is still one vendor's implementation of it, so until a device
+    /// has been confirmed on the bench every SunSpec write is an unverified one.
+    bool allowUnverifiedWrites = false;
 };
 
 /// One block on the chain, as advertised by the device.

@@ -294,6 +294,10 @@ bool MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
                                                 channel.uniqueBase)) {
         ok = publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str()) && ok;
     }
+    for (const auto& e : buildCommandRemovals(state, bridge, config_.discoveryPrefix,
+                                              channel.uniqueBase)) {
+        ok = publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str()) && ok;
+    }
     // Bridge entities belong to the bridge and are announced once -- publishing them per
     // device would create N copies of the same RSSI sensor. Tied to the bridge-scoped channel
     // rather than to whichever channel happens to be first in the vector.
@@ -451,7 +455,7 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
             }
         }
 
-        const auto signature = discoverySignature(state);
+        const auto signature = discoverySignature(state, bridge.inverterWritesOpen());
         if (!channel.discoveryPublished || signature != channel.discoveredSignature) {
             // Commit only on success: a refused publish must not look delivered here either --
             // the same rule forgetDevice() already applies below. Leaving both fields untouched
@@ -482,8 +486,9 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         // and a ROLE change renames switches, rebuilds the select options and changes the
         // derived mode -- both force a discovery re-announce; a mask change just acks.
         const uint64_t rolesSig = stringListFingerprint(bridge.relayRoles);
-        if (bridge.relaysEnabled != lastRelaysEnabled_ || rolesSig != lastRelayRolesSig_) {
-            lastRelaysEnabled_  = bridge.relaysEnabled;
+        // "Enabled" here is the whole gate, read-only mode included: the switches follow it.
+        if (bridge.relaysOpen() != lastRelaysEnabled_ || rolesSig != lastRelayRolesSig_) {
+            lastRelaysEnabled_  = bridge.relaysOpen();
             lastRelayRolesSig_  = rolesSig;
             // Relay entities ride along with the bridge-scoped channel's announcement.
             for (auto& c : channels_) {
