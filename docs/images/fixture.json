@@ -3,7 +3,7 @@
     "bridge": {
       "id": "heliograph-a1b2c3",
       "name": "Heliograph",
-      "firmware_version": "0.29.0 (Oct 22 2026 15:11:53)",
+      "firmware_version": "0.31.2 (Nov  3 2026 20:29:52)",
       "board_id": "rs485-can",
       "ip_address": "192.168.1.50",
       "ip_mode": "dhcp",
@@ -11,18 +11,18 @@
       "devices_configured": 1,
       "devices_started": 1,
       "device_problems": [],
-      "uptime_seconds": 346921,
+      "uptime_seconds": 87160,
       "wifi_connected": true,
-      "wifi_rssi_dbm": -49,
+      "wifi_rssi_dbm": -58,
       "mqtt_connected": true,
       "modbus_listening": true,
       "modbus_clients": 0,
       "time_synced": true,
-      "time": "2026-10-26 16:35:53",
-      "ntp_last_sync": "2026-10-26 16:13:59",
+      "time": "2026-11-05 10:38:44",
+      "ntp_last_sync": "2026-11-05 10:26:13",
       "ntp_server": "pool.ntp.org",
       "ntp_server_source": "dhcp",
-      "free_heap_bytes": 153840,
+      "free_heap_bytes": 152600,
       "boot_button_pressed": false
     },
     "device": {
@@ -37,79 +37,79 @@
       "data_valid": true,
       "data_stale": false,
       "consecutive_poll_failures": 0,
-      "last_successful_poll_seconds_ago": 4
+      "last_successful_poll_seconds_ago": 9
     },
     "measurements": {
       "ac.power.total": {
-        "value": 11,
+        "value": 192,
         "unit": "W",
         "valid": true,
         "stale": false
       },
       "ac.phase_l1.voltage": {
-        "value": 228.1,
+        "value": 233.9,
         "unit": "V",
         "valid": true,
         "stale": false
       },
       "ac.phase_l1.current": {
-        "value": 0.3,
+        "value": 0.8,
         "unit": "A",
         "valid": true,
         "stale": false
       },
       "ac.frequency": {
-        "value": 49.98,
+        "value": 50.01,
         "unit": "Hz",
         "valid": true,
         "stale": false
       },
       "dc.mppt_1.voltage": {
-        "value": 327.5,
+        "value": 415.5,
         "unit": "V",
         "valid": true,
         "stale": false
       },
       "dc.mppt_1.current": {
-        "value": 0.1,
+        "value": 0.5,
         "unit": "A",
         "valid": true,
         "stale": false
       },
       "dc.mppt_1.power": {
-        "value": 32.75,
+        "value": 207.75,
         "unit": "W",
         "valid": true,
         "stale": false,
         "derived": true
       },
       "dc.power.total": {
-        "value": 32.75,
+        "value": 207.75,
         "unit": "W",
         "valid": true,
         "stale": false,
         "derived": true
       },
       "energy.today": {
-        "value": 3.5,
+        "value": 0.3,
         "unit": "kWh",
         "valid": true,
         "stale": false
       },
       "energy.total": {
-        "value": 36494.1,
+        "value": 36535.8,
         "unit": "kWh",
         "valid": true,
         "stale": false
       },
       "inverter.temperature": {
-        "value": 25.4,
+        "value": 24.8,
         "unit": "\u00b0C",
         "valid": true,
         "stale": false
       },
       "inverter.operating_hours": {
-        "value": 48724,
+        "value": 48817,
         "unit": "h",
         "valid": true,
         "stale": false
@@ -126,27 +126,27 @@
         "data_valid": true,
         "data_stale": false,
         "modbus_unit_id": 1,
-        "last_successful_poll_seconds_ago": 4,
-        "energy_today_kwh": 3.5,
-        "ac_voltage_v": 228.1,
-        "temperature_c": 25.4,
+        "last_successful_poll_seconds_ago": 9,
+        "energy_today_kwh": 0.3,
+        "ac_voltage_v": 233.9,
+        "temperature_c": 24.8,
         "battery_soc_pct": null,
         "battery_power_w": null,
-        "ac_power_w": 11
+        "ac_power_w": 192
       }
     ],
     "totals": {
       "devices_answering": 1,
       "devices_polled": 1,
-      "ac_power_w": 11,
+      "ac_power_w": 192,
       "ac_power_devices": 1,
-      "energy_today_kwh": 3.5,
+      "energy_today_kwh": 0.3,
       "energy_today_devices": 1,
-      "energy_total_kwh": 36494.1,
+      "energy_total_kwh": 36535.8,
       "energy_total_devices": 1
     },
-    "poll_success_total": 14522,
-    "poll_failure_total": 3317
+    "poll_success_total": 3641,
+    "poll_failure_total": 835
   },
   "config": {
     "version": 2,
@@ -212,7 +212,7 @@
       "check_enabled": true
     },
     "logging": {
-      "level": "trace"
+      "level": "info"
     },
     "security": {
       "password_set": true,
@@ -220,14 +220,14 @@
     }
   },
   "diagnostics": {
-    "uptime_seconds": 346921,
-    "firmware_version": "0.29.0 (Oct 22 2026 15:11:53)",
+    "uptime_seconds": 87162,
+    "firmware_version": "0.31.2 (Nov  3 2026 20:29:52)",
     "board": "Waveshare ESP32-S3-RS485-CAN",
-    "free_heap_bytes": 154088,
-    "minimum_free_heap_bytes": 104592,
-    "max_alloc_heap_bytes": 102388,
+    "free_heap_bytes": 152840,
+    "minimum_free_heap_bytes": 98644,
+    "max_alloc_heap_bytes": 94196,
     "psram_size_bytes": 8388608,
-    "psram_free_bytes": 8368144,
+    "psram_free_bytes": 8367636,
     "reset_reason": 3,
     "ota_image_state": "valid",
     "coredump_present": false,
@@ -237,36 +237,36 @@
     "coredump_cause_name": null,
     "coredump_fault_address": null,
     "wifi_connected": true,
-    "wifi_rssi_dbm": -49,
+    "wifi_rssi_dbm": -58,
     "mqtt_connected": true,
     "time_synced": true,
-    "time": "2026-10-26 16:35:53",
-    "ntp_last_sync": "2026-10-26 16:13:59",
+    "time": "2026-11-05 10:38:47",
+    "ntp_last_sync": "2026-11-05 10:26:13",
     "ntp_server": "pool.ntp.org",
     "ntp_server_source": "dhcp",
-    "poll_success_total": 14522,
-    "poll_duration_count": 14522,
-    "poll_duration_last_ms": 106,
-    "poll_duration_min_ms": 99,
-    "poll_duration_max_ms": 4438,
+    "poll_success_total": 3642,
+    "poll_duration_count": 3642,
+    "poll_duration_last_ms": 103,
+    "poll_duration_min_ms": 98,
+    "poll_duration_max_ms": 4441,
     "poll_duration_ewma_ms": 107,
-    "poll_failure_total": 3317,
+    "poll_failure_total": 835,
     "consecutive_poll_failures": 0,
     "checksum_error_total": 0,
-    "rs485_timeout_total": 6562,
+    "rs485_timeout_total": 1652,
     "invalid_frame_total": 0,
     "wifi_reconnect_total": 0,
     "mqtt_reconnect_total": 0,
     "modbus_client_connections_total": 0,
-    "rest_requests_total": 24960,
+    "rest_requests_total": 2495,
     "mqtt_publish_failure_total": 0,
-    "last_successful_poll_ms": 346916991,
-    "rs485_stack_free_bytes": 1248,
-    "loop_stack_free_bytes": 3244,
+    "last_successful_poll_ms": 87161039,
+    "rs485_stack_free_bytes": 3232,
+    "loop_stack_free_bytes": 3404,
     "last_error": "poll failed: timeout",
-    "boot_count": 10,
-    "previous_uptime_ms": 9795000,
-    "previous_firmware": "0.28.1",
+    "boot_count": 15,
+    "previous_uptime_ms": 65267000,
+    "previous_firmware": "0.31.1",
     "coredump_backtrace": null,
     "coredump_backtrace_corrupted": null
   },
@@ -460,6 +460,8 @@
             "default_value": "",
             "allowed_values": [
               "",
+              "deye_sg0x_lp3",
+              "deye_sg0x_lp3_dual",
               "deye_sun_xk_sg",
               "goodwe_et_hybrid",
               "mic_tl_x",
@@ -474,6 +476,8 @@
             ],
             "allowed_labels": [
               "",
+              "Deye/Sunsynk SUN-xK-SG04LP3/SG05LP3 hybrid (three phase, LV battery) \u2014 Deye (experimental)",
+              "Deye/Sunsynk SUN-xK-SG04LP3/SG05LP3 hybrid (three phase, two LV batteries) \u2014 Deye (experimental)",
               "Deye/Sunsynk SUN-xK-SG hybrid (single phase) \u2014 Deye (experimental)",
               "GoodWe ET/EH/BT/BH hybrid \u2014 GoodWe (experimental)",
               "Growatt MIC TL-X (0.6-3.3 kW) \u2014 Growatt (experimental)",
@@ -607,107 +611,107 @@
     "data_valid": true,
     "data_stale": false,
     "consecutive_poll_failures": 0,
-    "last_successful_poll_seconds_ago": 4
+    "last_successful_poll_seconds_ago": 2
   },
   "devices/eversolar_legacy-16/measurements": {
     "measurements": {
       "ac.power.total": {
         "display_name": "AC Power",
-        "value": 11,
+        "value": 191,
         "unit": "W",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "ac.phase_l1.voltage": {
         "display_name": "AC Voltage",
-        "value": 228.1,
+        "value": 233.9,
         "unit": "V",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "ac.phase_l1.current": {
         "display_name": "AC Current",
-        "value": 0.3,
+        "value": 0.8,
         "unit": "A",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "ac.frequency": {
         "display_name": "Grid Frequency",
-        "value": 49.98,
+        "value": 50,
         "unit": "Hz",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "dc.mppt_1.voltage": {
         "display_name": "PV1 Voltage",
-        "value": 327.5,
+        "value": 416.2,
         "unit": "V",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "dc.mppt_1.current": {
         "display_name": "PV1 Current",
-        "value": 0.1,
+        "value": 0.5,
         "unit": "A",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "dc.mppt_1.power": {
         "display_name": "PV1 Power",
-        "value": 32.75,
+        "value": 208.1,
         "unit": "W",
         "valid": true,
         "stale": false,
         "derived": true,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "dc.power.total": {
         "display_name": "DC Power",
-        "value": 32.75,
+        "value": 208.1,
         "unit": "W",
         "valid": true,
         "stale": false,
         "derived": true,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "energy.today": {
         "display_name": "Energy Today",
-        "value": 3.5,
+        "value": 0.3,
         "unit": "kWh",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "energy.total": {
         "display_name": "Total Energy",
-        "value": 36494.1,
+        "value": 36535.8,
         "unit": "kWh",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "inverter.temperature": {
         "display_name": "Temperature",
-        "value": 25.4,
+        "value": 24.8,
         "unit": "\u00b0C",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       },
       "inverter.operating_hours": {
         "display_name": "Operating Hours",
-        "value": 48724,
+        "value": 48817,
         "unit": "h",
         "valid": true,
         "stale": false,
-        "timestamp_ms": 346916991
+        "timestamp_ms": 87161039
       }
     }
   },
