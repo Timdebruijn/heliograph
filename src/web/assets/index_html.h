@@ -301,7 +301,10 @@ async function authFetch(url,opts={}){
   return r;
 }
 async function getJson(url){
-  const r=await fetch(url);
+  // A timeout, because refresh() runs one pass at a time: a reply that never comes (a
+  // half-dead WiFi socket can hang for minutes) would otherwise hold that pass open and freeze
+  // every tab. 10 s is several times the slowest /status measured on the prod bridge.
+  const r=await fetch(url,{signal:AbortSignal.timeout(10000)});
   // fetch does not reject on 5xx, and the error body is valid JSON -- rendering it would
   // fabricate a device with undefined everything, or a measurement count of 0, which is the
   // wrong-register-map tell.
