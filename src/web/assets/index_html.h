@@ -203,7 +203,7 @@ const kb=b=>b===null||b===undefined?'—':sp(Math.round(b/1024))+' kB';
 const RESETS=['unknown','power-on','reset pin','software restart','crash','interrupt watchdog',
   'task watchdog','other watchdog','deep sleep','brownout','SDIO','USB','JTAG','eFuse error',
   'power glitch','CPU lockup'];
-const why=r=>r===null||r===undefined?'—':RESETS[r]||'code '+r;
+const why=r=>r===null||r===undefined?'—':Number.isInteger(r)&&RESETS[r]||'code '+r;
 
 let tab='live', panel=null, logFilter='all', logPaused=false;
 let S=null;              // last /api/v1/status

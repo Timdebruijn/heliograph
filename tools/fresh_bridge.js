@@ -54,7 +54,7 @@
   ]};
   const diagnostics = {uptime_seconds:41,firmware_version:'0.23.0',
     board:'Waveshare ESP32-S3-RS485-CAN',free_heap_bytes:201000,minimum_free_heap_bytes:198000,
-    max_alloc_heap_bytes:120000,reset_reason:'power-on',ota_image_state:'valid',
+    max_alloc_heap_bytes:120000,reset_reason:1,ota_image_state:'valid',
     coredump_present:false,wifi_connected:true,wifi_rssi_dbm:-61,mqtt_connected:false,
     time_synced:true,time:'2026-07-29 09:12:03',poll_success_total:0,poll_failure_total:37,
     consecutive_poll_failures:37,checksum_error_total:0,rs485_timeout_total:37,
