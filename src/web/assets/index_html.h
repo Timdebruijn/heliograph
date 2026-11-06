@@ -2743,16 +2743,32 @@ async function refreshOnce(){
 // live. And while it IS alive the interval backs off to a heartbeat -- the old fixed 5 s poll
 // ran on top of an event stream emitting up to once a second, on the board that is also driving
 // the RS485 bus.
-let es=null, lastEvent=0;
+let es=null, lastEvent=0, sseRetry=0;
+// No stream while the tab is hidden, and never two: a pending retry finds one already open and
+// leaves it. A tab forgotten in the background otherwise held one of the bridge's four SSE slots
+// and fetched /status every second for as long as the browser stayed open.
 function connect(){
+  if(document.hidden||es)return;
   try{
-    es=new EventSource('/api/v1/events');
-    es.addEventListener('state',()=>{lastEvent=Date.now();refresh()});
-    es.onerror=()=>{es.close();setTimeout(connect,10000)};
-  }catch(e){}
+    const s=es=new EventSource('/api/v1/events');
+    s.addEventListener('open',()=>{sseRetry=0});
+    s.addEventListener('state',()=>{lastEvent=Date.now();refresh()});
+    // Backoff with jitter, 5-10 s first and at most a minute: tabs refused at the client cap,
+    // or all of them on a bridge that is rebooting, must not come back in lockstep.
+    s.onerror=()=>{
+      s.close();if(es!==s)return;  // already replaced or closed on purpose: nothing to retry
+      es=null;
+      setTimeout(connect,Math.min(60000,10000*2**sseRetry++)*(0.5+Math.random()/2));
+    };
+  }catch(e){es=null}
 }
+function onVisibility(){
+  if(document.hidden){if(es){es.close();es=null}}
+  else{refresh();connect()}
+}
+document.addEventListener('visibilitychange',onVisibility);
 refresh();connect();
-setInterval(()=>{if(Date.now()-lastEvent>15000)refresh()},5000);
+setInterval(()=>{if(!document.hidden&&Date.now()-lastEvent>15000)refresh()},5000);
 </script></body></html>
 )HTML";
 
