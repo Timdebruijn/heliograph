@@ -158,6 +158,7 @@ inline void writeDiagnostics(JsonObject doc, const DiagnosticsSnapshot& d,
         doc["psram_free_bytes"] = nullptr;
     }
     doc["reset_reason"]    = bridge.resetReason;
+    addOptional(doc, "wifi_power_save", bridge.wifiPowerSave);
     doc["ota_image_state"] = bridge.otaImageState;
 
     // Absent, not zero, when no dump is stored: task "" at PC 0 is not a fact about anything,
