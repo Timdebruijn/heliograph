@@ -64,6 +64,7 @@ def main() -> int:
                 status |= check_auth_prompt_reentrancy(script, scratch)
                 status |= check_auth_fetch_race(script, scratch)
                 status |= check_diag_single_flight(script, scratch)
+                status |= check_sse_lifecycle(script, scratch)
                 status |= check_fleet_mode(script, scratch)
                 status |= check_address_collision(script, scratch)
     # A final verdict, because the per-check lines are not the last thing printed: a failing
@@ -668,6 +669,93 @@ const fail = m => { console.error(m); bad++; };
     return run_node(
         "diagnostics single flight", "diag_single_flight.js", harness, scratch
     )
+
+
+def check_sse_lifecycle(script, scratch):
+    """A hidden tab holds no SSE stream, a visible one holds exactly one, and retries back off.
+
+    The bridge serves four SSE clients. A tab left in the background kept its slot and fetched
+    /status every second for days; four of them locked every later visitor out of the stream.
+    And a retry that fires after the tab already reconnected must not open a second stream.
+    """
+    parts = []
+    for fn in ("connect", "retryConnect", "onVisibility"):
+        body = extract_function(script, fn)
+        if body is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(body)
+    harness = (
+        """
+const document = {hidden: false};
+let es = null, lastEvent = 0, sseRetry = 0, refreshes = 0;
+const refresh = () => { refreshes++; };
+const open = [];
+class EventSource {
+  constructor(url) { this.closed = false; this.l = {}; open.push(this); }
+  addEventListener(k, f) { this.l[k] = f; }
+  close() { this.closed = true; }
+}
+const timers = [];
+const setTimeout = (f, ms) => { timers.push({f, ms}); };
+const live = () => open.filter(e => !e.closed).length;
+"""
+        + "\n".join(parts)
+        + """
+let bad = 0;
+const fail = m => { console.error(m); bad++; };
+
+connect();
+if (live() !== 1) fail(`visible page should hold one stream, holds ${live()}`);
+connect();
+if (live() !== 1) fail(`a second connect() opened another stream: ${live()}`);
+
+document.hidden = true; onVisibility();
+if (live() !== 0) fail(`hidden tab still holds ${live()} stream(s)`);
+connect();
+if (live() !== 0) fail('a retry firing while hidden opened a stream');
+
+document.hidden = false; const r0 = refreshes; onVisibility();
+if (live() !== 1) fail(`back to visible should hold one stream, holds ${live()}`);
+if (refreshes !== r0 + 1) fail('back to visible should refresh at once');
+
+// Errors back off: 5-10 s, then 10-20 s, ... capped at 60 s.
+const delays = [];
+for (let i = 0; i < 6; i++) {
+  open[open.length - 1].onerror();
+  delays.push(timers.pop().ms);
+  connect();
+}
+if (live() !== 1) fail(`after retries there should be one stream, holds ${live()}`);
+if (!(delays[0] >= 5000 && delays[0] <= 10000)) fail(`first retry ${delays[0]} ms, want 5-10 s`);
+if (!(delays[1] >= 10000)) fail(`second retry ${delays[1]} ms did not back off`);
+if (delays.some(d => d > 60000)) fail(`a retry exceeded 60 s: ${delays}`);
+
+// A successful open resets the backoff.
+open[open.length - 1].l.open();
+open[open.length - 1].onerror();
+const reset = timers.pop().ms;
+if (reset > 10000) fail(`backoff not reset after open: ${reset} ms`);
+
+// An error on a stream closed on purpose (tab hidden) schedules nothing.
+connect(); const s = open[open.length - 1];
+document.hidden = true; onVisibility(); const t0 = timers.length;
+s.onerror();
+if (timers.length !== t0) fail('an error on a deliberately closed stream scheduled a retry');
+
+// A constructor that throws still schedules a retry, or the page sits on the fallback poll
+// until the next visibility change.
+const Real = EventSource;
+EventSource = class { constructor() { throw new Error('nope'); } };
+document.hidden = false; es = null; const t1 = timers.length;
+connect();
+if (timers.length !== t1 + 1) fail('a throwing EventSource scheduled no retry');
+EventSource = Real;
+
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("sse lifecycle", "sse_lifecycle.js", harness, scratch)
 
 
 if __name__ == "__main__":
