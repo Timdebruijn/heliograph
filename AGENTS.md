@@ -2,8 +2,9 @@
 
 Heliograph is ESP32-S3 firmware that reads solar inverters over RS485 and republishes
 their data as MQTT + Home Assistant discovery, Modbus TCP, REST/JSON, and Prometheus.
-It targets the **Waveshare ESP32-S3-RS485-CAN** board and is built with **PlatformIO**
-using the Arduino framework (pioarduino, Arduino core 3.x / ESP-IDF 5.5.x).
+It targets the **Waveshare ESP32-S3-RS485-CAN** board, plus the **Relay-1CH** and **Relay-6CH**
+boards for DRM relay curtailment, and is built with **PlatformIO** using the Arduino framework
+(pioarduino, Arduino core 3.x / ESP-IDF 5.5.x).
 
 ---
 
@@ -45,7 +46,7 @@ talk to a driver directly.
 | `src/drivers/` | All brand-specific code |
 | `src/drivers/driver_registry.cpp` | Registers every driver |
 | `src/drivers/discovery_engine.cpp` | Auto-detects the connected inverter |
-| `src/protocols/` | Protocol parsers (PMU AA55, Modbus RTU) |
+| `src/protocols/` | Protocol framing (PMU AA55, Modbus RTU, MaxTalk) |
 | `src/device/` | `DeviceContext`, `DeviceState`, and measurement models |
 | `src/state/` | Thread-safe state store; immutable snapshots |
 | `src/outputs/` | MQTT, Modbus TCP, REST, Prometheus adapters |
@@ -64,19 +65,24 @@ talk to a driver directly.
 Run these and confirm they pass before committing:
 
 ```bash
-pio test -e native                    # 1,055 host tests, no hardware needed
-bash tools/check_layering.sh          # layering invariants — read RESULT: PASS/FAIL at the end
-python3 tools/gen_profiles.py --check # profile schema (when touching profiles/)
-python3 tools/check_web_js.py         # embedded JS (when touching src/web/)
-python3 tools/build_web.py            # strip + gzip web pages (when touching src/web/)
-ruff check tools/                     # Python tooling lint
+pio test -e native                      # host tests, no hardware needed
+bash tools/check_layering.sh            # layering invariants (and the read-back rule) — read RESULT: at the end
+python3 tools/gen_profiles.py --check   # profile schema (when touching profiles/)
+python3 tools/check_measurement_ids.py  # measurement ids vs the Prometheus gauges
+bash tools/check_version.sh --self-test # version-tag check (when touching src/main.cpp versions)
+python3 tools/check_web_js.py           # embedded JS (when touching src/web/)
+python3 tools/build_web.py              # strip + gzip web pages (when touching src/web/)
+python3 tools/check_dashboard_layout.py # the page in headless Chrome against tools/demo_fleet.js (src/web/)
+ruff check tools/ && ruff format --check tools/   # Python tooling lint + format
 ```
 
 `check_layering.sh` prints every rule it checks. **Always read the final `RESULT:` line**;
 an earlier check may have failed even if the last sub-check printed "OK".
 
-CI runs the same checks plus a firmware build for each of the four firmware environments
-(`waveshare-rs485-can`, `waveshare-relay-1ch`, `waveshare-relay-6ch`, `mock`).
+CI runs the same checks, cppcheck (`pio check -e native`), and a firmware build for each of the
+four firmware environments (`waveshare-rs485-can`, `waveshare-relay-1ch`, `waveshare-relay-6ch`,
+`mock`).
+
 ---
 
 ## Build environments
@@ -85,6 +91,9 @@ CI runs the same checks plus a firmware build for each of the four firmware envi
 |---|---|---|
 | `native` | `pio test -e native` | Host tests, no hardware needed |
 | `waveshare-rs485-can` | `pio run -e waveshare-rs485-can` | Production firmware |
+| `waveshare-relay-1ch` | `pio run -e waveshare-relay-1ch` | Relay-1CH board (DRM) |
+| `waveshare-relay-6ch` | `pio run -e waveshare-relay-6ch` | Relay-6CH board (DRM) |
+| `debug-rs485-can` | `pio run -e debug-rs485-can` | RS485-CAN with a debug build, for the built-in JTAG |
 | `mock` | `pio run -e mock` | Full output stack with a simulated inverter |
 
 The `native` environment only compiles platform-independent sources. A source file that
@@ -110,8 +119,7 @@ map and what the support-level progression means.
 - No heap allocations in hot paths (the poll loop, packet parsers).
 - No new dependencies without a concrete reason; pin library versions explicitly.
 - Comments explain *why* (protocol constraints, hardware quirks), not *what*.
-- All code and commit messages are in **English**. Architecture docs in `docs/` are in
-  Dutch — leave them as-is.
+- All code, commit messages and docs (`docs/`, README) are in **English**.
 
 ---
 
@@ -120,9 +128,14 @@ map and what the support-level progression means.
 | Family | Protocol | Driver |
 |---|---|---|
 | EverSolar / Zeversolar legacy TL | PMU (AA55) over RS485 | `src/drivers/eversolar_legacy/` |
-| Growatt SPH hybrid, MIC TL-X | Modbus RTU | `src/drivers/modbus_profile/` |
+| Modbus devices described by a TOML profile in `profiles/`: Growatt, Deye, GoodWe, Huawei, Sofar, Solis, Sungrow | Modbus RTU | `src/drivers/modbus_profile/` |
 | SolaX X1 series | PMU (AA55) over RS485 | `src/drivers/solax_x1/` |
+| SolarMax | MaxTalk over RS485 | `src/drivers/solarmax/` |
 | SunSpec-capable devices | Modbus RTU | `src/drivers/sunspec/` |
+
+The profile list grows by adding TOML, so read `profiles/` rather than this table for the current
+set. Each profile and driver carries its own support level; most are `experimental` until a real
+device has confirmed them.
 
 Do not describe this firmware as read-only. It monitors by default and **controls on opt-in**.
 Two drivers (`modbus_profile`, `sunspec`) declare `supportsWrite` and implement `execute()`, and
@@ -143,8 +156,12 @@ strips comments and gzips the result into `src/web/assets/generated/` (not commi
 To preview locally without hardware:
 
 ```bash
-python3 tools/preview_web.py   # serves on http://127.0.0.1:8000
+python3 tools/preview_web.py   # serves on http://127.0.0.1:8000 with tools/demo_fleet.js
 ```
+
+The page is one document; tabs are buttons that call `goTab()`, with no URL per tab. User feedback
+goes through `say()`, which also announces result messages to screen readers via the two live
+regions at the top of `<body>`. Use it rather than writing into a message element directly.
 
 ---
 
