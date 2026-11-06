@@ -119,6 +119,9 @@ map and what the support-level progression means.
 - No heap allocations in hot paths (the poll loop, packet parsers).
 - No new dependencies without a concrete reason; pin library versions explicitly.
 - Comments explain *why* (protocol constraints, hardware quirks), not *what*.
+- Generated files are never edited by hand: `test/fixtures/eversolar_frames.h` comes from
+  `tools/gen_fixtures.py`; `profiles_generated.cpp` and `src/web/assets/generated/` are built and
+  gitignored. Change the generator or its source instead.
 - All code, commit messages and docs (`docs/`, README) are in **English**.
 
 ---
