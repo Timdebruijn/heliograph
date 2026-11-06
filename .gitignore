@@ -46,6 +46,9 @@ venv/
 .dummy
 dist/
 site/
+# Accessibility-audit workspace: scan output, screenshots, agent findings and the report. A local
+# working copy that a re-audit diffs against, not something to review in a PR.
+.a11y-audit/
 
 # --- Not part of the public repo ------------------------------------------------
 # Internal phase tracker (personal planning, test evidence).
