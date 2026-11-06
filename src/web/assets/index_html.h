@@ -2679,7 +2679,7 @@ function drawTab(){
 // deep on the bridge, and the first refresh raced the first event so /config, /diagnostics and
 // /drivers were each fetched more than once. A call that lands mid-flight is not dropped -- it
 // asks for exactly one more pass when the current one finishes, so nothing goes stale.
-let refreshBusy=false, refreshAgain=false;
+let refreshBusy=false, refreshAgain=false, cfgTried=0, diagTried=0;
 async function refresh(){
   if(refreshBusy){refreshAgain=true;return}
   refreshBusy=true;
@@ -2697,15 +2697,23 @@ async function refreshOnce(){
     else record('all',(S.measurements&&S.measurements['ac.power.total']||{}).value);
     for(const f of fleet)record('d:'+f.id,f.ac_power_w);
     saveHist();
-    if(!cfg){try{cfg=await getJson('/api/v1/config')}catch(e){}}
+    // Neither is awaited: the first paint needs only /status, and on a fresh load these two
+    // used to stand between it and the skeleton, one round trip each. Each repaints when it
+    // lands; drawTab's signatures carry cfg and diag, so the tabs that use them redraw.
+    // At most one attempt per 30 s, so a /diagnostics that fails is not retried every tick.
+    if(!cfg&&Date.now()-cfgTried>30000){
+      cfgTried=Date.now();
+      getJson('/api/v1/config').then(c=>{cfg=c;paintTick()},()=>{});
+    }
     // Unauthenticated, and every tab shows something from it, so it is fetched once up front
     // rather than only on the Health tab.
-    if(!diag)await loadDiag();
+    if(!diag&&Date.now()-diagTried>30000){diagTried=Date.now();loadDiag().then(()=>{if(diag)paintTick()})}
     if(!drivers&&(tab==='inv'))
       {try{drivers=await getJson('/api/v1/drivers')}catch(e){}}
     // Once per page load, and only when it is switched on. Fired here because this is the first
-    // moment the running version is known.
-    if(!window.__updChecked){
+    // moment the running version is known -- and only once cfg is in, or updatesEnabled() would
+    // fetch /config a second time alongside the request started above.
+    if(!window.__updChecked&&cfg){
       window.__updChecked=true;
       updatesEnabled().then(on=>{if(on)checkForUpdate(false).then(()=>{if(tab==='bridge')updRender()})});
     }
