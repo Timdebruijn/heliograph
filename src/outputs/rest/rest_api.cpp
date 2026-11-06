@@ -168,7 +168,7 @@ bool RestApi::saveAndApply(AsyncWebServerRequest* request, const Configuration& 
 
 RestApi::~RestApi() { stop(); }
 
-void RestApi::notifyState(uint64_t nowMs) {
+void RestApi::notifyState(uint64_t nowMs, uint32_t pollTotal) {
     if (g_events == nullptr || !started_) {
         return;
     }
@@ -178,7 +178,9 @@ void RestApi::notifyState(uint64_t nowMs) {
         return;
     }
     lastSseMs_ = nowMs;
-    g_events->send("", "state", static_cast<uint32_t>(nowMs));
+    char data[24];
+    snprintf(data, sizeof(data), "{\"polls\":%lu}", static_cast<unsigned long>(pollTotal));
+    g_events->send(data, "state", static_cast<uint32_t>(nowMs));
 }
 
 bool RestApi::begin() {
@@ -1470,7 +1472,7 @@ RestApi::RestApi(RestContext context) : context_(std::move(context)) {}
 RestApi::~RestApi() = default;
 bool RestApi::begin() { return false; }
 void RestApi::stop() { started_ = false; }
-void RestApi::notifyState(uint64_t) {}
+void RestApi::notifyState(uint64_t, uint32_t) {}
 
 bool RestApi::collectBody(AsyncWebServerRequest*, const uint8_t*, size_t, size_t, size_t,
                           std::string*& out, size_t) {

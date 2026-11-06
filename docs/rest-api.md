@@ -757,15 +757,20 @@ no hardcoded default. Without a password, all mutating endpoints refuse with 401
 
 ## SSE
 
-`GET /api/v1/events` sends on every state change (max 1×/s):
+`GET /api/v1/events` (send `Accept: text/event-stream`) emits a `state` event about once a
+second. It carries no readings, only the bridge's poll count (successes + failures since boot):
 
 ```
 event: state
-data: {"ac.power.total":1842.0,"inverter_online":true,"data_stale":false}
+data: {"polls":1843}
 ```
 
-Maximum 4 concurrent SSE clients; beyond that, 503. Bounded to protect the heap.
-If SSE goes away, the web interface polls `/api/v1/status` every 5 s — SSE is an
+A client fetches `/api/v1/status` when `polls` moved; the web interface also refetches when
+its last fetch is 5 s old, so uptime, memory and the connection chips keep moving between
+polls. Older firmware sends the event with empty data.
+
+Maximum 4 concurrent SSE clients; beyond that the connection is refused. Bounded to protect
+the heap. If SSE goes away, the web interface polls `/api/v1/status` every 5 s — SSE is an
 optimization, not a dependency.
 
 ## Prometheus
