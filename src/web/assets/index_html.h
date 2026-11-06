@@ -1674,6 +1674,9 @@ async function saveDevice(slot){
   if(problem){say('#dv_msg','err',esc(problem));return}
   const r=await patch(body);
   if(!r.ok){say('#dv_msg','err',esc(r.why));return}
+  // Said twice: at once, because the reload is 1+3N requests on a busy board, and again after
+  // it, because the reload redraws the panel the first one was written into.
+  say('#dv_msg','ok','Saved. Takes effect after a restart.');
   invNextMs=0;await loadInverters(true);
   say('#dv_msg','ok','Saved. Takes effect after a restart.');
 }

@@ -565,11 +565,27 @@ const tick=setInterval(async()=>{
     paintTick();
     await new Promise(r=>setTimeout(r,80));
     if(!document.getElementById('int-probe')) say('an idle refresh rebuilt the tab anyway');
+  }catch(e){ say('the integrations assertions threw: '+e.message); }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
 
-    // "Saved." must still be on screen after the save repaints the panel. It was written into
-    // the panel and the very next line redrew that panel, so nobody ever saw it.
-    const rp=window.patch;
-    window.patch=async()=>({ok:true,body:{}});
+
+# A save's confirmation is written into the open panel. MQTT, Modbus and Access then repainted
+# that panel on the next line, which replaced the message with a fresh hidden one: nobody ever
+# saw a save succeed.
+SAVE_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+let tries=0;
+const tick=setInterval(async()=>{
+  if((!cfg||!S) && ++tries<=80) return;
+  clearInterval(tick);
+  const rp=window.patch;
+  window.patch=async()=>({ok:true,body:{}});
+  try{
     for(const [t,p,save,id] of [['int','mqtt',saveMqtt,'mq_msg'],['int','modbus',saveModbus,'mb_msg'],
                                 ['bridge','access',saveAccess,'ac_msg']]){
       goTab(t); panel=p; paint();
@@ -578,13 +594,12 @@ const tick=setInterval(async()=>{
       if(!m||m.classList.contains('hide')||!m.textContent.includes('Saved'))
         say('the '+p+' save confirmation was wiped by its own repaint');
     }
-    window.patch=rp; panel=null;
-  }catch(e){ say('the integrations assertions threw: '+e.message); }
+  }catch(e){ say('the save assertions threw: '+e.message); }
+  finally{ window.patch=rp; panel=null; }
   document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
 },25);
 })();
 """
-
 
 # The Health tab: counters that tick on every poll, and a log the reader scrolls through. The
 # tab was rebuilt to move those counters, which threw the log -- and the reader's place in it --
@@ -1047,6 +1062,10 @@ def main() -> int:
         page = build_page(stripped, stub, BATTERY_STATE, INTEGRATIONS_JS)
         verdict = render(chrome, page, 1000, scratch, "int")
         status |= report("integrations still reports what changed", verdict)
+
+        page = build_page(stripped, stub, BATTERY_STATE, SAVE_JS)
+        verdict = render(chrome, page, 1000, scratch, "save")
+        status |= report("a save still says it saved", verdict)
 
         for case, label in (
             ("http", "plain HTTP, no clipboard API"),
