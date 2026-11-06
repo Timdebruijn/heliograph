@@ -59,7 +59,7 @@ td,th{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);vertic
 th{color:var(--dim);font-weight:500;font-size:12px}
 tr:last-child td{border-bottom:0}
 /* Visually hidden, still read. The two live regions below are the page's only voice for a
-   screen reader: every message is mirrored into them. */
+   screen reader: every message and every restore result goes through them. */
 .sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 </style></head><body>
 <div id="srs" class="sr" role="status"></div><div id="sra" class="sr" role="alert"></div>

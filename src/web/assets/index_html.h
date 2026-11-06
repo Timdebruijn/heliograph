@@ -135,7 +135,7 @@ tr:last-child td{border-bottom:0}
 dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:20px;width:90%;max-width:340px}
 dialog::backdrop{background:#000a}
 /* Visually hidden, still read. The two live regions below are the page's only voice for a
-   screen reader: every say() and banner is mirrored into them. */
+   screen reader: every result message (say() with a class) and every banner goes through them. */
 .sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 </style></head><body>
 <div id="srs" class="sr" role="status"></div><div id="sra" class="sr" role="alert"></div>
