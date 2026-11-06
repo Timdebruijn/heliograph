@@ -511,7 +511,9 @@ const els = {{
   '#authdlg': {{returnValue:'', onclose:null, open:false,
                 showModal(){{ if(this.open) throw new Error('InvalidStateError'); this.open=true }},
                 close(v){{ this.open=false; this.returnValue=v; this.onclose && this.onclose() }}}},
-  '#authpw': {{value:''}}, '#authu': {{value:''}},
+  '#authpw': {{value:'', attrs:{{}},
+               setAttribute(k,v){{ this.attrs[k]=String(v) }}, removeAttribute(k){{ delete this.attrs[k] }}}},
+  '#authu': {{value:''}},
   // The error line is hidden by a class, not by an inline style. It needs a real enough
   // classList that a missing method is a failure here rather than a TypeError thrown inside
   // the promise executor -- which is how this check first reported the rename: three
@@ -535,6 +537,7 @@ const fail = m => {{ console.error(m); bad++; }};
 (async () => {{
   const first = askAuth(false);
   await null;                       // let the prompt open
+  if ('aria-describedby' in $('#authpw').attrs) fail('a first sign-in is described by the "not accepted" error');
   // The user starts typing.
   $('#authu').value = 'beheerder';
   $('#authpw').value = 'halfway-typed';
@@ -552,6 +555,9 @@ const fail = m => {{ console.error(m); bad++; }};
   await null;
   if ($('#authpw').value !== 'halfway-typed') fail('retry=true wiped the password field');
   if ($('#autherr').hidden) fail('a refusal arriving while the dialog is open said nothing');
+  // The field points at the error only while the error shows: a description is read even from a
+  // hidden element.
+  if ($('#authpw').attrs['aria-describedby'] !== 'autherr') fail('the refusal is not tied to the password field');
 
   // Finishing the dialog must resolve EVERY waiter, not only the last one.
   $('#authdlg').close('ok');
