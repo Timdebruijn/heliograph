@@ -1129,7 +1129,7 @@ const DIAGGROUPS=[
   ['The bus',[['poll_success_total','Polls that succeeded'],['poll_failure_total','Polls that failed'],
     ['consecutive_poll_failures','Failed in a row right now'],['checksum_error_total','Bad checksums'],
     ['rs485_timeout_total','Timeouts waiting for a reply'],['invalid_frame_total','Frames that made no sense']]],
-  ['The network',[['wifi_rssi_dbm','WiFi signal','dBm'],['wifi_power_save','WiFi power save'],['wifi_reconnect_total','WiFi reconnects'],
+  ['The network',[['wifi_rssi_dbm','WiFi signal','dBm'],['wifi_power_save','WiFi power save','ps'],['wifi_reconnect_total','WiFi reconnects'],
     ['mqtt_reconnect_total','MQTT reconnects'],['mqtt_publish_failure_total','MQTT publishes refused'],
     ['modbus_client_connections_total','Modbus clients since boot'],['rest_requests_total','API requests']]],
   ['Memory',[['free_heap_bytes','Free now','kB'],['minimum_free_heap_bytes','Lowest it has ever been','kB'],
@@ -1230,6 +1230,7 @@ function countersHtml(){
       else if(unit==='kB')v=kb(v);
       else if(unit==='up')v=up(v);
       else if(unit==='why')v=why(v,d);
+      else if(unit==='ps')v=v==='none'?'off':'on ('+String(v).replace('_',' ')+')';
       else if(unit)v=v+' '+unit;
       else if(typeof v==='boolean')v=v?'yes':'no';
       else if(typeof v==='number')v=sp(v);

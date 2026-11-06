@@ -855,9 +855,13 @@ BridgeInfo bridgeInfo() {
     info.wifiConnected    = g_wifi.connected();
     info.wifiRssiDbm      = g_wifi.rssi();
     if (wifi_ps_type_t ps; esp_wifi_get_ps(&ps) == ESP_OK) {
-        info.wifiPowerSave = ps == WIFI_PS_NONE        ? "none"
-                             : ps == WIFI_PS_MIN_MODEM ? "min_modem"
-                                                       : "max_modem";
+        if (ps == WIFI_PS_NONE) {
+            info.wifiPowerSave = "none";
+        } else if (ps == WIFI_PS_MIN_MODEM) {
+            info.wifiPowerSave = "min_modem";
+        } else if (ps == WIFI_PS_MAX_MODEM) {
+            info.wifiPowerSave = "max_modem";
+        }  // anything else stays absent: a mode this build does not know is not a guess
     }
     info.ipAddress        = g_wifi.ipAddress();
     info.staticIp         = g_config.wifi.staticIp();
