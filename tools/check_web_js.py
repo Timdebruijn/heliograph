@@ -65,6 +65,8 @@ def main() -> int:
                 status |= check_auth_fetch_race(script, scratch)
                 status |= check_diag_single_flight(script, scratch)
                 status |= check_sse_lifecycle(script, scratch)
+                status |= check_state_event_gate(script, scratch)
+                status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
                 status |= check_address_collision(script, scratch)
     # A final verdict, because the per-check lines are not the last thing printed: a failing
@@ -756,6 +758,82 @@ process.exit(bad === 0 ? 0 : 1);
 """
     )
     return run_node("sse lifecycle", "sse_lifecycle.js", harness, scratch)
+
+
+def check_state_event_gate(script, scratch):
+    """An SSE `state` event refetches /status only when a poll landed or the data is 5 s old.
+
+    The event fires about once a second; the inverter is polled every few seconds. Refetching on
+    every event was ~2.4 KB a second of JSON built on the board for nothing new. The gate must
+    still refetch on a new poll at once, on the 5 s floor, and on an event with no count at all
+    -- older firmware sends none, and a page that went quiet on it would look frozen.
+    """
+    body = extract_function(script, "stateWantsRefresh")
+    if body is None:
+        print(
+            "FAIL: stateWantsRefresh() not found in index_html.h; this check needs updating"
+        )
+        return 1
+    harness = (
+        "let lastFetch = 0, lastPolls = null;\n"
+        + body
+        + """
+let bad = 0;
+const fail = m => { console.error(m); bad++; };
+const ev = n => JSON.stringify({polls: n});
+const want = (data, now, exp, what) => {
+  const got = stateWantsRefresh(data, now);
+  if (got) lastFetch = now;  // what refresh() does
+  if (got !== exp) fail(`${what}: expected ${exp}, got ${got}`);
+};
+
+want(ev(7), 1000, true, 'first event');
+want(ev(7), 2000, false, 'same poll count, 1 s later');
+want(ev(7), 4000, false, 'same poll count, 3 s later');
+want(ev(8), 4500, true, 'a poll landed');
+want(ev(8), 5500, false, 'same count again');
+want(ev(8), 9500, true, '5 s floor since the last fetch');
+want('', 9600, true, 'older firmware: no data');
+want('', 9700, true, 'older firmware: every event');
+want('not json', 9800, true, 'garbage data');
+want(ev(8), 9900, true, 'count back after a dataless event');
+want(ev(8), 10000, false, 'and then settled again');
+
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("state event gate", "state_event_gate.js", harness, scratch)
+
+
+def check_bridge_clock(script, scratch):
+    """The Bridge-tab clock is the last reading plus the time since it arrived.
+
+    /status is no longer fetched every second, so the clock ticks in the page. It must still say
+    "not synced" before NTP, and must not turn a reading it cannot parse into "NaN-NaN-NaN".
+    """
+    body = extract_function(script, "clockText")
+    if body is None:
+        print("FAIL: clockText() not found in index_html.h; this check needs updating")
+        return 1
+    harness = (
+        "let S = null, sAt = Date.now() - 5000;\n"
+        + body
+        + """
+let bad = 0;
+const fail = m => { console.error(m); bad++; };
+const is = (want, what) => { const got = clockText(); if (got !== want) fail(`${what}: ${got}`); };
+S = {bridge: {time_synced: true, time: '2026-11-06 23:59:58'}};
+is('2026-11-07 00:00:03', 'reading plus 5 s, across midnight');
+S = {bridge: {time_synced: false, time: '2026-11-06 23:59:58'}};
+is('not synced', 'before NTP');
+S = {bridge: {time_synced: true, time: 'garbage'}};
+is('garbage', 'unparseable reading shown as is');
+S = null;
+is('not synced', 'no status yet');
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("bridge clock", "bridge_clock.js", harness, scratch)
 
 
 if __name__ == "__main__":

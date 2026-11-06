@@ -2605,13 +2605,25 @@ function drawIfChanged(key,signature,draw){
   drawn[key]=sig;
   draw();
 }
+/// The bridge clock: its last reading plus the time since that reading arrived. /status is not
+/// fetched every second, so the clock ticks here -- and liveFields() uses the same text, so a
+/// repaint between fetches does not snap it back to the older reading.
+function clockText(){
+  const b=(S&&S.bridge)||{};
+  if(!b.time_synced)return 'not synced';
+  if(!b.time)return '—';
+  const t=new Date(new Date(b.time.replace(' ','T')).getTime()+Date.now()-sAt);
+  if(isNaN(t))return b.time;
+  const z=n=>String(n).padStart(2,'0');
+  return `${t.getFullYear()}-${z(t.getMonth()+1)}-${z(t.getDate())} ${z(t.getHours())}:${z(t.getMinutes())}:${z(t.getSeconds())}`;
+}
 /// The handful of readouts that move without anything being configured. Written straight into
 /// their own nodes, so the card around them is never rebuilt to keep a clock ticking.
 function liveFields(){
   const b=(S&&S.bridge)||{};
   const wifi=$('#bridge_wifi'), clock=$('#bridge_clock');
   if(wifi)wifi.textContent=b.wifi_rssi_dbm!=null?' · '+b.wifi_rssi_dbm+' dBm':'';
-  if(clock)clock.textContent=b.time_synced?(b.time||'—'):'not synced';
+  if(clock)clock.textContent=clockText();
   const d=liveDiag();
   const set=(id,html)=>{const e=$(id);if(e)e.innerHTML=html};
   set('#h_polls',`${esc(sp(d.poll_success_total??'—'))}<span class="u"> · ${esc(sp(d.poll_failure_total??0))} failed</span>`);
@@ -2694,8 +2706,10 @@ async function refresh(){
   finally{refreshBusy=false;if(refreshAgain){refreshAgain=false;refresh()}}
 }
 async function refreshOnce(){
+  lastFetch=Date.now();
   try{
     S=await getJson('/api/v1/status');
+    sAt=Date.now();
     // One request feeds the whole Live tab: /status already carries devices[] and totals, so
     // the fleet rows need no per-device fetch. The sparkline series come from here too.
     const tot=S.totals||{}, fleet=S.devices||[];
@@ -2743,7 +2757,17 @@ async function refreshOnce(){
 // live. And while it IS alive the interval backs off to a heartbeat -- the old fixed 5 s poll
 // ran on top of an event stream emitting up to once a second, on the board that is also driving
 // the RS485 bus.
-let es=null, lastEvent=0, sseRetry=0;
+let es=null, lastEvent=0, sseRetry=0, lastFetch=0, lastPolls=null, sAt=0;
+// The event fires about once a second, but the inverter is polled every few seconds at best, so
+// most events carry nothing /status would not repeat. It names the poll count; refetch when that
+// moved, or when the last fetch is 5 s old -- the floor that keeps the chips, uptime and memory
+// moving between polls. An event without the count (older firmware) refetches, as it always did.
+function stateWantsRefresh(data,now){
+  let p=null;
+  try{p=JSON.parse(data).polls}catch(e){}
+  if(p==null||p!==lastPolls||now-lastFetch>=5000){lastPolls=p;return true}
+  return false;
+}
 // No stream while the tab is hidden, and never two: a pending retry finds one already open and
 // leaves it. A tab forgotten in the background otherwise held one of the bridge's four SSE slots
 // and fetched /status every second for as long as the browser stayed open.
@@ -2752,7 +2776,7 @@ function connect(){
   try{
     const s=es=new EventSource('/api/v1/events');
     s.addEventListener('open',()=>{sseRetry=0});
-    s.addEventListener('state',()=>{lastEvent=Date.now();refresh()});
+    s.addEventListener('state',ev=>{lastEvent=Date.now();if(stateWantsRefresh(ev.data,lastEvent))refresh()});
     // Backoff with jitter, 5-10 s first and at most a minute: tabs refused at the client cap,
     // or all of them on a bridge that is rebooting, must not come back in lockstep.
     s.onerror=()=>{
@@ -2769,6 +2793,9 @@ function onVisibility(){
 document.addEventListener('visibilitychange',onVisibility);
 refresh();connect();
 setInterval(()=>{if(!document.hidden&&Date.now()-lastEvent>15000)refresh()},5000);
+// The clock ticks between fetches (see clockText). It stops once the last reading is 15 s old:
+// a bridge that stopped answering should not show a clock that looks alive.
+setInterval(()=>{const c=$('#bridge_clock');if(c&&Date.now()-sAt<15000)c.textContent=clockText()},1000);
 </script></body></html>
 )HTML";
 

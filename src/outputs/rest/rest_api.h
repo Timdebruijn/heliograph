@@ -163,7 +163,11 @@ public:
 
     /// Pushes a state update to any Server-Sent Events subscribers. Rate limited internally.
     /// SSE is an optimisation: the UI falls back to polling /status if it is unavailable.
-    void notifyState(uint64_t nowMs);
+    ///
+    /// `pollTotal` (successes + failures since boot) rides along as `{"polls":N}`, so a page can
+    /// tell "a poll landed" from "a second went by" and skip refetching /status when nothing
+    /// new can be in it. The event still fires about once a second either way.
+    void notifyState(uint64_t nowMs, uint32_t pollTotal);
 
 private:
     /// Accumulates a chunked body into bodyBuffer_. See the note on bodyBuffer_.
