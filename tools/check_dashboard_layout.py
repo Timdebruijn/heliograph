@@ -572,6 +572,35 @@ const tick=setInterval(async()=>{
 """
 
 
+# A save's confirmation is written into the open panel. MQTT, Modbus and Access then repainted
+# that panel on the next line, which replaced the message with a fresh hidden one: nobody ever
+# saw a save succeed.
+SAVE_JS = r"""
+(function(){
+const fail=[];
+const say=m=>fail.push(m);
+let tries=0;
+const tick=setInterval(async()=>{
+  if((!cfg||!S) && ++tries<=80) return;
+  clearInterval(tick);
+  const rp=window.patch;
+  window.patch=async()=>({ok:true,body:{}});
+  try{
+    for(const [t,p,save,id] of [['int','mqtt',saveMqtt,'mq_msg'],['int','modbus',saveModbus,'mb_msg'],
+                                ['bridge','access',saveAccess,'ac_msg']]){
+      goTab(t); panel=p; paint();
+      await save();
+      const m=document.getElementById(id);
+      if(!m||m.classList.contains('hide')||!m.textContent.includes('Saved'))
+        say('the '+p+' save confirmation was wiped by its own repaint');
+    }
+  }catch(e){ say('the save assertions threw: '+e.message); }
+  finally{ window.patch=rp; panel=null; }
+  document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
+},25);
+})();
+"""
+
 # The Health tab: counters that tick on every poll, and a log the reader scrolls through. The
 # tab was rebuilt to move those counters, which threw the log -- and the reader's place in it --
 # back to the top every few seconds.
@@ -1033,6 +1062,10 @@ def main() -> int:
         page = build_page(stripped, stub, BATTERY_STATE, INTEGRATIONS_JS)
         verdict = render(chrome, page, 1000, scratch, "int")
         status |= report("integrations still reports what changed", verdict)
+
+        page = build_page(stripped, stub, BATTERY_STATE, SAVE_JS)
+        verdict = render(chrome, page, 1000, scratch, "save")
+        status |= report("a save still says it saved", verdict)
 
         for case, label in (
             ("http", "plain HTTP, no clipboard API"),
