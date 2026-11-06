@@ -2324,6 +2324,28 @@ static void test_psram_is_null_on_a_board_without_it() {
     TEST_ASSERT_TRUE(doc["psram_free_bytes"].isNull());
 }
 
+// Read back from the driver, not echoed from the request: setSleep(false) is what the firmware
+// asks for, and a radio that dozes anyway holds every inbound frame until the next DTIM.
+static void test_wifi_power_save_is_reported_when_read() {
+    Rig  r;
+    auto bridge          = makeBridge();
+    bridge.wifiPowerSave = "min_modem";
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_STRING("min_modem", doc["wifi_power_save"].as<const char*>());
+}
+
+// Before the WiFi driver is up there is no mode to read; absent, not a guessed "none".
+static void test_wifi_power_save_is_absent_before_the_driver_is_up() {
+    Rig  r;
+    auto bridge = makeBridge();
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(r.diagnostics.snapshot(), bridge, json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["wifi_power_save"].isNull());
+}
+
 // The dump has been written to flash on every panic since the OTA partition layout was
 // designed; nothing read it until 2026-07-26. These pin the reporting, not the reading -- the
 // esp_core_dump_* calls are ESP32-only and the summary reaches the builder as a plain struct.
@@ -3311,6 +3333,8 @@ int main(int, char**) {
     RUN_TEST(test_diagnostics_report_stack_marks_and_fragmentation);
     RUN_TEST(test_psram_is_reported_when_the_board_has_it);
     RUN_TEST(test_psram_is_null_on_a_board_without_it);
+    RUN_TEST(test_wifi_power_save_is_reported_when_read);
+    RUN_TEST(test_wifi_power_save_is_absent_before_the_driver_is_up);
     RUN_TEST(test_prometheus_reports_psram_only_when_present);
     RUN_TEST(test_mqtt_publish_failures_are_counted_and_published);
     RUN_TEST(test_prometheus_exports_the_publish_failure_counter);

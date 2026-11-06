@@ -43,6 +43,11 @@ struct BridgeInfo {
 
     bool    wifiConnected  = false;
     int16_t wifiRssiDbm    = 0;
+    /// The radio's power-save mode as the WiFi driver reports it now: "none", "min_modem" or
+    /// "max_modem"; empty before the driver is up. Read back rather than assumed, because the
+    /// firmware asks for "none" and a request is not a fact -- with the radio dozing, every
+    /// inbound frame waits for the next DTIM wake-up.
+    std::string wifiPowerSave;
     /// The address in use, and how it was obtained.
     ///
     /// Both, because they answer different questions. `ipAddress` is what the interface ended

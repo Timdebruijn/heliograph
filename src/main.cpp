@@ -14,6 +14,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <esp_task_wdt.h>
 
 #include "diagnostics/breadcrumbs.h"
@@ -853,6 +854,11 @@ BridgeInfo bridgeInfo() {
     info.resetReason      = static_cast<uint16_t>(esp_reset_reason());
     info.wifiConnected    = g_wifi.connected();
     info.wifiRssiDbm      = g_wifi.rssi();
+    if (wifi_ps_type_t ps; esp_wifi_get_ps(&ps) == ESP_OK) {
+        info.wifiPowerSave = ps == WIFI_PS_NONE        ? "none"
+                             : ps == WIFI_PS_MIN_MODEM ? "min_modem"
+                                                       : "max_modem";
+    }
     info.ipAddress        = g_wifi.ipAddress();
     info.staticIp         = g_config.wifi.staticIp();
     info.mqttConnected    = g_mqtt && g_mqtt->connected();
