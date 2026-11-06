@@ -679,7 +679,7 @@ def check_sse_lifecycle(script, scratch):
     And a retry that fires after the tab already reconnected must not open a second stream.
     """
     parts = []
-    for fn in ("connect", "onVisibility"):
+    for fn in ("connect", "retryConnect", "onVisibility"):
         body = extract_function(script, fn)
         if body is None:
             print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
@@ -742,6 +742,15 @@ connect(); const s = open[open.length - 1];
 document.hidden = true; onVisibility(); const t0 = timers.length;
 s.onerror();
 if (timers.length !== t0) fail('an error on a deliberately closed stream scheduled a retry');
+
+// A constructor that throws still schedules a retry, or the page sits on the fallback poll
+// until the next visibility change.
+const Real = EventSource;
+EventSource = class { constructor() { throw new Error('nope'); } };
+document.hidden = false; es = null; const t1 = timers.length;
+connect();
+if (timers.length !== t1 + 1) fail('a throwing EventSource scheduled no retry');
+EventSource = Real;
 
 process.exit(bad === 0 ? 0 : 1);
 """

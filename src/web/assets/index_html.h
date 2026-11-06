@@ -2757,11 +2757,11 @@ function connect(){
     // or all of them on a bridge that is rebooting, must not come back in lockstep.
     s.onerror=()=>{
       s.close();if(es!==s)return;  // already replaced or closed on purpose: nothing to retry
-      es=null;
-      setTimeout(connect,Math.min(60000,10000*2**sseRetry++)*(0.5+Math.random()/2));
+      es=null;retryConnect();
     };
-  }catch(e){es=null}
+  }catch(e){es=null;retryConnect()}
 }
+function retryConnect(){setTimeout(connect,Math.min(60000,10000*2**sseRetry++)*(0.5+Math.random()/2))}
 function onVisibility(){
   if(document.hidden){if(es){es.close();es=null}}
   else{refresh();connect()}
