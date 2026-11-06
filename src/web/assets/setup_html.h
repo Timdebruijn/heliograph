@@ -58,7 +58,12 @@ td,th{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);vertic
   word-break:break-word}
 th{color:var(--dim);font-weight:500;font-size:12px}
 tr:last-child td{border-bottom:0}
-</style></head><body><div class="w">
+/* Visually hidden, still read. The two live regions below are the page's only voice for a
+   screen reader: every message is mirrored into them. */
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+</style></head><body>
+<div id="srs" class="sr" role="status"></div><div id="sra" class="sr" role="alert"></div>
+<div class="w">
 <h1>Heliograph setup</h1>
 <p class="sub">Connect this bridge to your network.</p>
 
@@ -135,7 +140,9 @@ tr:last-child td{border-bottom:0}
 </div>
 <script>
 const $=s=>document.getElementById(s);
-const msg=(t,ok)=>{const m=$('m');m.textContent=t;m.className='msg '+(ok?'ok':'err')};
+// Emptied first, so the same message twice is still spoken the second time.
+const announce=(t,urgent)=>{const r=$(urgent?'sra':'srs');r.textContent='';setTimeout(()=>{r.textContent=t},30)};
+const msg=(t,ok)=>{const m=$('m');m.textContent=t;m.className='msg '+(ok?'ok':'err');announce(t,!ok)};
 const esc=s=>String(s??'').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
 
 // Basic auth by hand: fetch() will not surface the browser's credential dialog reliably, least
@@ -273,7 +280,8 @@ $('f').onsubmit=async e=>{
 // straight from a FileReader and nothing is staged on the bridge between the two steps, so
 // what gets applied is exactly what was previewed.
 
-const rmsg=(t,cls)=>{const m=$('rm');m.textContent=t;m.className='msg '+cls;m.style.display='block'};
+const rmsg=(t,cls)=>{const m=$('rm');m.textContent=t;m.className='msg '+cls;m.style.display='block';
+  if(cls)announce(t,cls==='err')};
 let rsPending=null;
 
 // Authenticated exactly like provisioning, and for the same reason: the setup network also
@@ -353,6 +361,7 @@ async function applyRestore(){
       ? 'The bridge is restarting and joining the network from the backup — this setup network '+
         'disappears. Give it ~30 seconds.'
       : 'No restart was needed, so this setup network is still up.');
+  announce($('rm').textContent);
 }
 </script></body></html>)HTML";
 

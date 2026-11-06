@@ -134,7 +134,11 @@ tr:last-child td{border-bottom:0}
 .prog>div{height:100%;width:0%;background:var(--acc)}
 dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:20px;width:90%;max-width:340px}
 dialog::backdrop{background:#000a}
+/* Visually hidden, still read. The two live regions below are the page's only voice for a
+   screen reader: every say() and banner is mirrored into them. */
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 </style></head><body>
+<div id="srs" class="sr" role="status"></div><div id="sra" class="sr" role="alert"></div>
 
 <header><b>Heliograph</b>
 <span id="host" class="dim" style="font-size:12px"></span>
@@ -162,10 +166,10 @@ dialog::backdrop{background:#000a}
 <section id="bridge" class="hide"></section>
 </main>
 
-<dialog id="authdlg">
+<dialog id="authdlg" aria-labelledby="authttl">
 <form method="dialog">
-<b>Admin sign-in</b>
-<div id="autherr" class="msg err hide">Not accepted. Check the username too — it is only
+<b id="authttl">Admin sign-in</b>
+<div id="autherr" class="msg err hide" role="alert">Not accepted. Check the username too — it is only
 <b>admin</b> if you never changed it.</div>
 <label for="authu">Username</label>
 <input id="authu" autocomplete="username" autocapitalize="none" autocorrect="off"
@@ -263,12 +267,15 @@ function authHeader(){const c=sessionStorage.getItem('hg_auth');return c?{'Autho
 function clearAuth(){sessionStorage.removeItem('hg_auth')}
 let authPrompt=null;
 async function askAuth(retry){
-  if(authPrompt){if(retry)$('#autherr').classList.remove('hide');return authPrompt}
+  if(authPrompt){if(retry){$('#autherr').classList.remove('hide');$('#authpw').setAttribute('aria-describedby','autherr')}return authPrompt}
   const remembered=sessionStorage.getItem('hg_user');
   authPrompt=new Promise(resolve=>{
     const d=$('#authdlg'),p=$('#authpw'),un=$('#authu'),err=$('#autherr');
     un.value=remembered||'admin';
     err.classList.toggle('hide',!retry);
+    // Described by the error only while it shows: a description is read even from a hidden
+    // element, so a permanent reference would greet every first sign-in with "Not accepted".
+    if(retry)p.setAttribute('aria-describedby','autherr');else p.removeAttribute('aria-describedby');
     p.value='';d.returnValue='';
     d.onclose=()=>{
       const u=un.value.trim()||'admin';
@@ -516,6 +523,8 @@ function paintChrome(){
     el.innerHTML=`<div><b>${esc(started)} of ${esc(b.devices_configured)} configured inverters started.</b></div>
       <div style="color:var(--mid);font-size:14px;margin-top:4px">The other inverters answer on this bus, so the bridge and the line speed are fine — which narrows it down.
       <a href="#" onclick="goTab('inv');return false">Three things to check →</a></div>`;
+    // Announced when it appears, not on every repaint that rewrites it.
+    if(el.classList.contains('hide'))announce(el.textContent);
     el.classList.remove('hide');
   }else el.classList.add('hide');
 }
@@ -1279,6 +1288,7 @@ function copyText(text,btn){
     // and the button keeps it for good.
     if(!btn.dataset.idle)btn.dataset.idle=btn.textContent;
     btn.textContent=ok?'Copied':'Could not copy — select it by hand';
+    announce(btn.textContent,!ok);
     setTimeout(()=>{btn.textContent=btn.dataset.idle},2000);
   };
   if(navigator.clipboard){
@@ -1403,7 +1413,7 @@ function paintBridge(){
       <label for="ota_file">Firmware image (.bin)</label>
       <input id="ota_file" type="file" accept=".bin">
       <div class="acts"><button id="ota_btn" onclick="otaUpload()">Upload and install</button></div>
-      <div id="ota_prog" class="prog"><div></div></div>
+      <div id="ota_prog" class="prog" role="progressbar" aria-label="Firmware upload" aria-valuemin="0" aria-valuemax="100"><div></div></div>
       <div id="ota_msg" class="msg hide"></div>
       <div class="hint">The image is verified before the boot partition switches; a rejected upload leaves the running firmware untouched.</div></div>`:''}
   </div>
@@ -1594,7 +1604,13 @@ async function patch(body){
   return {ok:r.ok,status:r.status,cancelled:r.cancelled,body:d,
     why:(d.error&&d.error.message)||httpWhy(r)};
 }
-function say(sel,cls,text){const m=$(sel);if(!m)return;m.className='msg '+cls;m.innerHTML=text;m.classList.remove('hide')}
+/// Puts text in a live region so a screen reader says it. Emptied first, so the same message twice
+/// ("Saved." after a second save) is still spoken the second time.
+function announce(text,urgent){const r=$(urgent?'#sra':'#srs');r.textContent='';setTimeout(()=>{r.textContent=text},30)}
+/// In-flight messages (cls '') are not announced: the upload and the recordings rewrite them on
+/// every progress event, which would talk over everything. Their result is announced.
+function say(sel,cls,text){const m=$(sel);if(!m)return;m.className='msg '+cls;m.innerHTML=text;m.classList.remove('hide');
+  if(cls)announce(m.textContent,cls==='err')}
 const val=id=>{const e=$('#'+id);return e?e.value:''};
 const num=id=>Number(val(id));
 const chk=id=>{const e=$('#'+id);return e?e.checked:false};
@@ -2425,7 +2441,7 @@ function updRender(){
       ${safeUrl(updLatest.notes_url)?`<a href="${esc(safeUrl(updLatest.notes_url))}" target="_blank" rel="noopener noreferrer">Release notes</a>`:''}</div>
     <div class="hint">${Math.round((asset.size||0)/1024)} kB. Your browser downloads it and hands it to the bridge, which checks it against the checksum from the release before writing anything. That proves the image arrived intact — it is not a signature, and does not prove who built it.</div>
     <div class="acts"><button id="upd_btn" onclick="installUpdate()">Install ${esc(updLatest.version)}</button></div>
-    <div id="upd_prog" class="prog"><div></div></div>
+    <div id="upd_prog" class="prog" role="progressbar" aria-label="Firmware upload" aria-valuemin="0" aria-valuemax="100"><div></div></div>
     <div id="upd_msg" class="msg hide"></div>`;
 }
 async function manualCheck(){
@@ -2442,6 +2458,7 @@ async function manualCheck(){
 // "uploading…" reads as a hang.
 function upload(url,blob,filename,btnSel,progSel,msgSel,done){
   const btn=$(btnSel), pb=$(progSel), pf=pb&&pb.firstElementChild;
+  let nextSaid=25;
   const send=mayRetry=>{
     const x=new XMLHttpRequest();
     x.open('POST',url);
@@ -2450,6 +2467,9 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
       if(!e.lengthComputable)return;
       const p=Math.round(e.loaded/e.total*100);
       if(pf)pf.style.width=p+'%';
+      if(pb)pb.setAttribute('aria-valuenow',p);
+      // say() keeps progress quiet; a quarter at a time is enough to know it is moving.
+      if(p>=nextSaid){announce(p+'%');nextSaid=Math.floor(p/25)*25+25}
       say(msgSel,'',p<100?'Uploading to the bridge… '+p+'%':'Upload complete — verifying the checksum and writing flash…');
     };
     x.onload=()=>{
@@ -2470,7 +2490,8 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
     x.onerror=()=>{if(pb)pb.style.display='none';if(btn)btn.disabled=false;
       say(msgSel,'err','Upload failed: network error — the running firmware is untouched.')};
     say(msgSel,'','Uploading to the bridge… 0%');
-    if(pb){pb.style.display='block';pf.style.width='0%'}
+    announce('Uploading to the bridge.');nextSaid=25;
+    if(pb){pb.style.display='block';pf.style.width='0%';pb.setAttribute('aria-valuenow',0)}
     if(btn)btn.disabled=true;
     // FormData: the browser sets the multipart boundary itself; setting Content-Type by hand
     // here breaks the upload.
@@ -2749,6 +2770,7 @@ async function refreshOnce(){
   }catch(e){
     const el=$('#banner');
     el.textContent='Cannot reach the bridge: '+e.message;
+    if(el.classList.contains('hide'))announce(el.textContent,true);
     el.classList.remove('hide');
   }
 }
