@@ -523,10 +523,8 @@ function paintChrome(){
     el.innerHTML=`<div><b>${esc(started)} of ${esc(b.devices_configured)} configured inverters started.</b></div>
       <div style="color:var(--mid);font-size:14px;margin-top:4px">The other inverters answer on this bus, so the bridge and the line speed are fine — which narrows it down.
       <a href="#" onclick="goTab('inv');return false">Three things to check →</a></div>`;
-    // Announced when it appears, not on every repaint that rewrites it.
-    if(el.classList.contains('hide'))announce(el.textContent);
-    el.classList.remove('hide');
-  }else el.classList.add('hide');
+    showBanner(el,false);
+  }else{el.classList.add('hide');delete el.dataset.said}
 }
 
 // ---------------- Live ----------------
@@ -1609,6 +1607,10 @@ async function patch(body){
 function announce(text,urgent){const r=$(urgent?'#sra':'#srs');r.textContent='';setTimeout(()=>{r.textContent=text},30)}
 /// In-flight messages (cls '') are not announced: the upload and the recordings rewrite them on
 /// every progress event, which would talk over everything. Their result is announced.
+/// The banner is rewritten on every repaint and shared by two messages, so it is announced when
+/// its TEXT changes -- not when it unhides, which misses one message replacing the other.
+function showBanner(el,urgent){if(el.dataset.said!==el.textContent){el.dataset.said=el.textContent;announce(el.textContent,urgent)}
+  el.classList.remove('hide')}
 function say(sel,cls,text){const m=$(sel);if(!m)return;m.className='msg '+cls;m.innerHTML=text;m.classList.remove('hide');
   if(cls)announce(m.textContent,cls==='err')}
 const val=id=>{const e=$('#'+id);return e?e.value:''};
@@ -2469,7 +2471,8 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
       if(pf)pf.style.width=p+'%';
       if(pb)pb.setAttribute('aria-valuenow',p);
       // say() keeps progress quiet; a quarter at a time is enough to know it is moving.
-      if(p>=nextSaid){announce(p+'%');nextSaid=Math.floor(p/25)*25+25}
+      // At 100 % the wait that follows is the flash write, so that is what gets said.
+      if(p>=nextSaid){announce(p<100?p+'%':'Upload complete, verifying and writing flash.');nextSaid=Math.floor(p/25)*25+25}
       say(msgSel,'',p<100?'Uploading to the bridge… '+p+'%':'Upload complete — verifying the checksum and writing flash…');
     };
     x.onload=()=>{
@@ -2770,8 +2773,7 @@ async function refreshOnce(){
   }catch(e){
     const el=$('#banner');
     el.textContent='Cannot reach the bridge: '+e.message;
-    if(el.classList.contains('hide'))announce(el.textContent,true);
-    el.classList.remove('hide');
+    showBanner(el,true);
   }
 }
 
