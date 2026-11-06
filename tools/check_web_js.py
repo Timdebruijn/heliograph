@@ -63,6 +63,7 @@ def main() -> int:
                 status |= check_version_compare(script, scratch)
                 status |= check_auth_prompt_reentrancy(script, scratch)
                 status |= check_auth_fetch_race(script, scratch)
+                status |= check_diag_single_flight(script, scratch)
                 status |= check_fleet_mode(script, scratch)
                 status |= check_address_collision(script, scratch)
     # A final verdict, because the per-check lines are not the last thing printed: a failing
@@ -628,6 +629,45 @@ const fail = m => { console.error(m); bad++; };
 """
     )
     return run_node("auth fetch race", "auth_fetch_race.js", harness, scratch)
+
+
+def check_diag_single_flight(script, scratch):
+    """Two callers asking for /diagnostics at once share one request.
+
+    The first refresh starts it without waiting, and the Health tab awaits it when stale, so a
+    first load that lands on Health used to send it twice. A failed request must clear the
+    in-flight slot too, or the page never asks again.
+    """
+    body = extract_function(script, "loadDiag")
+    if body is None:
+        print("FAIL: loadDiag() not found in index_html.h; this check needs updating")
+        return 1
+    harness = (
+        "let diag = null, diagAt = 0, diagP = null, sent = 0, fails = false;\n"
+        "const getJson = () => { sent++; return fails ? Promise.reject(new Error('x'))"
+        " : Promise.resolve({n: sent}); };\n"
+        + body
+        + """
+let bad = 0;
+const fail = m => { console.error(m); bad++; };
+(async () => {
+  await Promise.all([loadDiag(), loadDiag()]);
+  if (sent !== 1) fail(`two concurrent callers sent ${sent} requests, want 1`);
+  if (!diag) fail('diag not set after the shared request');
+  await loadDiag();
+  if (sent !== 2) fail(`a later call should send again, sent ${sent}`);
+  fails = true;
+  await loadDiag();
+  fails = false;
+  await loadDiag();
+  if (sent !== 4) fail(`a failed request left the slot taken: sent ${sent}`);
+  process.exit(bad === 0 ? 0 : 1);
+})();
+"""
+    )
+    return run_node(
+        "diagnostics single flight", "diag_single_flight.js", harness, scratch
+    )
 
 
 if __name__ == "__main__":

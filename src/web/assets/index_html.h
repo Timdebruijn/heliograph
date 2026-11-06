@@ -1101,7 +1101,13 @@ function credField(id,label,isSet){
 
 // ---------------- Health ----------------
 let diag=null;
-async function loadDiag(){try{diag=await getJson('/api/v1/diagnostics');diagAt=Date.now()}catch(e){}}
+// One request in flight at a time: the first load fires it un-awaited, and the Health tab awaits
+// it when stale -- landing on Health first used to send both.
+let diagP=null;
+function loadDiag(){
+  return diagP||(diagP=getJson('/api/v1/diagnostics')
+    .then(d=>{diag=d;diagAt=Date.now()},()=>{}).finally(()=>{diagP=null}));
+}
 // Health used to refetch /diagnostics on every refresh -- once a second, doubling the requests to
 // a board that is slow to answer anything over one segment. The bus counters move only with a poll,
 // and /status already carries the poll totals: so refetch when they differ from the ones in the
@@ -1252,7 +1258,7 @@ function renderLogs(){
 }
 async function setLogLevel(level){
   const r=await patch({logging:{level}});
-  if(r.ok){cfg.logging.level=level;loadLogs(true)}
+  if(r.ok){if(cfg)cfg.logging.level=level;loadLogs(true)}
 }
 // Confirms in the button itself. Silent success is indistinguishable from a broken button.
 //
@@ -2679,7 +2685,7 @@ function drawTab(){
 // deep on the bridge, and the first refresh raced the first event so /config, /diagnostics and
 // /drivers were each fetched more than once. A call that lands mid-flight is not dropped -- it
 // asks for exactly one more pass when the current one finishes, so nothing goes stale.
-let refreshBusy=false, refreshAgain=false, cfgTried=0, diagTried=0;
+let refreshBusy=false, refreshAgain=false, bootTried=0;
 async function refresh(){
   if(refreshBusy){refreshAgain=true;return}
   refreshBusy=true;
@@ -2697,17 +2703,22 @@ async function refreshOnce(){
     else record('all',(S.measurements&&S.measurements['ac.power.total']||{}).value);
     for(const f of fleet)record('d:'+f.id,f.ac_power_w);
     saveHist();
-    // Neither is awaited: the first paint needs only /status, and on a fresh load these two
-    // used to stand between it and the skeleton, one round trip each. Each repaints when it
+    // /config, then /diagnostics (unauthenticated, and every tab shows something from it), but
+    // NOT awaited: the first paint needs only /status, and on a fresh load these two used to
+    // stand between it and the skeleton, one round trip each. Still one after the other, as
+    // before -- the board sees no more requests at once than it did. Each repaints when it
     // lands; drawTab's signatures carry cfg and diag, so the tabs that use them redraw.
-    // At most one attempt per 30 s, so a /diagnostics that fails is not retried every tick.
-    if(!cfg&&Date.now()-cfgTried>30000){
-      cfgTried=Date.now();
-      getJson('/api/v1/config').then(c=>{cfg=c;paintTick()},()=>{});
+    // At most one round per 10 s, so a request that fails is not retried every tick.
+    if((!cfg||!diag)&&Date.now()-bootTried>10000){
+      bootTried=Date.now();
+      (async()=>{
+        if(!cfg){
+          // A cfg some other path set meanwhile (a save, the wizard) is newer: kept.
+          try{const c=await getJson('/api/v1/config');if(!cfg)cfg=c;paintTick()}catch(e){}
+        }
+        if(!diag){await loadDiag();if(diag)paintTick()}
+      })();
     }
-    // Unauthenticated, and every tab shows something from it, so it is fetched once up front
-    // rather than only on the Health tab.
-    if(!diag&&Date.now()-diagTried>30000){diagTried=Date.now();loadDiag().then(()=>{if(diag)paintTick()})}
     if(!drivers&&(tab==='inv'))
       {try{drivers=await getJson('/api/v1/drivers')}catch(e){}}
     // Once per page load, and only when it is switched on. Fired here because this is the first
