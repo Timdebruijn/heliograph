@@ -1607,15 +1607,15 @@ async function saveMqtt(){
   if(val('mq_pw'))body.mqtt.password=val('mq_pw');
   const r=await patch(body);
   if(!r.ok){say('#mq_msg','err',esc(r.why));return}
-  say('#mq_msg','ok','Saved.'+(r.body.reboot_required?' Takes effect after a restart.':''));
   paintInt();
+  say('#mq_msg','ok','Saved.'+(r.body.reboot_required?' Takes effect after a restart.':''));
 }
 async function saveModbus(){
   const r=await patch({modbus:{enabled:chk('mb_en'),port:num('mb_port'),unit_id:num('mb_unit'),
     max_clients:num('mb_max'),idle_timeout_seconds:num('mb_idle')}});
   if(!r.ok){say('#mb_msg','err',esc(r.why));return}
-  say('#mb_msg','ok','Saved. Takes effect after a restart.');
   paintInt();
+  say('#mb_msg','ok','Saved. Takes effect after a restart.');
 }
 async function saveBus(){
   const r=await patch({polling:{interval_seconds:num('bs_int')},
@@ -1651,8 +1651,8 @@ async function saveAccess(){
     roles:[...relays].map(e=>e.value)};
   const r=await patch(body);
   if(!r.ok){say('#ac_msg','err',esc(r.why));return}
-  say('#ac_msg','ok','Saved and applied.');
   paintBridge();
+  say('#ac_msg','ok','Saved and applied.');
 }
 async function saveDevice(slot){
   // A slot the bridge could not name. Every started device is in the plan, so this should not
@@ -1674,8 +1674,8 @@ async function saveDevice(slot){
   if(problem){say('#dv_msg','err',esc(problem));return}
   const r=await patch(body);
   if(!r.ok){say('#dv_msg','err',esc(r.why));return}
+  invNextMs=0;await loadInverters(true);
   say('#dv_msg','ok','Saved. Takes effect after a restart.');
-  invNextMs=0;loadInverters(true);
 }
 /// Whether a second row of this driver can run at all, straight from the driver list. Absent on
 /// a bridge running firmware from before the field existed, and the benefit of the doubt is the

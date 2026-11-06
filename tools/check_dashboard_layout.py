@@ -565,6 +565,20 @@ const tick=setInterval(async()=>{
     paintTick();
     await new Promise(r=>setTimeout(r,80));
     if(!document.getElementById('int-probe')) say('an idle refresh rebuilt the tab anyway');
+
+    // "Saved." must still be on screen after the save repaints the panel. It was written into
+    // the panel and the very next line redrew that panel, so nobody ever saw it.
+    const rp=window.patch;
+    window.patch=async()=>({ok:true,body:{}});
+    for(const [t,p,save,id] of [['int','mqtt',saveMqtt,'mq_msg'],['int','modbus',saveModbus,'mb_msg'],
+                                ['bridge','access',saveAccess,'ac_msg']]){
+      goTab(t); panel=p; paint();
+      await save();
+      const m=document.getElementById(id);
+      if(!m||m.classList.contains('hide')||!m.textContent.includes('Saved'))
+        say('the '+p+' save confirmation was wiped by its own repaint');
+    }
+    window.patch=rp; panel=null;
   }catch(e){ say('the integrations assertions threw: '+e.message); }
   document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
 },25);
