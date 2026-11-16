@@ -28,14 +28,22 @@ Physical  →  Transport  →  Driver  →  State (DeviceContext/DeviceState)  �
 
 | Layer | Location | May depend on |
 |---|---|---|
-| Transport | `src/transport/` | Physical only |
-| Driver | `src/drivers/<driver>/` | Transport, protocols, device model |
-| State | `src/device/`, `src/state/` | Device model only |
-| Outputs | `src/outputs/` | Read state snapshots; commands go to the dispatcher, never to a driver |
-| Protocols | `src/protocols/` | Nothing above Transport |
+| Transport | `src/transport/` | The board's pin map (`src/boards/`) |
+| Protocols | `src/protocols/` | Transport; framing only, no brand |
+| Driver | `src/drivers/<driver>/` | Transport, protocols, the device model |
+| Device model | `src/device/` (`DeviceState`, measurements, identity, capabilities) | Nothing above it |
+| State | `src/state/` (`StateStore`, `DeviceManager`) | The device model |
+| Device runtime | `src/device/device_context.*` | A driver and the state store: `DeviceContext` runs one driver's polls and publishes its snapshots |
+| Outputs | `src/outputs/` | State snapshots; driver *metadata* (`driver_registry.h`, `driver_descriptor.h`) to list what exists. Commands go to the dispatcher, never to a driver |
 
-Outputs read immutable `DeviceState` snapshots via `StateStore::snapshot()`. They never
-talk to a driver directly.
+`src/diagnostics/` (logging, counters) may be used from every layer.
+
+Outputs read immutable `DeviceState` snapshots via `StateStore::snapshot()`. No output calls a
+driver; the REST API reads the registry only to describe the drivers that exist.
+
+`tools/check_layering.sh` does **not** check this table. It enforces the brand rule and the
+Arduino-free host core, not include direction, so a wrong include here is caught in review or
+not at all.
 
 ---
 
