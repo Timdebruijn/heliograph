@@ -310,10 +310,23 @@ const tick=setInterval(async()=>{
 
         // And Save must rewrite that slot and leave its siblings exactly as stored.
         lab.value='Corrected';
-        let body=null; const rp=window.patch;
+        let body=null; const rp=window.patch, rf=window.fetch;
         window.patch=async b=>{body=b;return{ok:true,body:{}}};
-        await saveDevice(2);
-        window.patch=rp;
+        // The save reloads the device list, and the stub would answer with its own slots, in
+        // which slot 2 is running -- the row would stop being pending mid-test, which no bridge
+        // does. Keep the stub saying what this scenario says: Dak achter runs in slot 3.
+        window.fetch=(u,o)=>/\/devices\/modbus_profile-GW3300XYZ$/.test(String(u))
+          ?rf(u,o).then(r=>r.json()).then(d=>new Response(JSON.stringify({...d,config_slot:3})))
+          :rf(u,o);
+        try{
+          await saveDevice(2);
+          // ...and past the reload it started, which is what used to wipe the message.
+          await new Promise(r=>setTimeout(r,50));
+          for(let i=0;i<80&&invBusy;i++) await new Promise(r=>setTimeout(r,25));
+        }finally{ window.patch=rp; window.fetch=rf; }
+        const dm=document.getElementById('dv_msg');
+        if(!dm||dm.classList.contains('hide')||!dm.textContent.includes('Saved'))
+          say('saving a pending row left no confirmation on screen');
         const arr=body&&body.additional_devices;
         if(!arr||arr.length!==3) say('saving a pending row did not send the whole device list');
         else{
