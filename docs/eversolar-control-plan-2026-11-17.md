@@ -60,8 +60,10 @@ sentence in comments. All three are corrected in the Phase 1 PR, together with a
   percentage. No step size, persistence or read-back is stated.
 - **Write request and reply.** The request carries two data bytes. The reply carries one byte:
   `0x06` set OK, `0x15` refused, `0x00` checksum or format error.
-- **Byte order.** The document says words are sent LSB first. Every working implementation,
-  ours included, reads words big-endian. A 16-bit sum checksum cannot tell the two apart.
+- **Byte order.** The document says words are sent LSB first. Our driver reads this inverter's
+  `11 82` words big-endian, and the values decode correctly (**observed**, on the TL3000-20). The
+  community implementations do the same. A 16-bit sum checksum cannot tell the two orders apart,
+  and whether a *write* follows the read convention is unknown.
 
 ### Inferences on top of that
 
@@ -93,10 +95,10 @@ function is in the EverSolar table, so under
 them itself in `11 81`. Even then they stay unproven, because "listed" does not mean "same
 meaning as on a SolaX".
 
-### Community (observed)
+### Community (observed where they ran hardware, otherwise their claims)
 
-- `timretout/zeversolar-esphome`: reads only. It treats write and execute as undocumented, and
-  firmware updates as travelling over the same port.
+- `timretout/zeversolar-esphome`: reads only. Its README *claims* that write and execute are
+  undocumented, and that firmware updates travel over the same port. Neither is observed.
 - `craimasjien/ha-zeversolar-modbus`: has a passive mode that only decodes `11 82` replies to
   another master's polls. Not this work, see [Later](#later-not-this-work).
 - `kmbrimble/zeversolar-esphome-gateway` (archived): claims a newer TL3000 generation with an
@@ -111,7 +113,7 @@ meaning as on a SolaX".
 | Exists on our unit? | Unknown. Phase 1 answers it. | Unknown. Needs a physical look for a DRED port. |
 | Granularity | Steps of unknown size | DRM0 = off. DRM5–8 = levels, only on a 6CH board and an inverter that honours them. |
 | Read-back of the limit | None documented | The relay state is ours. The inverter's response is not readable. |
-| Hardware we need | None. The production RS485-CAN board can do it. | A Relay board in place of the RS485-CAN. Same RS485 pins, so monitoring continues. |
+| Hardware we need | None. The production RS485-CAN board can do it. | A Relay board in place of the RS485-CAN. Same RS485 pins per the schematic, untried on the 1CH. |
 | Firmware region | Power management needs an LCD switch the NL guide says to leave off | AS4777 DRM is usually AU firmware. SolaX confirmed that for its own units (2026-11-05). |
 | Our side proven? | No write has ever left this driver | Relay side hardware-verified, inverter side never wired |
 | Failure mode | A step that persists and leaves the inverter curtailed | Wiring inverts the failsafe (see [`drm.md`](drm.md)) |
@@ -160,31 +162,51 @@ would also announce it to Home Assistant as soon as the gates open, and a bench 
 become an entity. So the bench action is a second kind of diagnostic query, marked `writes`:
 
 - Two actions: `power_step_down` and `power_step_up`.
-- Before anything is sent, the runner applies the same gates the dispatcher does, in the same
-  order:
-  1. `security.read_only_mode` off;
-  2. `control.inverter_writes_enabled` on;
-  3. the per-device driver option `allow_unverified_writes` on, the existing opt-in, now also on
-     this driver;
-  4. at most one bench write per 30 s.
+- Before anything is sent, the runner checks, in this order:
+  1. `security.read_only_mode` off (the dispatcher's first gate, reused);
+  2. `control.inverter_writes_enabled` on (the dispatcher's second gate, reused);
+  3. **new:** the per-device driver option `allow_unverified_writes` on. The key is generic
+     (`driver_descriptor.h`), but today only `modbus_profile` and `sunspec` declare it; Phase 2
+     adds it to this driver's descriptor;
+  4. **new:** the device is registered, and its serial matches the one this device was
+     configured with. Registration alone does not prove `0x10` is still the same inverter (see
+     the pitfalls in [`eversolar-protocol.md`](eversolar-protocol.md));
+  5. **new:** at most one bench write per 30 s **per device, counting attempts**, not
+     successes. The dispatcher's own limiter defaults to 1 s and is not reused.
 
-  The capability and range gates become the whitelist below.
-- **The whitelist (hard requirement).** The driver has exactly one function that builds a `0x12`
-  frame. Its only inputs are an enum `{Down, Up}` and an enum `{BigEndian, LittleEndian}`, so no
-  caller can pass a function code or a data value. Nothing in the driver builds a `0x13` frame.
-  `execute()` keeps returning `Unsupported` for every command type.
-- **A test proves the whitelist.** It drives every public entry point against the fake device,
-  with a frame recorder on the transport: probe, poll, every diagnostic query, both bench actions
-  in both byte orders, and `execute()` for every `InverterCommandType`. It then asserts that every
-  transmitted frame with control `0x12` is func `0x20` with data in
-  `{00 02, 02 00, 00 08, 08 00}`, and that no frame has control `0x13`.
+  The dispatcher's capability and range gates have no equivalent here. The whitelist below
+  replaces them.
+- **A deliberate, temporary exception to the read-back rule.** `write-path.md` serves a write
+  only when its setpoint can be read back, with or without the opt-in. The bench path has no
+  read-back, and that is the point of it: finding one is what Phase 2 is for. It is acceptable
+  only because the bench is not a command (no Home Assistant entity, no MQTT or automation path),
+  is admin-only, and is removed or replaced in Phase 3. It must not outlive Phase 3 as-is.
+- **Never retried.** A bench write goes out once. After a timeout the inverter's state is
+  unknown, so an automatic retry could step twice. The vendor's "retry up to 3 times" applies to
+  reads only. A timeout counts against the rate limit like any other attempt.
+- **The whitelist (hard requirement), structural rather than by convention.**
+  - The driver has exactly one function that builds a `0x12` frame. Its only inputs are an enum
+    `{Down, Up}` and an enum `{BigEndian, LittleEndian}`, so no caller can pass a function code
+    or a data value. `execute()` keeps returning `Unsupported` for every command type.
+  - `pmu::buildRequest()` is generic and shared with the SolaX driver, so "one function" is not
+    enough by itself. A new check in `tools/check_layering.sh` fails when a control code
+    `0x12` or higher appears anywhere in `src/` outside that one builder.
+  - The diagnostic-query runner refuses any frame with control `0x12` or higher unless it came
+    from the bench builder, whatever the driver declares about the query.
+- **A test checks the whitelist on the wire.** It drives every public entry point against the
+  fake device, with a frame recorder on the transport: probe, poll, every diagnostic query, both
+  bench actions in both byte orders, and `execute()` for every `InverterCommandType`. It asserts
+  an **allow-list**: every transmitted frame is a known `10 xx` or `11 xx` pair, or `12 20` with
+  data in `{00 02, 02 00, 00 08, 08 00}`. Anything else fails, `0x13` and above included. The
+  test covers reachable paths only. The layering check above is what covers unreachable ones.
 - **What is logged per bench write:**
   - the full TX and RX;
   - the reply byte, named (`ACK`, `NAK`, `format error`, or `timeout`);
   - AC power, and the complete raw `11 82` payload, right before and 60 s after.
 
   The raw payload matters: the TL3000-20 sends an undecoded 8-word tail (words 14–21:
-  `0000 0000 FFFF 0000 0000 0000 FF00 0000`, constant across captures, see
+  `0000 0000 FFFF 0000 0000 0000 FF00 0000`, identical in three consecutive replies captured
+  2026-08-03, see
   [`eversolar-protocol.md`](eversolar-protocol.md)). If one of those words moves after a step,
   that is the read-back candidate. Word 20 (`FF00`) is the first one to watch. **inference**
 - **Byte order** is a parameter of this action only. Big-endian is the default, little-endian the
@@ -199,8 +221,16 @@ from Phase 2:
 1. a step size that repeats;
 2. a known way back to 100 %;
 3. known persistence, across a night and across a power cycle;
-4. an observable read-back: a word in `11 82` or `11 84`, or anything else the inverter reports
-   that tracks the limit.
+4. an observable read-back: a word in `11 82` or `11 84`, or anything else the inverter reports,
+   that tracks **several steps in both directions** and holds across repeated polls. One moved
+   word after one step is a lead, not a read-back.
+
+Two traps for the bench session:
+
+- A first step *down* at full sun shows in AC power, if the step is big enough. A first step *up*
+  from 100 % is probably a no-op. So the session starts with down.
+- A 60 s AC-power delta is noise when the step size is unknown. Step only in stable sun, and
+  repeat.
 
 With all four, the candidate is a percentage emulated by stepping, with the read-back as the
 canonical `control.active_power_limit`. Without a read-back, the honest outcome is a documented
@@ -235,7 +265,9 @@ Nothing else is ever sent, apart from the existing registration and poll traffic
 |---|---|
 | A step persists, and the inverter stays curtailed after the test | Step up straight after. If that fails: power-cycle (AC off, DC off, wait, DC on, AC on), then switch the LCD back to `ActiveP&EEG : OFF`. Whether that LCD switch clears a limit is **inference**. |
 | `ActiPowFun: ON` without a ComBox puts the inverter in an unexpected default state | Switch it on and watch AC power for a full sunny day *before* the first bench write. Undocumented either way. |
-| The wrong byte order is read as another value | Function `0x20` only, two values per order. The worst documented outcome is a `0x00` format error or a NAK. |
+| The wrong byte order is read as another value | Function `0x20` only, two values per order. A big-endian parser reads `02 00` or `08 00` as `0x0200` or `0x0800`, values the document does not define for `0x20`. We expect a NAK or a `0x00` format error. **inference**: the behaviour is undefined. |
+| A timeout leaves the step state unknown, and a second press steps twice | No automatic retry. The rate limit counts attempts. Poll and look at AC power before pressing again. |
+| Address `0x10` belongs to another inverter after a restart (multi-inverter bus) | Before each write, compare the serial with the configured one. |
 | A firmware or execute path is reached | No `0x13` frame can be built (see the whitelist test). |
 | Another owner's inverter is affected | Every gate is default closed. The bench action also needs the per-device opt-in. |
 | The address was lost at dawn mid-test | Queries and bench writes are refused while unregistered. Test at midday with stable sun. |
@@ -265,7 +297,9 @@ the SolaX doc, not before.
 - whether NL firmware honours it at all.
 
 The production bridge is an RS485-CAN board without relays. A Relay-1CH has the same RS485
-pinout, so it can take its place and keep monitoring. That gives DRM0 only, which means off, not
+pins (TX 17, RX 18, EN 21), per Waveshare's schematic, so it should be able to take its place and
+keep monitoring. That is not yet observed: no RS485 traffic has been driven on a 1CH (see
+[`hardware.md`](hardware.md)). That gives DRM0 only, which means off, not
 limited. Graded limits need the 6CH and an inverter that implements DRM5–8. Once the port is
 photographed, the track becomes a short section in `drm.md` for this family.
 
