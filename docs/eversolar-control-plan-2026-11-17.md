@@ -80,7 +80,7 @@ which explains why it is missing from the normal manual.
 
 **Our unit (observed).** The TL3000-20 identifies as
 `1  3000E1.00   TL3000-20    Ever-Solar      XH300060115506193600V610-01023-06` (captured
-2026-07-19, see [`implementation-plan.md`](implementation-plan.md)). The suffix `V610-01023-06`
+2026-07-19 on the production bridge, the reply to `11 03`). The suffix `V610-01023-06`
 is exactly the minimum. That this suffix *is* the firmware version is **inference**: the TLC8000
 capture uses the same shape (`V610-03017-03`). The LCD's Version screen confirms it.
 
