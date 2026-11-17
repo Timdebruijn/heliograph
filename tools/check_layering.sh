@@ -463,11 +463,12 @@ echo "==> 12. No PMU command with a control code of 0x12 or higher exists under 
 # Nothing is allowed today. A later change that adds a gated bench write has to touch this rule
 # in the same PR, which is the point: it cannot happen by accident.
 #
-# Matches a temporary (CommandCode{0x12, ...}, CommandCode {0X1f, ...}) and a named constant
-# (CommandCode kName{0x13, ...}, how pmu::cmd declares them), braces or parentheses, upper- or
-# lowercase hex. A control code built from a variable or a decimal literal does not match; every
-# construction site in this tree uses a hex literal.
-if hits=$(grep -rnE 'CommandCode([[:space:]]+[A-Za-z_][A-Za-z0-9_]*)?[[:space:]]*[{(][[:space:]]*0[xX]1[2-9a-fA-F]' src/ 2>/dev/null); then
+# Matches a temporary (CommandCode{0x12, ...}, CommandCode {0X1f, ...}), a named constant
+# (CommandCode kName{0x13, ...}, how pmu::cmd declares them) and copy-list-initialisation
+# (CommandCode k = {0x20, ...}), braces or parentheses, upper- or lowercase hex, any control
+# from 0x12 to 0xFF. Known gaps, accepted because no construction site in this tree looks like
+# them: a decimal literal, a variable, a bare `return {0x12, ...}`, or assigning `.control`.
+if hits=$(grep -rnE 'CommandCode([[:space:]]+[A-Za-z_][A-Za-z0-9_]*)?[[:space:]]*=?[[:space:]]*[{(][[:space:]]*0[xX]0*(1[2-9a-fA-F]|[2-9a-fA-F][0-9a-fA-F])' src/ 2>/dev/null); then
     echo "FAIL: a PMU command with control >= 0x12 (WRITE/EXECUTE) is constructed:"
     echo "$hits"
     status=1

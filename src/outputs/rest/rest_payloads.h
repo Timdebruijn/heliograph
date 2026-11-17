@@ -174,8 +174,9 @@ bool buildRegisterReadPayload(const RegisterReadReport& report, std::string& out
                               size_t maxBytes = kMaxResponseBytes);
 
 /// The driver-query report: which queries each device offers, and, once one has run, what the
-/// device answered as raw hex. `rx` and `payload` are absent unless bytes came back and decoded
-/// to a frame -- never an empty string standing in for data.
+/// device answered as raw hex. `rx` is every byte the line delivered, present whenever any
+/// arrived (also on a timeout: something answered that was not accepted); `payload` only on
+/// ok. Absent otherwise, never an empty string standing in for data.
 bool buildDriverQueryPayload(const DriverQueryReport& report,
                              const std::vector<DriverQueryCatalogEntry>& catalog,
                              std::string& out, size_t maxBytes = kMaxResponseBytes);

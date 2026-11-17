@@ -26,6 +26,7 @@ enum class DiagnosticStatus : uint8_t {
     InvalidFrame,
     UnknownQuery,   ///< the driver lists no query with that name; nothing was sent
     NotRegistered,  ///< the device has no usable address right now; nothing was sent
+    TransportError, ///< the bus lock or the write failed; the frame may not have gone out
 };
 
 inline const char* diagnosticStatusName(DiagnosticStatus status) {
@@ -36,14 +37,15 @@ inline const char* diagnosticStatusName(DiagnosticStatus status) {
         case DiagnosticStatus::InvalidFrame:  return "invalid_frame";
         case DiagnosticStatus::UnknownQuery:  return "unknown_query";
         case DiagnosticStatus::NotRegistered: return "not_registered";
+        case DiagnosticStatus::TransportError: return "transport_error";
     }
     return "unknown";
 }
 
 struct DiagnosticQueryResult {
     DiagnosticStatus     status = DiagnosticStatus::UnknownQuery;
-    std::vector<uint8_t> tx;       ///< whole request frame; empty when nothing was sent
-    std::vector<uint8_t> rx;       ///< whole reply frame; empty = nothing usable came back
+    std::vector<uint8_t> tx;       ///< whole request frame; empty when it was not (fully) sent
+    std::vector<uint8_t> rx;       ///< every byte the line delivered, unparsed; empty = silence
     std::vector<uint8_t> payload;  ///< the reply's data bytes, undecoded; only with Ok
 };
 

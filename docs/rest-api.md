@@ -614,16 +614,24 @@ curl http://bridge/api/v1/driver-query
 
 - **Reads only**, so `security.read_only_mode` does not apply. The list is the whole
   vocabulary: the endpoint takes no data to send, only a device id and a name from that list.
-- **One query in place of one poll**, once, with no retry. 409 `bus_busy` while a query, a
-  register read, a capture or a discovery run holds the bus; 404 `unknown_device` or
-  `unknown_query` for an id or name the bridge does not offer.
+- **One query in place of one poll**, once, with no retry. The POST answers
+  `202 {"status":"accepted"}`; read the result with the GET. 409 `bus_busy` while another query,
+  a register read, a passive capture, a driver capture or a discovery run holds the bus; 404
+  `unknown_device` or `unknown_query` for an id or name the bridge does not offer; 404
+  `no_driver_query` on a build without queries. The GET answers 500 `payload_too_large` if the
+  report would exceed its bound.
 - `devices` in the GET lists every configured device whose driver offers queries, so a client
   can discover the names.
-- `result` is `ok`, `timeout`, `checksum_error`, `invalid_frame`, `not_registered` (the device
-  has no usable address right now, nothing was sent), `unknown_query` or `unknown_device`.
-- `tx` is the whole request frame. `rx` is the whole reply frame and is **absent** when nothing
-  usable came back: a timeout has no `rx`, not an empty one. `payload` is the reply's data
-  bytes and is present only with `ok`.
+- `result` is `ok`, `timeout`, `checksum_error`, `invalid_frame`, `transport_error` (the bus
+  lock or the write failed), `not_registered` (the device has no usable address right now,
+  nothing was sent) or `unknown_query`. `unknown_device` appears only if a device disappeared
+  between the POST's validation and the run.
+- `tx` is the whole request frame, absent when it was not (fully) sent. `rx` is **every byte the
+  line delivered** during the exchange, unparsed and capped at two frames: the reply, but also an
+  echo of our own request or a frame with an unexpected function code. It is **absent**, not
+  empty, when the line stayed silent. So `timeout` *with* `rx` means something answered that was
+  not the expected reply; read the bytes. `payload` is the accepted reply's data bytes and is
+  present only with `ok`.
 - Raw hex only. The payload formats are not confirmed, so nothing is decoded.
 
 ## Applying changes: `reboot_required`

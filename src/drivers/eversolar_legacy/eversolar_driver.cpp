@@ -542,8 +542,12 @@ DiagnosticQueryResult EversolarDriver::runDiagnosticQuery(const std::string& nam
             break;
         case TransactResult::Timeout:        result.status = DiagnosticStatus::Timeout; break;
         case TransactResult::ChecksumError:  result.status = DiagnosticStatus::ChecksumError; break;
-        case TransactResult::InvalidFrame:
-        case TransactResult::TransportError: result.status = DiagnosticStatus::InvalidFrame; break;
+        case TransactResult::InvalidFrame:   result.status = DiagnosticStatus::InvalidFrame; break;
+        case TransactResult::TransportError:
+            // The lock or the write failed, so the frame may never have reached the line.
+            result.status = DiagnosticStatus::TransportError;
+            result.tx.clear();
+            break;
     }
     return result;
 }

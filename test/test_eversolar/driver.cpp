@@ -867,10 +867,12 @@ static void test_a_silent_device_is_a_timeout_with_no_reply_bytes() {
     Rig r;
     registerDriver(r);
     r.device.withholdQueries = true;
+    const size_t before = r.transport.writes.size();
 
     const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("rw_description");
 
     TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::Timeout), static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(before + 1, r.transport.writes.size());  // no retry
     TEST_ASSERT_EQUAL_size_t(11, res.tx.size());  // what we sent is still reported
     TEST_ASSERT_TRUE(res.rx.empty());
     TEST_ASSERT_TRUE(res.payload.empty());
@@ -891,12 +893,59 @@ static void test_a_corrupt_reply_is_a_checksum_error_with_the_raw_bytes() {
         return true;
     });
 
+    const size_t before = r.transport.writes.size();
+
     const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("versions");
 
     TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::ChecksumError),
                       static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(before + 1, r.transport.writes.size());  // no retry
     TEST_ASSERT_EQUAL_size_t(fx::kRespVersionsConstructedLen, res.rx.size());
     TEST_ASSERT_TRUE(res.payload.empty());
+}
+
+// An inverter that does not know a query may answer it with some other, well-formed frame. That
+// frame is the finding, so it must reach rx -- an earlier version reported it as a silent
+// timeout because only an accepted or corrupt frame was kept.
+static void test_an_unexpected_reply_frame_is_a_timeout_that_keeps_its_bytes() {
+    Rig r;
+    registerDriver(r);
+    const auto responder = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (!responder(req, reply)) {
+            return false;
+        }
+        if (req[kOffsetControl] == 0x11 && req[kOffsetFunction] == 0x42) {
+            reply[kOffsetFunction] = 0xC3;  // not the C2 we asked for
+            const uint16_t sum = checksum(reply.data(), reply.size() - 2);
+            reply[reply.size() - 2] = static_cast<uint8_t>(sum >> 8);
+            reply[reply.size() - 1] = static_cast<uint8_t>(sum & 0xFF);
+        }
+        return true;
+    });
+
+    const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("versions");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::Timeout), static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(fx::kRespVersionsConstructedLen, res.rx.size());
+    TEST_ASSERT_EQUAL_HEX8(0xC3, res.rx[kOffsetFunction]);
+    TEST_ASSERT_TRUE(res.payload.empty());
+}
+
+// On a bus that echoes, rx shows our own frame ahead of the reply: it is every byte the line
+// delivered, not a parsed frame. The reply is still accepted.
+static void test_an_echoing_bus_shows_the_echo_ahead_of_the_reply() {
+    Rig r;
+    registerDriver(r);
+    r.device.echoRequests = true;
+
+    const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("versions");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::Ok), static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(11 + fx::kRespVersionsConstructedLen, res.rx.size());
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kTxVersions, res.rx.data(), 11);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(fx::kRespVersionsConstructed, res.rx.data() + 11,
+                                  fx::kRespVersionsConstructedLen);
 }
 
 // The wire allow-list. Every public entry point that can put a frame on the bus is driven, and
@@ -1230,6 +1279,8 @@ void run_eversolar_driver() {
     RUN_TEST(test_an_unknown_query_name_sends_nothing);
     RUN_TEST(test_a_silent_device_is_a_timeout_with_no_reply_bytes);
     RUN_TEST(test_a_corrupt_reply_is_a_checksum_error_with_the_raw_bytes);
+    RUN_TEST(test_an_unexpected_reply_frame_is_a_timeout_that_keeps_its_bytes);
+    RUN_TEST(test_an_echoing_bus_shows_the_echo_ahead_of_the_reply);
     RUN_TEST(test_every_frame_the_driver_transmits_is_a_known_registration_or_read);
     RUN_TEST(test_probe_scores_a_full_handshake_highly);
     RUN_TEST(test_probe_on_a_silent_bus_scores_zero);

@@ -105,9 +105,6 @@ TransactStatus transact(Transport& transport, const Exchange& exchange, uint8_t*
                     std::memcpy(payloadOut, frame.data, frame.dataLength);
                 }
                 payloadLen = frame.dataLength;
-                if (exchange.rawReply != nullptr) {
-                    exchange.rawReply->assign(rx, rx + frame.frameLength);
-                }
                 traceOutcome("ok");
                 return TransactStatus::Ok;
             }
@@ -139,9 +136,6 @@ TransactStatus transact(Transport& transport, const Exchange& exchange, uint8_t*
             ++tally.checksumErrors;
             const size_t skip = frame.frameLength > 0 ? frame.frameLength : 1;
             const size_t n    = skip < have ? skip : have;
-            if (exchange.rawReply != nullptr) {
-                exchange.rawReply->assign(rx, rx + n);
-            }
             std::memmove(rx, rx + n, have - n);
             have -= n;
             continue;
@@ -164,6 +158,11 @@ TransactStatus transact(Transport& transport, const Exchange& exchange, uint8_t*
             // did not accept it, which is a different problem with a different fix.
             traceOutcome(received > 0 ? "timeout after partial/rejected data" : "silent");
             return TransactStatus::Timeout;
+        }
+        if (exchange.rawReply != nullptr && exchange.rawReply->size() < kMaxRawReply) {
+            const size_t room = kMaxRawReply - exchange.rawReply->size();
+            exchange.rawReply->insert(exchange.rawReply->end(), rx + have,
+                                      rx + have + (n < room ? n : room));
         }
         have += n;
         received += n;
