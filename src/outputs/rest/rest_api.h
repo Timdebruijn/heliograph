@@ -37,6 +37,7 @@ class AsyncWebServerRequest;
 #include "app/capture_runner.h"
 #include "app/discovery_runner.h"
 #include "app/driver_capture_runner.h"
+#include "app/driver_query_runner.h"
 #include "app/register_reader.h"
 #include "drivers/driver_registry.h"
 #include "rest_payloads.h"
@@ -101,6 +102,13 @@ struct RestContext {
     std::function<bool()> registerReadFitsBus;
     /// The last register read, for the page to poll.
     std::function<RegisterReadReport()> registerReadReport;
+    /// Queue one driver diagnostic query for the bus task. False when anything else holds or is
+    /// about to hold the bus.
+    std::function<bool(const std::string& deviceId, const std::string& query)> requestDriverQuery;
+    /// The last driver query's report, for the page to poll.
+    std::function<DriverQueryReport()> driverQueryReport;
+    /// What each configured device offers.
+    std::function<std::vector<DriverQueryCatalogEntry>()> driverQueryCatalog;
     /// Wipes stored configuration including credentials, then reboots into the setup portal.
     /// The same wipe the BOOT-hold performs, reached over the network instead of the button --
     /// which is what a user without physical access has when a config locks them out.

@@ -3232,6 +3232,121 @@ static void test_an_unused_register_reader_reports_idle_and_nothing_else() {
     TEST_ASSERT_FALSE(doc["address"].is<int>());
 }
 
+// ---------------------------------------------------------------------------------------
+// The driver query runner: request rules, the handover to the bus task, and the payload.
+// ---------------------------------------------------------------------------------------
+
+static std::vector<DriverQueryCatalogEntry> oneDeviceCatalog() {
+    return {{"dev1", {{"versions", "master, slave and logger versions"}}}};
+}
+
+static std::optional<rest::ApiError> parseQuery(const Query& q, std::string& device,
+                                                std::string& query) {
+    return rest::parseDriverQueryRequest(queryOf(q), oneDeviceCatalog(), device, query);
+}
+
+static void test_a_driver_query_needs_a_configured_device_and_a_query_it_lists() {
+    std::string device, query;
+    TEST_ASSERT_FALSE(parseQuery({{"device", "dev1"}, {"query", "versions"}}, device, query)
+                          .has_value());
+    TEST_ASSERT_EQUAL_STRING("dev1", device.c_str());
+    TEST_ASSERT_EQUAL_STRING("versions", query.c_str());
+
+    auto e = parseQuery({{"query", "versions"}}, device, query);
+    TEST_ASSERT_TRUE(e.has_value());
+    TEST_ASSERT_EQUAL(400, e->httpStatus);
+    e = parseQuery({{"device", "dev1"}, {"query", ""}}, device, query);
+    TEST_ASSERT_EQUAL(400, e->httpStatus);
+    e = parseQuery({{"device", "nope"}, {"query", "versions"}}, device, query);
+    TEST_ASSERT_EQUAL(404, e->httpStatus);
+    TEST_ASSERT_EQUAL_STRING("unknown_device", e->code.c_str());
+    e = parseQuery({{"device", "dev1"}, {"query", "set_power"}}, device, query);
+    TEST_ASSERT_EQUAL(404, e->httpStatus);
+    TEST_ASSERT_EQUAL_STRING("unknown_query", e->code.c_str());
+}
+
+static void test_a_driver_query_runs_on_the_bus_task_and_reports_raw_hex() {
+    Rig r;
+    r.poll();  // registers
+    DriverQueryRunner runner;
+    const DriverLookup lookup = [&](const std::string& id) -> InverterDriver* {
+        return id == "dev1" ? &r.driver : nullptr;
+    };
+
+    TEST_ASSERT_FALSE(runner.runIfRequested(lookup));  // nothing asked: the poll keeps its slot
+    TEST_ASSERT_TRUE(runner.request("dev1", "versions"));
+    TEST_ASSERT_TRUE(runner.busy());
+    TEST_ASSERT_FALSE(runner.request("dev1", "set_info"));  // one at a time
+    TEST_ASSERT_TRUE(runner.runIfRequested(lookup));
+    TEST_ASSERT_FALSE(runner.busy());
+    TEST_ASSERT_FALSE(runner.runIfRequested(lookup));  // one request is one query
+
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildDriverQueryPayload(runner.report(), oneDeviceCatalog(), body));
+    JsonDocument doc = parse(body);
+    TEST_ASSERT_EQUAL_STRING("done", doc["status"]);
+    TEST_ASSERT_EQUAL_STRING("ok", doc["result"]);
+    TEST_ASSERT_EQUAL_STRING("AA 55 01 00 00 10 11 42 00 01 63", doc["tx"]);
+    TEST_ASSERT_TRUE(doc["rx"].is<const char*>());
+    TEST_ASSERT_EQUAL_STRING("4D 31 2E 30 20 53 31 2E 31 20 4C 31 2E 32", doc["payload"]);
+    TEST_ASSERT_EQUAL_STRING("versions", doc["devices"][0]["queries"][0]["name"]);
+}
+
+// The runner's own guard, behind the REST parser: an id that is not configured and a name the
+// driver does not list both end in a report, never in a frame on the bus.
+static void test_the_driver_query_runner_refuses_unknown_devices_and_queries() {
+    Rig r;
+    r.poll();
+    DriverQueryRunner runner;
+    const DriverLookup lookup = [&](const std::string& id) -> InverterDriver* {
+        return id == "dev1" ? &r.driver : nullptr;
+    };
+    const size_t before = r.transport.writes.size();
+
+    runner.request("ghost", "versions");
+    TEST_ASSERT_TRUE(runner.runIfRequested(lookup));
+    TEST_ASSERT_FALSE(runner.report().deviceFound);
+    runner.request("dev1", "set_power");
+    TEST_ASSERT_TRUE(runner.runIfRequested(lookup));
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::UnknownQuery),
+                      static_cast<int>(runner.report().result.status));
+    TEST_ASSERT_EQUAL_size_t(before, r.transport.writes.size());
+
+    std::string body;
+    runner.request("ghost", "versions");
+    runner.runIfRequested(lookup);
+    TEST_ASSERT_TRUE(rest::buildDriverQueryPayload(runner.report(), {}, body));
+    TEST_ASSERT_EQUAL_STRING("unknown_device", parse(body)["result"]);
+}
+
+// Silence reports a timeout and leaves rx and payload out entirely.
+static void test_a_silent_driver_query_has_no_rx_and_no_payload_in_the_report() {
+    Rig r;
+    r.poll();
+    r.device.withholdQueries = true;
+    DriverQueryRunner runner;
+    runner.request("dev1", "set_info");
+    runner.runIfRequested([&](const std::string&) -> InverterDriver* { return &r.driver; });
+
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildDriverQueryPayload(runner.report(), oneDeviceCatalog(), body));
+    JsonDocument doc = parse(body);
+    TEST_ASSERT_EQUAL_STRING("timeout", doc["result"]);
+    TEST_ASSERT_TRUE(doc["tx"].is<const char*>());
+    TEST_ASSERT_FALSE(doc["rx"].is<const char*>());
+    TEST_ASSERT_FALSE(doc["payload"].is<const char*>());
+}
+
+static void test_an_unused_driver_query_runner_reports_idle_and_the_catalog_only() {
+    DriverQueryRunner runner;
+    std::string       body;
+    TEST_ASSERT_TRUE(rest::buildDriverQueryPayload(runner.report(), oneDeviceCatalog(), body));
+    JsonDocument doc = parse(body);
+    TEST_ASSERT_EQUAL_STRING("idle", doc["status"]);
+    TEST_ASSERT_EQUAL_STRING("dev1", doc["devices"][0]["id"]);
+    TEST_ASSERT_FALSE(doc["result"].is<const char*>());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_config_response_contains_no_secret_anywhere);
@@ -3397,6 +3512,11 @@ int main(int, char**) {
     RUN_TEST(test_restore_preview_omits_an_absent_export_date);
     RUN_TEST(test_restore_preview_of_a_real_backup_leaks_no_password);
     RUN_TEST(test_restore_result_reports_a_missing_undo_separately);
+    RUN_TEST(test_a_driver_query_needs_a_configured_device_and_a_query_it_lists);
+    RUN_TEST(test_a_driver_query_runs_on_the_bus_task_and_reports_raw_hex);
+    RUN_TEST(test_the_driver_query_runner_refuses_unknown_devices_and_queries);
+    RUN_TEST(test_a_silent_driver_query_has_no_rx_and_no_payload_in_the_report);
+    RUN_TEST(test_an_unused_driver_query_runner_reports_idle_and_the_catalog_only);
     RUN_TEST(test_a_register_read_needs_only_an_address);
     RUN_TEST(test_a_register_read_takes_unit_space_and_count);
     RUN_TEST(test_a_register_read_refuses_what_is_not_a_plain_number);

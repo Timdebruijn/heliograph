@@ -1137,6 +1137,52 @@ bool RestApi::begin() {
         request->send(200, kJson, body.c_str());
     });
 
+    // A driver's diagnostic queries: named READs, raw hex back. Same terms as the register
+    // reader -- reads only, so read_only_mode does not apply, but admin-gated because it takes a
+    // poll slot and talks on the bus.
+    g_server->on("/api/v1/actions/driver-query", HTTP_POST,
+                 [this, authorised, rateLimited](AsyncWebServerRequest* request) {
+        if (!authorised(request) || rateLimited(request)) {
+            return;
+        }
+        if (context_.requestDriverQuery == nullptr || context_.driverQueryCatalog == nullptr) {
+            sendError(request, {404, "no_driver_query", "this build has no driver queries"});
+            return;
+        }
+        const rest::QueryParam param = [request](const char* name) -> const char* {
+            return request->hasParam(name) ? request->getParam(name)->value().c_str() : nullptr;
+        };
+        std::string deviceId;
+        std::string query;
+        if (const auto error = rest::parseDriverQueryRequest(param, context_.driverQueryCatalog(),
+                                                             deviceId, query)) {
+            sendError(request, *error);
+            return;
+        }
+        if (!context_.requestDriverQuery(deviceId, query)) {
+            sendError(request, {409, "bus_busy",
+                                "a query, read, capture or discovery run is already using the bus"});
+            return;
+        }
+        request->send(202, kJson, "{\"status\":\"accepted\"}");
+    });
+
+    g_server->on(AsyncURIMatcher::exact("/api/v1/driver-query"), HTTP_GET,
+                 [this](AsyncWebServerRequest* request) {
+        context_.diagnostics->recordRestRequest();
+        if (context_.driverQueryReport == nullptr || context_.driverQueryCatalog == nullptr) {
+            sendError(request, {404, "no_driver_query", "this build has no driver queries"});
+            return;
+        }
+        std::string body;
+        if (!buildDriverQueryPayload(context_.driverQueryReport(), context_.driverQueryCatalog(),
+                                     body)) {
+            sendError(request, {500, "payload_too_large", "driver query exceeded its bound"});
+            return;
+        }
+        request->send(200, kJson, body.c_str());
+    });
+
     // Bus capture, in either of its two modes: `passive` for a device discovery could not name,
     // `driver` for one we already talk to. Every parameter travels in the query: they are a
     // handful of numbers and two enums, and a JSON body would need the whole collectBody dance

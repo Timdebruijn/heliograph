@@ -64,9 +64,11 @@ inline constexpr uint8_t kFirstInverterAddress = 0x10;
 
 inline constexpr Address inverterAddress(uint8_t addr) { return Address{0x00, addr}; }
 
-// Control codes 0x12 (WRITE) and 0x13 (EXECUTE) exist in the protocol but no function
-// codes for them are known, so no write operation can be expressed. This is why the
-// PMU-family drivers are read-only by nature rather than by MVP scope.
+// Control codes 0x12 (WRITE) and 0x13 (EXECUTE) exist in the protocol. The community
+// reference leaves both empty, but a vendor protocol document lists write functions (see the
+// protocol notes under docs/). No driver sends one: the PMU-family drivers are read-only
+// because nothing implements a write, not because none exist. tools/check_layering.sh fails
+// if a CommandCode with control >= 0x12 appears under src/.
 struct CommandCode {
     uint8_t control  = 0;
     uint8_t function = 0;
@@ -82,8 +84,11 @@ inline constexpr CommandCode kSendAddress{0x10, 0x01};   // -> 1 byte ACK (kRegi
 inline constexpr CommandCode kReRegister{0x10, 0x04};    // broadcast, no response
 // Control code 0x11 — READ
 inline constexpr CommandCode kQueryDescription{0x11, 0x00};
+inline constexpr CommandCode kQueryRwDescription{0x11, 0x01};  // writable data numbers (list)
+inline constexpr CommandCode kQuerySetInfo{0x11, 0x04};        // current setting values
 inline constexpr CommandCode kQueryNormalInfo{0x11, 0x02};  // -> measurement payload
 inline constexpr CommandCode kQueryInverterId{0x11, 0x03};  // -> device id payload
+inline constexpr CommandCode kQueryVersions{0x11, 0x42};    // -> master/slave/logger versions
 }  // namespace cmd
 
 inline constexpr uint8_t kRegisterAck = 0x06;

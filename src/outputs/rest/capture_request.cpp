@@ -80,6 +80,30 @@ std::optional<ApiError> parseRegisterReadRequest(const QueryParam& param,
     return std::nullopt;
 }
 
+std::optional<ApiError> parseDriverQueryRequest(const QueryParam& param,
+                                                const std::vector<DriverQueryCatalogEntry>& catalog,
+                                                std::string& deviceId, std::string& query) {
+    const char* device = param("device");
+    const char* name   = param("query");
+    if (device == nullptr || *device == '\0' || name == nullptr || *name == '\0') {
+        return invalid("device and query are both required");
+    }
+    for (const DriverQueryCatalogEntry& entry : catalog) {
+        if (entry.deviceId != device) {
+            continue;
+        }
+        for (const DiagnosticQuery& q : entry.queries) {
+            if (q.name == name) {
+                deviceId = entry.deviceId;
+                query    = q.name;
+                return std::nullopt;
+            }
+        }
+        return ApiError{404, "unknown_query", "this device's driver does not list that query"};
+    }
+    return ApiError{404, "unknown_device", "no configured device has that id and offers queries"};
+}
+
 std::optional<ApiError> parseCaptureRequest(const QueryParam& param, CaptureRequest& out) {
     out = CaptureRequest{};
 

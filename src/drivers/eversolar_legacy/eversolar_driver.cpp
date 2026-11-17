@@ -114,7 +114,8 @@ EversolarDriver::TransactResult EversolarDriver::transact(CommandCode command,
                                                           uint8_t* payloadOut,
                                                           size_t   payloadCapacity,
                                                           size_t&  payloadLen,
-                                                          const Address* altSource) {
+                                                          const Address* altSource,
+                                                          DiagnosticQueryResult* raw) {
     payloadLen = 0;
     if (transport_ == nullptr) {
         return TransactResult::TransportError;
@@ -128,7 +129,11 @@ EversolarDriver::TransactResult EversolarDriver::transact(CommandCode command,
     }
 
     waitForInterFrameGap();
-    const pmu::Exchange exchange{request, requestLen, command, expectedSource, altSource};
+    pmu::Exchange exchange{request, requestLen, command, expectedSource, altSource};
+    if (raw != nullptr) {
+        raw->tx.assign(request, request + requestLen);
+        exchange.rawReply = &raw->rx;
+    }
     const auto result = pmu::transact(*transport_, exchange, payloadOut, payloadCapacity,
                                       payloadLen, tally_, "RS485");
     lastFrameMs_ = transport_->nowMs();
@@ -484,6 +489,63 @@ InverterCapabilities EversolarDriver::capabilities() const { return capabilities
 CommandResult EversolarDriver::execute(const InverterCommand& command) {
     (void)command;
     return CommandResult::Unsupported;
+}
+
+namespace {
+struct QueryDef {
+    const char* name;
+    const char* description;
+    CommandCode command;
+};
+// All READ (control 0x11). Reply payloads are not decoded: see the header.
+constexpr QueryDef kQueries[] = {
+    {"read_description", "read-only data codes the inverter lists", cmd::kQueryDescription},
+    {"rw_description", "writable data numbers the inverter lists", cmd::kQueryRwDescription},
+    {"set_info", "current setting values", cmd::kQuerySetInfo},
+    {"versions", "master, slave and logger versions", cmd::kQueryVersions},
+};
+}  // namespace
+
+std::vector<DiagnosticQuery> EversolarDriver::diagnosticQueries() const {
+    std::vector<DiagnosticQuery> out;
+    for (const QueryDef& q : kQueries) {
+        out.push_back({q.name, q.description});
+    }
+    return out;
+}
+
+DiagnosticQueryResult EversolarDriver::runDiagnosticQuery(const std::string& name) {
+    DiagnosticQueryResult result;
+    const QueryDef*       def = nullptr;
+    for (const QueryDef& q : kQueries) {
+        if (name == q.name) {
+            def = &q;
+        }
+    }
+    if (def == nullptr) {
+        return result;  // UnknownQuery, nothing sent
+    }
+    if (!registered_) {
+        result.status = DiagnosticStatus::NotRegistered;
+        return result;
+    }
+    uint8_t payload[kMaxDataLength];
+    size_t  payloadLen = 0;
+    const Address inverter = inverterAddress(address_);
+    // One attempt, no retry: this reports what the wire did.
+    const auto r = transact(def->command, inverter, nullptr, 0, inverter, payload,
+                            sizeof(payload), payloadLen, nullptr, &result);
+    switch (r) {
+        case TransactResult::Ok:
+            result.status = DiagnosticStatus::Ok;
+            result.payload.assign(payload, payload + payloadLen);
+            break;
+        case TransactResult::Timeout:        result.status = DiagnosticStatus::Timeout; break;
+        case TransactResult::ChecksumError:  result.status = DiagnosticStatus::ChecksumError; break;
+        case TransactResult::InvalidFrame:
+        case TransactResult::TransportError: result.status = DiagnosticStatus::InvalidFrame; break;
+    }
+    return result;
 }
 
 }  // namespace heliograph::eversolar

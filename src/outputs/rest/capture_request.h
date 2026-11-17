@@ -16,8 +16,11 @@
 
 #include <functional>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "app/driver_capture_runner.h"
+#include "app/driver_query_runner.h"
 #include "app/register_reader.h"
 #include "diagnostics/bus_tap.h"
 #include "diagnostics/frame_capture.h"
@@ -51,6 +54,13 @@ std::optional<ApiError> parseCaptureRequest(const QueryParam& param, CaptureRequ
 /// Lives here with the capture parser because it is the same kind of thing: a bus action whose
 /// every parameter is a small number in the query string.
 std::optional<ApiError> parseRegisterReadRequest(const QueryParam& param, RegisterReadRequest& out);
+
+/// The driver query's two parameters, `device` and `query`, both required, checked against what
+/// the configured devices offer: 404 for a device that is not configured, 404 for a query its
+/// driver does not list. Nothing reaches the bus task unless both are known.
+std::optional<ApiError> parseDriverQueryRequest(const QueryParam& param,
+                                                const std::vector<DriverQueryCatalogEntry>& catalog,
+                                                std::string& deviceId, std::string& query);
 
 /// Bounds for the passive mode, here rather than as literals in the handler so a test asserts
 /// the same numbers the endpoint enforces.

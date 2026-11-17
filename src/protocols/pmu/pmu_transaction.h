@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "pmu_protocol.h"
 #include "transport/transport.h"
@@ -64,6 +65,10 @@ struct Exchange {
     /// A second acceptable source, or nullptr. Used where an inverter may answer from the
     /// address it was given or from the one it had before being told.
     const Address* altSource = nullptr;
+    /// When set, receives the whole reply frame as it came off the wire: on Ok, and on a
+    /// checksum error (the bytes are the diagnosis). Cleared first, so empty means nothing
+    /// usable arrived.
+    std::vector<uint8_t>* rawReply = nullptr;
 };
 
 /// Sends `exchange` and waits for a matching reply, taking the bus lock for the whole thing.

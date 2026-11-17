@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: MIT
+//
+// A driver's optional list of named diagnostic queries, and what running one returns.
+//
+// For someone working out what a device supports: ask it something the poll loop never asks,
+// see the raw bytes. Every query a driver lists must be a READ; the interface has no way to
+// pass data to the device, only a name chosen from the driver's own list. Brand-free: the
+// names and their meaning live in the driver that lists them.
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace heliograph {
+
+struct DiagnosticQuery {
+    std::string name;         ///< stable, snake_case; what a caller passes back
+    std::string description;  ///< one line for a human
+};
+
+enum class DiagnosticStatus : uint8_t {
+    Ok,
+    Timeout,
+    ChecksumError,
+    InvalidFrame,
+    UnknownQuery,   ///< the driver lists no query with that name; nothing was sent
+    NotRegistered,  ///< the device has no usable address right now; nothing was sent
+};
+
+inline const char* diagnosticStatusName(DiagnosticStatus status) {
+    switch (status) {
+        case DiagnosticStatus::Ok:            return "ok";
+        case DiagnosticStatus::Timeout:       return "timeout";
+        case DiagnosticStatus::ChecksumError: return "checksum_error";
+        case DiagnosticStatus::InvalidFrame:  return "invalid_frame";
+        case DiagnosticStatus::UnknownQuery:  return "unknown_query";
+        case DiagnosticStatus::NotRegistered: return "not_registered";
+    }
+    return "unknown";
+}
+
+struct DiagnosticQueryResult {
+    DiagnosticStatus     status = DiagnosticStatus::UnknownQuery;
+    std::vector<uint8_t> tx;       ///< whole request frame; empty when nothing was sent
+    std::vector<uint8_t> rx;       ///< whole reply frame; empty = nothing usable came back
+    std::vector<uint8_t> payload;  ///< the reply's data bytes, undecoded; only with Ok
+};
+
+}  // namespace heliograph

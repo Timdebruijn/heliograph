@@ -32,6 +32,8 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | GET | `/api/v1/capture/driver` | — | The last driver capture: the same, plus a direction per frame |
 | POST | `/api/v1/actions/read-registers` | **✔** | Read 1–16 Modbus registers once (`?unit=&space=holding\|input&address=&count=`) |
 | GET | `/api/v1/registers` | — | The last register read: the request, the result and the raw words |
+| POST | `/api/v1/actions/driver-query` | **✔** | Run one named READ diagnostic query a driver lists (`?device=&query=`) — see [Driver queries](#driver-queries) |
+| GET | `/api/v1/driver-query` | — | The queries each device offers, and the last result as raw hex |
 | POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
 | POST | `/api/v1/actions/reboot` | **✔** | Reboot |
 | POST | `/api/v1/actions/clear-coredump` | **✔** | Discard a stored crash dump (404 when there is none) |
@@ -591,6 +593,38 @@ curl http://bridge/api/v1/registers
   `transport_error`. `values` holds raw 16-bit words, only when `result` is `ok`.
 - `unit` 1–247 (default 1), `space` defaults to `holding`, `count` 1–16 (default 1).
   `address` is required and must be plain digits.
+
+## Driver queries
+
+Some drivers list named READ queries the poll loop never sends, for working out what a device
+supports. Today only the EverSolar/Zeversolar driver does: `read_description`,
+`rw_description`, `set_info` and `versions` (function codes `11 00`, `11 01`, `11 04`, `11 42`).
+
+```bash
+curl -X POST -u admin \
+  "http://bridge/api/v1/actions/driver-query?device=<id>&query=versions"
+curl http://bridge/api/v1/driver-query
+```
+
+```json
+{"status": "done", "devices": [{"id": "...", "queries": [{"name": "versions", "description": "..."}]}],
+ "device": "...", "query": "versions", "result": "ok",
+ "tx": "AA 55 01 00 00 10 11 42 00 01 63", "rx": "AA 55 ...", "payload": "..."}
+```
+
+- **Reads only**, so `security.read_only_mode` does not apply. The list is the whole
+  vocabulary: the endpoint takes no data to send, only a device id and a name from that list.
+- **One query in place of one poll**, once, with no retry. 409 `bus_busy` while a query, a
+  register read, a capture or a discovery run holds the bus; 404 `unknown_device` or
+  `unknown_query` for an id or name the bridge does not offer.
+- `devices` in the GET lists every configured device whose driver offers queries, so a client
+  can discover the names.
+- `result` is `ok`, `timeout`, `checksum_error`, `invalid_frame`, `not_registered` (the device
+  has no usable address right now, nothing was sent), `unknown_query` or `unknown_device`.
+- `tx` is the whole request frame. `rx` is the whole reply frame and is **absent** when nothing
+  usable came back: a timeout has no `rx`, not an empty one. `payload` is the reply's data
+  bytes and is present only with `ok`.
+- Raw hex only. The payload formats are not confirmed, so nothing is decoded.
 
 ## Applying changes: `reboot_required`
 
