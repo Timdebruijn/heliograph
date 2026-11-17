@@ -108,6 +108,10 @@ meaning as on a SolaX".
 
 ## Two routes
 
+> **For the TL3000-20 the DRM column is closed:** no DRED port was found (see
+> [Answers](#answers-2026-11-17)). The comparison stays because it holds for other units of
+> this family.
+
 | | RS485 write (`12 20`) | DRM/DRED relay |
 |---|---|---|
 | Exists on our unit? | Unknown. Phase 1 answers it. | Unknown. Needs a physical look for a DRED port. |
@@ -124,6 +128,8 @@ risk nothing. Then:
 - `0x20` listed → Phase 2.
 - Not listed, DRED port present → the DRM track.
 - Neither → document "not controllable" and stop.
+
+For the TL3000-20 the port check is done (none), so only the first and last branch remain.
 
 ## Mapping onto the architecture
 
@@ -144,9 +150,14 @@ The existing tools do not fit. `RegisterReader` is Modbus-only, and refuses a PM
 - A small runner in `src/app/` has the same handover as `RegisterReader`. The web task requests,
   and `rs485Task` runs the query in place of one poll, because that task owns the bus. Never from
   the HTTP handler.
-- The result holds the raw TX and RX hex, the parse status, and the documented decoding where we
-  have one. The rest is shown raw. A reply that does not arrive is a timeout, not an empty list.
-  Unknown is never zero.
+- The result holds the raw TX and RX hex and a status. Nothing is decoded: the reply formats are
+  not confirmed, so decoding follows the first real capture. RX is every byte the line delivered,
+  so an echo of our own request or a frame with an unexpected function code is visible too.
+  `timeout` means nothing came back but, at most, that echo; `unexpected_frame` means other
+  bytes arrived. A reply that does not arrive is absent, not an empty list. Unknown is never
+  zero.
+- Query timeouts and checksum errors are kept out of the device's bus-error metrics. A query the
+  inverter does not know times out by design, and that says nothing about the cabling.
 - The REST surface is `POST /api/v1/actions/driver-query` plus `GET` for the report, admin-gated
   like the other actions. Reads are not under `security.read_only_mode`, for the same reason
   `RegisterReader` is not: no write path is reachable from here.
@@ -165,12 +176,16 @@ become an entity. So the bench action is a second kind of diagnostic query, mark
 - Before anything is sent, the runner checks, in this order:
   1. `security.read_only_mode` off (the dispatcher's first gate, reused);
   2. `control.inverter_writes_enabled` on (the dispatcher's second gate, reused);
-  3. **new:** the per-device driver option `allow_unverified_writes` on. The key is generic
-     (`driver_descriptor.h`), but today only `modbus_profile` and `sunspec` declare it; Phase 2
-     adds it to this driver's descriptor;
-  4. **new:** the device is registered, and its serial matches the one this device was
-     configured with. Registration alone does not prove `0x10` is still the same inverter (see
-     the pitfalls in [`eversolar-protocol.md`](eversolar-protocol.md));
+  3. **new:** a per-device opt-in. Proposed: the driver option `allow_unverified_writes`. The
+     key is generic (`driver_descriptor.h`), but today only `modbus_profile` and `sunspec`
+     declare it, so Phase 2 adds it to this driver's descriptor. This is **pending open
+     question 7**: it may become a dedicated `allow_bench_writes`;
+  4. **new:** the device is registered, and the serial the inverter announced at its latest
+     registration (the offline-query reply) equals the serial the configured device's id was
+     derived from. A device id is built from the serial (see the pitfalls in
+     [`eversolar-protocol.md`](eversolar-protocol.md)), so this needs no new stored field.
+     Registration alone does not prove `0x10` is still the same inverter. Phase 2 confirms that
+     derivation in code before relying on it;
   5. **new:** at most one bench write per 30 s **per device, counting attempts**, not
      successes. The dispatcher's own limiter defaults to 1 s and is not reused.
 
@@ -228,7 +243,8 @@ from Phase 2:
 Two traps for the bench session:
 
 - A first step *down* at full sun shows in AC power, if the step is big enough. A first step *up*
-  from 100 % is probably a no-op. So the session starts with down.
+  from 100 % is probably a no-op (**inference**: nothing documents what the inverter does at its
+  ceiling, so watch AC power on the first step up too). So the session starts with down.
 - A 60 s AC-power delta is noise when the step size is unknown. Step only in stable sun, and
   repeat.
 
@@ -271,7 +287,8 @@ Nothing else is ever sent, apart from the existing registration and poll traffic
 | A firmware or execute path is reached | No `0x13` frame can be built (see the whitelist test). |
 | Another owner's inverter is affected | Every gate is default closed. The bench action also needs the per-device opt-in. |
 | The address was lost at dawn mid-test | Queries and bench writes are refused while unregistered. Test at midday with stable sun. |
-| Phase 1 reads confuse older firmware | Low: these are documented read functions. A unit that does not know one should stay silent, which we record as a timeout. **inference** |
+| Phase 1 reads confuse older firmware | Low: these are documented read functions. A unit that does not know one should stay silent (`timeout`) or answer with another frame (`unexpected_frame`). **inference** |
+| Diagnostic timeouts read as a failing bus | Query errors are kept out of the bus-error metrics, so an unknown query does not show up as an RS485 fault. |
 
 ## SolaX X1 (report only, nothing to implement)
 
@@ -288,6 +305,9 @@ Revisit when someone has an X1 on V1.8-era firmware that actually talks RS485. T
 the SolaX doc, not before.
 
 ## DRM track (parallel, if a DRED port exists)
+
+**Closed for the TL3000-20** (no DRED port, see [Answers](#answers-2026-11-17)). Kept for other
+units of this family.
 
 [`drm.md`](drm.md) needs nothing new to support this, only facts about the inverter:
 
@@ -323,7 +343,8 @@ photographed, the track becomes a short section in `drm.md` for this family.
    `ActiPowFun` is off.
 5. If `0x20` works but has no read-back: ship it as an explicitly unverified, opt-in step
    control, or stop at "use DRM"? **Proposal: stop.** Shipping a control with no read-back would
-   be the first exception to the rule PR #286 made mandatory.
+   be the first exception to the rule PR #286 made mandatory. *Superseded: without a DRED port
+   this proposal has no fallback, see Answer 5.*
 6. Does `decisions.md` already rule on undocumented or relative setpoints? **No.** It covers the
    framework and library choices. The binding rules are in
    [`write-path.md`](device-profiles/write-path.md): an undocumented write target is
