@@ -330,6 +330,26 @@ photographed, the track becomes a short section in `drm.md` for this family.
    disqualifying, a setpoint needs a read-back, and `verified` is flipped on a bench. They are
    enforced by `tools/gen_profiles.py` and `check_readback_rule.py` for profile rows. The Phase 1
    PR adds the EverSolar entry to `decisions.md`.
-7. *(new)* Phase 2's bench opt-in reuses `allow_unverified_writes` as a driver option on this
+7. Phase 2's bench opt-in reuses `allow_unverified_writes` as a driver option on this
    driver, so that the per-device consent means the same thing everywhere. OK, or a dedicated
    `allow_bench_writes`?
+
+## Answers (2026-11-17)
+
+1. **Firmware:** not read yet, because the LCD is out of reach. Phase 1's `versions` query
+   (`11 42`) may answer this remotely.
+2. **DRED port:** none found on visual inspection. **The DRM track is closed** for this unit,
+   unless a photo shows otherwise. That leaves RS485 as the only route.
+3. **Surface:** Phase 1 is REST only. The end goal is control from Home Assistant over MQTT.
+   That arrives in Phase 3 through the existing command path (dispatcher → MQTT/HA discovery),
+   never through the bench tool.
+4. **Byte order:** big-endian first, as proposed.
+5. **No read-back and no DRM:** the proposal "stop at DRM" no longer has a fallback, so this
+   question is re-opened. It is decided after Phase 2, on its data. The one middle ground worth
+   naming is **known by construction**. If Phase 2 shows that steps saturate, a reset is
+   possible: step up until nothing changes, and the inverter is at 100 %. From there, *k* steps
+   down give a known setting. That is still not a read-back. Home Assistant would show what was
+   requested, not what the inverter confirms. So it would be a documented exception to the rule
+   from PR #286, with its own decision entry. It is not a precedent for profile rows.
+6. Answered in the note itself.
+7. Open.
