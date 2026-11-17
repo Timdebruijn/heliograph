@@ -4,6 +4,7 @@
 #include "eversolar_driver.h"
 #include "drivers/pmu_pv_capabilities.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace heliograph::eversolar {
@@ -533,14 +534,29 @@ DiagnosticQueryResult EversolarDriver::runDiagnosticQuery(const std::string& nam
     size_t  payloadLen = 0;
     const Address inverter = inverterAddress(address_);
     // One attempt, no retry: this reports what the wire did.
+    //
+    // Not counted in the bus-error tallies. Those indict the cabling, and a query the inverter
+    // does not know times out by design; left in, every diagnostic session would show up as a
+    // degrading bus on the health page and in Prometheus.
+    const pmu::Tally tallyBefore = tally_;
     const auto r = transact(def->command, inverter, nullptr, 0, inverter, payload,
                             sizeof(payload), payloadLen, nullptr, &result);
+    tally_ = tallyBefore;
     switch (r) {
         case TransactResult::Ok:
             result.status = DiagnosticStatus::Ok;
             result.payload.assign(payload, payload + payloadLen);
             break;
-        case TransactResult::Timeout:        result.status = DiagnosticStatus::Timeout; break;
+        case TransactResult::Timeout: {
+            // rx is every byte the line delivered, so on a bus that echoes it holds our own
+            // request even when the inverter stayed silent. Only bytes beyond that echo mean
+            // something answered.
+            const bool onlyEcho =
+                result.rx.size() <= result.tx.size() &&
+                std::equal(result.rx.begin(), result.rx.end(), result.tx.begin());
+            result.status = onlyEcho ? DiagnosticStatus::Timeout : DiagnosticStatus::UnexpectedFrame;
+            break;
+        }
         case TransactResult::ChecksumError:  result.status = DiagnosticStatus::ChecksumError; break;
         case TransactResult::InvalidFrame:   result.status = DiagnosticStatus::InvalidFrame; break;
         case TransactResult::TransportError:

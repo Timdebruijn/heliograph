@@ -27,6 +27,7 @@ enum class DiagnosticStatus : uint8_t {
     UnknownQuery,   ///< the driver lists no query with that name; nothing was sent
     NotRegistered,  ///< the device has no usable address right now; nothing was sent
     TransportError, ///< the bus lock or the write failed; the frame may not have gone out
+    UnexpectedFrame, ///< no accepted reply, but bytes other than our own echo arrived: read rx
 };
 
 inline const char* diagnosticStatusName(DiagnosticStatus status) {
@@ -38,6 +39,7 @@ inline const char* diagnosticStatusName(DiagnosticStatus status) {
         case DiagnosticStatus::UnknownQuery:  return "unknown_query";
         case DiagnosticStatus::NotRegistered: return "not_registered";
         case DiagnosticStatus::TransportError: return "transport_error";
+        case DiagnosticStatus::UnexpectedFrame: return "unexpected_frame";
     }
     return "unknown";
 }

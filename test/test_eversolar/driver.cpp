@@ -907,7 +907,7 @@ static void test_a_corrupt_reply_is_a_checksum_error_with_the_raw_bytes() {
 // An inverter that does not know a query may answer it with some other, well-formed frame. That
 // frame is the finding, so it must reach rx -- an earlier version reported it as a silent
 // timeout because only an accepted or corrupt frame was kept.
-static void test_an_unexpected_reply_frame_is_a_timeout_that_keeps_its_bytes() {
+static void test_an_unexpected_reply_frame_is_reported_with_its_bytes() {
     Rig r;
     registerDriver(r);
     const auto responder = r.device.responder();
@@ -926,7 +926,8 @@ static void test_an_unexpected_reply_frame_is_a_timeout_that_keeps_its_bytes() {
 
     const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("versions");
 
-    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::Timeout), static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::UnexpectedFrame),
+                      static_cast<int>(res.status));
     TEST_ASSERT_EQUAL_size_t(fx::kRespVersionsConstructedLen, res.rx.size());
     TEST_ASSERT_EQUAL_HEX8(0xC3, res.rx[kOffsetFunction]);
     TEST_ASSERT_TRUE(res.payload.empty());
@@ -948,6 +949,43 @@ static void test_an_echoing_bus_shows_the_echo_ahead_of_the_reply() {
                                   fx::kRespVersionsConstructedLen);
 }
 
+// The echo alone is not an answer: a silent inverter on an echoing bus is a timeout, with the
+// echo visible in rx.
+static void test_a_silent_device_on_an_echoing_bus_is_still_a_timeout() {
+    Rig r;
+    registerDriver(r);
+    const auto responder = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req[kOffsetControl] == 0x11 && req[kOffsetFunction] == 0x01) {
+            reply = req;  // the bus hands our own frame back; the inverter says nothing
+            return true;
+        }
+        return responder(req, reply);
+    });
+
+    const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("rw_description");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::Timeout), static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(11, res.rx.size());
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kTxRwDescription, res.rx.data(), 11);
+}
+
+// A query the inverter ignores is not a bus fault, so it must not move the counters that
+// indict the cabling.
+static void test_query_errors_stay_out_of_the_bus_error_counts() {
+    Rig r;
+    registerDriver(r);
+    r.device.withholdQueries = true;
+    const BusErrorCounts before = r.driver.busErrors();
+
+    r.driver.runDiagnosticQuery("rw_description");
+
+    const BusErrorCounts after = r.driver.busErrors();
+    TEST_ASSERT_EQUAL_UINT32(before.timeouts, after.timeouts);
+    TEST_ASSERT_EQUAL_UINT32(before.checksumErrors, after.checksumErrors);
+    TEST_ASSERT_EQUAL_UINT32(before.invalidFrames, after.invalidFrames);
+}
+
 // The wire allow-list. Every public entry point that can put a frame on the bus is driven, and
 // every frame is checked against what this driver is known to send: registration (10 xx) and
 // reads (11 xx). Control 0x12 (WRITE) and 0x13 (EXECUTE) -- and anything else -- fail it. An
@@ -967,6 +1005,12 @@ static void test_every_frame_the_driver_transmits_is_a_known_registration_or_rea
         c.type         = static_cast<InverterCommandType>(i);
         c.numericValue = 50.0;
         r.driver.execute(c);
+    }
+    // The timeout-recovery branch transmits too (an offline query after three silent polls), so
+    // it is driven as well rather than trusted to stay inside the set.
+    r.device.silentNormalInfoPolls = 5;
+    for (int i = 0; i < 6; ++i) {
+        r.poll(state);
     }
 
     struct Known {
@@ -1279,7 +1323,9 @@ void run_eversolar_driver() {
     RUN_TEST(test_an_unknown_query_name_sends_nothing);
     RUN_TEST(test_a_silent_device_is_a_timeout_with_no_reply_bytes);
     RUN_TEST(test_a_corrupt_reply_is_a_checksum_error_with_the_raw_bytes);
-    RUN_TEST(test_an_unexpected_reply_frame_is_a_timeout_that_keeps_its_bytes);
+    RUN_TEST(test_an_unexpected_reply_frame_is_reported_with_its_bytes);
+    RUN_TEST(test_a_silent_device_on_an_echoing_bus_is_still_a_timeout);
+    RUN_TEST(test_query_errors_stay_out_of_the_bus_error_counts);
     RUN_TEST(test_an_echoing_bus_shows_the_echo_ahead_of_the_reply);
     RUN_TEST(test_every_frame_the_driver_transmits_is_a_known_registration_or_read);
     RUN_TEST(test_probe_scores_a_full_handshake_highly);

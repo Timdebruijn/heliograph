@@ -622,16 +622,18 @@ curl http://bridge/api/v1/driver-query
   report would exceed its bound.
 - `devices` in the GET lists every configured device whose driver offers queries, so a client
   can discover the names.
-- `result` is `ok`, `timeout`, `checksum_error`, `invalid_frame`, `transport_error` (the bus
-  lock or the write failed), `not_registered` (the device has no usable address right now,
-  nothing was sent) or `unknown_query`. `unknown_device` appears only if a device disappeared
+- `result` is `ok`, `timeout` (nothing came back but, at most, an echo of our own request),
+  `unexpected_frame` (no accepted reply, but other bytes arrived: read `rx`), `checksum_error`,
+  `invalid_frame`, `transport_error` (the bus lock or the write failed), `not_registered` (the
+  device has no usable address right now, nothing was sent) or `unknown_query`. `unknown_device` appears only if a device disappeared
   between the POST's validation and the run.
 - `tx` is the whole request frame, absent when it was not (fully) sent. `rx` is **every byte the
   line delivered** during the exchange, unparsed and capped at two frames: the reply, but also an
   echo of our own request or a frame with an unexpected function code. It is **absent**, not
-  empty, when the line stayed silent. So `timeout` *with* `rx` means something answered that was
-  not the expected reply; read the bytes. `payload` is the accepted reply's data bytes and is
-  present only with `ok`.
+  empty, when the line stayed silent. `payload` is the accepted reply's data bytes and is present
+  only with `ok`.
+- Query timeouts and checksum errors are **not** counted in the device's bus-error metrics: a
+  query the device does not know times out by design, and that says nothing about the cabling.
 - Raw hex only. The payload formats are not confirmed, so nothing is decoded.
 
 ## Applying changes: `reboot_required`

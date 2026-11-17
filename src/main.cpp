@@ -1633,7 +1633,7 @@ void rs485Task(void* /*arg*/) {
         }
         // A driver query, on the same terms: one transaction in place of this cycle's poll.
         if (g_driverQuery.runIfRequested([](const std::string& id) -> InverterDriver* {
-                for (size_t i = 0; i < g_deviceIds.size(); ++i) {
+                for (size_t i = 0; i < g_deviceIds.size() && i < g_contexts.size(); ++i) {
                     if (g_deviceIds[i] == id) {
                         return &g_contexts[i]->driver();
                     }
