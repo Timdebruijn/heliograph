@@ -838,10 +838,15 @@ void applySerialOverride(bool captureBoot = false) {
 // address nothing had written, failed the CRC and started counting from one. A block that
 // moves is a block that is lost, and the ring exists to carry evidence across an update.
 //
-// The member order below is the layout 0.34.0 shipped, so adopting this struct moved nothing.
-// Add new blocks at the END, never as a second RTC_NOINIT variable: the struct fixes the order
-// inside it, not where the linker puts a neighbour. Resizing the ring moves the breadcrumbs
+// The member order below is the layout 0.34.0 shipped, so adopting this struct moved nothing
+// (measured on the rs485-can image: the object starts where the ring did). Add new blocks at
+// the END, never as a second RTC_NOINIT variable. Resizing the ring moves the breadcrumbs
 // behind it and costs one boot history; the assert makes that a decision instead of a surprise.
+//
+// What the struct does NOT fix is where the object itself starts. That is the start of
+// .rtc_noinit, and it holds only while this is the one object in that section and the RTC
+// memory the SDK reserves in front of it (CONFIG_ULP_COPROC_RESERVE_MEM) keeps its size. A
+// toolchain or sdkconfig change can move both blocks at once, and nothing here detects it.
 struct RtcStore {
     faultlog::Storage    faults;
     breadcrumbs::Storage crumbs;

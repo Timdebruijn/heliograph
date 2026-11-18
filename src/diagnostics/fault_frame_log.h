@@ -34,6 +34,8 @@ inline constexpr size_t kCapacity      = 8;
 /// Sized so the longest poll reply a driver hands over today fits whole, with an echo of the
 /// request in front of it on a half-duplex bus. A cut frame has lost its checksum, so a driver
 /// with longer replies needs this raised (and kSchema bumped), not a truncated record.
+/// Raising this or kCapacity also moves the breadcrumbs that sit behind this block in RTC
+/// memory; the layout assert in main.cpp fails until that is accepted there.
 inline constexpr size_t kFrameBytes    = 80;
 /// A device id is the driver id plus a serial number or an instance key. 47 characters holds
 /// the ones in use whole; a longer one is cut, and storedId() is how a reader matches it.
