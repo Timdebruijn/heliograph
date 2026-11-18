@@ -417,8 +417,8 @@ cannot be extracted; it is cited, not copied) or **hypothesis** (our reasoning).
   (`11 82`) carries exactly 22 words. Stored as `kRespReadDescriptionObserved` (captured on the
   production bridge, 2026-11-18).
 - **Hypothesis, strong:** the reply is positional, one word per listed code, in list order. The
-  count matches and nothing in the first 14 words (which are verified against the display and
-  against V × I = P) contradicts it. The first 14 codes line up with the known word map, e.g.
+  count matches and nothing in the first 14 words contradicts it (those are **observed**:
+  checked against the display and against V × I = P). The first 14 codes line up with the known word map, e.g.
   code `4C` is word 13, `OP_MODE`.
 - **Documented:** codes `0x78`-`0x7F` are six fault values and two error words. Read
   positionally, with the vendor's scaling:
@@ -434,8 +434,9 @@ cannot be extracted; it is cited, not copied) or **hypothesis** (our reasoning).
 | 20 | `7E` | error message H, a bitmask | — | `FF00` |
 | 21 | `7F` | error message L, a bitmask | — | `0000` |
 
-- **Observed:** a healthy unit reads `FF00 0000` in words 20-21. The same pair is reported for
-  other Zeverlution units by a community project. **Unknown:** what the bits mean on this
+- **Observed:** a healthy unit reads `FF00 0000` in words 20-21. A community project
+  (timretout/zeversolar-esphome) reports the same pair on other Zeverlution units; that is their
+  observation, not ours. **Unknown:** what the bits mean on this
   firmware. Read as the vendor bitmask, `FF00 0000` would set bits 31-24 on a healthy
   inverter, which is why the words are never treated as "0 means no error" and are not decoded.
 - The fault values are **unverified**: no faulted unit has been read. The driver scales them only

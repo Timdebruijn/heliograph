@@ -1408,7 +1408,7 @@ void startRestApi() {
     // function that reads nothing a poll writes.
     ctx.decodeFaultFrame = [](const std::string& deviceId, const std::vector<uint8_t>& frame) {
         for (size_t i = 0; i < g_deviceIds.size() && i < g_contexts.size(); ++i) {
-            if (g_deviceIds[i] == deviceId) {
+            if (faultlog::storedId(g_deviceIds[i]) == deviceId) {
                 return g_contexts[i]->driver().decodeFaultFrame(frame.data(), frame.size());
             }
         }
@@ -1564,7 +1564,7 @@ void restoreDriverLine() {
 ///
 /// Two lines, because the logger clips a message at 219 characters and one line with both the
 /// header and the bytes loses the end of the frame. On its own line a frame of up to 68 bytes
-/// is whole, which covers a reply with a bus echo in front. The log ring has every byte anyway.
+/// is whole; a longer one is clipped here and whole in the log ring.
 void recordFaultFrames(size_t index) {
     for (const FaultRecord& rec : g_contexts[index]->driver().takeFaultRecords()) {
         std::string hex;

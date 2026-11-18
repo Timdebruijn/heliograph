@@ -3468,6 +3468,10 @@ static void test_a_long_frame_is_truncated_and_says_so_and_a_long_id_is_cut_safe
     const std::string longId(60, 'x');
     log.push(longId, faultRecord(FaultRecordReason::StatusChanged, 2, 1, 100), 0, 1);
     log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 2, faultlog::kFrameBytes), 0, 2);
+    // A real id with a serial number in it (driver id + serial) is longer than a short test
+    // id: it has to come back whole, or a reader cannot match the record to its device.
+    const std::string serialId = "some_driver_name-XH300060115506193600V610";
+    log.push(serialId, faultRecord(FaultRecordReason::StatusChanged, 2, 3), 0, 3);
 
     const auto records = log.snapshot();
     TEST_ASSERT_EQUAL_size_t(faultlog::kFrameBytes, records[0].frame.size());
@@ -3476,6 +3480,10 @@ static void test_a_long_frame_is_truncated_and_says_so_and_a_long_id_is_cut_safe
     TEST_ASSERT_TRUE(records[0].deviceId == longId.substr(0, faultlog::kDeviceIdBytes - 1));
     // Exactly the capacity is not a truncation.
     TEST_ASSERT_FALSE(records[1].truncated);
+    TEST_ASSERT_TRUE(records[2].deviceId == serialId);
+    // And how a reader matches a live id against a stored one, cut or not.
+    TEST_ASSERT_TRUE(faultlog::storedId(serialId) == records[2].deviceId);
+    TEST_ASSERT_TRUE(faultlog::storedId(longId) == records[0].deviceId);
 }
 
 /// The whole chain with the real driver: poll a healthy unit, then a (constructed) faulted one,
@@ -3583,7 +3591,8 @@ static void test_a_full_ring_of_fully_decoded_records_fits_the_response_bound() 
     faultlog::FaultFrameLog log(st);
     log.begin();
     for (uint32_t i = 0; i < 8; ++i) {
-        log.push("a-device-id-of-23-chars", faultRecord(FaultRecordReason::ErrorWordsChanged, 65535, i, faultlog::kFrameBytes), 1700000000, i);
+        // A device id at the full stored width, so the bound is tested at its real worst case.
+        log.push(std::string(faultlog::kDeviceIdBytes - 1, 'x'), faultRecord(FaultRecordReason::ErrorWordsChanged, 65535, i, faultlog::kFrameBytes), 1700000000, i);
     }
     rest::FaultFrameDecoder decode = [](const std::string&, const std::vector<uint8_t>&) {
         return std::vector<FaultFrameField>{{"residual_current_at_fault", 65534.999, "A"},

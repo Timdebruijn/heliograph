@@ -14,9 +14,9 @@
 #include "device/command.h"
 #include "device/device_identity.h"
 #include "device/device_state.h"
+#include "device/fault_record.h"
 #include "diagnostic_query.h"
 #include "driver_descriptor.h"
-#include "fault_record.h"
 #include "transport/transport.h"
 
 namespace heliograph {
@@ -124,7 +124,7 @@ public:
 
     /// Optional: raw frames worth keeping because the device's fault state changed. Drains what
     /// polls produced since the last call. Bus task only, like poll(): it moves state the poll
-    /// wrote. Empty by default. See fault_record.h.
+    /// wrote. Empty by default. See device/fault_record.h.
     virtual std::vector<FaultRecord> takeFaultRecords() { return {}; }
 
     /// Optional: reads values out of a frame this driver put in a FaultRecord. A PURE function

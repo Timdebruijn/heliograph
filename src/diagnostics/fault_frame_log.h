@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // A small ring of raw frames a driver thought worth keeping when a device's fault state moved
-// (see drivers/fault_record.h). Brand-free: it stores bytes and never looks inside them.
+// (see device/fault_record.h). Brand-free: it stores bytes and never looks inside them.
 //
 // WHERE IT LIVES. The block is a plain-old-data struct that main.cpp places in RTC_NOINIT
 // memory, like the breadcrumbs: it survives a software reset, an OTA restart and a panic, and
@@ -26,15 +26,18 @@
 #include <type_traits>
 #include <vector>
 
-#include "drivers/fault_record.h"
+#include "device/fault_record.h"
 
 namespace heliograph::faultlog {
 
 inline constexpr size_t kCapacity      = 8;
-/// A 44-byte reply is a 55-byte frame, and 66 with an echo of the 11-byte request in front of
-/// it on a half-duplex bus. Both must fit whole: a cut frame has lost its checksum.
+/// Sized so the longest poll reply a driver hands over today fits whole, with an echo of the
+/// request in front of it on a half-duplex bus. A cut frame has lost its checksum, so a driver
+/// with longer replies needs this raised (and kSchema bumped), not a truncated record.
 inline constexpr size_t kFrameBytes    = 80;
-inline constexpr size_t kDeviceIdBytes = 24;
+/// A device id is the driver id plus a serial number or an instance key. 47 characters holds
+/// the ones in use whole; a longer one is cut, and storedId() is how a reader matches it.
+inline constexpr size_t kDeviceIdBytes = 48;
 
 /// One slot. Explicit padding so the CRC over raw bytes never covers an indeterminate byte.
 struct Entry {
@@ -65,6 +68,12 @@ static_assert(std::is_trivially_default_constructible_v<Entry> &&
 static_assert(std::is_trivially_copyable_v<Storage>, "Storage is CRC'd as raw bytes.");
 static_assert(sizeof(Entry) % 4 == 0 && sizeof(Storage) == 12 + kCapacity * sizeof(Entry) + 4,
               "Storage must have no padding: the CRC covers raw bytes.");
+
+/// A device id as the log stores it: whole, or cut to what an Entry holds. Compare a live id
+/// through this, never raw, or a long id stops matching its own records.
+inline std::string storedId(const std::string& deviceId) {
+    return deviceId.substr(0, kDeviceIdBytes - 1);
+}
 
 /// A stored record, decoded for readers.
 struct StoredFault {

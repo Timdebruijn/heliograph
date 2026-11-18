@@ -836,6 +836,20 @@ static void test_a_failed_poll_produces_no_record_and_does_not_move_the_baseline
     TEST_ASSERT_TRUE(pollAndDrain(r, s, Payload::Captured).empty());
 }
 
+static void test_undrained_records_are_bounded() {
+    // The firmware drains after every poll. A caller that never does must not grow the heap
+    // while the unit flaps between two states.
+    Rig r;
+    r.begin();
+    DeviceState s;
+    for (int i = 0; i < 20; ++i) {
+        r.device.payload = (i % 2 == 0) ? Payload::Captured : Payload::Fault;
+        r.driver.poll(s);
+    }
+    TEST_ASSERT_EQUAL_size_t(4, r.driver.takeFaultRecords().size());
+    TEST_ASSERT_TRUE(r.driver.takeFaultRecords().empty());
+}
+
 static void test_decode_fault_frame_scales_the_vendor_values() {
     Rig r;
     const EversolarDriver& driver = r.driver;  // const: the web task calls it
@@ -1642,6 +1656,7 @@ void run_eversolar_driver() {
     RUN_TEST(test_an_unknown_mode_is_recorded_when_it_appears_and_not_while_it_stays);
     RUN_TEST(test_a_record_keeps_the_bytes_as_they_came_including_a_bus_echo);
     RUN_TEST(test_a_failed_poll_produces_no_record_and_does_not_move_the_baseline_state);
+    RUN_TEST(test_undrained_records_are_bounded);
     RUN_TEST(test_decode_fault_frame_scales_the_vendor_values);
     RUN_TEST(test_decode_fault_frame_omits_a_filler_word_instead_of_scaling_it);
     RUN_TEST(test_decode_fault_frame_finds_the_reply_after_an_echo_and_refuses_the_rest);
