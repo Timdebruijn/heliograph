@@ -221,3 +221,7 @@ Refinements made while turning the note into a build brief:
 - **Persistence (question 3).** If the bridge shares the inverter's AC group, it is off during
   the AC-off test and records nothing, whatever the storage. So `RTC_NOINIT` is enough, and the
   bridge's power source is a thing to check before the test, not a storage decision.
+- **One record per frame.** When the mode and the error words move in the same reply, that is
+  one `status_changed` record. Two copies of one frame would only cost a slot.
+- **Frame size.** A stored frame is up to 80 bytes, so a reply behind an echo of the request
+  (66 bytes on a half-duplex bus) keeps its checksum.
