@@ -8,6 +8,11 @@ with green checks, a hardware test on the maintainer's TL3000-20, and a stop for
 its own read/write description (`11 01`). Phase 1 measures it at no risk. Phases 2 and 3 do not
 start until it has.
 
+**Outcome (2026-11-18): the TL3000-20 does not list `0x20`, and its LCD offers no
+`ActiPowFun` switch. Phase 2 does not start; this unit is not controllable over RS485.** See
+[Phase 1 results](#phase-1-results-2026-11-18). The rest of this note is kept as the design it
+was, for another EverSolar unit that does list `0x20`.
+
 Every protocol claim carries one of three labels:
 
 - **documented** — stated in a vendor document;
@@ -358,7 +363,8 @@ photographed, the track becomes a short section in `drm.md` for this family.
 ## Answers (2026-11-17)
 
 1. **Firmware:** not read yet, because the LCD is out of reach. Phase 1's `versions` query
-   (`11 42`) may answer this remotely.
+   (`11 42`) may answer this remotely. *Answered 2026-11-18: the LCD's Version screen reads
+   610-01023-06, exactly the guide's minimum. `11 42` did not answer it, see below.*
 2. **DRED port:** none found on visual inspection. **The DRM track is closed** for this unit,
    unless a photo shows otherwise. That leaves RS485 as the only route.
 3. **Surface:** Phase 1 is REST only. The end goal is control from Home Assistant over MQTT.
@@ -372,5 +378,42 @@ photographed, the track becomes a short section in `drm.md` for this family.
    down give a known setting. That is still not a read-back. Home Assistant would show what was
    requested, not what the inverter confirms. So it would be a documented exception to the rule
    from PR #286, with its own decision entry. It is not a precedent for profile rows.
+   *Moot for the TL3000-20 since 2026-11-18: there is no Phase 2 data to decide on.*
 6. Answered in the note itself.
-7. Open.
+7. Open. *Moot for the TL3000-20; it returns only if another unit lists `0x20`.*
+
+## Phase 1 results (2026-11-18)
+
+Run on the production bridge with the PR #306 build, against the TL3000-20 at address `0x10`,
+in daylight with the inverter registered. All four queries returned a valid frame on the first
+attempt. No echo appeared, and the bus counters stayed at zero (timeouts, checksum errors, failed
+polls). Frames are **observed**; the readings of them are labelled.
+
+| Query | Reply payload | Reading |
+|---|---|---|
+| `11 00` read description | `00 0D 01 04 41 42 43 44 45 47 48 49 4A 4C 78 79 7A 7B 7C 7D 7E 7F` | The measurement codes. Nothing new for control. |
+| `11 01` read/write description | `40 41 44 45 46 47 48 49` | **No `0x20`.** Eight writable data numbers, none of them a power control. |
+| `11 04` set info | `04 E2 00 3C 07 30 09 E2 12 C0 13 EC FF FF FF FF` | Eight 16-bit big-endian values, one per writable number in the same order: 1250, 60, 1840, 2530, 4800, 5100, unset, unset. **inference**: start voltage 125.0 V, start delay 60 s, AC voltage 184.0–253.0 V, frequency 48.00–51.00 Hz, so grid protection. `48` and `49` are unknown. |
+| `11 42` versions | `15` | One byte, `0x15`. **inference**: a NAK, so this firmware does not support the query. |
+
+Then on the LCD (**observed**):
+
+- the Version screen reads **610-01023-06**;
+- from the Normal screen, holding the button for 15 seconds shows only `Lock`. The guide's
+  `ActiPowFun: ON` never appears, so power management cannot be switched on. Whether that is the
+  firmware or its NL grid code is **inference** either way.
+
+Decisions taken on this:
+
+- **Phase 2 does not start.** The note's own rule applies: not listed, no DRED port → document
+  "not controllable" and stop.
+- **The grid code is not changed** to reach the power-management menu. It sets the grid
+  protection values above; another region's values break the Dutch grid code the installation is
+  registered under, for a gain that is itself unknown.
+- **Writable numbers `44`–`47` are not a control route.** Narrowing grid-protection limits to make
+  the inverter trip is outside this plan's one allowed write, and outside the grid code.
+- **What remains is outside the inverter**: switching the AC side with a contactor driven by a
+  Heliograph relay board. That is 0 or 100 %, not a limit, and it is installation work, not a
+  firmware change.
+- **The Phase 1 queries stay.** They are read-only, and the same four calls answer this question
+  for any other EverSolar unit.
