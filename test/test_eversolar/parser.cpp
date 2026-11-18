@@ -175,7 +175,7 @@ static void test_captured_44_byte_payload_decodes_as_single_string() {
     // The first QUERY_NORMAL_INFO a real TL3000-20 ever answered us (2026-07-19): a 44-byte
     // payload -- neither 28 nor 32. The first 14 words are exactly the single-string layout
     // (the values below cross-check physically: 655 W AC from 346.4 V x 2.0 A DC), followed
-    // by an 8-word tail of zeros and FFFF. Auto must accept this; rejecting it was why the
+    // by an 8-word tail (six fault values and two error words, FF00 0000 when healthy). Auto must accept this; rejecting it was why the
     // first live poll returned invalid_frame while the inverter was answering perfectly.
     Frame f;
     TEST_ASSERT_EQUAL(ParseResult::Ok,
@@ -196,6 +196,92 @@ static void test_captured_44_byte_payload_decodes_as_single_string() {
     TEST_ASSERT_EQUAL_UINT32(47401, info.operatingHours);
     TEST_ASSERT_EQUAL_UINT16(1, info.statusCode);
     TEST_ASSERT_FALSE(info.hasSecondString);
+}
+
+// --- the tail (words 14-21 of a 44-byte single-string reply) -------------------------------------
+
+static NormalInfo decodeFixture(const uint8_t* frame, size_t len) {
+    Frame f;
+    TEST_ASSERT_EQUAL(ParseResult::Ok, parseFrame(frame, len, f));
+    NormalInfo info;
+    TEST_ASSERT_EQUAL(DecodeResult::Ok, decodeNormalInfo(f.data, f.dataLength, info));
+    return info;
+}
+
+static void test_the_real_capture_yields_its_tail_raw() {
+    // Words 14-19 are six fault values, 20-21 two error words. A healthy TL3000-20 reads FF00
+    // 0000 there (observed) -- so the words cannot be treated as "0 = fine".
+    const NormalInfo info = decodeFixture(fx::kRespNormalInfoCaptured, fx::kRespNormalInfoCapturedLen);
+    TEST_ASSERT_TRUE(info.tailValid);
+    const uint16_t expected[6] = {0x0000, 0x0000, 0xFFFF, 0x0000, 0x0000, 0x0000};
+    TEST_ASSERT_EQUAL_UINT16_ARRAY(expected, info.tail.faultValue, 6);
+    TEST_ASSERT_EQUAL_HEX16(0xFF00, info.tail.errorWordH);
+    TEST_ASSERT_EQUAL_HEX16(0x0000, info.tail.errorWordL);
+}
+
+static void test_a_28_byte_payload_has_no_tail() {
+    const NormalInfo info = decodeFixture(fx::kRespNormalInfoSingle, fx::kRespNormalInfoSingleLen);
+    TEST_ASSERT_FALSE(info.tailValid);
+}
+
+static void test_no_other_layout_reads_a_tail() {
+    // Their tails are not understood well enough to read: the dual-generation one is a
+    // different length (and our only data for it is constructed), the three-phase one is a
+    // different word order.
+    TEST_ASSERT_FALSE(decodeFixture(fx::kRespNormalInfoDual, fx::kRespNormalInfoDualLen).tailValid);
+    TEST_ASSERT_FALSE(decodeFixture(fx::kRespNormalInfoDualExtended,
+                                    fx::kRespNormalInfoDualExtendedLen)
+                          .tailValid);
+    TEST_ASSERT_FALSE(decodeFixture(fx::kRespNormalInfoThreePhaseCaptured,
+                                    fx::kRespNormalInfoThreePhaseCapturedLen)
+                          .tailValid);
+}
+
+static void test_the_observed_read_description_lists_one_code_per_reply_word() {
+    // The positional hypothesis rests on this count: the inverter lists 22 data codes (11 00,
+    // observed 2026-11-18) and answers 11 82 with 22 words (observed 2026-07-19).
+    Frame description;
+    TEST_ASSERT_EQUAL(ParseResult::Ok,
+                      parseFrame(fx::kRespReadDescriptionObserved,
+                                 fx::kRespReadDescriptionObservedLen, description));
+    Frame info;
+    TEST_ASSERT_EQUAL(ParseResult::Ok,
+                      parseFrame(fx::kRespNormalInfoCaptured, fx::kRespNormalInfoCapturedLen, info));
+    TEST_ASSERT_EQUAL_size_t(22, description.dataLength);  // one byte per code
+    TEST_ASSERT_EQUAL_size_t(description.dataLength * 2, info.dataLength);
+    // The last eight codes are the vendor's 0x78-0x7F: six fault values and two error words.
+    for (size_t i = 0; i < 8; ++i) {
+        TEST_ASSERT_EQUAL_HEX8(0x78 + i, description.data[14 + i]);
+    }
+}
+
+static void test_op_mode_texts_cover_observed_and_documented_codes() {
+    TEST_ASSERT_EQUAL_STRING("Standby (not feeding)", opModeText(0));
+    TEST_ASSERT_EQUAL_STRING("Grid-connected (normal)", opModeText(1));
+    // Documented in the vendor table, never observed.
+    TEST_ASSERT_EQUAL_STRING("Fault", opModeText(2));
+    TEST_ASSERT_EQUAL_STRING("Permanent fault", opModeText(3));
+    TEST_ASSERT_EQUAL_STRING("", opModeText(4));
+    TEST_ASSERT_EQUAL_STRING("", opModeText(7));
+}
+
+static void test_the_constructed_fault_frames_carry_their_mode_and_tail() {
+    const NormalInfo two = decodeFixture(fx::kRespNormalInfoFaultConstructed,
+                                         fx::kRespNormalInfoFaultConstructedLen);
+    TEST_ASSERT_EQUAL_UINT16(2, two.statusCode);
+    TEST_ASSERT_TRUE(two.tailValid);
+    TEST_ASSERT_EQUAL_HEX16(0xFF40, two.tail.errorWordH);
+    TEST_ASSERT_EQUAL_HEX16(0x0004, two.tail.errorWordL);
+    TEST_ASSERT_EQUAL_UINT16(2650, two.tail.faultValue[0]);
+
+    const NormalInfo three = decodeFixture(fx::kRespNormalInfoPermanentFaultConstructed,
+                                           fx::kRespNormalInfoPermanentFaultConstructedLen);
+    TEST_ASSERT_EQUAL_UINT16(3, three.statusCode);
+
+    const NormalInfo seven = decodeFixture(fx::kRespNormalInfoUnknownModeConstructed,
+                                           fx::kRespNormalInfoUnknownModeConstructedLen);
+    TEST_ASSERT_EQUAL_UINT16(7, seven.statusCode);
+    TEST_ASSERT_EQUAL_HEX16(0xFF00, seven.tail.errorWordH);
 }
 
 static void test_50_byte_payload_decodes_as_dual_generation() {
@@ -544,6 +630,12 @@ void run_eversolar_parser() {
     RUN_TEST(test_forced_layout_accepts_an_unexpected_length);
     RUN_TEST(test_unknown_payload_length_is_rejected);
     RUN_TEST(test_bad_payload_length_frame_parses_but_does_not_decode);
+    RUN_TEST(test_the_real_capture_yields_its_tail_raw);
+    RUN_TEST(test_a_28_byte_payload_has_no_tail);
+    RUN_TEST(test_no_other_layout_reads_a_tail);
+    RUN_TEST(test_the_observed_read_description_lists_one_code_per_reply_word);
+    RUN_TEST(test_op_mode_texts_cover_observed_and_documented_codes);
+    RUN_TEST(test_the_constructed_fault_frames_carry_their_mode_and_tail);
     RUN_TEST(test_serial_number_is_extracted);
     RUN_TEST(test_model_is_anchored_on_the_manufacturer_field);
     RUN_TEST(test_empty_or_unprintable_serial_is_refused);

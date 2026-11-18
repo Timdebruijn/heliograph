@@ -34,6 +34,7 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | GET | `/api/v1/registers` | — | The last register read: the request, the result and the raw words |
 | POST | `/api/v1/actions/driver-query` | **✔** | Run one named READ diagnostic query a driver lists (`?device=&query=`) — see [Driver queries](#driver-queries) |
 | GET | `/api/v1/driver-query` | — | The queries each device offers, and the last result as raw hex |
+| GET | `/api/v1/fault-frames` | — | The raw frames kept when a device's fault state changed — see [Fault frames](#fault-frames) |
 | POST | `/api/v1/actions/poll` | **✔** | Force an immediate poll |
 | POST | `/api/v1/actions/reboot` | **✔** | Reboot |
 | POST | `/api/v1/actions/clear-coredump` | **✔** | Discard a stored crash dump (404 when there is none) |
@@ -593,6 +594,45 @@ curl http://bridge/api/v1/registers
   `transport_error`. `values` holds raw 16-bit words, only when `result` is `ok`.
 - `unit` 1–247 (default 1), `space` defaults to `holding`, `count` 1–16 (default 1).
   `address` is required and must be plain digits.
+
+## Fault frames
+
+`GET /api/v1/fault-frames` returns the raw frames a driver kept when a device's fault state
+changed, oldest first. It is a read of RAM: no bus traffic, no auth beyond what
+`/api/v1/driver-query` has.
+
+```json
+{"capacity": 8, "records": [
+  {"time": "2026-11-18T14:03:22+01:00", "uptime_s": 52311, "device": "...",
+   "reason": "status_changed", "status_code": 2,
+   "frame": "AA 55 00 10 01 00 11 82 2C ...", "truncated": false,
+   "decoded_unverified": [{"name": "grid_voltage_at_fault", "value": 265.0, "unit": "V"}]}
+]}
+```
+
+- `reason` is `baseline` (the error words the driver compares against, stored once per distinct
+  value per device so a restart does not push fault frames out), `status_changed` (the status
+  word moved to something other than a normal state, an unknown value included) or
+  `error_words_changed`.
+- `frame` is every byte the line delivered for that poll, as it came, so it may start with an
+  echo of the bridge's own request. Capped at 64 bytes; `truncated` says when it was cut.
+- `decoded_unverified` is **only a reading aid**: values read out of the frame with the vendor
+  document's scaling, never checked against a faulted unit, and left out when the frame holds
+  nothing the driver can read or the device is no longer configured. A raw filler word
+  (`0xFFFF`) is omitted, not scaled. The frame is the record.
+- `time` is `null` when the clock was not synced; `uptime_s` is always there.
+- The ring holds 8 records in RTC memory: it survives a software reset, an OTA restart and a
+  panic, **not** a power loss. A flag flapping on every poll can still push older records out.
+- 404 `no_fault_frames` on a build without the log; 500 `payload_too_large` if the list would
+  exceed its bound.
+
+## Device status
+
+`GET /api/v1/status` and the MQTT state topic carry `status_code`, `status_text`, `error_code`
+and `error_raw`, each `null` when the driver does not report it or the reading is stale.
+`error_raw` is a driver-formatted string of undecoded vendor error words (`"FF00 0000"` for an
+EverSolar), separate from `error_code`, whose `0` means "healthy". It is additive: a key
+consumers of the older payload do not read.
 
 ## Driver queries
 

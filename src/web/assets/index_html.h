@@ -402,7 +402,7 @@ function socColour(pct){
 }
 
 // ---------------- canonical measurements ----------------
-// Label, group and decimals per id ('flag' for a yes/no). Order here IS the order on screen.
+// Label, group and decimals per id ('flag' for open/closed, 'yesno' for yes/no). Order here IS the order on screen.
 // Units are NOT here -- they arrive with each reading, so only one place decides what a watt is
 // called.
 // A new id in measurement.h without a row here is caught by tools/check_measurement_ids.py.
@@ -459,6 +459,8 @@ const MEAS=[
   ['grid.export_power','Exporting','Grid',0],
   ['grid.power','Net flow','Grid',0],
   ['grid.connected','Grid relay','Grid','flag'],
+  ['inverter.fault','Fault','Device','yesno'],
+  ['inverter.error_words_changed','Error words changed','Device','yesno'],
   ['load.power','House load','Grid',0],
   ['inverter.temperature','Temperature','Device',1],
   ['inverter.operating_hours','Operating hours','Device',0],
@@ -472,6 +474,7 @@ function reading(m,id){
   const r=m[id];if(!r)return '—';
   const d=(LABEL[id]||{}).dec??1;
   if(r.value===null||r.value===undefined)return '—';
+  if(d==='yesno')return r.value?'Yes':'No';
   return d==='flag'?(r.value?'Closed':'Open'):(fmt(r.value,d)+' '+(r.unit||'')).trim();
 }
 /// The detail groups for one device's measurement map. Empty groups are not rendered: a heading

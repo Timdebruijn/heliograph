@@ -156,11 +156,33 @@ INVERTER_ID = (
 EXPECTED_MODEL = "TL3000-20"
 
 # --- Diagnostic-query replies (11 00 / 11 01 / 11 04 / 11 42) ---------------------------
-# CONSTRUCTED, NOT CAPTURED. The vendor document describing these four replies is a scanned
-# image, so their payload formats are unconfirmed, and no real inverter has been asked yet.
-# These payloads are arbitrary bytes of a plausible shape: the tests only prove that the
-# driver passes whatever comes back through as raw bytes, never that it understands them.
-CONSTRUCTED_READ_DESCRIPTION = bytes([0x01, 0x02, 0x03, 0x04, 0x05, 0x06])
+# The 11 00 reply is OBSERVED (a real TL3000-20, production bridge, 2026-11-18): the 22 data
+# codes the inverter lists. The other three are CONSTRUCTED, NOT CAPTURED. The vendor document
+# describing these replies is a scanned image, so their payload formats are unconfirmed, and no
+# real inverter has been asked for them yet. Those payloads are arbitrary bytes of a plausible
+# shape: the tests only prove that the driver passes whatever comes back through as raw bytes,
+# never that it understands them.
+OBSERVED_READ_DESCRIPTION = bytes(
+    [
+        *(
+            0x00,
+            0x0D,
+            0x01,
+            0x04,
+            0x41,
+            0x42,
+            0x43,
+            0x44,
+            0x45,
+            0x47,
+            0x48,
+            0x49,
+            0x4A,
+            0x4C,
+        ),
+        *(0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F),
+    ]
+)
 CONSTRUCTED_RW_DESCRIPTION = bytes([0x10, 0x20, 0x21])
 CONSTRUCTED_SET_INFO = words(1200, 80, 1840, 2760, 4750, 5150)
 CONSTRUCTED_VERSIONS = b"M1.0 S1.1 L1.2"
@@ -187,9 +209,10 @@ FIXTURES: list[tuple[str, str, bytes]] = [
         request(0x10, 0x01, 0x00, SERIAL + bytes([INVERTER_ADDR])),
     ),
     (
-        "kRespReadDescriptionConstructed",
-        "Response: 11 00 read description, CONSTRUCTED payload (not captured)",
-        response(0x11, 0x00, CONSTRUCTED_READ_DESCRIPTION),
+        "kRespReadDescriptionObserved",
+        "Response: 11 00 read description, OBSERVED on a real TL3000-20 (2026-11-18):"
+        " 22 data codes",
+        response(0x11, 0x00, OBSERVED_READ_DESCRIPTION),
     ),
     (
         "kRespRwDescriptionConstructed",
@@ -240,8 +263,8 @@ FIXTURES: list[tuple[str, str, bytes]] = [
     # The first QUERY_NORMAL_INFO a real TL3000-20 ever answered us (2026-07-19 12:23:57,
     # mid-production). 44-byte payload: the first 14 words are exactly the single-string
     # layout (38.6 degC, 3.44 kWh today, 346.4 V / 2.0 A PV, 230.6 V / 2.7 A AC, 50.03 Hz,
-    # 655 W, 35445.9 kWh lifetime, 47401 h, OP_MODE 1), followed by an 8-word tail of zeros
-    # and FFFF. Neither 28 nor 32: the length-decides-layout hypothesis is hereby disproven,
+    # 655 W, 35445.9 kWh lifetime, 47401 h, OP_MODE 1), followed by an 8-word tail: six fault
+    # values (0000 0000 FFFF 0000 0000 0000) and two error words (FF00 0000). Neither 28 nor 32: the length-decides-layout hypothesis is hereby disproven,
     # and the reference making `strings` a config option finally makes sense -- it only ever
     # indexes words and ignores everything after.
     (
@@ -354,6 +377,68 @@ FIXTURES: list[tuple[str, str, bytes]] = [
 ]
 
 
+# --- Fault-mode replies: CONSTRUCTED from the real healthy capture above -------------------
+# NOT observed. No faulted unit has been read yet. Each is kRespNormalInfoCaptured's payload
+# with the words below changed, so the first 13 words (and the layout) are real and only the
+# mode and tail are invented. They exist to exercise the parser and the fault log, and prove
+# nothing about what a fault looks like on the wire.
+CAPTURED_NORMAL_INFO = words(
+    0x0182, 0x0158, 0x0D88, 0x0014, 0x001B, 0x0902, 0x138B, 0x028F, 0xFFFF, 0x0005,
+    0x689B, 0x0000, 0xB929, 0x0001,
+    0x0000, 0x0000, 0xFFFF, 0x0000, 0x0000, 0x0000, 0xFF00, 0x0000,
+)  # fmt: skip
+
+
+def with_words(base: bytes, changes: dict[int, int]) -> bytes:
+    out = bytearray(base)
+    for index, value in changes.items():
+        out[index * 2 : index * 2 + 2] = value.to_bytes(2, "big")
+    return bytes(out)
+
+
+FAULT_MODE_2 = with_words(
+    CAPTURED_NORMAL_INFO,
+    {
+        13: 2,  # OP_MODE: Fault (documented, never observed)
+        14: 2650,  # GV   265.0 V
+        15: 5003,  # GF   50.03 Hz
+        16: 900,  # GZ   0.900 ohm
+        17: 0xFFF6,  # Tmp  -1.0 C, to exercise the signed read
+        18: 3464,  # PV1  346.4 V
+        19: 3,  # GFCI 0.003 A
+        20: 0xFF40,  # error word H, changed from the healthy FF00
+        21: 0x0004,  # error word L
+    },
+)
+FAULT_MODE_3 = with_words(
+    CAPTURED_NORMAL_INFO,
+    {13: 3, 14: 2310, 15: 4998, 16: 0xFFFF, 17: 412, 18: 3464, 19: 0, 21: 0x0100},
+)
+# Mode 7 is in neither the observed set nor the vendor table; the tail is left healthy.
+UNKNOWN_MODE_7 = with_words(CAPTURED_NORMAL_INFO, {13: 7})
+
+FIXTURES += [
+    (
+        "kRespNormalInfoFaultConstructed",
+        "Response: 44-byte QUERY_NORMAL_INFO, mode 2, CONSTRUCTED from the real capture"
+        " (changed error words, non-zero fault values; never observed)",
+        response(0x11, 0x02, FAULT_MODE_2),
+    ),
+    (
+        "kRespNormalInfoPermanentFaultConstructed",
+        "Response: 44-byte QUERY_NORMAL_INFO, mode 3, CONSTRUCTED from the real capture"
+        " (never observed)",
+        response(0x11, 0x02, FAULT_MODE_3),
+    ),
+    (
+        "kRespNormalInfoUnknownModeConstructed",
+        "Response: 44-byte QUERY_NORMAL_INFO, mode 7 (neither observed nor documented),"
+        " CONSTRUCTED from the real capture",
+        response(0x11, 0x02, UNKNOWN_MODE_7),
+    ),
+]
+
+
 def corrupt_checksum(f: bytes) -> bytes:
     b = bytearray(f)
     b[-1] ^= 0xFF
@@ -447,6 +532,22 @@ def main() -> None:
     assert generated_info == captured_info, (
         "kRespNormalInfoCaptured drifted from the hardware capture"
     )
+
+    # The 11 00 reply a real TL3000-20 sent on 2026-11-18 (production bridge): 22 data codes.
+    observed_read_description = bytes.fromhex(
+        "aa 55 00 10 01 00 11 80 16 00 0d 01 04 41 42 43 44 45 47 48 49 4a 4c 78 79 7a 7b"
+        " 7c 7d 7e 7f 08 62".replace(" ", "")
+    )
+    generated_description = {n: f for n, _, f in FIXTURES}[
+        "kRespReadDescriptionObserved"
+    ]
+    assert generated_description == observed_read_description, (
+        "kRespReadDescriptionObserved drifted from the hardware capture"
+    )
+    # The captured normal-info payload above, and the tail the 11 00 reply says it has: one
+    # word per listed code, which is the positional reading docs/eversolar-protocol.md argues.
+    assert len(OBSERVED_READ_DESCRIPTION) * 2 == len(CAPTURED_NORMAL_INFO)
+    assert captured_info[9:-2] == CAPTURED_NORMAL_INFO, "the fault frames' base drifted"
 
     captured_three = bytes.fromhex(
         "aa 55 00 10 01 00 11 82 30 01 0b 13 c9 0e 22 00 02 00 16 00 08 5c c1 00 00 a0 03"

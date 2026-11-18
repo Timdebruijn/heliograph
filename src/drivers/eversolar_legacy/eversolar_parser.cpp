@@ -13,6 +13,10 @@ namespace {
 
 // Word indices for the single-string layout (14 words).
 namespace single {
+// Words 14-21 are the tail, read only from a 44-byte payload (see NormalInfoTail).
+inline constexpr size_t kTailFirst   = 14;
+inline constexpr size_t kTailErrorH  = 20;
+inline constexpr size_t kTailErrorL  = 21;
 inline constexpr size_t kTemp        = 0;
 inline constexpr size_t kEnergyToday = 1;
 inline constexpr size_t kVpv         = 2;
@@ -179,6 +183,14 @@ DecodeResult decodeNormalInfo(const uint8_t* data, size_t len, NormalInfo& out,
         out.operatingHours = readWord(data, single::kHoursUp);
         out.statusCode     = readWord(data, single::kOpMode);
         out.hasSecondString = false;
+        if (len == kNormalInfoSingleStringExtendedBytes) {
+            out.tailValid = true;
+            for (size_t i = 0; i < 6; ++i) {
+                out.tail.faultValue[i] = readWord(data, single::kTailFirst + i);
+            }
+            out.tail.errorWordH = readWord(data, single::kTailErrorH);
+            out.tail.errorWordL = readWord(data, single::kTailErrorL);
+        }
     } else if (layout == NormalInfoLayout::ThreePhase) {
         out.layout          = NormalInfoLayout::ThreePhase;
         out.temperatureC    = readSignedWord(data, three::kTemp) / 10.0;
@@ -249,7 +261,11 @@ const char* opModeText(uint16_t code) {
     switch (code) {
         case 0: return "Standby (not feeding)";
         case 1: return "Grid-connected (normal)";
-        default: break;  // never observed: the caller reports "Unknown (n)"
+        // Documented in the vendor's operating-mode table, never observed. Do not read these
+        // as proof that a unit has been seen faulting.
+        case 2: return "Fault";
+        case 3: return "Permanent fault";
+        default: break;  // neither observed nor documented: the caller reports "Unknown (n)"
     }
     return "";
 }

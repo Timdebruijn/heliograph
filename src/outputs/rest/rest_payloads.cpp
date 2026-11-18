@@ -524,6 +524,44 @@ bool buildDriverQueryPayload(const DriverQueryReport& report,
     return finish(doc, out, maxBytes);
 }
 
+bool buildFaultFramesPayload(const std::vector<faultlog::StoredFault>& records,
+                             const FaultFrameDecoder& decode, std::string& out,
+                             size_t maxBytes) {
+    JsonDocument doc;
+    doc["capacity"] = faultlog::kCapacity;
+    JsonArray list  = doc["records"].to<JsonArray>();
+    for (const faultlog::StoredFault& r : records) {
+        JsonObject o = list.add<JsonObject>();
+        char       when[24];
+        if (r.epochSeconds != 0 &&
+            log::formatIsoLocalTime(when, sizeof(when), static_cast<time_t>(r.epochSeconds)) > 0) {
+            o["time"] = when;  // ArduinoJson copies the string
+        } else {
+            o["time"] = nullptr;
+        }
+        o["uptime_s"]    = r.uptimeSeconds;
+        o["device"]      = r.deviceId;
+        o["reason"]      = faultRecordReasonName(r.reason);
+        o["status_code"] = r.statusCode;
+        o["frame"]       = hexBytes(r.frame);
+        o["truncated"]   = r.truncated;
+        // A truncated frame has lost its checksum: nothing to decode from it.
+        const auto fields = r.truncated || decode == nullptr
+                                ? std::vector<FaultFrameField>{}
+                                : decode(r.deviceId, r.frame);
+        if (!fields.empty()) {
+            JsonArray values = o["decoded_unverified"].to<JsonArray>();
+            for (const FaultFrameField& f : fields) {
+                JsonObject v = values.add<JsonObject>();
+                v["name"]    = f.name;
+                v["value"]   = f.value;
+                v["unit"]    = f.unit;
+            }
+        }
+    }
+    return finish(doc, out, maxBytes);
+}
+
 bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::string& out,
                            size_t maxBytes) {
     JsonDocument doc;

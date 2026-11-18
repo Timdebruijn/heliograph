@@ -62,6 +62,17 @@ public:
     std::vector<DiagnosticQuery> diagnosticQueries() const override;
     DiagnosticQueryResult        runDiagnosticQuery(const std::string& name) override;
 
+    /// Raw frames kept because the unit's fault state moved: the status word entering anything
+    /// but a normal mode, the error words changing, and the baseline they are compared with.
+    /// Produced by normal-info polls only. See trackFaultState() for the exact rules.
+    std::vector<FaultRecord> takeFaultRecords() override;
+
+    /// The six fault values of a stored normal-info reply, scaled as the vendor protocol
+    /// document gives them and UNVERIFIED: no faulted unit has been read yet. A pure function of
+    /// `frame`, so the web task may call it.
+    std::vector<FaultFrameField> decodeFaultFrame(const uint8_t* frame,
+                                                  size_t         len) const override;
+
     bool registered() const { return registered_; }
 
 private:
@@ -79,7 +90,11 @@ private:
                             size_t dataLen, Address expectedSource, uint8_t* payloadOut,
                             size_t payloadCapacity, size_t& payloadLen,
                             const Address* altSource = nullptr,
-                            DiagnosticQueryResult* raw = nullptr);
+                            std::vector<uint8_t>* rawTx = nullptr,
+                            std::vector<uint8_t>* rawRx = nullptr);
+
+    /// Fault bookkeeping for one validated normal-info reply; see the definition.
+    void trackFaultState(const NormalInfo& info);
 
     /// Broadcast: every inverter forgets its address. Disruptive, so only on begin().
     void reRegisterAll();
@@ -120,6 +135,28 @@ private:
     InverterCapabilities capabilities_;
     bool                 channelsDeclared_ = false;
     bool                 declaredDual_     = false;
+
+    /// Every byte the line delivered during the last normal-info poll, kept as a member so its
+    /// capacity survives: a fault record copies from it, and a poll never allocates.
+    std::vector<uint8_t> pollRaw_;
+
+    /// What the previous successful poll said, for change detection. RAM only.
+    bool     havePrevious_  = false;
+    uint16_t previousMode_  = 0;
+    bool     previousTail_  = false;
+    uint16_t previousWordH_ = 0;
+    uint16_t previousWordL_ = 0;
+    /// The error words of the first mode-1 reply with a tail, learned once per boot and not
+    /// reset by begin(): a re-registration is not a new boot, and a baseline relearned after
+    /// the unit had already drifted would hide the drift. Never hard-coded: a healthy
+    /// TL3000-20 reads FF00 0000, but that is one unit.
+    bool     baselineKnown_ = false;
+    uint16_t baselineWordH_ = 0;
+    uint16_t baselineWordL_ = 0;
+    /// Whether the words differ from the baseline, as of the last poll; meaningful only when
+    /// both baselineKnown_ and previousTail_.
+    bool     wordsChanged_  = false;
+    std::vector<FaultRecord> faultRecords_;
 
     /// Bumped by pmu::transact, which does the counting because it is where the failures are
     /// seen -- a single exchange can meet several bad frames.

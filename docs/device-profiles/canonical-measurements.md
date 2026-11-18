@@ -54,6 +54,8 @@ $ python3 tools/gen_profiles.py --list-measurements
 | `grid.power` | W | **Net grid flow, signed**: positive = importing, negative = exporting. Prefer this where a device reports one bidirectional register; the two rails above are for devices that publish them separately. Where both exist, this one is what a controller acts on. |
 | `load.power` | W | What the house is drawing, as the inverter measures it — **positive = consuming** |
 | `grid.connected` | — | **Flag** (1/0, map it with `bit`): 1 = the inverter's grid relay is closed, 0 = running islanded or disconnected. The inverter's own relay state, not a measurement of the grid. |
+| `inverter.fault` | — | **Flag**: 1 = the device reports a fault mode, 0 = it reports a normal one. Absent for a mode the driver does not know, never 0. Derived from the device's own operating-mode word, not from error bits. |
+| `inverter.error_words_changed` | — | **Flag**: 1 = the device's undecoded error words differ from the baseline the driver learned this boot, 0 = they match. Absent until a baseline exists and on devices that report no such words. A change detector, not a diagnosis. |
 
 ## Conventions
 

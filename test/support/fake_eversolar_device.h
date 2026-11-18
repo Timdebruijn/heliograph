@@ -22,7 +22,20 @@ namespace heliograph::test {
 
 class FakeEversolarDevice {
 public:
-    enum class Payload { SingleString, DualString, ThreePhase, Night, BadChecksum, BadLength };
+    /// Captured is the real TL3000-20 reply (44-byte payload with a tail); the three Fault* /
+    /// UnknownMode entries are CONSTRUCTED from it and never observed on hardware.
+    enum class Payload {
+        SingleString,
+        DualString,
+        ThreePhase,
+        Night,
+        BadChecksum,
+        BadLength,
+        Captured,
+        Fault,
+        PermanentFault,
+        UnknownMode,
+    };
 
     /// Off the bus entirely, as every solar inverter is after sunset.
     bool offline = false;
@@ -187,6 +200,22 @@ private:
                 case Payload::Night:
                     append(body, fixtures::kRespNormalInfoNight, fixtures::kRespNormalInfoNightLen);
                     break;
+                case Payload::Captured:
+                    append(body, fixtures::kRespNormalInfoCaptured,
+                           fixtures::kRespNormalInfoCapturedLen);
+                    break;
+                case Payload::Fault:
+                    append(body, fixtures::kRespNormalInfoFaultConstructed,
+                           fixtures::kRespNormalInfoFaultConstructedLen);
+                    break;
+                case Payload::PermanentFault:
+                    append(body, fixtures::kRespNormalInfoPermanentFaultConstructed,
+                           fixtures::kRespNormalInfoPermanentFaultConstructedLen);
+                    break;
+                case Payload::UnknownMode:
+                    append(body, fixtures::kRespNormalInfoUnknownModeConstructed,
+                           fixtures::kRespNormalInfoUnknownModeConstructedLen);
+                    break;
                 case Payload::BadChecksum:
                     append(body, fixtures::kRespBadChecksum, fixtures::kRespBadChecksumLen);
                     break;
@@ -199,11 +228,12 @@ private:
             if (!registered || withholdQueries) {
                 return false;
             }
-            // CONSTRUCTED replies, see tools/gen_fixtures.py.
+            // 11 00 is the OBSERVED reply of a real TL3000-20; the rest are CONSTRUCTED. See
+            // tools/gen_fixtures.py.
             switch (function) {
                 case 0x00:
-                    append(body, fixtures::kRespReadDescriptionConstructed,
-                           fixtures::kRespReadDescriptionConstructedLen);
+                    append(body, fixtures::kRespReadDescriptionObserved,
+                           fixtures::kRespReadDescriptionObservedLen);
                     break;
                 case 0x01:
                     append(body, fixtures::kRespRwDescriptionConstructed,

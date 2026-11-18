@@ -69,6 +69,13 @@ struct DeviceState {
     /// null rather than 0, because 0 would assert "no fault" -- a claim we cannot make.
     bool errorCodeSupported = false;
 
+    /// Vendor error words the driver reads but does not decode, as text the driver formats
+    /// (hex words, say). Separate from `errorCode` on purpose: that field means "0 is healthy"
+    /// and is clamped to 16 bits on Modbus TCP, and a device whose healthy words are non-zero
+    /// would read as faulted in both. When false, outputs publish null, like every sibling above.
+    std::string errorRaw;
+    bool        errorRawSupported = false;
+
     /// Applies the outcome of a poll attempt. The only place the online/stale rules live.
     void recordPollSuccess(uint64_t nowMs, const StalenessPolicy& policy);
     void recordPollFailure(uint64_t nowMs, const StalenessPolicy& policy);

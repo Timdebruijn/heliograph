@@ -5,6 +5,7 @@
 #include "drivers/pmu_pv_capabilities.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace heliograph::eversolar {
@@ -62,7 +63,11 @@ EversolarOptions optionsFrom(const heliograph::DriverOptions& values) {
 }
 
 EversolarDriver::EversolarDriver(Transport& transport, EversolarOptions options)
-    : transport_(&transport), options_(options), address_(options.assignedAddress) {}
+    : transport_(&transport), options_(options), address_(options.assignedAddress) {
+    // A healthy reply with an echo of our request is ~66 bytes; this holds noise on top of
+    // that without growing, so the steady-state poll never touches the heap.
+    pollRaw_.reserve(128);
+}
 
 const DriverDescriptor& EversolarDriver::descriptor() const { return eversolar::descriptor(); }
 
@@ -116,7 +121,8 @@ EversolarDriver::TransactResult EversolarDriver::transact(CommandCode command,
                                                           size_t   payloadCapacity,
                                                           size_t&  payloadLen,
                                                           const Address* altSource,
-                                                          DiagnosticQueryResult* raw) {
+                                                          std::vector<uint8_t>* rawTx,
+                                                          std::vector<uint8_t>* rawRx) {
     payloadLen = 0;
     if (transport_ == nullptr) {
         return TransactResult::TransportError;
@@ -131,10 +137,10 @@ EversolarDriver::TransactResult EversolarDriver::transact(CommandCode command,
 
     waitForInterFrameGap();
     pmu::Exchange exchange{request, requestLen, command, expectedSource, altSource};
-    if (raw != nullptr) {
-        raw->tx.assign(request, request + requestLen);
-        exchange.rawReply = &raw->rx;
+    if (rawTx != nullptr) {
+        rawTx->assign(request, request + requestLen);
     }
+    exchange.rawReply = rawRx;
     const auto result = pmu::transact(*transport_, exchange, payloadOut, payloadCapacity,
                                       payloadLen, tally_, "RS485");
     lastFrameMs_ = transport_->nowMs();
@@ -377,7 +383,8 @@ PollResult EversolarDriver::poll(DeviceState& state) {
     uint8_t payload[kMaxDataLength];
     size_t  payloadLen = 0;
     const auto r = transact(cmd::kQueryNormalInfo, inverterAddress(address_), nullptr, 0,
-                            inverterAddress(address_), payload, sizeof(payload), payloadLen);
+                            inverterAddress(address_), payload, sizeof(payload), payloadLen,
+                            nullptr, nullptr, &pollRaw_);
     switch (r) {
         case TransactResult::Timeout:
             // Registration is deliberately NOT dropped here. We keep polling the address; the
@@ -478,9 +485,146 @@ PollResult EversolarDriver::poll(DeviceState& state) {
     state.errorCodeSupported = false;
     state.errorCode          = 0;
 
+    // Fault status. Derived from the mode word alone -- no error bit is decoded anywhere. 2 and
+    // 3 are vendor-documented and not yet observed; 0 and 1 are observed. Any other mode is
+    // unknown, and an unknown mode is not "no fault": the flag is invalidated, not set false,
+    // so it publishes null and Home Assistant shows "unknown".
+    m.declare(measurement_id::kInverterFault, MeasurementType::Flag, Unit::None, "Fault");
+    if (info.statusCode == 2 || info.statusCode == 3) {
+        m.set(measurement_id::kInverterFault, 1.0, ts);
+    } else if (info.statusCode == 0 || info.statusCode == 1) {
+        m.set(measurement_id::kInverterFault, 0.0, ts);
+    } else {
+        m.invalidate(measurement_id::kInverterFault);
+    }
+
+    trackFaultState(info);
+    if (info.tailValid) {
+        // The raw words as hex, in the order the unit sends them. Not errorCode: see
+        // DeviceState::errorRaw.
+        char words[10];
+        std::snprintf(words, sizeof(words), "%04X %04X", info.tail.errorWordH,
+                      info.tail.errorWordL);
+        state.errorRaw          = words;
+        state.errorRawSupported = true;
+        m.declare(measurement_id::kInverterErrorWordsChanged, MeasurementType::Flag, Unit::None,
+                  "Error words changed");
+        if (baselineKnown_) {
+            m.set(measurement_id::kInverterErrorWordsChanged, wordsChanged_ ? 1.0 : 0.0, ts);
+        } else {
+            m.invalidate(measurement_id::kInverterErrorWordsChanged);
+        }
+    } else {
+        // A layout without a readable tail: nothing to report, and nothing left over from an
+        // earlier reply that had one.
+        state.errorRaw.clear();
+        state.errorRawSupported = false;
+        m.invalidate(measurement_id::kInverterErrorWordsChanged);
+    }
+
     state.identity     = identity_;
     state.capabilities = capabilities_;
     return PollResult::Ok;
+}
+
+void EversolarDriver::trackFaultState(const NormalInfo& info) {
+    const uint16_t mode = info.statusCode;
+    const bool     tail = info.tailValid;
+    const uint32_t signature =
+        tail ? (static_cast<uint32_t>(info.tail.errorWordH) << 16) | info.tail.errorWordL : 0;
+
+    auto keep = [&](FaultRecordReason reason) {
+        FaultRecord rec;
+        rec.reason     = reason;
+        rec.statusCode = mode;
+        rec.signature  = signature;
+        rec.frame.assign(pollRaw_.begin(), pollRaw_.end());
+        faultRecords_.push_back(std::move(rec));
+    };
+
+    // The mode moved (or this is the first poll we ever saw) into something other than a normal
+    // state. 2 and 3 are the documented faults; an unknown mode is recorded too, because an
+    // unknown frame is exactly the one worth having later.
+    if ((!havePrevious_ || previousMode_ != mode) && mode != 0 && mode != 1) {
+        keep(FaultRecordReason::StatusChanged);
+    }
+    if (tail && havePrevious_ && previousTail_ &&
+        (previousWordH_ != info.tail.errorWordH || previousWordL_ != info.tail.errorWordL)) {
+        keep(FaultRecordReason::ErrorWordsChanged);
+    }
+    if (!baselineKnown_ && tail && mode == 1) {
+        baselineKnown_ = true;
+        baselineWordH_ = info.tail.errorWordH;
+        baselineWordL_ = info.tail.errorWordL;
+        keep(FaultRecordReason::Baseline);
+    }
+
+    wordsChanged_ = tail && baselineKnown_ &&
+                    (info.tail.errorWordH != baselineWordH_ ||
+                     info.tail.errorWordL != baselineWordL_);
+    havePrevious_  = true;
+    previousMode_  = mode;
+    previousTail_  = tail;
+    previousWordH_ = tail ? info.tail.errorWordH : 0;
+    previousWordL_ = tail ? info.tail.errorWordL : 0;
+}
+
+std::vector<FaultRecord> EversolarDriver::takeFaultRecords() {
+    std::vector<FaultRecord> out;
+    out.swap(faultRecords_);
+    return out;
+}
+
+std::vector<FaultFrameField> EversolarDriver::decodeFaultFrame(const uint8_t* frame,
+                                                               size_t         len) const {
+    std::vector<FaultFrameField> out;
+    if (frame == nullptr) {
+        return out;
+    }
+    // The stored bytes are a raw record and may begin with an echo of our own request, so look
+    // for the reply rather than assume where it starts. parseFrame checks the checksum.
+    for (size_t i = 0; i + kFrameOverhead <= len; ++i) {
+        Frame f;
+        if (frame[i] != kHeader0 || parseFrame(frame + i, len - i, f) != ParseResult::Ok ||
+            f.control != cmd::kQueryNormalInfo.control ||
+            f.function != (cmd::kQueryNormalInfo.function | 0x80)) {
+            continue;
+        }
+        NormalInfo info;
+        if (decodeNormalInfo(f.data, f.dataLength, info, LayoutSelection::Auto) !=
+                DecodeResult::Ok ||
+            !info.tailValid) {
+            return out;
+        }
+        // Scaling from the vendor protocol document (V1.1), UNVERIFIED on a faulted unit. A raw
+        // 0xFFFF is left out: a healthy unit sends it for the impedance (observed), and 65.535
+        // would be a number made up from a filler, while 0 would claim a measurement. Unknown
+        // is never zero.
+        struct Spec {
+            const char* name;
+            double      scale;
+            const char* unit;
+            bool        isSigned;
+        };
+        static constexpr Spec kSpecs[6] = {
+            {"grid_voltage_at_fault", 10.0, "V", false},
+            {"grid_frequency_at_fault", 100.0, "Hz", false},
+            {"grid_impedance_at_fault", 1000.0, "ohm", false},
+            {"temperature_at_fault", 10.0, "C", true},
+            {"pv1_voltage_at_fault", 10.0, "V", false},
+            {"residual_current_at_fault", 1000.0, "A", false},
+        };
+        for (size_t k = 0; k < 6; ++k) {
+            const uint16_t raw = info.tail.faultValue[k];
+            if (raw == 0xFFFF) {
+                continue;
+            }
+            const double v = kSpecs[k].isSigned ? static_cast<int16_t>(raw) : raw;
+            out.push_back({kSpecs[k].name, v / kSpecs[k].scale, kSpecs[k].unit});
+        }
+        return out;
+    }
+    return out;
 }
 
 DeviceIdentity EversolarDriver::identity() const { return identity_; }
@@ -540,7 +684,7 @@ DiagnosticQueryResult EversolarDriver::runDiagnosticQuery(const std::string& nam
     // degrading bus on the health page and in Prometheus.
     const pmu::Tally tallyBefore = tally_;
     const auto r = transact(def->command, inverter, nullptr, 0, inverter, payload,
-                            sizeof(payload), payloadLen, nullptr, &result);
+                            sizeof(payload), payloadLen, nullptr, &result.tx, &result.rx);
     tally_ = tallyBefore;
     switch (r) {
         case TransactResult::Ok:

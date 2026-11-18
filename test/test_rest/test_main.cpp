@@ -14,6 +14,7 @@
 #include "config/configuration.h"
 #include "diagnostics/breadcrumbs.h"
 #include "diagnostics/coredump.h"
+#include "diagnostics/fault_frame_log.h"
 #include "diagnostics/logger.h"
 #include "outputs/modbus_tcp/modbus_tcp_server.h"
 #include "device/device_context.h"
@@ -3347,8 +3348,313 @@ static void test_an_unused_driver_query_runner_reports_idle_and_the_catalog_only
     TEST_ASSERT_FALSE(doc["result"].is<const char*>());
 }
 
+// ---------------------------------------------------------------------------------------
+// The fault-frame log: the ring, its survival of a reboot, and the REST payload over it.
+// ---------------------------------------------------------------------------------------
+
+static FaultRecord faultRecord(FaultRecordReason reason, uint16_t status, uint32_t signature,
+                               size_t frameLen = 4, uint8_t fill = 0xAB) {
+    FaultRecord r;
+    r.reason     = reason;
+    r.statusCode = status;
+    r.signature  = signature;
+    r.frame.assign(frameLen, fill);
+    return r;
+}
+
+static void test_the_fault_log_returns_oldest_first_and_wraps_at_eight() {
+    faultlog::Storage st;
+    std::memset(&st, 0xA5, sizeof st);
+    faultlog::FaultFrameLog log(st);
+    log.begin();
+    TEST_ASSERT_TRUE(log.snapshot().empty());
+
+    for (uint32_t i = 0; i < 11; ++i) {
+        TEST_ASSERT_TRUE(log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, i),
+                                  1000 + i, 50 + i));
+    }
+    const auto all = log.snapshot();
+    TEST_ASSERT_EQUAL_size_t(faultlog::kCapacity, all.size());
+    // 11 pushed, 8 kept: the three oldest are gone and the order is still oldest first.
+    for (size_t i = 0; i < all.size(); ++i) {
+        TEST_ASSERT_EQUAL_UINT32(3 + i, all[i].signature);
+        TEST_ASSERT_EQUAL_UINT32(1003 + i, all[i].epochSeconds);
+        TEST_ASSERT_EQUAL_UINT32(53 + i, all[i].uptimeSeconds);
+    }
+}
+
+static void test_a_repeated_baseline_does_not_evict_fault_frames() {
+    faultlog::Storage st;
+    std::memset(&st, 0, sizeof st);
+    faultlog::FaultFrameLog log(st);
+    log.begin();
+
+    TEST_ASSERT_TRUE(log.push("dev1", faultRecord(FaultRecordReason::Baseline, 1, 0xFF000000), 0, 1));
+    TEST_ASSERT_TRUE(log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 0xFF400004), 0, 2));
+    // The bridge reboots on every deploy: the same baseline again, for the same device, is dropped.
+    for (int boot = 0; boot < 20; ++boot) {
+        TEST_ASSERT_FALSE(
+            log.push("dev1", faultRecord(FaultRecordReason::Baseline, 1, 0xFF000000), 0, 3));
+    }
+    TEST_ASSERT_EQUAL_size_t(2, log.snapshot().size());
+
+    // A different signature, or a different device, is a different baseline.
+    TEST_ASSERT_TRUE(log.push("dev1", faultRecord(FaultRecordReason::Baseline, 1, 0xFF000001), 0, 4));
+    TEST_ASSERT_TRUE(log.push("dev2", faultRecord(FaultRecordReason::Baseline, 1, 0xFF000000), 0, 5));
+    // And the dedup is for baselines only: the same fault twice is two events.
+    TEST_ASSERT_TRUE(log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 0xFF400004), 0, 6));
+    TEST_ASSERT_EQUAL_size_t(5, log.snapshot().size());
+}
+
+static void test_a_corrupt_or_blank_fault_block_reads_as_empty() {
+    faultlog::Storage st;
+    std::memset(&st, 0, sizeof st);
+    {
+        faultlog::FaultFrameLog log(st);
+        log.begin();
+        log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 7), 0, 1);
+    }
+    // One flipped bit inside a record: the CRC no longer holds, so nothing is invented.
+    reinterpret_cast<uint8_t*>(&st)[offsetof(faultlog::Storage, entries) + 20] ^= 0x01;
+    faultlog::FaultFrameLog corrupted(st);
+    corrupted.begin();
+    TEST_ASSERT_TRUE(corrupted.snapshot().empty());
+    // ...and it is usable afterwards, not stuck.
+    TEST_ASSERT_TRUE(corrupted.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 8), 0, 2));
+    TEST_ASSERT_EQUAL_size_t(1, corrupted.snapshot().size());
+
+    // Power-on garbage, and an all-zero block.
+    std::memset(&st, 0xA5, sizeof st);
+    faultlog::FaultFrameLog garbage(st);
+    garbage.begin();
+    TEST_ASSERT_TRUE(garbage.snapshot().empty());
+    std::memset(&st, 0, sizeof st);
+    faultlog::FaultFrameLog blank(st);
+    blank.begin();
+    TEST_ASSERT_TRUE(blank.snapshot().empty());
+}
+
+static void test_the_fault_log_survives_a_simulated_reboot() {
+    faultlog::Storage st;
+    std::memset(&st, 0, sizeof st);
+    {
+        faultlog::FaultFrameLog before(st);
+        before.begin();
+        before.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 0x11, 10, 0x5A), 1700000000, 99);
+        before.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 2, 0x22), 0, 120);
+    }
+    // A new object over the same RTC block, as after a software reset or an OTA restart.
+    faultlog::FaultFrameLog after(st);
+    after.begin();
+    const auto records = after.snapshot();
+    TEST_ASSERT_EQUAL_size_t(2, records.size());
+    TEST_ASSERT_EQUAL_UINT32(0x11, records[0].signature);
+    TEST_ASSERT_EQUAL_UINT32(1700000000, records[0].epochSeconds);
+    TEST_ASSERT_EQUAL_size_t(10, records[0].frame.size());
+    TEST_ASSERT_EQUAL_HEX8(0x5A, records[0].frame[9]);
+    TEST_ASSERT_EQUAL(FaultRecordReason::ErrorWordsChanged, records[1].reason);
+    TEST_ASSERT_EQUAL_UINT32(0, records[1].epochSeconds);  // the clock was not synced
+
+    // And the next record continues the ring where it left off.
+    after.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 3, 0x33), 0, 130);
+    TEST_ASSERT_EQUAL_UINT32(0x33, after.snapshot().back().signature);
+}
+
+static void test_a_long_frame_is_truncated_and_says_so_and_a_long_id_is_cut_safely() {
+    faultlog::Storage st;
+    std::memset(&st, 0, sizeof st);
+    faultlog::FaultFrameLog log(st);
+    log.begin();
+    const std::string longId(60, 'x');
+    log.push(longId, faultRecord(FaultRecordReason::StatusChanged, 2, 1, 100), 0, 1);
+    log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 2, faultlog::kFrameBytes), 0, 2);
+
+    const auto records = log.snapshot();
+    TEST_ASSERT_EQUAL_size_t(faultlog::kFrameBytes, records[0].frame.size());
+    TEST_ASSERT_TRUE(records[0].truncated);
+    TEST_ASSERT_EQUAL_size_t(faultlog::kDeviceIdBytes - 1, records[0].deviceId.size());
+    TEST_ASSERT_TRUE(records[0].deviceId == longId.substr(0, faultlog::kDeviceIdBytes - 1));
+    // Exactly the capacity is not a truncation.
+    TEST_ASSERT_FALSE(records[1].truncated);
+}
+
+/// The whole chain with the real driver: poll a healthy unit, then a (constructed) faulted one,
+/// drain the driver's records into the log, and read the REST payload.
+static std::string faultFramesJson(Rig& r, faultlog::FaultFrameLog& log) {
+    rest::FaultFrameDecoder decode = [&r](const std::string& id, const std::vector<uint8_t>& frame) {
+        return id == "dev1" ? r.driver.decodeFaultFrame(frame.data(), frame.size())
+                            : std::vector<FaultFrameField>{};
+    };
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildFaultFramesPayload(log.snapshot(), decode, body));
+    return body;
+}
+
+static void test_the_fault_frames_endpoint_lists_raw_frames_and_unverified_values() {
+    Rig r;
+    faultlog::Storage st;
+    std::memset(&st, 0, sizeof st);
+    faultlog::FaultFrameLog log(st);
+    log.begin();
+
+    r.device.payload = FakeEversolarDevice::Payload::Captured;
+    r.poll();
+    r.device.payload = FakeEversolarDevice::Payload::Fault;
+    r.poll();
+    for (const FaultRecord& rec : r.driver.takeFaultRecords()) {
+        log.push("dev1", rec, 0, 77);
+    }
+
+    JsonDocument doc = parse(faultFramesJson(r, log));
+    TEST_ASSERT_EQUAL_UINT32(8, doc["capacity"].as<uint32_t>());
+    JsonArray records = doc["records"].as<JsonArray>();
+    TEST_ASSERT_EQUAL_size_t(3, records.size());  // baseline, status_changed, error_words_changed
+
+    JsonObject baseline = records[0];
+    TEST_ASSERT_EQUAL_STRING("baseline", baseline["reason"]);
+    TEST_ASSERT_TRUE(baseline["time"].isNull());  // epoch 0: the clock was not synced
+    TEST_ASSERT_EQUAL_UINT32(77, baseline["uptime_s"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("dev1", baseline["device"]);
+    TEST_ASSERT_EQUAL_UINT32(1, baseline["status_code"].as<uint32_t>());
+    TEST_ASSERT_FALSE(baseline["truncated"].as<bool>());
+    TEST_ASSERT_TRUE(std::string(baseline["frame"].as<const char*>()).rfind("AA 55 00 10 01 00 11 82 2C", 0) == 0);
+
+    JsonObject fault = records[1];
+    TEST_ASSERT_EQUAL_STRING("status_changed", fault["reason"]);
+    TEST_ASSERT_EQUAL_UINT32(2, fault["status_code"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("error_words_changed", records[2]["reason"]);
+    // The vendor-scaled values, under a key that says they are unverified.
+    JsonArray decoded = fault["decoded_unverified"].as<JsonArray>();
+    TEST_ASSERT_EQUAL_size_t(6, decoded.size());
+    TEST_ASSERT_EQUAL_STRING("grid_voltage_at_fault", decoded[0]["name"]);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 265.0, decoded[0]["value"].as<double>());
+    TEST_ASSERT_EQUAL_STRING("V", decoded[0]["unit"]);
+}
+
+static void test_a_time_is_published_when_the_clock_was_synced_and_decoding_is_optional() {
+    faultlog::Storage st;
+    std::memset(&st, 0, sizeof st);
+    faultlog::FaultFrameLog log(st);
+    log.begin();
+    log.push("gone", faultRecord(FaultRecordReason::StatusChanged, 2, 1), 1700000000, 5);
+    log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 2, 100), 0, 6);
+
+    // A decoder that finds nothing: the key is omitted, not an empty array. A truncated frame is
+    // never offered to the decoder at all (it has lost its checksum).
+    std::vector<std::string> asked;
+    rest::FaultFrameDecoder decode = [&asked](const std::string& id, const std::vector<uint8_t>&) {
+        asked.push_back(id);
+        return std::vector<FaultFrameField>{};
+    };
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildFaultFramesPayload(log.snapshot(), decode, body));
+    JsonDocument doc = parse(body);
+    TEST_ASSERT_TRUE(doc["records"][0]["time"].is<const char*>());
+    TEST_ASSERT_TRUE(doc["records"][0]["decoded_unverified"].isNull());
+    TEST_ASSERT_TRUE(doc["records"][1]["truncated"].as<bool>());
+    TEST_ASSERT_EQUAL_size_t(1, asked.size());
+    TEST_ASSERT_EQUAL_STRING("gone", asked[0].c_str());
+
+    // No decoder at all (a build without one) is the same as a decoder that finds nothing.
+    TEST_ASSERT_TRUE(rest::buildFaultFramesPayload(log.snapshot(), nullptr, body));
+    TEST_ASSERT_EQUAL_size_t(2, parse(body)["records"].as<JsonArray>().size());
+}
+
+static void test_an_empty_fault_log_is_an_empty_list_and_the_size_bound_is_enforced() {
+    faultlog::Storage st;
+    std::memset(&st, 0, sizeof st);
+    faultlog::FaultFrameLog log(st);
+    log.begin();
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildFaultFramesPayload(log.snapshot(), nullptr, body));
+    TEST_ASSERT_EQUAL_size_t(0, parse(body)["records"].as<JsonArray>().size());
+
+    for (uint32_t i = 0; i < 8; ++i) {
+        log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, i, faultlog::kFrameBytes), 0, i);
+    }
+    TEST_ASSERT_FALSE(rest::buildFaultFramesPayload(log.snapshot(), nullptr, body, 200));
+}
+
+static void test_a_full_ring_of_fully_decoded_records_fits_the_response_bound() {
+    // The worst case the endpoint can meet: eight records, each a full-size frame with all six
+    // values decoded. It has to fit kMaxResponseBytes or the endpoint answers 500 when it matters.
+    faultlog::Storage st;
+    std::memset(&st, 0, sizeof st);
+    faultlog::FaultFrameLog log(st);
+    log.begin();
+    for (uint32_t i = 0; i < 8; ++i) {
+        log.push("a-device-id-of-23-chars", faultRecord(FaultRecordReason::ErrorWordsChanged, 65535, i, faultlog::kFrameBytes), 1700000000, i);
+    }
+    rest::FaultFrameDecoder decode = [](const std::string&, const std::vector<uint8_t>&) {
+        return std::vector<FaultFrameField>{{"residual_current_at_fault", 65534.999, "A"},
+                                            {"grid_impedance_at_fault", 65534.999, "ohm"},
+                                            {"grid_frequency_at_fault", 655.35, "Hz"},
+                                            {"grid_voltage_at_fault", 6553.4, "V"},
+                                            {"temperature_at_fault", -3276.8, "C"},
+                                            {"pv1_voltage_at_fault", 6553.4, "V"}};
+    };
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildFaultFramesPayload(log.snapshot(), decode, body));
+    TEST_ASSERT_TRUE(body.size() < rest::kMaxResponseBytes);
+}
+
+/// `error_raw` sits beside status_code / error_code, which REST serves in the status payload.
+static std::string statusJson(Rig& r, const DeviceState& state) {
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildStatusPayload(state, "eversolar_legacy", makeBridge(),
+                                              r.diagnostics.snapshot(), &eversolar::descriptor(),
+                                              g_now, {}, json));
+    return json;
+}
+
+static void test_error_raw_is_in_the_rest_status_payload_as_a_string_or_null() {
+    Rig r;
+    r.device.payload = FakeEversolarDevice::Payload::Captured;
+    auto state = r.poll();
+    auto json  = statusJson(r, state);
+    TEST_ASSERT_EQUAL_STRING("FF00 0000", parse(json)["error_raw"]);
+    // A healthy FF000000 must not have leaked into the 0-means-healthy field.
+    TEST_ASSERT_TRUE(parse(json)["error_code"].isNull());
+
+    // A reply with no tail: null, never an empty string or zeros.
+    Rig plain;
+    state = plain.poll();
+    json  = statusJson(plain, state);
+    TEST_ASSERT_TRUE(parse(json)["error_raw"].isNull());
+    TEST_ASSERT_TRUE(json.find("\"error_raw\":null") != std::string::npos);
+
+    // Stale data: the last words are not published as current.
+    state           = r.poll();
+    state.dataStale = true;
+    TEST_ASSERT_TRUE(parse(statusJson(r, state))["error_raw"].isNull());
+}
+
+static void test_unset_fault_flags_are_null_in_the_rest_measurements() {
+    Rig r;
+    r.device.payload = FakeEversolarDevice::Payload::UnknownMode;  // mode 7, no baseline yet
+    const auto  state = r.poll();
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildMeasurementsPayload(state, json));
+    JsonDocument doc = parse(json);
+    // The key is there (the device has the channel) and the value is null: "unknown", not false.
+    TEST_ASSERT_TRUE(doc["measurements"]["inverter.fault"].is<JsonObject>());
+    TEST_ASSERT_TRUE(doc["measurements"]["inverter.fault"]["value"].isNull());
+    TEST_ASSERT_TRUE(doc["measurements"]["inverter.error_words_changed"]["value"].isNull());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_the_fault_log_returns_oldest_first_and_wraps_at_eight);
+    RUN_TEST(test_a_repeated_baseline_does_not_evict_fault_frames);
+    RUN_TEST(test_a_corrupt_or_blank_fault_block_reads_as_empty);
+    RUN_TEST(test_the_fault_log_survives_a_simulated_reboot);
+    RUN_TEST(test_a_long_frame_is_truncated_and_says_so_and_a_long_id_is_cut_safely);
+    RUN_TEST(test_the_fault_frames_endpoint_lists_raw_frames_and_unverified_values);
+    RUN_TEST(test_a_time_is_published_when_the_clock_was_synced_and_decoding_is_optional);
+    RUN_TEST(test_an_empty_fault_log_is_an_empty_list_and_the_size_bound_is_enforced);
+    RUN_TEST(test_a_full_ring_of_fully_decoded_records_fits_the_response_bound);
+    RUN_TEST(test_error_raw_is_in_the_rest_status_payload_as_a_string_or_null);
+    RUN_TEST(test_unset_fault_flags_are_null_in_the_rest_measurements);
     RUN_TEST(test_config_response_contains_no_secret_anywhere);
     RUN_TEST(test_config_reports_whether_a_secret_is_set);
     RUN_TEST(test_a_serial_override_round_trips_through_a_patch);

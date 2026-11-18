@@ -94,7 +94,7 @@ inline void writeMeasurement(JsonObject entry, const Measurement& m) {
     }
 }
 
-/// The `status_code` / `status_text` / `error_code` triplet, under the same absent-as-null rule.
+/// The `status_code` / `status_text` / `error_code` / `error_raw` set, under the same absent-as-null rule.
 ///
 /// A protocol with no error-code field must not report 0: that reads as "no fault". A driver
 /// with no status text must not report "": the UI renders that as a blank tile rather than as
@@ -116,6 +116,13 @@ inline void writeDeviceStatus(JsonObject obj, const DeviceState& state) {
         obj["error_code"] = state.errorCode;
     } else {
         obj["error_code"] = nullptr;
+    }
+    // Undecoded vendor words, as the driver formatted them. Additive: a key no consumer of the
+    // older payload reads.
+    if (state.errorRawSupported && usable && !state.errorRaw.empty()) {
+        obj["error_raw"] = state.errorRaw;
+    } else {
+        obj["error_raw"] = nullptr;
     }
 }
 

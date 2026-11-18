@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -14,6 +16,7 @@
 #include "device/device_state.h"
 #include "diagnostic_query.h"
 #include "driver_descriptor.h"
+#include "fault_record.h"
 #include "transport/transport.h"
 
 namespace heliograph {
@@ -118,6 +121,23 @@ public:
     /// Optional: named READ queries for someone working out what the device supports. Empty by
     /// default. See diagnostic_query.h.
     virtual std::vector<DiagnosticQuery> diagnosticQueries() const { return {}; }
+
+    /// Optional: raw frames worth keeping because the device's fault state changed. Drains what
+    /// polls produced since the last call. Bus task only, like poll(): it moves state the poll
+    /// wrote. Empty by default. See fault_record.h.
+    virtual std::vector<FaultRecord> takeFaultRecords() { return {}; }
+
+    /// Optional: reads values out of a frame this driver put in a FaultRecord. A PURE function
+    /// of its arguments -- const, and it must not touch anything a poll writes -- because the
+    /// web task calls it while the bus task polls. That is the same safety argument as
+    /// diagnosticQueries(), which the web task also calls: both only read what is fixed once the
+    /// driver is built. Empty when the frame holds nothing it can read.
+    virtual std::vector<FaultFrameField> decodeFaultFrame(const uint8_t* frame,
+                                                          size_t         len) const {
+        (void)frame;
+        (void)len;
+        return {};
+    }
 
     /// Runs one query from diagnosticQueries() by name. Called from the bus task only, in place
     /// of a poll. An unlisted name must return UnknownQuery without touching the bus.
