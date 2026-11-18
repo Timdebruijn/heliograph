@@ -15,7 +15,7 @@ inline constexpr uint32_t kMagic = 0x48464C47;  // "HFLG"
 inline constexpr uint32_t kSchema = 1;
 
 // Same plain bitwise CRC32 as breadcrumbs.cpp (it is private there; eleven lines do not justify
-// a shared header). Over 880 bytes once per stored record, so no table.
+// a shared header). Over about 1 KB once per stored record, so no table.
 uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
     for (size_t i = 0; i < len; ++i) {
         crc ^= data[i];

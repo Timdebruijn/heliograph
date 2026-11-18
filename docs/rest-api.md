@@ -613,9 +613,10 @@ changed, oldest first. It is a read of RAM: no bus traffic, no auth beyond what
 - `reason` is `baseline` (the error words the driver compares against, stored once per distinct
   value per device so a restart does not push fault frames out), `status_changed` (the status
   word moved to something other than a normal state, an unknown value included) or
-  `error_words_changed`.
+  `error_words_changed`. One record per frame: when the status and the error words move in the
+  same reply, that is one `status_changed` record.
 - `frame` is every byte the line delivered for that poll, as it came, so it may start with an
-  echo of the bridge's own request. Capped at 64 bytes; `truncated` says when it was cut.
+  echo of the bridge's own request. Capped at 80 bytes; `truncated` says when it was cut.
 - `decoded_unverified` is **only a reading aid**: values read out of the frame with the vendor
   document's scaling, never checked against a faulted unit, and left out when the frame holds
   nothing the driver can read or the device is no longer configured. A raw filler word

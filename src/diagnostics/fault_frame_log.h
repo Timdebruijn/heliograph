@@ -31,7 +31,9 @@
 namespace heliograph::faultlog {
 
 inline constexpr size_t kCapacity      = 8;
-inline constexpr size_t kFrameBytes    = 64;  ///< a normal 44-byte reply is 55; echo and noise fit less
+/// A 44-byte reply is a 55-byte frame, and 66 with an echo of the 11-byte request in front of
+/// it on a half-duplex bus. Both must fit whole: a cut frame has lost its checksum.
+inline constexpr size_t kFrameBytes    = 80;
 inline constexpr size_t kDeviceIdBytes = 24;
 
 /// One slot. Explicit padding so the CRC over raw bytes never covers an indeterminate byte.

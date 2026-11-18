@@ -1560,8 +1560,11 @@ void restoreDriverLine() {
     }
 }
 
-/// Moves what a device's driver kept after a poll into the log, and says so once per record.
-/// The frame goes in the log line in full: a fault frame is rare and is the whole point.
+/// Moves what a device's driver kept after a poll into the log, and says so per record.
+///
+/// Two lines, because the logger clips a message at 219 characters and one line with both the
+/// header and the bytes loses the end of the frame. On its own line a frame of up to 68 bytes
+/// is whole, which covers a reply with a bus echo in front. The log ring has every byte anyway.
 void recordFaultFrames(size_t index) {
     for (const FaultRecord& rec : g_contexts[index]->driver().takeFaultRecords()) {
         std::string hex;
@@ -1570,8 +1573,10 @@ void recordFaultFrames(size_t index) {
             std::snprintf(byte, sizeof(byte), hex.empty() ? "%02X" : " %02X", b);
             hex += byte;
         }
-        log::warn("fault frame %s on %s: status %u frame %s", faultRecordReasonName(rec.reason),
-                  g_deviceIds[index].c_str(), static_cast<unsigned>(rec.statusCode), hex.c_str());
+        log::warn("fault frame %s on %s: status %u, %u byte(s)", faultRecordReasonName(rec.reason),
+                  g_deviceIds[index].c_str(), static_cast<unsigned>(rec.statusCode),
+                  static_cast<unsigned>(rec.frame.size()));
+        log::warn("fault frame: %s", hex.c_str());
         g_faultLog.push(g_deviceIds[index], rec,
                         g_time.synced() ? static_cast<uint32_t>(time(nullptr)) : 0,
                         static_cast<uint32_t>(nowMs() / 1000));

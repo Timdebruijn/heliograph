@@ -759,17 +759,16 @@ static void test_each_fault_transition_is_recorded_once_with_its_reason() {
     DeviceState s;
     pollAndDrain(r, s, Payload::Captured);
 
-    // Healthy -> Fault: the mode moved AND the words moved: two records, same frame.
+    // Healthy -> Fault: the mode moved AND the words moved. One record, not two: the status
+    // record holds the frame, and a second copy would only cost a slot in the log.
     auto records = pollAndDrain(r, s, Payload::Fault);
-    TEST_ASSERT_EQUAL_size_t(2, records.size());
+    TEST_ASSERT_EQUAL_size_t(1, records.size());
     TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
     TEST_ASSERT_EQUAL_UINT16(2, records[0].statusCode);
-    TEST_ASSERT_EQUAL(FaultRecordReason::ErrorWordsChanged, records[1].reason);
-    TEST_ASSERT_EQUAL_HEX32(0xFF400004, records[1].signature);
+    TEST_ASSERT_EQUAL_HEX32(0xFF400004, records[0].signature);
     const auto faultFrame = bytesOf(fx::kRespNormalInfoFaultConstructed,
                                     fx::kRespNormalInfoFaultConstructedLen);
     TEST_ASSERT_TRUE(faultFrame == records[0].frame);
-    TEST_ASSERT_TRUE(faultFrame == records[1].frame);
 
     // Steady state in the fault: nothing new.
     TEST_ASSERT_TRUE(pollAndDrain(r, s, Payload::Fault).empty());
@@ -777,7 +776,8 @@ static void test_each_fault_transition_is_recorded_once_with_its_reason() {
 
     // Fault -> permanent fault: mode 3 is a new mode and the words differ again.
     records = pollAndDrain(r, s, Payload::PermanentFault);
-    TEST_ASSERT_EQUAL_size_t(2, records.size());
+    TEST_ASSERT_EQUAL_size_t(1, records.size());
+    TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
     TEST_ASSERT_EQUAL_UINT16(3, records[0].statusCode);
 
     // Back to healthy: mode 1 is a normal state (no status record), the words changed (one).

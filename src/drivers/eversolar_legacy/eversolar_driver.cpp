@@ -534,6 +534,11 @@ void EversolarDriver::trackFaultState(const NormalInfo& info) {
         tail ? (static_cast<uint32_t>(info.tail.errorWordH) << 16) | info.tail.errorWordL : 0;
 
     auto keep = [&](FaultRecordReason reason) {
+        // Drained after every poll, so this never fills in the firmware. The bound is for a
+        // caller that polls without draining: a flapping unit must not grow the heap.
+        if (faultRecords_.size() >= kMaxPendingFaultRecords) {
+            return;
+        }
         FaultRecord rec;
         rec.reason     = reason;
         rec.statusCode = mode;
@@ -545,11 +550,13 @@ void EversolarDriver::trackFaultState(const NormalInfo& info) {
     // The mode moved (or this is the first poll we ever saw) into something other than a normal
     // state. 2 and 3 are the documented faults; an unknown mode is recorded too, because an
     // unknown frame is exactly the one worth having later.
+    // One record per frame: when the mode and the words move in the same reply, the status
+    // record already holds that frame, and the log has only a few slots.
     if ((!havePrevious_ || previousMode_ != mode) && mode != 0 && mode != 1) {
         keep(FaultRecordReason::StatusChanged);
-    }
-    if (tail && havePrevious_ && previousTail_ &&
-        (previousWordH_ != info.tail.errorWordH || previousWordL_ != info.tail.errorWordL)) {
+    } else if (tail && havePrevious_ && previousTail_ &&
+               (previousWordH_ != info.tail.errorWordH ||
+                previousWordL_ != info.tail.errorWordL)) {
         keep(FaultRecordReason::ErrorWordsChanged);
     }
     if (!baselineKnown_ && tail && mode == 1) {

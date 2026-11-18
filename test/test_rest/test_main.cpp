@@ -3508,7 +3508,8 @@ static void test_the_fault_frames_endpoint_lists_raw_frames_and_unverified_value
     JsonDocument doc = parse(faultFramesJson(r, log));
     TEST_ASSERT_EQUAL_UINT32(8, doc["capacity"].as<uint32_t>());
     JsonArray records = doc["records"].as<JsonArray>();
-    TEST_ASSERT_EQUAL_size_t(3, records.size());  // baseline, status_changed, error_words_changed
+    // baseline, then ONE record for the reply in which both the status and the words moved
+    TEST_ASSERT_EQUAL_size_t(2, records.size());
 
     JsonObject baseline = records[0];
     TEST_ASSERT_EQUAL_STRING("baseline", baseline["reason"]);
@@ -3522,7 +3523,6 @@ static void test_the_fault_frames_endpoint_lists_raw_frames_and_unverified_value
     JsonObject fault = records[1];
     TEST_ASSERT_EQUAL_STRING("status_changed", fault["reason"]);
     TEST_ASSERT_EQUAL_UINT32(2, fault["status_code"].as<uint32_t>());
-    TEST_ASSERT_EQUAL_STRING("error_words_changed", records[2]["reason"]);
     // The vendor-scaled values, under a key that says they are unverified.
     JsonArray decoded = fault["decoded_unverified"].as<JsonArray>();
     TEST_ASSERT_EQUAL_size_t(6, decoded.size());

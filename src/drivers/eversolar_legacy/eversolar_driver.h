@@ -157,6 +157,7 @@ private:
     /// both baselineKnown_ and previousTail_.
     bool     wordsChanged_  = false;
     std::vector<FaultRecord> faultRecords_;
+    static constexpr size_t  kMaxPendingFaultRecords = 4;
 
     /// Bumped by pmu::transact, which does the counting because it is where the failures are
     /// seen -- a single exchange can meet several bad frames.
