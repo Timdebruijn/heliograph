@@ -23,9 +23,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <type_traits>
 #include <vector>
 
 #include "app/capture_runner.h"
@@ -823,17 +825,41 @@ void applySerialOverride(bool captureBoot = false) {
     }
 }
 
-// RTC-domain SRAM for the reset breadcrumbs. The type must stay trivially default
-// constructible or this object gets zeroed on every boot -- breadcrumbs.h explains why and
-// a static_assert there enforces it. Measured, in case someone reaches for one: a `{}` here
-// is harmless (constant initialisation, no startup write); it is an initialiser on a MEMBER
-// that generates the .init_array entry which defeats the whole point.
-RTC_NOINIT_ATTR breadcrumbs::Storage g_breadcrumbStore;
-static breadcrumbs::BootRecord       g_bootRecord;
-// The fault-frame ring's block, in RTC memory for the same reason (and under the same
-// no-initialiser rule, asserted in fault_frame_log.h). Survives a reset, not a power loss.
-RTC_NOINIT_ATTR faultlog::Storage g_faultStore;
-faultlog::FaultFrameLog           g_faultLog{g_faultStore};
+// RTC-domain SRAM for the fault-frame ring and the reset breadcrumbs: both survive a reset,
+// neither a power loss. The types must stay trivially default constructible or the object
+// gets zeroed on every boot -- breadcrumbs.h explains why, and each header asserts it for its
+// own block. Measured, in case someone reaches for one: a `{}` here is harmless (constant
+// initialisation, no startup write); it is an initialiser on a MEMBER that generates the
+// .init_array entry which defeats the whole point.
+//
+// ONE OBJECT, BECAUSE THE ORDER OF TWO IS THE LINKER'S CHOICE. As separate RTC_NOINIT
+// variables the ring, added in 0.34.0, was placed in front of the breadcrumbs and moved them
+// 0x4b0 bytes up. The image that booted after that update looked for its boot history at an
+// address nothing had written, failed the CRC and started counting from one. A block that
+// moves is a block that is lost, and the ring exists to carry evidence across an update.
+//
+// The member order below is the layout 0.34.0 shipped, so adopting this struct moved nothing
+// (measured on the rs485-can image: the object starts where the ring did). Add new blocks at
+// the END, never as a second RTC_NOINIT variable. Resizing the ring moves the breadcrumbs
+// behind it and costs one boot history; the assert makes that a decision instead of a surprise.
+//
+// What the struct does NOT fix is where the object itself starts. That is the start of
+// .rtc_noinit, and it holds only while this is the one object in that section and the RTC
+// memory the SDK reserves in front of it (CONFIG_ULP_COPROC_RESERVE_MEM) keeps its size. A
+// toolchain or sdkconfig change can move both blocks at once, and nothing here detects it.
+struct RtcStore {
+    faultlog::Storage    faults;
+    breadcrumbs::Storage crumbs;
+};
+static_assert(std::is_trivially_default_constructible_v<RtcStore>,
+              "No default member initialisers in RTC_NOINIT memory. See breadcrumbs.h.");
+static_assert(offsetof(RtcStore, faults) == 0 && offsetof(RtcStore, crumbs) == 0x4b0 &&
+                  sizeof(RtcStore) == 0x4c0,
+              "The RTC layout changed: the block that moved reads as empty after the next "
+              "update. Append new blocks, and change these numbers only on purpose.");
+RTC_NOINIT_ATTR RtcStore       g_rtcStore;
+static breadcrumbs::BootRecord g_bootRecord;
+faultlog::FaultFrameLog        g_faultLog{g_rtcStore.faults};
 
 BridgeInfo bridgeInfo() {
     BridgeInfo info;
@@ -1839,7 +1865,7 @@ void setup() {
     // First thing, before anything that could crash: a boot that dies during setup still
     // leaves its predecessor's death recorded, and its own becomes the next entry.
     g_bootRecord = breadcrumbs::begin(
-        g_breadcrumbStore, (static_cast<uint32_t>(kFirmwareMajor) << 16) |
+        g_rtcStore.crumbs, (static_cast<uint32_t>(kFirmwareMajor) << 16) |
                                (static_cast<uint32_t>(kFirmwareMinor) << 8) | kFirmwarePatch);
     g_faultLog.begin();
 
@@ -2156,7 +2182,7 @@ void loop() {
 
     // Breadcrumb heartbeat: "this life reached this uptime". Throttled inside to one RTC-RAM
     // write per second.
-    breadcrumbs::tick(g_breadcrumbStore, nowMs());
+    breadcrumbs::tick(g_rtcStore.crumbs, nowMs());
 
     g_wifi.loop(nowMs());
     startOutputs();  // no-op until there is a network, and only ever runs once
