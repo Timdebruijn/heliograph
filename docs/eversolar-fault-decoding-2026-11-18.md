@@ -113,14 +113,16 @@ are a separate setting table: `0x44` there is not PAC.
    *Known limit:* a warning bit already set at boot becomes the baseline. Point 5 also records
    the baseline frame, so that case stays visible.
 5. **Fault log.** A record is made for:
-   - every transition into mode 2 or 3;
-   - every change of words 20–21;
-   - the baseline frame, once per boot.
+   - every change of the mode word into a value other than 0 or 1, so an unknown mode is
+     recorded as well as 2 and 3 (`status_changed`);
+   - every change of words 20–21 (`error_words_changed`);
+   - the baseline frame, once per distinct baseline per device (`baseline`).
 
-   Each record is one log line plus a ring entry: time, mode, the full raw `11 82` frame in hex,
-   and words 14–19 decoded with V1.1 scaling and marked `unverified`. The ring holds N entries
-   and is readable over `GET /api/v1/eversolar/faults` (name to be settled). N and persistence:
-   see question 3.
+   Each record is one log line plus a ring entry: time, mode, and the full raw `11 82` frame in
+   hex. Reading the log adds words 14–19 decoded with V1.1 scaling and marked `unverified`; only
+   the raw frame is stored. The ring holds N entries and is readable over
+   `GET /api/v1/fault-frames`. The log, the driver hook that feeds it and the endpoint are
+   generic: brand names stay inside the driver directory. N and persistence: see question 3.
 6. **Fault values.** They are recorded only in the fault log, not published as measurements. Six
    HA entities that sit at "unknown" except during a rare fault would be noise. If you want them
    as entities after all: question 5.
@@ -199,3 +201,23 @@ The same frames also show the mode word during the fault. That is the first obse
    (documented), never from the error bits.
 5. **Fault values as entities?** Proposal: **no**, only in the fault log (Phase 1, point 6). This
    deviates from the brief, which publishes them while mode is 2 or 3.
+
+## Answers (2026-11-18)
+
+All five proposals are accepted. The maintainer set one condition above the rest: **the Home
+Assistant integration must keep working.** For Phase 1 that means:
+
+- The change is additive. No existing entity, unique id, topic or state key changes.
+- The texts for mode 0 and 1 stay byte-identical, because automations may match on them.
+- Home Assistant gets two new binary sensors and nothing else.
+- An absent value is published as `null`. Home Assistant then shows "unknown", never "off" or
+  "OK".
+
+Refinements made while turning the note into a build brief:
+
+- **Baseline records.** The bridge restarts on every deploy, several times a day. One baseline
+  record per boot would fill an 8-slot ring with baselines and push out the fault frames. A
+  baseline is therefore stored once per distinct value per device.
+- **Persistence (question 3).** If the bridge shares the inverter's AC group, it is off during
+  the AC-off test and records nothing, whatever the storage. So `RTC_NOINIT` is enough, and the
+  bridge's power source is a thing to check before the test, not a storage decision.
