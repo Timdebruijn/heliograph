@@ -45,9 +45,10 @@ enum class LayoutSelection {
 inline constexpr size_t kNormalInfoSingleStringBytes = 28;
 inline constexpr size_t kNormalInfoDualStringBytes   = 32;
 /// A real TL3000-20 (single string) sends 44 bytes: the 14 single-string words followed by an
-/// 8-word tail of zeros and 0xFFFF, meaning unknown. Captured 2026-07-19; this is what finally
-/// explains the reference making `strings` a config option -- it indexes words and ignores
-/// everything after, so payload length never was decisive.
+/// 8-word tail. Captured 2026-07-19; this is what finally explains the reference making
+/// `strings` a config option -- it indexes words and ignores everything after, so payload
+/// length never was decisive. The tail of a healthy unit reads 0000 0000 FFFF 0000 0000 0000
+/// FF00 0000 (observed); NormalInfoTail below says what its words are believed to be.
 inline constexpr size_t kNormalInfoSingleStringExtendedBytes = 44;
 /// A Zeversolar 2000s sends 50 bytes in the dual-string word order (calibrated capture in the
 /// ha-zeversolar-modbus project, 2026-05-30: IAC/VAC/PAC at words 6/7/9, uint32 E_TOTAL at
@@ -59,6 +60,21 @@ inline constexpr size_t kNormalInfoDualStringExtendedBytes = 50;
 /// cross-checked: VPV*IPV summed over both strings (897 W) against PAC (861 W) is a 96%
 /// conversion, E_TOTAL matches the inverter's display, and the three VAC words read 235 V.
 inline constexpr size_t kNormalInfoThreePhaseBytes = 48;
+
+/// The 8-word tail of a 44-byte single-string reply (words 14-21), raw and undecoded.
+///
+/// HYPOTHESIS, STRONG: the reply is positional, one word per code the inverter lists in its
+/// read description (11 00), in list order. That list holds 22 codes and the reply 22 words, and
+/// the first 14 agree with the known word map. The vendor protocol documents the last eight
+/// codes (0x78-0x7F) as six fault values and two error words, which is what this struct names.
+/// Nothing here is decoded: the fault values are kept raw (scaling lives in the driver's fault
+/// frame decoder and is unverified), and the meaning of the error-word bits is unknown. A
+/// healthy unit reads H = 0xFF00, L = 0x0000, so the words cannot be treated as "0 = no error".
+struct NormalInfoTail {
+    uint16_t faultValue[6] = {};  ///< words 14-19, vendor codes 0x78-0x7D
+    uint16_t errorWordH    = 0;   ///< word 20, vendor code 0x7E
+    uint16_t errorWordL    = 0;   ///< word 21, vendor code 0x7F
+};
 
 /// Decoded measurements, already scaled to their physical units.
 ///
@@ -90,7 +106,13 @@ struct NormalInfo {
     double acCurrent3     = 0.0;    ///< IAC L3, /10
 
     uint32_t operatingHours = 0;  ///< HOURS_UP
-    uint16_t statusCode     = 0;  ///< OP_MODE, raw. Meaning is undocumented; do not map to text.
+    uint16_t statusCode     = 0;  ///< OP_MODE, raw. See opModeText() for which codes have a text.
+
+    /// Only for the single-string layout with a 44-byte payload. Every other layout and length
+    /// leaves it absent: their tails are not understood well enough to read (the dual-string
+    /// one is a different length, and our only data for it is constructed).
+    bool           tailValid = false;
+    NormalInfoTail tail;
 
     /// Only present in the single-string layout, at word 8. Unit and scale unknown.
     bool     impedanceValid = false;
@@ -141,10 +163,13 @@ bool isRegistrationAck(const uint8_t* data, size_t len);
 /// (trimmed of padding) rather than parsed into model/firmware fields.
 bool parseInverterId(const uint8_t* data, size_t len, std::string& out);
 
-/// OP_MODE code -> observed meaning, or "" for a code never seen on hardware (the caller
-/// then presents "Unknown (n)" -- naming an unobserved code would be a fabrication).
+/// OP_MODE code -> meaning, or "" for a code with neither an observation nor a vendor
+/// documentation behind it (the caller then presents "Unknown (n)").
 ///
-/// The code space is vendor-undocumented; every entry here is backed by measurement:
+/// 2 and 3 are DOCUMENTED, NOT YET OBSERVED: the vendor protocol's operating-mode table lists
+/// them as Fault and Permanent fault, and no frame from a faulted unit has been captured. The
+/// first one that is will move them to observed. 0 and 1 are observed; each entry here is one
+/// or the other, and the evidence for the observed ones is:
 ///   1 = grid-connected/producing. Two independent sources: our own capture (2026-07-19,
 ///       code 1 throughout grid-tied production on a TL3000-20) and the calibrated
 ///       Zeversolar 2000s capture in ha-zeversolar-modbus.

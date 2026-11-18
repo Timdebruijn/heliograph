@@ -18,6 +18,7 @@
 #include <esp_task_wdt.h>
 
 #include "diagnostics/breadcrumbs.h"
+#include "diagnostics/fault_frame_log.h"
 #include <esp_timer.h>
 
 #include <algorithm>
@@ -829,6 +830,10 @@ void applySerialOverride(bool captureBoot = false) {
 // that generates the .init_array entry which defeats the whole point.
 RTC_NOINIT_ATTR breadcrumbs::Storage g_breadcrumbStore;
 static breadcrumbs::BootRecord       g_bootRecord;
+// The fault-frame ring's block, in RTC memory for the same reason (and under the same
+// no-initialiser rule, asserted in fault_frame_log.h). Survives a reset, not a power loss.
+RTC_NOINIT_ATTR faultlog::Storage g_faultStore;
+faultlog::FaultFrameLog           g_faultLog{g_faultStore};
 
 BridgeInfo bridgeInfo() {
     BridgeInfo info;
@@ -1397,6 +1402,18 @@ void startRestApi() {
         }
         return catalog;
     };
+    ctx.faultFrames = [] { return g_faultLog.snapshot(); };
+    // From the web task, while the bus task polls. Safe for the reason the catalog above is:
+    // g_contexts is complete before any output starts, and decodeFaultFrame() is a const pure
+    // function that reads nothing a poll writes.
+    ctx.decodeFaultFrame = [](const std::string& deviceId, const std::vector<uint8_t>& frame) {
+        for (size_t i = 0; i < g_deviceIds.size() && i < g_contexts.size(); ++i) {
+            if (faultlog::storedId(g_deviceIds[i]) == deviceId) {
+                return g_contexts[i]->driver().decodeFaultFrame(frame.data(), frame.size());
+            }
+        }
+        return std::vector<FaultFrameField>{};
+    };
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
     // The undo behind a configuration restore. Straight through to the store, which owns both
     // the stash and the swap; the REST layer only decides when.
@@ -1540,6 +1557,29 @@ void restoreDriverLine() {
         // cycle -- the same failure that override exists to prevent, on the one path that
         // reconfigures the line at runtime.
         applySerialOverride();
+    }
+}
+
+/// Moves what a device's driver kept after a poll into the log, and says so per record.
+///
+/// Two lines, because the logger clips a message at 219 characters and one line with both the
+/// header and the bytes loses the end of the frame. On its own line a frame of up to 68 bytes
+/// is whole; a longer one is clipped here and whole in the log ring.
+void recordFaultFrames(size_t index) {
+    for (const FaultRecord& rec : g_contexts[index]->driver().takeFaultRecords()) {
+        std::string hex;
+        char        byte[4];
+        for (const uint8_t b : rec.frame) {
+            std::snprintf(byte, sizeof(byte), hex.empty() ? "%02X" : " %02X", b);
+            hex += byte;
+        }
+        log::warn("fault frame %s on %s: status %u, %u byte(s)", faultRecordReasonName(rec.reason),
+                  g_deviceIds[index].c_str(), static_cast<unsigned>(rec.statusCode),
+                  static_cast<unsigned>(rec.frame.size()));
+        log::warn("fault frame: %s", hex.c_str());
+        g_faultLog.push(g_deviceIds[index], rec,
+                        g_time.synced() ? static_cast<uint32_t>(time(nullptr)) : 0,
+                        static_cast<uint32_t>(nowMs() / 1000));
     }
 }
 
@@ -1692,6 +1732,7 @@ void rs485Task(void* /*arg*/) {
             if (g_manualPollRequested.exchange(false)) {
                 const uint64_t   pollStart = nowMs();
                 const PollResult r         = g_contexts.front()->pollOnce();
+                recordFaultFrames(0);
                 if (r == PollResult::Ok) {
                     g_diagnostics.recordPollDuration(
                         static_cast<uint32_t>(nowMs() - pollStart));
@@ -1709,6 +1750,7 @@ void rs485Task(void* /*arg*/) {
                 }
                 const uint64_t   pollStart = nowMs();
                 const PollResult r         = ctx.pollOnce();
+                recordFaultFrames(index);
                 if (r == PollResult::Ok) {
                     // Wall time of the whole transaction as this task experienced it --
                     // preemption included, which is the point: this is the number that moves
@@ -1799,6 +1841,7 @@ void setup() {
     g_bootRecord = breadcrumbs::begin(
         g_breadcrumbStore, (static_cast<uint32_t>(kFirmwareMajor) << 16) |
                                (static_cast<uint32_t>(kFirmwareMinor) << 8) | kFirmwarePatch);
+    g_faultLog.begin();
 
     Serial.begin(115200);
     const uint32_t serialDeadline = millis() + 2000;

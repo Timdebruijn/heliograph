@@ -172,22 +172,34 @@ those fields simply do not exist in the payload:
     "energy.today":         { "value": 8.42,   "unit": "kWh", "valid": true, "stale": false },
     "energy.total":         { "value": 18452.7,"unit": "kWh", "valid": true, "stale": false },
     "inverter.temperature": { "value": 41.3,   "unit": "°C",  "valid": true, "stale": false },
-    "inverter.operating_hours": { "value": 31204, "unit": "h", "valid": true, "stale": false }
+    "inverter.operating_hours": { "value": 31204, "unit": "h", "valid": true, "stale": false },
+    "inverter.fault": { "value": 0, "unit": "", "valid": true, "stale": false },
+    "inverter.error_words_changed": { "value": 0, "unit": "", "valid": true, "stale": false }
   },
   "status_code": 1,
-  "status_text": "Unknown (1)",
-  "error_code": null
+  "status_text": "Grid-connected (normal)",
+  "error_code": null,
+  "error_raw": "FF00 0000"
 }
 ```
 
-Two deliberate choices relative to the example in the assignment:
+Deliberate choices:
 
-1. **`status_text` is `"Unknown (1)"`, not `"Normal"`.** The meaning of `OP_MODE` is
-   documented nowhere — not in the reference implementation, not anywhere else. No
-   table is being invented. Once Phase 3 has logged the codes over a full day, a real
-   mapping will follow.
-2. **`error_code` is `null`, not `0`.** The protocol has no readable error code field. `0`
-   would mean "no error" and we don't know that.
+1. **`status_text` is only ever a text for a code that was observed or that the vendor documents.**
+   Any other code reads `"Unknown (<n>)"`; no table is invented. The texts for 0 and 1 never
+   change, because automations may match on them.
+2. **`error_code` is `null`, not `0`.** `0` would mean "no error" and this protocol does not tell
+   us that.
+3. **`error_raw`** carries the device's undecoded error words as text (`"FF00 0000"`), or `null`
+   when the device reports none or the reading is stale. It is not `error_code` on purpose: a
+   healthy unit reads `FF00 0000`, which `error_code` would show as a fault. Nothing decodes the
+   bits yet.
+4. **Two flags, absent-as-null.** `inverter.fault` is 1 for a fault mode and 0 for a normal
+   one, and `null` for a mode the driver does not know. `inverter.error_words_changed` is 1 when
+   the error words differ from a baseline learned from the first normal reply after boot, and
+   `null` until that baseline exists. Home Assistant shows both as binary sensors
+   (`inverter.fault` with device class `problem`), and a `null` shows as "unknown", never
+   "off". The flags are only published by drivers that read the underlying mode or words.
 
 On a nighttime outage:
 

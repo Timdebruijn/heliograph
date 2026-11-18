@@ -561,13 +561,350 @@ static void test_op_mode_zero_is_standby() {
     TEST_ASSERT_EQUAL_STRING("Standby (not feeding)", state.statusText.c_str());
 }
 
-static void test_unobserved_status_codes_stay_unknown() {
-    // Any code never seen on hardware (2..n) keeps its honest "Unknown (n)" presentation;
-    // the mapping function itself is pure and pinned here.
+static void test_codes_with_no_observation_and_no_documentation_stay_unknown() {
+    // 0 and 1 are observed, 2 and 3 documented by the vendor (and not yet observed). Anything
+    // else keeps its honest "Unknown (n)" presentation; the mapping function is pure and pinned
+    // here.
     TEST_ASSERT_EQUAL_STRING("Standby (not feeding)", eversolar::opModeText(0));
     TEST_ASSERT_EQUAL_STRING("Grid-connected (normal)", eversolar::opModeText(1));
-    TEST_ASSERT_EQUAL_STRING("", eversolar::opModeText(2));
+    TEST_ASSERT_EQUAL_STRING("Fault", eversolar::opModeText(2));
+    TEST_ASSERT_EQUAL_STRING("Permanent fault", eversolar::opModeText(3));
+    TEST_ASSERT_EQUAL_STRING("", eversolar::opModeText(4));
     TEST_ASSERT_EQUAL_STRING("", eversolar::opModeText(999));
+}
+
+// --- fault status, error words, fault records ---------------------------------------------------
+//
+// The first two payloads below are real (kRespNormalInfoCaptured is a TL3000-20, healthy); the
+// Fault, PermanentFault and UnknownMode ones are CONSTRUCTED from it and prove plumbing, not what
+// a fault looks like.
+
+namespace {
+const Measurement* flagIn(const DeviceState& s, const char* id) { return s.measurements.find(id); }
+
+std::vector<uint8_t> bytesOf(const uint8_t* p, size_t n) { return std::vector<uint8_t>(p, p + n); }
+
+std::vector<FaultRecord> pollAndDrain(Rig& r, DeviceState& s, Payload p) {
+    r.device.payload = p;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(s));
+    return r.driver.takeFaultRecords();
+}
+}  // namespace
+
+static void test_the_fault_flag_follows_the_mode_word() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+
+    pollAndDrain(r, s, Payload::Captured);  // mode 1
+    TEST_ASSERT_TRUE(publishable(flagIn(s, measurement_id::kInverterFault)));
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, valueOf(s, measurement_id::kInverterFault));
+    TEST_ASSERT_TRUE(flagIn(s, measurement_id::kInverterFault)->type == MeasurementType::Flag);
+
+    pollAndDrain(r, s, Payload::Night);  // mode 0, a normal state
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, valueOf(s, measurement_id::kInverterFault));
+
+    pollAndDrain(r, s, Payload::Fault);  // mode 2
+    TEST_ASSERT_EQUAL_DOUBLE(1.0, valueOf(s, measurement_id::kInverterFault));
+    TEST_ASSERT_EQUAL_STRING("Fault", s.statusText.c_str());
+
+    pollAndDrain(r, s, Payload::PermanentFault);  // mode 3
+    TEST_ASSERT_EQUAL_DOUBLE(1.0, valueOf(s, measurement_id::kInverterFault));
+    TEST_ASSERT_EQUAL_STRING("Permanent fault", s.statusText.c_str());
+}
+
+static void test_an_unknown_mode_leaves_the_fault_flag_unset_not_false() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+    pollAndDrain(r, s, Payload::Captured);
+    TEST_ASSERT_TRUE(publishable(flagIn(s, measurement_id::kInverterFault)));
+
+    // Mode 7: "Unknown (7)", and the flag must not keep last poll's false either.
+    pollAndDrain(r, s, Payload::UnknownMode);
+    TEST_ASSERT_EQUAL_STRING("Unknown (7)", s.statusText.c_str());
+    TEST_ASSERT_NOT_NULL(flagIn(s, measurement_id::kInverterFault));
+    TEST_ASSERT_FALSE(publishable(flagIn(s, measurement_id::kInverterFault)));
+}
+
+static void test_modes_zero_and_one_keep_their_texts_byte_for_byte() {
+    // Home Assistant automations may match on these.
+    Rig r;
+    r.begin();
+    DeviceState s;
+    pollAndDrain(r, s, Payload::Captured);
+    TEST_ASSERT_EQUAL_STRING("Grid-connected (normal)", s.statusText.c_str());
+    pollAndDrain(r, s, Payload::Night);
+    TEST_ASSERT_EQUAL_STRING("Standby (not feeding)", s.statusText.c_str());
+}
+
+static void test_the_raw_error_words_are_published_but_not_as_an_error_code() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+    pollAndDrain(r, s, Payload::Captured);
+    TEST_ASSERT_TRUE(s.errorRawSupported);
+    TEST_ASSERT_EQUAL_STRING("FF00 0000", s.errorRaw.c_str());
+    // 0xFF000000 is what a HEALTHY unit reads; as errorCode it would look like a fault.
+    TEST_ASSERT_FALSE(s.errorCodeSupported);
+    TEST_ASSERT_EQUAL_UINT32(0, s.errorCode);
+
+    pollAndDrain(r, s, Payload::Fault);
+    TEST_ASSERT_EQUAL_STRING("FF40 0004", s.errorRaw.c_str());
+}
+
+static void test_a_28_byte_payload_has_no_error_words_and_no_change_flag() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+    pollAndDrain(r, s, Payload::SingleString);  // mode 1, 28 bytes: no tail
+    TEST_ASSERT_FALSE(s.errorRawSupported);
+    TEST_ASSERT_TRUE(s.errorRaw.empty());
+    TEST_ASSERT_FALSE(publishable(flagIn(s, measurement_id::kInverterErrorWordsChanged)));
+    // The mode is still known, so the fault flag still has an honest answer.
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, valueOf(s, measurement_id::kInverterFault));
+    TEST_ASSERT_TRUE(r.driver.takeFaultRecords().empty());  // no tail, no baseline
+}
+
+static void test_the_baseline_is_learned_at_the_first_mode_one_frame_with_a_tail() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+
+    // A faulted first frame: a tail, but not a normal mode, so no baseline yet. Unset, not false.
+    pollAndDrain(r, s, Payload::Fault);
+    TEST_ASSERT_FALSE(publishable(flagIn(s, measurement_id::kInverterErrorWordsChanged)));
+
+    // The first mode-1 frame becomes the baseline (FF00 0000), so it equals itself.
+    pollAndDrain(r, s, Payload::Captured);
+    TEST_ASSERT_TRUE(publishable(flagIn(s, measurement_id::kInverterErrorWordsChanged)));
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, valueOf(s, measurement_id::kInverterErrorWordsChanged));
+
+    // Words move away from it: true. Back again: false.
+    pollAndDrain(r, s, Payload::Fault);
+    TEST_ASSERT_EQUAL_DOUBLE(1.0, valueOf(s, measurement_id::kInverterErrorWordsChanged));
+    pollAndDrain(r, s, Payload::Captured);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, valueOf(s, measurement_id::kInverterErrorWordsChanged));
+}
+
+static void test_the_baseline_is_not_hard_coded_to_what_one_unit_reads() {
+    // Drive a unit whose healthy words are not FF00 0000: the mode-1 frame is the real capture
+    // with its words rewritten, checksum recomputed by the responder wrapper.
+    Rig r;
+    r.begin();
+    const auto base = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (!base(req, reply)) {
+            return false;
+        }
+        if (req[kOffsetControl] == 0x11 && req[kOffsetFunction] == 0x02) {
+            // words 20-21 live at payload bytes 40-43: frame offsets 49..52
+            reply[kOffsetData + 40] = 0x00;
+            reply[kOffsetData + 41] = 0x12;
+            reply[kOffsetData + 42] = 0x34;
+            reply[kOffsetData + 43] = 0x56;
+            const uint16_t sum = checksum(reply.data(), reply.size() - 2);
+            reply[reply.size() - 2] = static_cast<uint8_t>(sum >> 8);
+            reply[reply.size() - 1] = static_cast<uint8_t>(sum & 0xFF);
+        }
+        return true;
+    });
+    r.device.payload = Payload::Captured;
+    DeviceState s;
+    TEST_ASSERT_EQUAL(PollResult::Ok, r.poll(s));
+    TEST_ASSERT_EQUAL_STRING("0012 3456", s.errorRaw.c_str());
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, valueOf(s, measurement_id::kInverterErrorWordsChanged));
+    const auto records = r.driver.takeFaultRecords();
+    TEST_ASSERT_EQUAL_size_t(1, records.size());
+    TEST_ASSERT_EQUAL(FaultRecordReason::Baseline, records[0].reason);
+    TEST_ASSERT_EQUAL_HEX32(0x00123456, records[0].signature);
+}
+
+static void test_the_baseline_survives_a_re_registration() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+    pollAndDrain(r, s, Payload::Captured);
+    // The bus is re-registered (begin() again, as after a discovery run); the baseline is a
+    // fact about this boot, not about this registration, so it is neither relearned nor lost.
+    r.begin();
+    const auto records = pollAndDrain(r, s, Payload::Fault);
+    TEST_ASSERT_EQUAL_DOUBLE(1.0, valueOf(s, measurement_id::kInverterErrorWordsChanged));
+    for (const FaultRecord& rec : records) {
+        TEST_ASSERT_TRUE(rec.reason != FaultRecordReason::Baseline);
+    }
+}
+
+static void test_a_steady_healthy_unit_records_one_baseline_and_nothing_more() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+    const auto first = pollAndDrain(r, s, Payload::Captured);
+    TEST_ASSERT_EQUAL_size_t(1, first.size());
+    TEST_ASSERT_EQUAL(FaultRecordReason::Baseline, first[0].reason);
+    TEST_ASSERT_EQUAL_UINT16(1, first[0].statusCode);
+    TEST_ASSERT_EQUAL_HEX32(0xFF000000, first[0].signature);
+    // The whole raw reply, as it came.
+    const auto expected = bytesOf(fx::kRespNormalInfoCaptured, fx::kRespNormalInfoCapturedLen);
+    TEST_ASSERT_TRUE(expected == first[0].frame);
+
+    for (int i = 0; i < 5; ++i) {
+        TEST_ASSERT_TRUE(pollAndDrain(r, s, Payload::Captured).empty());
+    }
+}
+
+static void test_each_fault_transition_is_recorded_once_with_its_reason() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+    pollAndDrain(r, s, Payload::Captured);
+
+    // Healthy -> Fault: the mode moved AND the words moved. One record, not two: the status
+    // record holds the frame, and a second copy would only cost a slot in the log.
+    auto records = pollAndDrain(r, s, Payload::Fault);
+    TEST_ASSERT_EQUAL_size_t(1, records.size());
+    TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
+    TEST_ASSERT_EQUAL_UINT16(2, records[0].statusCode);
+    TEST_ASSERT_EQUAL_HEX32(0xFF400004, records[0].signature);
+    const auto faultFrame = bytesOf(fx::kRespNormalInfoFaultConstructed,
+                                    fx::kRespNormalInfoFaultConstructedLen);
+    TEST_ASSERT_TRUE(faultFrame == records[0].frame);
+
+    // Steady state in the fault: nothing new.
+    TEST_ASSERT_TRUE(pollAndDrain(r, s, Payload::Fault).empty());
+    TEST_ASSERT_TRUE(pollAndDrain(r, s, Payload::Fault).empty());
+
+    // Fault -> permanent fault: mode 3 is a new mode and the words differ again.
+    records = pollAndDrain(r, s, Payload::PermanentFault);
+    TEST_ASSERT_EQUAL_size_t(1, records.size());
+    TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
+    TEST_ASSERT_EQUAL_UINT16(3, records[0].statusCode);
+
+    // Back to healthy: mode 1 is a normal state (no status record), the words changed (one).
+    records = pollAndDrain(r, s, Payload::Captured);
+    TEST_ASSERT_EQUAL_size_t(1, records.size());
+    TEST_ASSERT_EQUAL(FaultRecordReason::ErrorWordsChanged, records[0].reason);
+}
+
+static void test_a_first_poll_already_in_fault_is_recorded() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+    const auto records = pollAndDrain(r, s, Payload::Fault);
+    // The mode is not normal and there was no previous poll: a status record. No previous words,
+    // so no change record, and no baseline from a non-normal mode.
+    TEST_ASSERT_EQUAL_size_t(1, records.size());
+    TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
+}
+
+static void test_an_unknown_mode_is_recorded_when_it_appears_and_not_while_it_stays() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+    pollAndDrain(r, s, Payload::Captured);
+
+    auto records = pollAndDrain(r, s, Payload::UnknownMode);
+    TEST_ASSERT_EQUAL_size_t(1, records.size());  // tail unchanged: only the mode moved
+    TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
+    TEST_ASSERT_EQUAL_UINT16(7, records[0].statusCode);
+    TEST_ASSERT_TRUE(pollAndDrain(r, s, Payload::UnknownMode).empty());
+}
+
+static void test_a_record_keeps_the_bytes_as_they_came_including_a_bus_echo() {
+    Rig r;
+    r.device.echoRequests = true;
+    r.begin();
+    DeviceState s;
+    const auto records = pollAndDrain(r, s, Payload::Fault);
+    TEST_ASSERT_EQUAL_size_t(1, records.size());
+    // Our own 11-byte request first, then the reply: a raw record, not a stripped one.
+    TEST_ASSERT_EQUAL_size_t(kFrameOverhead + fx::kRespNormalInfoFaultConstructedLen,
+                             records[0].frame.size());
+    TEST_ASSERT_EQUAL_HEX8(0x01, records[0].frame[2]);  // request source: the PMU
+    TEST_ASSERT_EQUAL_HEX8(0x02, records[0].frame[kOffsetFunction]);
+}
+
+static void test_a_failed_poll_produces_no_record_and_does_not_move_the_baseline_state() {
+    Rig r;
+    r.begin();
+    DeviceState s;
+    pollAndDrain(r, s, Payload::Captured);
+    r.device.payload = Payload::BadChecksum;
+    TEST_ASSERT_EQUAL(PollResult::ChecksumError, r.poll(s));
+    TEST_ASSERT_TRUE(r.driver.takeFaultRecords().empty());
+    // Still compares against the last GOOD frame: the same healthy frame again is no change.
+    TEST_ASSERT_TRUE(pollAndDrain(r, s, Payload::Captured).empty());
+}
+
+static void test_undrained_records_are_bounded() {
+    // The firmware drains after every poll. A caller that never does must not grow the heap
+    // while the unit flaps between two states.
+    Rig r;
+    r.begin();
+    DeviceState s;
+    for (int i = 0; i < 20; ++i) {
+        r.device.payload = (i % 2 == 0) ? Payload::Captured : Payload::Fault;
+        r.driver.poll(s);
+    }
+    TEST_ASSERT_EQUAL_size_t(4, r.driver.takeFaultRecords().size());
+    TEST_ASSERT_TRUE(r.driver.takeFaultRecords().empty());
+}
+
+static void test_decode_fault_frame_scales_the_vendor_values() {
+    Rig r;
+    const EversolarDriver& driver = r.driver;  // const: the web task calls it
+    const auto fields = driver.decodeFaultFrame(fx::kRespNormalInfoFaultConstructed,
+                                                fx::kRespNormalInfoFaultConstructedLen);
+    TEST_ASSERT_EQUAL_size_t(6, fields.size());
+    TEST_ASSERT_EQUAL_STRING("grid_voltage_at_fault", fields[0].name);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 265.0, fields[0].value);
+    TEST_ASSERT_EQUAL_STRING("V", fields[0].unit);
+    TEST_ASSERT_EQUAL_STRING("grid_frequency_at_fault", fields[1].name);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 50.03, fields[1].value);
+    TEST_ASSERT_EQUAL_STRING("Hz", fields[1].unit);
+    TEST_ASSERT_EQUAL_STRING("grid_impedance_at_fault", fields[2].name);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.9, fields[2].value);
+    TEST_ASSERT_EQUAL_STRING("ohm", fields[2].unit);
+    TEST_ASSERT_EQUAL_STRING("temperature_at_fault", fields[3].name);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, -1.0, fields[3].value);  // signed read of 0xFFF6
+    TEST_ASSERT_EQUAL_STRING("pv1_voltage_at_fault", fields[4].name);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 346.4, fields[4].value);
+    TEST_ASSERT_EQUAL_STRING("residual_current_at_fault", fields[5].name);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, 0.003, fields[5].value);
+    TEST_ASSERT_EQUAL_STRING("A", fields[5].unit);
+}
+
+static void test_decode_fault_frame_omits_a_filler_word_instead_of_scaling_it() {
+    Rig r;
+    // The healthy capture has 0xFFFF for the impedance: neither 65.535 nor 0, simply absent. The
+    // zero words are real zeros and stay.
+    const auto fields = r.driver.decodeFaultFrame(fx::kRespNormalInfoCaptured,
+                                                  fx::kRespNormalInfoCapturedLen);
+    TEST_ASSERT_EQUAL_size_t(5, fields.size());
+    for (const auto& f : fields) {
+        TEST_ASSERT_TRUE(std::string(f.name) != "grid_impedance_at_fault");
+    }
+}
+
+static void test_decode_fault_frame_finds_the_reply_after_an_echo_and_refuses_the_rest() {
+    Rig r;
+    std::vector<uint8_t> echoed = bytesOf(fx::kReqQueryNormalInfo, fx::kReqQueryNormalInfoLen);
+    const auto           reply  = bytesOf(fx::kRespNormalInfoFaultConstructed,
+                                          fx::kRespNormalInfoFaultConstructedLen);
+    echoed.insert(echoed.end(), reply.begin(), reply.end());
+    TEST_ASSERT_EQUAL_size_t(6, r.driver.decodeFaultFrame(echoed.data(), echoed.size()).size());
+
+    // No tail (28 bytes), a corrupt checksum, a truncated frame, an echo alone, nothing at all.
+    TEST_ASSERT_TRUE(r.driver
+                         .decodeFaultFrame(fx::kRespNormalInfoSingle, fx::kRespNormalInfoSingleLen)
+                         .empty());
+    std::vector<uint8_t> corrupt = reply;
+    corrupt.back() ^= 0xFF;
+    TEST_ASSERT_TRUE(r.driver.decodeFaultFrame(corrupt.data(), corrupt.size()).empty());
+    TEST_ASSERT_TRUE(r.driver.decodeFaultFrame(reply.data(), reply.size() - 3).empty());
+    TEST_ASSERT_TRUE(r.driver.decodeFaultFrame(fx::kReqQueryNormalInfo, fx::kReqQueryNormalInfoLen)
+                         .empty());
+    TEST_ASSERT_TRUE(r.driver.decodeFaultFrame(nullptr, 0).empty());
 }
 
 // --- failure handling ---------------------------------------------------------------------------
@@ -770,8 +1107,9 @@ static void test_execute_never_writes_to_the_bus() {
 
 // --- diagnostic queries -----------------------------------------------------------------------
 //
-// The reply payloads come from CONSTRUCTED fixtures (tools/gen_fixtures.py): these tests prove the
-// driver sends the right request and hands back the bytes untouched, not that it understands them.
+// The 11 00 reply is an OBSERVED fixture (a real TL3000-20, 2026-11-18); the other three are
+// CONSTRUCTED (tools/gen_fixtures.py). These tests prove the driver sends the right request and
+// hands back the bytes untouched, not that it understands them.
 
 namespace {
 struct QueryCase {
@@ -786,8 +1124,8 @@ const uint8_t kTxSetInfo[]         = {0xAA, 0x55, 0x01, 0x00, 0x00, 0x10, 0x11, 
 const uint8_t kTxVersions[]        = {0xAA, 0x55, 0x01, 0x00, 0x00, 0x10, 0x11, 0x42, 0x00, 0x01, 0x63};
 
 const QueryCase kQueryCases[] = {
-    {"read_description", kTxReadDescription, fx::kRespReadDescriptionConstructed,
-     fx::kRespReadDescriptionConstructedLen},
+    {"read_description", kTxReadDescription, fx::kRespReadDescriptionObserved,
+     fx::kRespReadDescriptionObservedLen},
     {"rw_description", kTxRwDescription, fx::kRespRwDescriptionConstructed,
      fx::kRespRwDescriptionConstructedLen},
     {"set_info", kTxSetInfo, fx::kRespSetInfoConstructed, fx::kRespSetInfoConstructedLen},
@@ -1303,7 +1641,25 @@ void run_eversolar_driver() {
     RUN_TEST(test_the_phase_count_follows_the_payload_back_down);
     RUN_TEST(test_status_text_does_not_invent_a_meaning);
     RUN_TEST(test_op_mode_zero_is_standby);
-    RUN_TEST(test_unobserved_status_codes_stay_unknown);
+    RUN_TEST(test_codes_with_no_observation_and_no_documentation_stay_unknown);
+    RUN_TEST(test_the_fault_flag_follows_the_mode_word);
+    RUN_TEST(test_an_unknown_mode_leaves_the_fault_flag_unset_not_false);
+    RUN_TEST(test_modes_zero_and_one_keep_their_texts_byte_for_byte);
+    RUN_TEST(test_the_raw_error_words_are_published_but_not_as_an_error_code);
+    RUN_TEST(test_a_28_byte_payload_has_no_error_words_and_no_change_flag);
+    RUN_TEST(test_the_baseline_is_learned_at_the_first_mode_one_frame_with_a_tail);
+    RUN_TEST(test_the_baseline_is_not_hard_coded_to_what_one_unit_reads);
+    RUN_TEST(test_the_baseline_survives_a_re_registration);
+    RUN_TEST(test_a_steady_healthy_unit_records_one_baseline_and_nothing_more);
+    RUN_TEST(test_each_fault_transition_is_recorded_once_with_its_reason);
+    RUN_TEST(test_a_first_poll_already_in_fault_is_recorded);
+    RUN_TEST(test_an_unknown_mode_is_recorded_when_it_appears_and_not_while_it_stays);
+    RUN_TEST(test_a_record_keeps_the_bytes_as_they_came_including_a_bus_echo);
+    RUN_TEST(test_a_failed_poll_produces_no_record_and_does_not_move_the_baseline_state);
+    RUN_TEST(test_undrained_records_are_bounded);
+    RUN_TEST(test_decode_fault_frame_scales_the_vendor_values);
+    RUN_TEST(test_decode_fault_frame_omits_a_filler_word_instead_of_scaling_it);
+    RUN_TEST(test_decode_fault_frame_finds_the_reply_after_an_echo_and_refuses_the_rest);
     RUN_TEST(test_corrupt_reply_does_not_touch_state);
     RUN_TEST(test_reply_of_wrong_length_is_an_invalid_frame);
     RUN_TEST(test_a_run_of_timeouts_keeps_the_registration_and_never_broadcasts);

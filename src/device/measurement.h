@@ -226,6 +226,21 @@ inline constexpr const char* kLoadPower = "load.power";
 /// sources found reports phase presence there.
 inline constexpr const char* kGridConnected = "grid.connected";
 
+/// The inverter says it is in a fault state: true for a fault mode, false for a normal one,
+/// ABSENT for a mode the driver does not know. A Flag.
+///
+/// Derived from the device's own operating-mode word, never from error bits. An unrecognised
+/// mode is not "no fault": it publishes nothing, so Home Assistant shows "unknown" instead of
+/// a reassuring "OK".
+inline constexpr const char* kInverterFault = "inverter.fault";
+/// Whether the device's undecoded error words differ from the baseline the driver learned for
+/// this boot: true or false once a baseline exists, absent before that and on a device that
+/// does not report such words. A Flag.
+///
+/// A change detector, not a diagnosis: it says "something moved", not what. The words
+/// themselves are published raw as `error_raw` on the device status.
+inline constexpr const char* kInverterErrorWordsChanged = "inverter.error_words_changed";
+
 /// What the inverter is currently limited TO, as a percentage of its nameplate maximum, and
 /// whether that limit is switched on at all.
 ///
@@ -261,6 +276,7 @@ inline constexpr const char* kAll[] = {
     kGridImportPower, kGridExportPower,
     kGridPower,      kGridConnected,
     kLoadPower,
+    kInverterFault, kInverterErrorWordsChanged,
     kActivePowerLimitPct, kActivePowerLimitEnabled,
 };
 

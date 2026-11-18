@@ -109,6 +109,10 @@ struct RestContext {
     std::function<DriverQueryReport()> driverQueryReport;
     /// What each configured device offers.
     std::function<std::vector<DriverQueryCatalogEntry>()> driverQueryCatalog;
+    /// The fault-frame log, oldest first, and the reader that decodes a stored frame by device
+    /// id. Both null on a build without the log; the route then answers 404.
+    std::function<std::vector<faultlog::StoredFault>()> faultFrames;
+    FaultFrameDecoder                                   decodeFaultFrame;
     /// Wipes stored configuration including credentials, then reboots into the setup portal.
     /// The same wipe the BOOT-hold performs, reached over the network instead of the button --
     /// which is what a user without physical access has when a config locks them out.

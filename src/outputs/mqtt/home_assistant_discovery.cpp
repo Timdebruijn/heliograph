@@ -409,6 +409,9 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
             e["payload_off"] = "OFF";
             if (std::strcmp(m.id, measurement_id::kGridConnected) == 0) {
                 e["device_class"] = "connectivity";
+            } else if (std::strcmp(m.id, measurement_id::kInverterFault) == 0) {
+                // ON means a problem; HA draws it as one and groups it with the other alerts.
+                e["device_class"] = "problem";
             }
         }
         e["availability_topic"]  = availabilityTopic;

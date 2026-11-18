@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
@@ -541,6 +542,125 @@ static void test_a_flag_measurement_is_a_binary_sensor_that_keeps_unknown() {
     // Numbers stay sensors.
     const auto* power = findEntity(entities, "heliograph-a1b2c3_ac_power_total");
     TEST_ASSERT_TRUE(power->configTopic.find("/sensor/") != std::string::npos);
+}
+
+// --- fault status and error words (additive: nothing existing may move) ---------------------
+
+static void test_the_state_payload_carries_error_raw_as_a_string_or_null() {
+    Rig r;
+    r.device.payload = FakeEversolarDevice::Payload::Captured;
+    auto        state = r.poll();
+    std::string json;
+    TEST_ASSERT_TRUE(buildStatePayload(state, json));
+    TEST_ASSERT_EQUAL_STRING("FF00 0000", parse(json)["error_raw"]);
+    TEST_ASSERT_TRUE(parse(json)["error_code"].isNull());  // the healthy words are not an error code
+
+    Rig plain;  // 28-byte reply: no tail, no words
+    state = plain.poll();
+    TEST_ASSERT_TRUE(buildStatePayload(state, json));
+    TEST_ASSERT_TRUE(json.find("\"error_raw\":null") != std::string::npos);
+
+    state = r.poll();
+    state.dataStale = true;
+    TEST_ASSERT_TRUE(buildStatePayload(state, json));
+    TEST_ASSERT_TRUE(parse(json)["error_raw"].isNull());
+}
+
+static void test_unset_fault_flags_are_null_in_the_state_payload() {
+    Rig r;
+    r.device.payload = FakeEversolarDevice::Payload::UnknownMode;
+    const auto  state = r.poll();
+    std::string json;
+    TEST_ASSERT_TRUE(buildStatePayload(state, json));
+    auto doc = parse(json);
+    // Present with a null value: HA's template turns that into "unknown", not "off".
+    TEST_ASSERT_TRUE(doc["measurements"]["inverter.fault"].is<JsonObject>());
+    TEST_ASSERT_TRUE(doc["measurements"]["inverter.fault"]["value"].isNull());
+    TEST_ASSERT_TRUE(doc["measurements"]["inverter.error_words_changed"]["value"].isNull());
+    TEST_ASSERT_EQUAL_STRING("Unknown (7)", doc["status_text"]);
+}
+
+static void test_the_fault_flags_publish_real_values() {
+    Rig r;
+    r.device.payload = FakeEversolarDevice::Payload::Captured;
+    r.poll();  // baseline
+    r.device.payload = FakeEversolarDevice::Payload::Fault;
+    const auto  state = r.poll();
+    std::string json;
+    TEST_ASSERT_TRUE(buildStatePayload(state, json));
+    auto doc = parse(json);
+    TEST_ASSERT_EQUAL_DOUBLE(1.0, doc["measurements"]["inverter.fault"]["value"].as<double>());
+    TEST_ASSERT_EQUAL_DOUBLE(1.0,
+                             doc["measurements"]["inverter.error_words_changed"]["value"].as<double>());
+    TEST_ASSERT_EQUAL_STRING("Fault", doc["status_text"]);
+    TEST_ASSERT_EQUAL_STRING("FF40 0004", doc["error_raw"]);
+}
+
+static void test_discovery_adds_exactly_the_two_fault_binary_sensors() {
+    Rig r;
+    r.device.payload = FakeEversolarDevice::Payload::Captured;
+    const auto state  = r.poll();
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+
+    const auto* fault = findEntity(entities, "heliograph-a1b2c3_inverter_fault");
+    TEST_ASSERT_NOT_NULL(fault);
+    TEST_ASSERT_TRUE(fault->configTopic.find("/binary_sensor/") != std::string::npos);
+    auto fdoc = parse(fault->payload);
+    TEST_ASSERT_EQUAL_STRING("problem", fdoc["device_class"]);
+    TEST_ASSERT_EQUAL_STRING("ON", fdoc["payload_on"]);
+    TEST_ASSERT_EQUAL_STRING("OFF", fdoc["payload_off"]);
+    // A null value stays "unknown" in HA: the same none-aware template every flag uses, reading
+    // this id's own key.
+    const std::string tmpl = fdoc["value_template"].as<std::string>();
+    TEST_ASSERT_TRUE(tmpl.find("none if v is none") != std::string::npos);
+    TEST_ASSERT_TRUE(tmpl.find("measurements['inverter.fault'].value") != std::string::npos);
+
+    const auto* words = findEntity(entities, "heliograph-a1b2c3_inverter_error_words_changed");
+    TEST_ASSERT_NOT_NULL(words);
+    TEST_ASSERT_TRUE(words->configTopic.find("/binary_sensor/") != std::string::npos);
+    auto wdoc = parse(words->payload);
+    TEST_ASSERT_TRUE(wdoc["device_class"].isNull());
+    TEST_ASSERT_TRUE(wdoc["value_template"].as<std::string>().find("none if v is none") !=
+                     std::string::npos);
+
+    // Additive, proven: rebuild the same state without the two new channels and every entity it
+    // yields must be byte-identical in the full set, with exactly those two extra.
+    DeviceState without = state;
+    without.measurements.clear();
+    for (const auto& m : state.measurements.all()) {
+        if (std::strcmp(m.id, measurement_id::kInverterFault) == 0 ||
+            std::strcmp(m.id, measurement_id::kInverterErrorWordsChanged) == 0) {
+            continue;
+        }
+        without.measurements.declare(m.id, m.type, m.unit, m.displayName, m.derived);
+        if (m.valid) {
+            without.measurements.set(m.id, m.value, m.timestampMs);
+        }
+    }
+    const auto before = buildDiscoveryEntities(without, bridge, topics, topics.availability(),
+                                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+    TEST_ASSERT_TRUE(before.size() > 5);
+    TEST_ASSERT_EQUAL_size_t(before.size() + 2, entities.size());
+    for (const auto& old : before) {
+        const auto* now = findEntity(entities, old.uniqueId);
+        TEST_ASSERT_NOT_NULL_MESSAGE(now, old.uniqueId.c_str());
+        TEST_ASSERT_TRUE_MESSAGE(old.configTopic == now->configTopic, old.uniqueId.c_str());
+        TEST_ASSERT_TRUE_MESSAGE(old.payload == now->payload, old.uniqueId.c_str());
+    }
+}
+
+static void test_a_reply_without_a_tail_gets_the_fault_sensor_but_not_the_words_sensor() {
+    Rig        r;
+    const auto state  = r.poll();  // 28 bytes
+    const auto bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                               kDefaultDiscoveryPrefix, bridge.bridgeId);
+    TEST_ASSERT_NOT_NULL(findEntity(entities, "heliograph-a1b2c3_inverter_fault"));
+    TEST_ASSERT_NULL(findEntity(entities, "heliograph-a1b2c3_inverter_error_words_changed"));
 }
 
 static void test_discovery_metadata_matches_the_measurement_type() {
@@ -1729,6 +1849,11 @@ static void test_publish_memory_guard() {
 
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_the_state_payload_carries_error_raw_as_a_string_or_null);
+    RUN_TEST(test_unset_fault_flags_are_null_in_the_state_payload);
+    RUN_TEST(test_the_fault_flags_publish_real_values);
+    RUN_TEST(test_discovery_adds_exactly_the_two_fault_binary_sensors);
+    RUN_TEST(test_a_reply_without_a_tail_gets_the_fault_sensor_but_not_the_words_sensor);
     RUN_TEST(test_every_announceable_measurement_is_clearable);
     RUN_TEST(test_a_removed_device_is_forgotten);
     RUN_TEST(test_a_re_addressed_device_is_forgotten_under_its_old_id);

@@ -403,8 +403,52 @@ word   14   15   16   17   18   19   20   21
 ```
 
 Word 20 is `FF00` — neither zero nor `0xFFFF`, and stable across all three frames, so it is a
-constant rather than noise. Still unknown, and still not decoded: nothing here reads past word
-13. What changed is only that the description now matches the bytes.
+constant rather than noise. What changed on 2026-08-03 is only that the description matched the
+bytes.
+
+###### Reading the tail by position (2026-11-18)
+
+Every claim below carries one label: **observed** (seen in frames from our TL3000-20),
+**documented** (stated in the vendor PMU protocol V1.1 document, a scanned image whose text
+cannot be extracted; it is cited, not copied) or **hypothesis** (our reasoning).
+
+- **Observed:** the TL3000-20 answers the read description (`11 00`) with 22 data codes:
+  `00 0D 01 04 41 42 43 44 45 47 48 49 4A 4C 78 79 7A 7B 7C 7D 7E 7F`. Its normal-info reply
+  (`11 82`) carries exactly 22 words. Stored as `kRespReadDescriptionObserved` (captured on the
+  production bridge, 2026-11-18).
+- **Hypothesis, strong:** the reply is positional, one word per listed code, in list order. The
+  count matches and nothing in the first 14 words contradicts it (those are **observed**:
+  checked against the display and against V × I = P). The first 14 codes line up with the known word map, e.g.
+  code `4C` is word 13, `OP_MODE`.
+- **Documented:** codes `0x78`-`0x7F` are six fault values and two error words. Read
+  positionally, with the vendor's scaling:
+
+| Word | Code | Field | Scale | Healthy value (observed) |
+|---|---|---|---|---|
+| 14 | `78` | grid voltage at fault | ÷10 V | `0000` |
+| 15 | `79` | grid frequency at fault | ÷100 Hz | `0000` |
+| 16 | `7A` | grid impedance at fault | ÷1000 Ω | `FFFF` |
+| 17 | `7B` | temperature at fault (int16) | ÷10 °C | `0000` |
+| 18 | `7C` | PV voltage at fault | ÷10 V | `0000` |
+| 19 | `7D` | residual current at fault | ÷1000 A | `0000` |
+| 20 | `7E` | error message H, a bitmask | — | `FF00` |
+| 21 | `7F` | error message L, a bitmask | — | `0000` |
+
+- **Observed:** a healthy unit reads `FF00 0000` in words 20-21. A community project
+  (timretout/zeversolar-esphome) reports the same pair on other Zeverlution units; that is their
+  observation, not ours. **Unknown:** what the bits mean on this
+  firmware. Read as the vendor bitmask, `FF00 0000` would set bits 31-24 on a healthy
+  inverter, which is why the words are never treated as "0 means no error" and are not decoded.
+- The fault values are **unverified**: no faulted unit has been read. The driver scales them only
+  when a stored fault frame is read back (`GET /api/v1/fault-frames`, key `decoded_unverified`),
+  and leaves out any value whose raw word is `FFFF`, because that is the healthy filler (65.535
+  would be made up, 0 would claim a measurement).
+
+What the firmware does with them: the words are published raw as `error_raw` (`"FF00 0000"`),
+the flag `inverter.error_words_changed` says whether they moved off a baseline learned from the
+first mode-1 reply after boot, and frames are kept in the fault-frame log. Only a 44-byte
+single-string reply has its tail read; every other layout keeps today's behaviour. Nothing
+decodes a bit.
 
 How this was found is the point worth recording. The 2026-07-19 entry above needed a USB-RS485
 tap and a laptop at the inverter — which is why the tail got a one-line summary and no
@@ -502,20 +546,28 @@ zero.** They are logged at TRACE level in Phase 3 so that their meaning can pote
 be determined, but they do not appear in the canonical measurement model as long as unit and
 scale are unknown.
 
-## Status codes (`OP_MODE`) — two codes measured, rest unknown
+## Status codes (`OP_MODE`) — two codes observed, two documented, rest unknown
 
-The reference reads `OP_MODE` and publishes it as a raw number, without a value table.
-No table is invented here — but two codes have now been **measured** on a real
-TL3000-20 (day/night cycle via HA history, 2026-07-19 through 2026-07-26):
+The reference reads `OP_MODE` and publishes it as a raw number, without a value table. A text
+exists here for a code that has been **observed** on a real TL3000-20 or that the **vendor
+protocol document lists**, and each is labelled as one or the other. Two codes are observed
+(day/night cycle via HA history, 2026-07-19 through 2026-07-26); two are documented and have
+never been seen:
 
-| Code | Meaning (measured) | Evidence |
-|---|---|---|
-| 1 | Grid-connected (normal) | Full production days show code 1; independently confirmed by the calibrated Zeversolar 2000s capture (ha-zeversolar-modbus) |
-| 0 | Standby (not feeding) | Five independent events: dusk on July 19/20/21 (last minutes before shutdown show code 0) and two dawns — July 22 at 06:01 (four minutes of code 0, then code 1 at first production) and July 26 at 06:20:42 (≈5 minutes of code 0, then code 1 at 06:25:46, AC power 0 W→7 W then ramping). The July 26 dawn is a clean self-recovery on firmware 0.12.0: `unknown` straight to code 0 the moment the inverter re-registered, no stuck `poll: timeout` in between — the failure the sunrise-registration fix targets (see `eversolar_driver.h`, the 2026-07-21 note). |
+| Code | Meaning | Label | Evidence |
+|---|---|---|---|
+| 1 | Grid-connected (normal) | observed | Full production days show code 1; independently confirmed by the calibrated Zeversolar 2000s capture (ha-zeversolar-modbus) |
+| 0 | Standby (not feeding) | observed | Five independent events: dusk on July 19/20/21 (last minutes before shutdown show code 0) and two dawns — July 22 at 06:01 (four minutes of code 0, then code 1 at first production) and July 26 at 06:20:42 (≈5 minutes of code 0, then code 1 at 06:25:46, AC power 0 W→7 W then ramping). The July 26 dawn is a clean self-recovery on firmware 0.12.0: `unknown` straight to code 0 the moment the inverter re-registered, no stuck `poll: timeout` in between — the failure the sunrise-registration fix targets (see `eversolar_driver.h`, the 2026-07-21 note). |
+| 2 | Fault | **documented, not yet observed** | The vendor protocol's operating-mode table. No frame from a faulted unit has been captured. |
+| 3 | Permanent fault | **documented, not yet observed** | Same table. |
 
-Mapping in `eversolar_parser.cpp::opModeText()`; every other code honestly remains
-`"Unknown (<n>)"` until it has actually been observed (candidate: an error code during a
-grid fault).
+Mapping in `eversolar_parser.cpp::opModeText()`. Every other code honestly remains
+`"Unknown (<n>)"`; the status texts for 0 and 1 are unchanged byte for byte because Home
+Assistant automations may match on them. The first real mode-2 frame is what moves `Fault` from
+documented to observed.
+
+`inverter.fault` (a Flag) follows the mode word: true for 2 and 3, false for 0 and 1, and **absent**
+for any other mode. It is derived from the mode, never from error bits.
 
 Approach:
 - The MVP publishes `status_code` as a raw uint16 and sets `status_text` to `"Unknown (<n>)"`.
@@ -523,9 +575,11 @@ Approach:
   shutdown). The actually occurring codes follow from that sequence.
 - Only after that is a mapping added, with the measurement as the source.
 
-The same applies to `error_code`: **the protocol has no separate error code field** that
-is read out in the reference. `DeviceState::errorCode` therefore stays at 0 with
-`supported = false`; no fictitious field is filled in.
+The reference reads no error field, but the reply does carry **error words**: words 20 and 21 of
+a 44-byte reply, see [the tail](#reading-the-tail-by-position-2026-11-18). They are published
+undecoded as `error_raw`. `DeviceState::errorCode` still stays at 0 with `supported = false`:
+that field means "0 is healthy" and Modbus TCP clamps it to 16 bits, while a healthy unit reads
+`FF00 0000`, so putting the words there would show every healthy EverSolar as faulted.
 
 ## Response validation
 

@@ -124,6 +124,7 @@ Every series is prefixed `heliograph_`. Base units are in the names, counters en
 | `heliograph_build_info` | gauge | Always `1`. One per inverter. Labels `device`, `version`, `driver`, `board` |
 | `heliograph_inverter_online` | gauge | `1` when the inverter is answering, `0` when it is not |
 | `heliograph_data_stale` | gauge | `1` when the last reading is too old to trust |
+| `heliograph_device_status_code` | gauge | The device's raw status code. Only while the driver reports one and the reading is fresh; absent otherwise, never `0` as a placeholder. Label `device` |
 
 ### Inverter readings
 
@@ -205,6 +206,8 @@ inverter reports it, so a `sum()` over them never counts an input twice.
 | `heliograph_grid_power_watts` | Net grid flow. **Signed**: positive means importing, negative exporting. Present only when a device publishes `grid.power`. |
 | `heliograph_load_power_watts` | W, what the house is drawing |
 | `heliograph_grid_connected` | 1 when the inverter's grid relay is closed, 0 when it runs islanded or disconnected |
+| `heliograph_inverter_fault` | 1 when the inverter reports a fault mode, 0 when it reports a normal one. Absent while the mode is unknown. |
+| `heliograph_inverter_error_words_changed` | 1 when the device's error words differ from the baseline learned this boot, 0 when they match. Absent until a baseline exists. |
 
 Which of these appear depends on the inverter: a driver only reports what its device actually
 provides, so a single-phase inverter has no three-phase series and an inverter without a

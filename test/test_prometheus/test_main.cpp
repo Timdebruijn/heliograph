@@ -219,8 +219,51 @@ static void test_an_invalidated_reading_is_omitted_rather_than_reported() {
     TEST_ASSERT_TRUE(text.find("heliograph_inverter_mppt_voltage_volts") != std::string::npos);
 }
 
+static void test_the_device_status_code_is_a_gauge_only_while_it_is_known_and_fresh() {
+    DeviceState s = singlePhase();
+    s.statusCode          = 2;
+    s.statusCodeSupported = true;
+    std::string text = metricsOf(s);
+    TEST_ASSERT_TRUE(text.find("heliograph_device_status_code{device=\"inv-1\"} 2.000\n") !=
+                     std::string::npos);
+    TEST_ASSERT_EQUAL_size_t(1, occurrences(text, "# TYPE heliograph_device_status_code gauge"));
+
+    // Never 0 as a placeholder: a driver with no status word, stale data and no valid data each
+    // omit the family entirely, header included.
+    s.statusCodeSupported = false;
+    TEST_ASSERT_TRUE(metricsOf(s).find("heliograph_device_status_code") == std::string::npos);
+    s.statusCodeSupported = true;
+    s.dataStale           = true;
+    TEST_ASSERT_TRUE(metricsOf(s).find("heliograph_device_status_code") == std::string::npos);
+    s.dataStale = false;
+    s.dataValid = false;
+    TEST_ASSERT_TRUE(metricsOf(s).find("heliograph_device_status_code") == std::string::npos);
+}
+
+static void test_the_fault_flags_reach_prometheus_and_vanish_while_unset() {
+    DeviceState s = singlePhase();
+    report(s, measurement_id::kInverterFault, MeasurementType::Flag, Unit::None, "Fault", 1);
+    report(s, measurement_id::kInverterErrorWordsChanged, MeasurementType::Flag, Unit::None,
+           "Words", 0);
+    std::string text = metricsOf(s);
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_fault{device=\"inv-1\"} 1.000") !=
+                     std::string::npos);
+    // A real false is a real 0.
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_error_words_changed{device=\"inv-1\"} 0.000") !=
+                     std::string::npos);
+
+    // Declared but unset (an unknown mode, no baseline yet): absent, not 0.
+    s.measurements.invalidate(measurement_id::kInverterFault);
+    s.measurements.invalidate(measurement_id::kInverterErrorWordsChanged);
+    text = metricsOf(s);
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_fault") == std::string::npos);
+    TEST_ASSERT_TRUE(text.find("heliograph_inverter_error_words_changed") == std::string::npos);
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_the_device_status_code_is_a_gauge_only_while_it_is_known_and_fresh);
+    RUN_TEST(test_the_fault_flags_reach_prometheus_and_vanish_while_unset);
     RUN_TEST(test_the_channels_that_used_to_be_dropped_are_exported);
     RUN_TEST(test_a_phase_is_a_label_not_a_name);
     RUN_TEST(test_one_help_and_one_type_however_many_phases);

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@
 #include "device/bridge_info.h"
 #include "device/device_state.h"
 #include "diagnostics/diagnostics.h"
+#include "diagnostics/fault_frame_log.h"
 #include "app/discovery_runner.h"
 #include "drivers/driver_descriptor.h"
 
@@ -180,6 +182,20 @@ bool buildRegisterReadPayload(const RegisterReadReport& report, std::string& out
 bool buildDriverQueryPayload(const DriverQueryReport& report,
                              const std::vector<DriverQueryCatalogEntry>& catalog,
                              std::string& out, size_t maxBytes = kMaxResponseBytes);
+
+/// Reads the values out of a stored frame, by the device's id: the driver that wrote the frame
+/// knows how. Returns nothing for a device that is no longer configured.
+using FaultFrameDecoder =
+    std::function<std::vector<FaultFrameField>(const std::string& deviceId,
+                                               const std::vector<uint8_t>& frame)>;
+
+/// The fault-frame log, oldest first: `{"capacity":N,"records":[...]}`. Each record carries the
+/// raw frame as hex, always. `decoded_unverified` is added only when the decoder returns
+/// something: its values come from a vendor document and have not been checked against a
+/// faulted unit, and the key says so. `time` is null when the clock was not synced.
+bool buildFaultFramesPayload(const std::vector<faultlog::StoredFault>& records,
+                             const FaultFrameDecoder& decode, std::string& out,
+                             size_t maxBytes = kMaxResponseBytes);
 
 /// Drivers compiled into this build. The discovery wizard needs this rather than a hardcoded
 /// list in the frontend.

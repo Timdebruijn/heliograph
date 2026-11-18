@@ -237,6 +237,11 @@ constexpr GaugeSpec kInverterGauges[] = {
      "1 when the inverter's grid relay is closed, 0 when it runs islanded or disconnected"},
     {measurement_id::kLoadPower, "heliograph_load_power_watts",
      "Power the house is drawing, as the inverter measures it"},
+    // Flags, absent while unknown: a missing series is "the device did not say", never 0.
+    {measurement_id::kInverterFault, "heliograph_inverter_fault",
+     "1 when the inverter reports a fault mode, 0 when it reports a normal one"},
+    {measurement_id::kInverterErrorWordsChanged, "heliograph_inverter_error_words_changed",
+     "1 when the device's error words differ from the baseline learned this boot"},
 };
 
 }  // namespace
@@ -274,6 +279,23 @@ std::string buildMetrics(const std::vector<DeviceMetrics>& devices, const Bridge
                    "gauge");
         for (const auto& dev : devices) {
             appendDeviceFlag(out, "heliograph_data_stale", dev.id, dev.state->dataStale);
+        }
+        // The raw status word, only while the driver reads one and the reading is fresh -- the
+        // same rule as status_code in the JSON payloads. The family header is lazy for the same
+        // reason as the gauges below: a bare HELP/TYPE with no sample is a strict-parser error.
+        bool statusHeaderWritten = false;
+        for (const auto& dev : devices) {
+            if (!dev.state->statusCodeSupported || !dev.state->dataValid ||
+                dev.state->dataStale) {
+                continue;
+            }
+            if (!statusHeaderWritten) {
+                appendHelp(out, "heliograph_device_status_code",
+                           "The device's raw status code, absent while unknown", "gauge");
+                statusHeaderWritten = true;
+            }
+            appendDeviceValue(out, "heliograph_device_status_code", dev.id,
+                              static_cast<double>(dev.state->statusCode));
         }
     }
 

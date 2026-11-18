@@ -1183,6 +1183,22 @@ bool RestApi::begin() {
         request->send(200, kJson, body.c_str());
     });
 
+    // The kept fault frames. A read of RAM, no bus: same terms as the driver-query report above.
+    g_server->on(AsyncURIMatcher::exact("/api/v1/fault-frames"), HTTP_GET,
+                 [this](AsyncWebServerRequest* request) {
+        context_.diagnostics->recordRestRequest();
+        if (context_.faultFrames == nullptr) {
+            sendError(request, {404, "no_fault_frames", "this build has no fault-frame log"});
+            return;
+        }
+        std::string body;
+        if (!buildFaultFramesPayload(context_.faultFrames(), context_.decodeFaultFrame, body)) {
+            sendError(request, {500, "payload_too_large", "fault frames exceeded their bound"});
+            return;
+        }
+        request->send(200, kJson, body.c_str());
+    });
+
     // Bus capture, in either of its two modes: `passive` for a device discovery could not name,
     // `driver` for one we already talk to. Every parameter travels in the query: they are a
     // handful of numbers and two enums, and a JSON body would need the whole collectBody dance
