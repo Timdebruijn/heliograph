@@ -17,6 +17,9 @@ TransactStatus transact(Transport& transport, const Exchange& exchange, uint8_t*
                         size_t payloadCapacity, size_t& payloadLen, Tally& tally,
                         const char* logPrefix) {
     payloadLen = 0;
+    if (exchange.rawReply != nullptr) {
+        exchange.rawReply->clear();
+    }
 
     TransportLock lock(transport, kBusLockTimeoutMs);
     if (!lock.held()) {
@@ -155,6 +158,11 @@ TransactStatus transact(Transport& transport, const Exchange& exchange, uint8_t*
             // did not accept it, which is a different problem with a different fix.
             traceOutcome(received > 0 ? "timeout after partial/rejected data" : "silent");
             return TransactStatus::Timeout;
+        }
+        if (exchange.rawReply != nullptr && exchange.rawReply->size() < kMaxRawReply) {
+            const size_t room = kMaxRawReply - exchange.rawReply->size();
+            exchange.rawReply->insert(exchange.rawReply->end(), rx + have,
+                                      rx + have + (n < room ? n : room));
         }
         have += n;
         received += n;

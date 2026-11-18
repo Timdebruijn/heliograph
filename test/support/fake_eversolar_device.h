@@ -65,6 +65,10 @@ public:
     /// the address): here the address is kept, so an offline query stays ignored.
     bool withholdNormalInfo = false;
 
+    /// Registered and polling normally, but never answering the diagnostic queries
+    /// (11 00 / 11 01 / 11 04 / 11 42), as an inverter that does not know one would.
+    bool withholdQueries = false;
+
     Responder responder() {
         return [this](const std::vector<uint8_t>& request, std::vector<uint8_t>& reply) {
             return handle(request, reply);
@@ -188,6 +192,30 @@ private:
                     break;
                 case Payload::BadLength:
                     append(body, fixtures::kRespBadPayloadLength, fixtures::kRespBadPayloadLengthLen);
+                    break;
+            }
+        } else if (control == 0x11 && (function == 0x00 || function == 0x01 ||
+                                       function == 0x04 || function == 0x42)) {
+            if (!registered || withholdQueries) {
+                return false;
+            }
+            // CONSTRUCTED replies, see tools/gen_fixtures.py.
+            switch (function) {
+                case 0x00:
+                    append(body, fixtures::kRespReadDescriptionConstructed,
+                           fixtures::kRespReadDescriptionConstructedLen);
+                    break;
+                case 0x01:
+                    append(body, fixtures::kRespRwDescriptionConstructed,
+                           fixtures::kRespRwDescriptionConstructedLen);
+                    break;
+                case 0x04:
+                    append(body, fixtures::kRespSetInfoConstructed,
+                           fixtures::kRespSetInfoConstructedLen);
+                    break;
+                default:
+                    append(body, fixtures::kRespVersionsConstructed,
+                           fixtures::kRespVersionsConstructedLen);
                     break;
             }
         } else {

@@ -768,6 +768,270 @@ static void test_execute_never_writes_to_the_bus() {
     TEST_ASSERT_EQUAL_size_t(before, r.transport.writes.size());
 }
 
+// --- diagnostic queries -----------------------------------------------------------------------
+//
+// The reply payloads come from CONSTRUCTED fixtures (tools/gen_fixtures.py): these tests prove the
+// driver sends the right request and hands back the bytes untouched, not that it understands them.
+
+namespace {
+struct QueryCase {
+    const char*    name;
+    const uint8_t* expectedTx;  // frame for address 0x10, spelled out independently of the generator
+    const uint8_t* reply;
+    size_t         replyLen;
+};
+const uint8_t kTxReadDescription[] = {0xAA, 0x55, 0x01, 0x00, 0x00, 0x10, 0x11, 0x00, 0x00, 0x01, 0x21};
+const uint8_t kTxRwDescription[]   = {0xAA, 0x55, 0x01, 0x00, 0x00, 0x10, 0x11, 0x01, 0x00, 0x01, 0x22};
+const uint8_t kTxSetInfo[]         = {0xAA, 0x55, 0x01, 0x00, 0x00, 0x10, 0x11, 0x04, 0x00, 0x01, 0x25};
+const uint8_t kTxVersions[]        = {0xAA, 0x55, 0x01, 0x00, 0x00, 0x10, 0x11, 0x42, 0x00, 0x01, 0x63};
+
+const QueryCase kQueryCases[] = {
+    {"read_description", kTxReadDescription, fx::kRespReadDescriptionConstructed,
+     fx::kRespReadDescriptionConstructedLen},
+    {"rw_description", kTxRwDescription, fx::kRespRwDescriptionConstructed,
+     fx::kRespRwDescriptionConstructedLen},
+    {"set_info", kTxSetInfo, fx::kRespSetInfoConstructed, fx::kRespSetInfoConstructedLen},
+    {"versions", kTxVersions, fx::kRespVersionsConstructed, fx::kRespVersionsConstructedLen},
+};
+
+/// A registered driver: one poll does the handshake.
+void registerDriver(Rig& r) {
+    r.begin();
+    DeviceState state;
+    r.poll(state);
+}
+}  // namespace
+
+static void test_the_driver_lists_exactly_four_read_queries() {
+    Rig  r;
+    const auto queries = r.driver.diagnosticQueries();
+    TEST_ASSERT_EQUAL_size_t(4, queries.size());
+    for (size_t i = 0; i < queries.size(); ++i) {
+        TEST_ASSERT_EQUAL_STRING(kQueryCases[i].name, queries[i].name.c_str());
+        TEST_ASSERT_FALSE(queries[i].description.empty());
+    }
+}
+
+static void test_each_query_sends_its_read_frame_and_returns_the_raw_reply() {
+    for (const QueryCase& c : kQueryCases) {
+        Rig r;
+        registerDriver(r);
+        const size_t before = r.transport.writes.size();
+
+        const DiagnosticQueryResult res = r.driver.runDiagnosticQuery(c.name);
+
+        TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(DiagnosticStatus::Ok),
+                                  static_cast<int>(res.status), c.name);
+        // Exactly one frame went out, and it is the one the design note spells out.
+        TEST_ASSERT_EQUAL_size_t(before + 1, r.transport.writes.size());
+        TEST_ASSERT_EQUAL_size_t(11, res.tx.size());
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(c.expectedTx, res.tx.data(), 11);
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(c.expectedTx, r.transport.writes.back().data(), 11);
+        // The whole reply frame, and its data bytes without framing.
+        TEST_ASSERT_EQUAL_size_t(c.replyLen, res.rx.size());
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(c.reply, res.rx.data(), c.replyLen);
+        TEST_ASSERT_EQUAL_size_t(c.replyLen - kFrameOverhead, res.payload.size());
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(c.reply + kOffsetData, res.payload.data(),
+                                      res.payload.size());
+    }
+}
+
+static void test_a_query_while_unregistered_sends_nothing() {
+    Rig r;
+    r.begin();  // handshake not done: the address is not ours yet
+    const size_t before = r.transport.writes.size();
+
+    const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("versions");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::NotRegistered),
+                      static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(before, r.transport.writes.size());
+    TEST_ASSERT_TRUE(res.tx.empty());
+    TEST_ASSERT_TRUE(res.rx.empty());
+}
+
+static void test_an_unknown_query_name_sends_nothing() {
+    Rig r;
+    registerDriver(r);
+    const size_t before = r.transport.writes.size();
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::UnknownQuery),
+                      static_cast<int>(r.driver.runDiagnosticQuery("set_power").status));
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::UnknownQuery),
+                      static_cast<int>(r.driver.runDiagnosticQuery("").status));
+    TEST_ASSERT_EQUAL_size_t(before, r.transport.writes.size());
+}
+
+// Silence is a timeout with no reply bytes at all -- not an empty frame that looks like data.
+static void test_a_silent_device_is_a_timeout_with_no_reply_bytes() {
+    Rig r;
+    registerDriver(r);
+    r.device.withholdQueries = true;
+    const size_t before = r.transport.writes.size();
+
+    const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("rw_description");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::Timeout), static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(before + 1, r.transport.writes.size());  // no retry
+    TEST_ASSERT_EQUAL_size_t(11, res.tx.size());  // what we sent is still reported
+    TEST_ASSERT_TRUE(res.rx.empty());
+    TEST_ASSERT_TRUE(res.payload.empty());
+}
+
+// A reply that fails its checksum keeps its bytes (they are the diagnosis) but no payload.
+static void test_a_corrupt_reply_is_a_checksum_error_with_the_raw_bytes() {
+    Rig r;
+    registerDriver(r);
+    const auto responder = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (!responder(req, reply)) {
+            return false;
+        }
+        if (req[kOffsetControl] == 0x11 && req[kOffsetFunction] == 0x42) {
+            reply.back() ^= 0xFF;
+        }
+        return true;
+    });
+
+    const size_t before = r.transport.writes.size();
+
+    const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("versions");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::ChecksumError),
+                      static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(before + 1, r.transport.writes.size());  // no retry
+    TEST_ASSERT_EQUAL_size_t(fx::kRespVersionsConstructedLen, res.rx.size());
+    TEST_ASSERT_TRUE(res.payload.empty());
+}
+
+// An inverter that does not know a query may answer it with some other, well-formed frame. That
+// frame is the finding, so it must reach rx -- an earlier version reported it as a silent
+// timeout because only an accepted or corrupt frame was kept.
+static void test_an_unexpected_reply_frame_is_reported_with_its_bytes() {
+    Rig r;
+    registerDriver(r);
+    const auto responder = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (!responder(req, reply)) {
+            return false;
+        }
+        if (req[kOffsetControl] == 0x11 && req[kOffsetFunction] == 0x42) {
+            reply[kOffsetFunction] = 0xC3;  // not the C2 we asked for
+            const uint16_t sum = checksum(reply.data(), reply.size() - 2);
+            reply[reply.size() - 2] = static_cast<uint8_t>(sum >> 8);
+            reply[reply.size() - 1] = static_cast<uint8_t>(sum & 0xFF);
+        }
+        return true;
+    });
+
+    const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("versions");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::UnexpectedFrame),
+                      static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(fx::kRespVersionsConstructedLen, res.rx.size());
+    TEST_ASSERT_EQUAL_HEX8(0xC3, res.rx[kOffsetFunction]);
+    TEST_ASSERT_TRUE(res.payload.empty());
+}
+
+// On a bus that echoes, rx shows our own frame ahead of the reply: it is every byte the line
+// delivered, not a parsed frame. The reply is still accepted.
+static void test_an_echoing_bus_shows_the_echo_ahead_of_the_reply() {
+    Rig r;
+    registerDriver(r);
+    r.device.echoRequests = true;
+
+    const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("versions");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::Ok), static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(11 + fx::kRespVersionsConstructedLen, res.rx.size());
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kTxVersions, res.rx.data(), 11);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(fx::kRespVersionsConstructed, res.rx.data() + 11,
+                                  fx::kRespVersionsConstructedLen);
+}
+
+// The echo alone is not an answer: a silent inverter on an echoing bus is a timeout, with the
+// echo visible in rx.
+static void test_a_silent_device_on_an_echoing_bus_is_still_a_timeout() {
+    Rig r;
+    registerDriver(r);
+    const auto responder = r.device.responder();
+    r.transport.setResponder([&](const std::vector<uint8_t>& req, std::vector<uint8_t>& reply) {
+        if (req[kOffsetControl] == 0x11 && req[kOffsetFunction] == 0x01) {
+            reply = req;  // the bus hands our own frame back; the inverter says nothing
+            return true;
+        }
+        return responder(req, reply);
+    });
+
+    const DiagnosticQueryResult res = r.driver.runDiagnosticQuery("rw_description");
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::Timeout), static_cast<int>(res.status));
+    TEST_ASSERT_EQUAL_size_t(11, res.rx.size());
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kTxRwDescription, res.rx.data(), 11);
+}
+
+// A query the inverter ignores is not a bus fault, so it must not move the counters that
+// indict the cabling.
+static void test_query_errors_stay_out_of_the_bus_error_counts() {
+    Rig r;
+    registerDriver(r);
+    r.device.withholdQueries = true;
+    const BusErrorCounts before = r.driver.busErrors();
+
+    r.driver.runDiagnosticQuery("rw_description");
+
+    const BusErrorCounts after = r.driver.busErrors();
+    TEST_ASSERT_EQUAL_UINT32(before.timeouts, after.timeouts);
+    TEST_ASSERT_EQUAL_UINT32(before.checksumErrors, after.checksumErrors);
+    TEST_ASSERT_EQUAL_UINT32(before.invalidFrames, after.invalidFrames);
+}
+
+// The wire allow-list. Every public entry point that can put a frame on the bus is driven, and
+// every frame is checked against what this driver is known to send: registration (10 xx) and
+// reads (11 xx). Control 0x12 (WRITE) and 0x13 (EXECUTE) -- and anything else -- fail it. An
+// allow-list, not a deny-list, so a new frame type has to be added here on purpose.
+static void test_every_frame_the_driver_transmits_is_a_known_registration_or_read() {
+    Rig r;
+    r.begin();
+    DeviceState state;
+    r.poll(state);
+    r.driver.probe();
+    for (const auto& q : r.driver.diagnosticQueries()) {
+        TEST_ASSERT_EQUAL(static_cast<int>(DiagnosticStatus::Ok),
+                          static_cast<int>(r.driver.runDiagnosticQuery(q.name).status));
+    }
+    for (size_t i = 0; i < kCommandTypeCount; ++i) {
+        InverterCommand c;
+        c.type         = static_cast<InverterCommandType>(i);
+        c.numericValue = 50.0;
+        r.driver.execute(c);
+    }
+    // The timeout-recovery branch transmits too (an offline query after three silent polls), so
+    // it is driven as well rather than trusted to stay inside the set.
+    r.device.silentNormalInfoPolls = 5;
+    for (int i = 0; i < 6; ++i) {
+        r.poll(state);
+    }
+
+    struct Known {
+        uint8_t control;
+        uint8_t function;
+    };
+    static const Known kKnown[] = {{0x10, 0x00}, {0x10, 0x01}, {0x10, 0x04}, {0x11, 0x00},
+                                   {0x11, 0x01}, {0x11, 0x02}, {0x11, 0x03}, {0x11, 0x04},
+                                   {0x11, 0x42}};
+    TEST_ASSERT_TRUE(r.transport.writes.size() > 10);
+    for (const auto& w : r.transport.writes) {
+        TEST_ASSERT_TRUE(w.size() >= kFrameOverhead);
+        bool known = false;
+        for (const Known& k : kKnown) {
+            known = known || (w[kOffsetControl] == k.control && w[kOffsetFunction] == k.function);
+        }
+        TEST_ASSERT_TRUE_MESSAGE(known, "a frame outside the known registration/read set");
+        TEST_ASSERT_TRUE(w[kOffsetControl] < 0x12);
+    }
+}
+
 // --- probe ------------------------------------------------------------------------------------
 
 static void test_probe_scores_a_full_handshake_highly() {
@@ -1053,6 +1317,17 @@ void run_eversolar_driver() {
     RUN_TEST(test_input_is_flushed_before_each_request);
     RUN_TEST(test_every_command_is_unsupported);
     RUN_TEST(test_execute_never_writes_to_the_bus);
+    RUN_TEST(test_the_driver_lists_exactly_four_read_queries);
+    RUN_TEST(test_each_query_sends_its_read_frame_and_returns_the_raw_reply);
+    RUN_TEST(test_a_query_while_unregistered_sends_nothing);
+    RUN_TEST(test_an_unknown_query_name_sends_nothing);
+    RUN_TEST(test_a_silent_device_is_a_timeout_with_no_reply_bytes);
+    RUN_TEST(test_a_corrupt_reply_is_a_checksum_error_with_the_raw_bytes);
+    RUN_TEST(test_an_unexpected_reply_frame_is_reported_with_its_bytes);
+    RUN_TEST(test_a_silent_device_on_an_echoing_bus_is_still_a_timeout);
+    RUN_TEST(test_query_errors_stay_out_of_the_bus_error_counts);
+    RUN_TEST(test_an_echoing_bus_shows_the_echo_ahead_of_the_reply);
+    RUN_TEST(test_every_frame_the_driver_transmits_is_a_known_registration_or_read);
     RUN_TEST(test_probe_scores_a_full_handshake_highly);
     RUN_TEST(test_probe_on_a_silent_bus_scores_zero);
     RUN_TEST(test_probe_stops_short_when_registration_is_refused);

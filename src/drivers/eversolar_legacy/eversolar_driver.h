@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "drivers/inverter_driver.h"
 #include "eversolar_parser.h"
@@ -49,10 +50,17 @@ public:
     DeviceIdentity          identity() const override;
     InverterCapabilities    capabilities() const override;
 
-    /// Always Unsupported. Control codes 0x12 (WRITE) and 0x13 (EXECUTE) exist in the frame
-    /// format but carry no known function codes, so there is no write operation to implement.
-    /// This is a property of the protocol, not an MVP shortcut.
+    /// Always Unsupported: not implemented, see the control plan named in
+    /// docs/eversolar-protocol.md. Control codes 0x12 (WRITE) and 0x13 (EXECUTE) exist in the
+    /// protocol -- the vendor document lists write functions, only the community reference
+    /// leaves them empty -- so this is a choice, not a property of the protocol.
     CommandResult execute(const InverterCommand& command) override;
+
+    /// Four READ queries (11 00, 11 01, 11 04, 11 42), raw bytes only. The payload formats are
+    /// not confirmed: the vendor document is a scanned image whose text cannot be extracted, so
+    /// nothing here decodes a reply. Refused while unregistered -- the address is volatile.
+    std::vector<DiagnosticQuery> diagnosticQueries() const override;
+    DiagnosticQueryResult        runDiagnosticQuery(const std::string& name) override;
 
     bool registered() const { return registered_; }
 
@@ -70,7 +78,8 @@ private:
     TransactResult transact(CommandCode command, Address destination, const uint8_t* data,
                             size_t dataLen, Address expectedSource, uint8_t* payloadOut,
                             size_t payloadCapacity, size_t& payloadLen,
-                            const Address* altSource = nullptr);
+                            const Address* altSource = nullptr,
+                            DiagnosticQueryResult* raw = nullptr);
 
     /// Broadcast: every inverter forgets its address. Disruptive, so only on begin().
     void reRegisterAll();

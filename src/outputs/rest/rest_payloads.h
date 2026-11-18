@@ -9,6 +9,7 @@
 
 #include "app/capture_runner.h"
 #include "app/driver_capture_runner.h"
+#include "app/driver_query_runner.h"
 #include "app/register_reader.h"
 #include "config/config_backup.h"
 #include "device/bridge_info.h"
@@ -171,6 +172,14 @@ bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::s
 /// The register reader's last result: what was asked, what the device answered, and the values.
 bool buildRegisterReadPayload(const RegisterReadReport& report, std::string& out,
                               size_t maxBytes = kMaxResponseBytes);
+
+/// The driver-query report: which queries each device offers, and, once one has run, what the
+/// device answered as raw hex. `rx` is every byte the line delivered, present whenever any
+/// arrived (also on a timeout: something answered that was not accepted); `payload` only on
+/// ok. Absent otherwise, never an empty string standing in for data.
+bool buildDriverQueryPayload(const DriverQueryReport& report,
+                             const std::vector<DriverQueryCatalogEntry>& catalog,
+                             std::string& out, size_t maxBytes = kMaxResponseBytes);
 
 /// Drivers compiled into this build. The discovery wizard needs this rather than a hardcoded
 /// list in the frontend.

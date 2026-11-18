@@ -12,6 +12,7 @@
 #include "device/command.h"
 #include "device/device_identity.h"
 #include "device/device_state.h"
+#include "diagnostic_query.h"
 #include "driver_descriptor.h"
 #include "transport/transport.h"
 
@@ -113,6 +114,17 @@ public:
 
     /// Returns CommandResult::Unsupported for a read-only driver.
     virtual CommandResult execute(const InverterCommand& command) = 0;
+
+    /// Optional: named READ queries for someone working out what the device supports. Empty by
+    /// default. See diagnostic_query.h.
+    virtual std::vector<DiagnosticQuery> diagnosticQueries() const { return {}; }
+
+    /// Runs one query from diagnosticQueries() by name. Called from the bus task only, in place
+    /// of a poll. An unlisted name must return UnknownQuery without touching the bus.
+    virtual DiagnosticQueryResult runDiagnosticQuery(const std::string& name) {
+        (void)name;
+        return {};
+    }
 };
 
 }  // namespace heliograph

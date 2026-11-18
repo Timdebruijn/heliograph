@@ -121,7 +121,9 @@ reject such a frame — roughly 1 in 65536 frames. Both cases are captured as a 
 
 ## Control and function codes
 
-From `%CTRL_FUNC_CODES` (`eversolar.pl:190-223`):
+From `%CTRL_FUNC_CODES` (`eversolar.pl:190-223`), plus the three READ codes `11 01`, `11 04`
+and `11 42` that the vendor PMU protocol V1.1 lists and the driver offers as diagnostic queries
+(raw bytes only: that document is a scanned image, so their payload formats are not confirmed):
 
 | Control | Function | Name | Request → Response |
 |---|---|---|---|
@@ -129,17 +131,24 @@ From `%CTRL_FUNC_CODES` (`eversolar.pl:190-223`):
 | `0x10` REGISTER | `0x01` | Send register address | `10 01` → `10 81` |
 | `0x10` REGISTER | `0x04` | Re-register | `10 04` → *(no response)* |
 | `0x11` READ | `0x00` | Query description | `11 00` → `11 80` |
+| `0x11` READ | `0x01` | Query read/write description (writable data numbers) | `11 01` → `11 81` |
 | `0x11` READ | `0x02` | Query normal info | `11 02` → `11 82` |
 | `0x11` READ | `0x03` | Query inverter ID | `11 03` → `11 83` |
+| `0x11` READ | `0x04` | Query set info (current setting values) | `11 04` → `11 84` |
+| `0x11` READ | `0x42` | Query versions (master, slave, logger) | `11 42` → `11 C2` |
 | `0x12` WRITE | — | *empty in reference* | — |
 | `0x13` EXECUTE | — | *empty in reference* | — |
 
 Responses set bit 7 of the function code (`0x02` → `0x82`).
 
-**`0x12` WRITE and `0x13` EXECUTE are empty in the reference.** There is therefore no known
-write operation for this inverter at all. So it is never a control target: the
-EverSolar driver returns `Unsupported` for every command, and that is not a temporary
-limitation but a property of what we know about this protocol.
+**`0x12` WRITE and `0x13` EXECUTE are empty in the `eversolar-monitor` reference.** The vendor
+PMU protocol V1.1 does fill them: it lists write functions, among them `0x20` "Control Power",
+a step up or down rather than a percentage. (Cited, not copied: the document says any copy is
+forbidden.) The driver still writes nothing and returns `Unsupported` for every command, but
+the reason is now "not implemented", not "no function codes exist". The plan, and the open
+question of whether the inverter lists `0x20` in its own `11 01` reply, are in the design note
+`eversolar-control-plan-2026-11-17.md`. The diagnostic queries (`POST
+/api/v1/actions/driver-query`) are how that question gets answered without writing anything.
 
 ## Registration procedure
 

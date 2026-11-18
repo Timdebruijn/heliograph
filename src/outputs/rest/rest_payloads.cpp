@@ -486,6 +486,44 @@ bool buildRegisterReadPayload(const RegisterReadReport& report, std::string& out
     return finish(doc, out, maxBytes);
 }
 
+bool buildDriverQueryPayload(const DriverQueryReport& report,
+                             const std::vector<DriverQueryCatalogEntry>& catalog,
+                             std::string& out, size_t maxBytes) {
+    JsonDocument doc;
+    doc["status"] = driverQueryStatusName(report.status);
+    JsonArray devices = doc["devices"].to<JsonArray>();
+    for (const DriverQueryCatalogEntry& entry : catalog) {
+        JsonObject d = devices.add<JsonObject>();
+        d["id"]      = entry.deviceId;
+        JsonArray qs = d["queries"].to<JsonArray>();
+        for (const DiagnosticQuery& q : entry.queries) {
+            JsonObject o   = qs.add<JsonObject>();
+            o["name"]        = q.name;
+            o["description"] = q.description;
+        }
+    }
+    if (report.status == DriverQueryStatus::Idle) {
+        return finish(doc, out, maxBytes);
+    }
+    doc["device"] = report.deviceId;
+    doc["query"]  = report.query;
+    if (report.status != DriverQueryStatus::Done) {
+        return finish(doc, out, maxBytes);
+    }
+    doc["result"] = report.deviceFound ? diagnosticStatusName(report.result.status)
+                                       : "unknown_device";
+    if (!report.result.tx.empty()) {
+        doc["tx"] = hexBytes(report.result.tx);
+    }
+    if (!report.result.rx.empty()) {
+        doc["rx"] = hexBytes(report.result.rx);
+    }
+    if (report.result.status == DiagnosticStatus::Ok) {
+        doc["payload"] = hexBytes(report.result.payload);
+    }
+    return finish(doc, out, maxBytes);
+}
+
 bool buildDiscoveryPayload(const DiscoveryReport& report, uint64_t nowMs, std::string& out,
                            size_t maxBytes) {
     JsonDocument doc;

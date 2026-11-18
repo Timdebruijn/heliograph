@@ -31,6 +31,7 @@
 #include "app/driver_capture_runner.h"
 #include "app/device_plan.h"
 #include "app/discovery_runner.h"
+#include "app/driver_query_runner.h"
 #include "app/register_reader.h"
 #include "boards/board.h"
 #include "commands/command_dispatcher.h"
@@ -724,6 +725,8 @@ DriverCaptureRunner g_driverCapture{nowMs};
 
 /// Owns the register reader's one-at-a-time reads, on the same request/run split.
 RegisterReader g_registerReader;
+/// Owns the driver diagnostic query, on the same request/run split.
+DriverQueryRunner g_driverQuery;
 
 /// The configured driver, or the highest-priority one compiled in. No manufacturer name here.
 std::string selectedDriverId() {
@@ -1320,7 +1323,8 @@ void startRestApi() {
         // is the problem: a sweep re-registers every inverter and walks eight addresses, so the
         // recording would be of something no driver ever does, filed under a report that claims
         // to show the driver's own conversation.
-        if (g_capture.busy() || g_driverCapture.busy() || g_registerReader.busy()) {
+        if (g_capture.busy() || g_driverCapture.busy() || g_registerReader.busy() ||
+            g_driverQuery.busy()) {
             return false;
         }
         return g_discovery.request(extended);
@@ -1330,7 +1334,8 @@ void startRestApi() {
     // want exclusive use of the same bus. A driver capture blocks it too -- this one takes the
     // bus away from the driver, which is precisely the traffic the other is recording.
     ctx.requestCapture = [](const diag::CaptureConfig& config, const SerialProfile& profile) {
-        if (g_discovery.busy() || g_driverCapture.busy() || g_registerReader.busy()) {
+        if (g_discovery.busy() || g_driverCapture.busy() || g_registerReader.busy() ||
+            g_driverQuery.busy()) {
             return false;
         }
         return g_capture.request(config, profile);
@@ -1342,7 +1347,8 @@ void startRestApi() {
     ctx.requestDriverCapture = [](const diag::TapConfig& config) {
         // A waiting register read too: it would land inside the window and be filed as the
         // driver's own traffic.
-        if (g_discovery.busy() || g_capture.busy() || g_registerReader.busy()) {
+        if (g_discovery.busy() || g_capture.busy() || g_registerReader.busy() ||
+            g_driverQuery.busy()) {
             return false;
         }
         // The line is not the operator's to choose here -- there is a working driver and it is
@@ -1357,7 +1363,8 @@ void startRestApi() {
     // either goes out on a line it was not meant for or lands in a recording that claims to be
     // something else.
     ctx.requestRegisterRead = [](const RegisterReadRequest& request) {
-        if (g_discovery.busy() || g_capture.busy() || g_driverCapture.busy()) {
+        if (g_discovery.busy() || g_capture.busy() || g_driverCapture.busy() ||
+            g_driverQuery.busy()) {
             return false;
         }
         return g_registerReader.request(request);
@@ -1369,6 +1376,26 @@ void startRestApi() {
             drivers.push_back(&d->descriptor());
         }
         return registerReadFitsBus(drivers);
+    };
+    // A driver query goes out on the bus like a register read, so it waits its turn behind the
+    // same four, and they wait behind it.
+    ctx.requestDriverQuery = [](const std::string& deviceId, const std::string& query) {
+        if (g_discovery.busy() || g_capture.busy() || g_driverCapture.busy() ||
+            g_registerReader.busy()) {
+            return false;
+        }
+        return g_driverQuery.request(deviceId, query);
+    };
+    ctx.driverQueryReport  = [] { return g_driverQuery.report(); };
+    ctx.driverQueryCatalog = [] {
+        std::vector<DriverQueryCatalogEntry> catalog;
+        for (size_t i = 0; i < g_deviceIds.size() && i < g_contexts.size(); ++i) {
+            auto queries = g_contexts[i]->driver().diagnosticQueries();
+            if (!queries.empty()) {
+                catalog.push_back({g_deviceIds[i], std::move(queries)});
+            }
+        }
+        return catalog;
     };
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
     // The undo behind a configuration restore. Straight through to the store, which owns both
@@ -1602,6 +1629,21 @@ void rs485Task(void* /*arg*/) {
             log::info("register read: unit %u fn 0x%02X %u+%u -> status %u",
                       report.request.unitId, report.request.functionCode, report.request.start,
                       report.request.count, static_cast<unsigned>(report.outcome.status));
+            continue;
+        }
+        // A driver query, on the same terms: one transaction in place of this cycle's poll.
+        if (g_driverQuery.runIfRequested([](const std::string& id) -> InverterDriver* {
+                for (size_t i = 0; i < g_deviceIds.size() && i < g_contexts.size(); ++i) {
+                    if (g_deviceIds[i] == id) {
+                        return &g_contexts[i]->driver();
+                    }
+                }
+                return nullptr;
+            })) {
+            const auto report = g_driverQuery.report();
+            log::info("driver query %s on %s -> %s", report.query.c_str(), report.deviceId.c_str(),
+                      report.deviceFound ? diagnosticStatusName(report.result.status)
+                                         : "unknown_device");
             continue;
         }
         // A queued write command, on the same terms as discovery and capture above: instead of

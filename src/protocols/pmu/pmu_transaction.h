@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "pmu_protocol.h"
 #include "transport/transport.h"
@@ -41,6 +42,9 @@ inline constexpr uint32_t kResponseTimeoutMs = 1000;
 inline constexpr uint32_t kTransactionDeadlineMs = 3000;
 inline constexpr uint32_t kBusLockTimeoutMs      = 2000;
 inline constexpr size_t   kRxBufferSize          = kMaxFrameSize + 16;
+/// Cap on Exchange::rawReply. Two full frames plus an echo fit; a babbling line does not grow
+/// the vector without bound.
+inline constexpr size_t   kMaxRawReply           = 2 * kMaxFrameSize;
 
 enum class TransactStatus : uint8_t { Ok, Timeout, ChecksumError, InvalidFrame, TransportError };
 
@@ -64,6 +68,13 @@ struct Exchange {
     /// A second acceptable source, or nullptr. Used where an inverter may answer from the
     /// address it was given or from the one it had before being told.
     const Address* altSource = nullptr;
+    /// When set, receives every byte the line delivered during this exchange, in arrival
+    /// order and unparsed, up to kMaxRawReply: the reply, but also an echo of our own frame, a
+    /// frame with an unexpected function code, or noise. Deliberately not just the accepted
+    /// frame -- a device that answers a request it does not know with some other frame is the
+    /// most useful thing a diagnostic can show, and a parsed-frame capture reported it as a
+    /// silent timeout. Cleared first, so empty means the line stayed silent.
+    std::vector<uint8_t>* rawReply = nullptr;
 };
 
 /// Sends `exchange` and waits for a matching reply, taking the bus lock for the whole thing.

@@ -155,6 +155,16 @@ INVERTER_ID = (
 )
 EXPECTED_MODEL = "TL3000-20"
 
+# --- Diagnostic-query replies (11 00 / 11 01 / 11 04 / 11 42) ---------------------------
+# CONSTRUCTED, NOT CAPTURED. The vendor document describing these four replies is a scanned
+# image, so their payload formats are unconfirmed, and no real inverter has been asked yet.
+# These payloads are arbitrary bytes of a plausible shape: the tests only prove that the
+# driver passes whatever comes back through as raw bytes, never that it understands them.
+CONSTRUCTED_READ_DESCRIPTION = bytes([0x01, 0x02, 0x03, 0x04, 0x05, 0x06])
+CONSTRUCTED_RW_DESCRIPTION = bytes([0x10, 0x20, 0x21])
+CONSTRUCTED_SET_INFO = words(1200, 80, 1840, 2760, 4750, 5150)
+CONSTRUCTED_VERSIONS = b"M1.0 S1.1 L1.2"
+
 FIXTURES: list[tuple[str, str, bytes]] = [
     (
         "kReqQueryNormalInfo",
@@ -175,6 +185,26 @@ FIXTURES: list[tuple[str, str, bytes]] = [
         "kReqSendAddress",
         "Request: SEND_REGISTER_ADDRESS = serial + assigned address",
         request(0x10, 0x01, 0x00, SERIAL + bytes([INVERTER_ADDR])),
+    ),
+    (
+        "kRespReadDescriptionConstructed",
+        "Response: 11 00 read description, CONSTRUCTED payload (not captured)",
+        response(0x11, 0x00, CONSTRUCTED_READ_DESCRIPTION),
+    ),
+    (
+        "kRespRwDescriptionConstructed",
+        "Response: 11 01 read/write description, CONSTRUCTED payload (not captured)",
+        response(0x11, 0x01, CONSTRUCTED_RW_DESCRIPTION),
+    ),
+    (
+        "kRespSetInfoConstructed",
+        "Response: 11 04 set info, CONSTRUCTED payload (not captured)",
+        response(0x11, 0x04, CONSTRUCTED_SET_INFO),
+    ),
+    (
+        "kRespVersionsConstructed",
+        "Response: 11 42 versions, CONSTRUCTED payload (not captured)",
+        response(0x11, 0x42, CONSTRUCTED_VERSIONS),
     ),
     (
         "kRespNormalInfoSingle",

@@ -457,6 +457,25 @@ fi
 # runtime (`/api/v1/relays/<n>/set`, from a std::string), so no static reading finds them. A bare
 # string "/api/v1/relays" added later would swallow all eight and this rule would say OK.
 
+echo "==> 12. No PMU command with a control code of 0x12 or higher exists under src/"
+# Control 0x12 is WRITE and 0x13 is EXECUTE. The wire allow-list test only covers paths a test
+# can reach; this covers the rest, by refusing to let such a CommandCode be written at all.
+# Nothing is allowed today. A later change that adds a gated bench write has to touch this rule
+# in the same PR, which is the point: it cannot happen by accident.
+#
+# Matches a temporary (CommandCode{0x12, ...}, CommandCode {0X1f, ...}), a named constant
+# (CommandCode kName{0x13, ...}, how pmu::cmd declares them) and copy-list-initialisation
+# (CommandCode k = {0x20, ...}), braces or parentheses, upper- or lowercase hex, any control
+# from 0x12 to 0xFF. Known gaps, accepted because no construction site in this tree looks like
+# them: a decimal literal, a variable, a bare `return {0x12, ...}`, or assigning `.control`.
+if hits=$(grep -rnE 'CommandCode([[:space:]]+[A-Za-z_][A-Za-z0-9_]*)?[[:space:]]*=?[[:space:]]*[{(][[:space:]]*0[xX]0*(1[2-9a-fA-F]|[2-9a-fA-F][0-9a-fA-F])' src/ 2>/dev/null); then
+    echo "FAIL: a PMU command with control >= 0x12 (WRITE/EXECUTE) is constructed:"
+    echo "$hits"
+    status=1
+else
+    echo "OK"
+fi
+
 echo
 if [ $status -eq 0 ]; then
     echo "RESULT: PASS"

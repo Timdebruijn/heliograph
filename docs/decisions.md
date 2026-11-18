@@ -231,3 +231,31 @@ Two deliberate properties:
 
 The release procedure is therefore: bump the defines, merge that, **then** tag the merge
 commit. Never move a tag onto a build that reports a different number.
+
+## Decision 5: EverSolar writes: reads first, one gated bench write at most
+
+The vendor PMU protocol V1.1 fills the WRITE (`0x12`) and EXECUTE (`0x13`) control codes that
+the `eversolar-monitor` reference leaves empty. It lists a "Control Power" function (`0x20`), a
+step up or down with no documented size, persistence or read-back. So "this protocol has no
+write operation" stopped being true, and the sentence saying it was corrected in
+`docs/eversolar-protocol.md`, `pmu_protocol.h` and the driver header.
+
+What was decided, in the order it happens:
+
+- **Reads first.** The driver gains four READ diagnostic queries (`11 00`, `11 01`, `11 04`,
+  `11 42`), raw bytes only, REST only. Whether the inverter lists `0x20` in its own `11 01` reply
+  is the one unmeasured fact the rest depends on.
+- **At most one gated bench write, and only if `0x20` is listed.** A separate change, behind
+  every existing write gate plus a per-device opt-in, not routed through `CommandDispatcher`
+  so it never becomes a Home Assistant entity.
+- **`0x13` EXECUTE is permanently out of scope.** It is where firmware update lives, if
+  anywhere. `tools/check_layering.sh` fails if a `CommandCode` with control `0x12` or higher
+  appears under `src/`, and a test records every frame the driver transmits against an
+  allow-list.
+- **The read-back rule stands.** A setpoint is served only when it can be read back
+  ([`write-path.md`](device-profiles/write-path.md)). A bench step has no read-back, which is
+  why it is a bench tool and not a capability; any exception for a shipped control would be
+  its own decision, not a precedent for profile rows.
+
+The design note, `eversolar-control-plan-2026-11-17.md`, carries the reasoning and the
+open questions.
