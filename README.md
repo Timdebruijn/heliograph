@@ -84,8 +84,8 @@ You need an inverter with an **RS485 port**.
 
 | Inverter / protocol | Grade | Has a real device answered it? |
 |---|---|---|
-| EverSolar / Zeversolar **TL** | **Stable** | Yes. A TL3000-20 in production, the author's own |
-| Zeversolar **TLC** | **Beta** | Yes. One TLC8000, on a contributor's hardware |
+| EverSolar / Zeversolar **TL** | **Stable** | Yes. A TL3000-20 in production, the author's own, and a TL1500 its owner reports running |
+| Zeversolar **TLC** | **Beta** | Yes. One TLC8000, on a contributor's hardware, which its owner reports is in production |
 | Modbus maps: Deye (3), GoodWe ET, Growatt (SPH, MIN TL-X, MIC TL-X), Huawei SUN2000, Sofar (2), Solis (2), Sungrow SH | Experimental | Has a map, needs a tester. None of the 13 shipped maps has met a device yet |
 | SunSpec (any inverter that implements it) | Experimental | No |
 | SolarMax (MaxTalk) | Experimental | No |
