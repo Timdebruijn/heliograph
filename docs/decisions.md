@@ -1,14 +1,15 @@
 # Framework and library choice
 
 All versions and statuses below were live-verified against GitHub releases/commits and the
-PlatformIO registry on **2026-07-16**. No version comes from memory.
+PlatformIO registry on **2026-07-16**. No version comes from memory. The Decision 2 version
+table was compared with the pins again on **2026-11-21**; the reasoning around it is as written.
 
 ## Decision 1: Arduino-ESP32 3.3.x via pioarduino (not native ESP-IDF)
 
 **Chosen: Option A — Arduino framework**, with one important nuance.
 
 The Arduino-vs-ESP-IDF trade-off has largely become a false dichotomy.
-**Arduino-ESP32 3.3.10 is built on ESP-IDF 5.5.4.** The Arduino framework is therefore not
+**Arduino-ESP32 3.3.x is built on ESP-IDF 5.5.x.** The Arduino framework is therefore not
 an alternative to IDF but a layer on top of it: all IDF APIs (`uart_set_mode()`,
 `esp_ota_ops`, `nvs_flash`, `esp_task_wdt`, `esp_reset_reason()`) are simply callable.
 So we choose Arduino and use IDF APIs directly wherever they're better — notably for
