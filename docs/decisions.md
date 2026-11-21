@@ -38,7 +38,7 @@ core 3.x.
 Required in `platformio.ini` — **pinned to a version, not to `stable`**:
 
 ```ini
-platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.312-1/platform-espressif32.zip
+platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.313/platform-espressif32.zip
 ```
 
 > This block used to end in `/stable/`, and that is a trap worth naming rather than quietly
@@ -58,8 +58,8 @@ from the work instructions: familiar name, current releases, wrong contents.
 
 | Purpose | Choice | Version (2026-10-02) | License | Why |
 |---|---|---|---|---|
-| Platform | **pioarduino/platform-espressif32** | 55.03.312-1 | Apache-2.0 | Only route to Arduino core 3.x |
-| Core | **arduino-esp32** | 3.3.12 | LGPL-2.1 | On IDF 5.5.5 |
+| Platform | **pioarduino/platform-espressif32** | 55.03.313 (2026-11-17) | Apache-2.0 | Only route to Arduino core 3.x |
+| Core | **arduino-esp32** | 3.3.13 (2026-11-17) | LGPL-2.1 | On IDF 5.5.6 |
 | Modbus TCP server | **eModbus** | v1.7.5stable, git-tag pinned (see below) | MIT | Server mode over TCP, sync+async |
 | JSON | **ArduinoJson** | 7.4.3 (2026-03-02) | MIT | v7 is current; v6 is legacy |
 | MQTT | **espMqttClient** | 1.7.3 (2026-06-22) | MIT | Non-blocking, QoS 0/1/2, LWT, auto-reconnect |
@@ -89,6 +89,14 @@ from the work instructions: familiar name, current releases, wrong contents.
 > It builds clean on all four boards with flash and RAM unchanged, which is why nothing caught
 > it. That is also exactly why the rule above is phrased around booting rather than building.
 > Not released until a board has run it.
+
+> **55.03.313 (core 3.3.12 → 3.3.13, GCC 14.2.0 → 14.4.0) was bumped on purpose, 2026-11-21, and
+> has not been booted.** Two things were read from the build artefacts, not from release notes.
+> The IDF libs are no longer a tagged release: 3.3.12 was built from the `v5.5.5` tag, 3.3.13
+> from the `release/v5.5` branch at `a45de8ccca1`, 436 commits past the `v5.5.6` tag it reports
+> as. And `g_rtcStore` sits at `0x50000200` in the ELF of both toolchains on all three boards,
+> so the fault-frame ring and the boot history should survive the update — which is an address
+> in an ELF, not a boot. The same rule applies: not released until a board has run it.
 
 ### Libraries rejected — explicitly
 
