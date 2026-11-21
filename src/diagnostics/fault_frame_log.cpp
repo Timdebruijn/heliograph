@@ -64,11 +64,12 @@ bool FaultFrameLog::push(const std::string& deviceId, const FaultRecord& record,
                          uint32_t epochSeconds, uint32_t uptimeSeconds) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (record.reason == FaultRecordReason::Baseline) {
+    // A fault is an event and is always stored. Anything else is a state the device was seen
+    // in, and one frame of a state is enough: a second one would only push a fault out.
+    if (record.reason != FaultRecordReason::StatusChanged) {
         for (size_t i = 0; i < s_.count; ++i) {
             const Entry& e = s_.entries[i];
-            if (e.reason == static_cast<uint8_t>(FaultRecordReason::Baseline) &&
-                e.signature == record.signature &&
+            if (e.signature == record.signature && e.statusCode == record.statusCode &&
                 std::strncmp(e.deviceId, deviceId.c_str(), kDeviceIdBytes - 1) == 0) {
                 return false;
             }
