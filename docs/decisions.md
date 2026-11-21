@@ -79,11 +79,13 @@ from the work instructions: familiar name, current releases, wrong contents.
 > reasoning as the toolchain note above — a release from something nobody booted is a release
 > nobody checked.
 
-> **Unity is the one version here that nothing in this repository pins.** `test_framework =
-> unity` makes PlatformIO Core 6.2.0 ask the registry for `throwtheswitch/Unity@^2.6.1`, and the
-> registry's newest is 2.6.1. Upstream tagged 2.7.0 on 2026-07-16, and this table has said
-> 2.7.0 since the first public release while the native tests ran on 2.6.1. A caret is not a
-> pin: the day the registry gets 2.7.0 the native tests move to it without a commit.
+> **Unity is the one version here that PlatformIO chooses unless the project says otherwise.**
+> `test_framework = unity` makes PlatformIO Core 6.2.0 ask the registry for
+> `throwtheswitch/Unity@^2.6.1`, and the registry's newest is 2.6.1. Upstream tagged 2.7.0 on
+> 2026-07-16, and this table has said 2.7.0 since the first public release while the native
+> tests ran on 2.6.1. A caret is not a pin: without an exact `throwtheswitch/Unity` entry in the
+> `lib_deps` of `[env:native]`, the day the registry gets 2.7.0 the native tests move to it
+> without a commit.
 
 > **The toolchain moved to 55.03.312-1 (core 3.3.11 → 3.3.12, IDF libs 5.5.5) without being
 > announced**, and the way it happened is worth keeping rather than tidying away. The edit was
