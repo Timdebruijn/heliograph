@@ -12,7 +12,7 @@ namespace heliograph {
 
 enum class FaultRecordReason : uint8_t {
     Baseline,          ///< the reference the driver compares error words against
-    StatusChanged,     ///< the status word moved to something other than a normal state
+    StatusChanged,     ///< the status word moved into a state that is not normal, or out of one
     ErrorWordsChanged, ///< the device's error words differ from the previous poll's
 };
 

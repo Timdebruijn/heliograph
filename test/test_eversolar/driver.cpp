@@ -780,10 +780,15 @@ static void test_each_fault_transition_is_recorded_once_with_its_reason() {
     TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
     TEST_ASSERT_EQUAL_UINT16(3, records[0].statusCode);
 
-    // Back to healthy: mode 1 is a normal state (no status record), the words changed (one).
+    // Back to healthy: leaving a fault is a status event, so the log always keeps the frame
+    // that says when it ended. The words moved too, and that is still one record.
     records = pollAndDrain(r, s, Payload::Captured);
     TEST_ASSERT_EQUAL_size_t(1, records.size());
-    TEST_ASSERT_EQUAL(FaultRecordReason::ErrorWordsChanged, records[0].reason);
+    TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
+    TEST_ASSERT_EQUAL_UINT16(1, records[0].statusCode);
+
+    // Healthy and staying healthy: nothing.
+    TEST_ASSERT_TRUE(pollAndDrain(r, s, Payload::Captured).empty());
 }
 
 static void test_a_first_poll_already_in_fault_is_recorded() {
@@ -808,6 +813,12 @@ static void test_an_unknown_mode_is_recorded_when_it_appears_and_not_while_it_st
     TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
     TEST_ASSERT_EQUAL_UINT16(7, records[0].statusCode);
     TEST_ASSERT_TRUE(pollAndDrain(r, s, Payload::UnknownMode).empty());
+
+    // And when it goes away: the tail never moved, so only the status rule can record this.
+    records = pollAndDrain(r, s, Payload::Captured);
+    TEST_ASSERT_EQUAL_size_t(1, records.size());
+    TEST_ASSERT_EQUAL(FaultRecordReason::StatusChanged, records[0].reason);
+    TEST_ASSERT_EQUAL_UINT16(1, records[0].statusCode);
 }
 
 static void test_a_record_keeps_the_bytes_as_they_came_including_a_bus_echo() {

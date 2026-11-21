@@ -3441,6 +3441,9 @@ static void test_a_change_that_repeats_every_day_is_kept_once() {
         log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 0xFF1E0000), 0, 9));
     TEST_ASSERT_TRUE(
         log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 0xFF1E0000), 0, 10));
+    // Words that come back to what a fault record already shows, within that fault: held.
+    TEST_ASSERT_FALSE(
+        log.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 2, 0xFF1E0000), 0, 11));
     TEST_ASSERT_EQUAL_size_t(7, log.snapshot().size());
 
     // Once the ring has turned over, the state is new again.

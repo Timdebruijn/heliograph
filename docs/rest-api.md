@@ -611,9 +611,9 @@ changed, oldest first. It is a read of RAM: no bus traffic, no auth beyond what
 ```
 
 - `reason` is `baseline` (the error words the driver compares against), `status_changed` (the
-  status word moved to something other than a normal state, an unknown value included) or
-  `error_words_changed`. One record per frame: when the status and the error words move in the
-  same reply, that is one `status_changed` record.
+  status word moved into a state that is not normal, an unknown value included, or back out of
+  one) or `error_words_changed`. One record per frame: when the status and the error words move
+  in the same reply, that is one `status_changed` record.
 - A `baseline` or `error_words_changed` record is stored **once**: it is skipped while the ring
   already holds a frame of the same device with the same status code and error words. A restart
   learns its baseline again, and a device can show the same change every day, and neither may

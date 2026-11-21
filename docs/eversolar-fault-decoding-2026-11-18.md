@@ -223,5 +223,10 @@ Refinements made while turning the note into a build brief:
   bridge's power source is a thing to check before the test, not a storage decision.
 - **One record per frame.** When the mode and the error words move in the same reply, that is
   one `status_changed` record. Two copies of one frame would only cost a slot.
+- **Changed on 2026-11-21.** The unit turned out to change word 20 for one poll at every dusk
+  (see `eversolar-protocol.md`), which filled the ring with two records an evening. Point 5 no
+  longer holds as written: a `baseline` or `error_words_changed` record is stored once per
+  device, mode and error words, and leaving a fault is a `status_changed` record too, so a fault
+  keeps its end. `rest-api.md` has the current rules.
 - **Frame size.** A stored frame is up to 80 bytes, so a reply behind an echo of the request
   (66 bytes on a half-duplex bus) keeps its checksum.
