@@ -97,12 +97,15 @@ public:
     /// Call once in setup().
     void begin();
 
-    /// Stores one record. Returns false when it was not stored: a Baseline for a device and
-    /// signature the ring already holds a Baseline of -- the bridge restarts on every deploy,
-    /// and a baseline per boot would push the fault frames out.
+    /// Stores one record. Returns false when it was not stored: a Baseline or ErrorWordsChanged
+    /// record while the ring already holds a frame of the same device, status code and
+    /// signature, whatever that frame's reason. Two things repeat and would otherwise push the
+    /// fault frames out: the bridge restarts on every deploy and learns its baseline again, and
+    /// a device can show the same harmless change every day (one inverter does at every dusk).
+    /// A StatusChanged record is always stored: the same fault twice is two events.
     ///
-    /// ponytail: a bit flapping every poll can still evict older records; add per-signature
-    /// rate limiting if a real unit does that
+    /// ponytail: a device flapping in and out of a fault on every poll can still evict older
+    /// records; add rate limiting per signature if a real unit does that
     bool push(const std::string& deviceId, const FaultRecord& record, uint32_t epochSeconds,
               uint32_t uptimeSeconds);
 

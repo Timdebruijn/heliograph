@@ -439,6 +439,11 @@ cannot be extracted; it is cited, not copied) or **hypothesis** (our reasoning).
   observation, not ours. **Unknown:** what the bits mean on this
   firmware. Read as the vendor bitmask, `FF00 0000` would set bits 31-24 on a healthy
   inverter, which is why the words are never treated as "0 means no error" and are not decoded.
+- **Observed:** at dusk the word H changes for a single poll. On 2026-11-19 (17:23:32) and
+  2026-11-20 (17:29:14) the unit, in mode 0 with a PV voltage of about 85 V, answered `FF1E 0000`
+  once and `FF00 0000` again ten seconds later. No such reply was recorded at the dawns in
+  between. **Unknown:** what `1E` means; one value cannot tell a code (30) from a bit pattern.
+  The flag `inverter.error_words_changed` is therefore on for about ten seconds every evening.
 - The fault values are **unverified**: no faulted unit has been read. The driver scales them only
   when a stored fault frame is read back (`GET /api/v1/fault-frames`, key `decoded_unverified`),
   and leaves out any value whose raw word is `FFFF`, because that is the healthy filler (65.535

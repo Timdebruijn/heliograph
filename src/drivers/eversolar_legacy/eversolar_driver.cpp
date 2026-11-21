@@ -550,10 +550,15 @@ void EversolarDriver::trackFaultState(const NormalInfo& info) {
     // The mode moved (or this is the first poll we ever saw) into something other than a normal
     // state. 2 and 3 are the documented faults; an unknown mode is recorded too, because an
     // unknown frame is exactly the one worth having later.
+    // The way back out is a status event as well. The log keeps a change of the error words only
+    // once per state, and the words a unit returns to are usually ones it already holds, so as a
+    // change record the recovery would be dropped and the fault would have no end.
     // When the mode and the words move in the same reply, the status record already holds that
     // frame, and the log has only a few slots: one record, not two. The baseline below is the
     // exception, and a rare one -- at most once per boot, and the log keeps only one copy of it.
-    if ((!havePrevious_ || previousMode_ != mode) && mode != 0 && mode != 1) {
+    const auto normal    = [](uint16_t m) { return m == 0 || m == 1; };
+    const bool modeMoved = !havePrevious_ || previousMode_ != mode;
+    if (modeMoved && (!normal(mode) || (havePrevious_ && !normal(previousMode_)))) {
         keep(FaultRecordReason::StatusChanged);
     } else if (tail && havePrevious_ && previousTail_ &&
                (previousWordH_ != info.tail.errorWordH ||

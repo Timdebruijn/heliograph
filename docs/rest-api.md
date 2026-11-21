@@ -610,11 +610,16 @@ changed, oldest first. It is a read of RAM: no bus traffic, no auth beyond what
 ]}
 ```
 
-- `reason` is `baseline` (the error words the driver compares against, stored once per distinct
-  value per device so a restart does not push fault frames out), `status_changed` (the status
-  word moved to something other than a normal state, an unknown value included) or
-  `error_words_changed`. One record per frame: when the status and the error words move in the
-  same reply, that is one `status_changed` record.
+- `reason` is `baseline` (the error words the driver compares against), `status_changed` (the
+  status word moved into a state that is not normal, an unknown value included, or back out of
+  one) or `error_words_changed`. One record per frame: when the status and the error words move
+  in the same reply, that is one `status_changed` record.
+- A `baseline` or `error_words_changed` record is stored **once**: it is skipped while the ring
+  already holds a frame of the same device with the same status code and error words. A restart
+  learns its baseline again, and a device can show the same change every day, and neither may
+  push a fault frame out. So these records say that a state was seen, not how often; the
+  measurement `inverter.error_words_changed` follows every occurrence. A `status_changed`
+  record is always stored.
 - `frame` is every byte the line delivered for that poll, as it came, so it may start with an
   echo of the bridge's own request. Capped at 80 bytes; `truncated` says when it was cut.
 - `decoded_unverified` is **only a reading aid**: values read out of the frame with the vendor
@@ -623,7 +628,8 @@ changed, oldest first. It is a read of RAM: no bus traffic, no auth beyond what
   (`0xFFFF`) is omitted, not scaled. The frame is the record.
 - `time` is `null` when the clock was not synced; `uptime_s` is always there.
 - The ring holds 8 records in RTC memory: it survives a software reset, an OTA restart and a
-  panic, **not** a power loss. A flag flapping on every poll can still push older records out.
+  panic, **not** a power loss. A device that flaps in and out of a fault on every poll can
+  still push older records out.
 - 404 `no_fault_frames` on a build without the log; 500 `payload_too_large` if the list would
   exceed its bound.
 

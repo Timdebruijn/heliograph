@@ -3401,9 +3401,57 @@ static void test_a_repeated_baseline_does_not_evict_fault_frames() {
     // A different signature, or a different device, is a different baseline.
     TEST_ASSERT_TRUE(log.push("dev1", faultRecord(FaultRecordReason::Baseline, 1, 0xFF000001), 0, 4));
     TEST_ASSERT_TRUE(log.push("dev2", faultRecord(FaultRecordReason::Baseline, 1, 0xFF000000), 0, 5));
-    // And the dedup is for baselines only: the same fault twice is two events.
+    // And the dedup never applies to a fault: the same fault twice is two events.
     TEST_ASSERT_TRUE(log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 0xFF400004), 0, 6));
     TEST_ASSERT_EQUAL_size_t(5, log.snapshot().size());
+}
+
+static void test_a_change_that_repeats_every_day_is_kept_once() {
+    faultlog::Storage st;
+    std::memset(&st, 0, sizeof st);
+    faultlog::FaultFrameLog log(st);
+    log.begin();
+
+    // What an EverSolar does: a baseline in mode 1, and at every dusk one standby reply with
+    // other error words followed by one that has the baseline's words again.
+    TEST_ASSERT_TRUE(log.push("dev1", faultRecord(FaultRecordReason::Baseline, 1, 0xFF000000), 0, 1));
+    TEST_ASSERT_TRUE(
+        log.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 0, 0xFF1E0000), 0, 2));
+    // Same words as the baseline, but in another mode: a state the ring does not hold yet.
+    TEST_ASSERT_TRUE(
+        log.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 0, 0xFF000000), 0, 3));
+    for (int dusk = 0; dusk < 20; ++dusk) {
+        TEST_ASSERT_FALSE(
+            log.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 0, 0xFF1E0000), 0, 4));
+        TEST_ASSERT_FALSE(
+            log.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 0, 0xFF000000), 0, 5));
+    }
+    TEST_ASSERT_EQUAL_size_t(3, log.snapshot().size());
+
+    // The same words while producing are not the dusk blip, and another device is another story.
+    TEST_ASSERT_TRUE(
+        log.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 1, 0xFF1E0000), 0, 6));
+    TEST_ASSERT_TRUE(
+        log.push("dev2", faultRecord(FaultRecordReason::ErrorWordsChanged, 0, 0xFF1E0000), 0, 7));
+    // A change back to a state another reason already recorded is not stored twice either.
+    TEST_ASSERT_FALSE(
+        log.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 1, 0xFF000000), 0, 8));
+    // A fault with words the ring has seen is still an event.
+    TEST_ASSERT_TRUE(
+        log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 0xFF1E0000), 0, 9));
+    TEST_ASSERT_TRUE(
+        log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 0xFF1E0000), 0, 10));
+    // Words that come back to what a fault record already shows, within that fault: held.
+    TEST_ASSERT_FALSE(
+        log.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 2, 0xFF1E0000), 0, 11));
+    TEST_ASSERT_EQUAL_size_t(7, log.snapshot().size());
+
+    // Once the ring has turned over, the state is new again.
+    for (uint32_t i = 0; i < faultlog::kCapacity; ++i) {
+        log.push("dev1", faultRecord(FaultRecordReason::StatusChanged, 2, 0x100 + i), 0, 20 + i);
+    }
+    TEST_ASSERT_TRUE(
+        log.push("dev1", faultRecord(FaultRecordReason::ErrorWordsChanged, 0, 0xFF1E0000), 0, 40));
 }
 
 static void test_a_corrupt_or_blank_fault_block_reads_as_empty() {
@@ -3655,6 +3703,7 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_the_fault_log_returns_oldest_first_and_wraps_at_eight);
     RUN_TEST(test_a_repeated_baseline_does_not_evict_fault_frames);
+    RUN_TEST(test_a_change_that_repeats_every_day_is_kept_once);
     RUN_TEST(test_a_corrupt_or_blank_fault_block_reads_as_empty);
     RUN_TEST(test_the_fault_log_survives_a_simulated_reboot);
     RUN_TEST(test_a_long_frame_is_truncated_and_says_so_and_a_long_id_is_cut_safely);
