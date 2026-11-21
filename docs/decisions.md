@@ -1,14 +1,15 @@
 # Framework and library choice
 
 All versions and statuses below were live-verified against GitHub releases/commits and the
-PlatformIO registry on **2026-07-16**. No version comes from memory.
+PlatformIO registry on **2026-07-16**. No version comes from memory. The Decision 2 version
+table was compared with the pins again on **2026-11-21**; the reasoning around it is as written.
 
 ## Decision 1: Arduino-ESP32 3.3.x via pioarduino (not native ESP-IDF)
 
 **Chosen: Option A — Arduino framework**, with one important nuance.
 
 The Arduino-vs-ESP-IDF trade-off has largely become a false dichotomy.
-**Arduino-ESP32 3.3.10 is built on ESP-IDF 5.5.4.** The Arduino framework is therefore not
+**Arduino-ESP32 3.3.x is built on ESP-IDF 5.5.x.** The Arduino framework is therefore not
 an alternative to IDF but a layer on top of it: all IDF APIs (`uart_set_mode()`,
 `esp_ota_ops`, `nvs_flash`, `esp_task_wdt`, `esp_reset_reason()`) are simply callable.
 So we choose Arduino and use IDF APIs directly wherever they're better — notably for
@@ -56,17 +57,17 @@ from the work instructions: familiar name, current releases, wrong contents.
 
 ## Decision 2: libraries
 
-| Purpose | Choice | Version (2026-10-02) | License | Why |
+| Purpose | Choice | Version (2026-11-21) | License | Why |
 |---|---|---|---|---|
 | Platform | **pioarduino/platform-espressif32** | 55.03.313 (2026-11-17) | Apache-2.0 | Only route to Arduino core 3.x |
 | Core | **arduino-esp32** | 3.3.13 (2026-11-17) | LGPL-2.1 | On IDF 5.5.6 |
-| Modbus TCP server | **eModbus** | v1.7.5stable, git-tag pinned (see below) | MIT | Server mode over TCP, sync+async |
+| Modbus TCP server | **eModbus** | v1.7.6.stable (2026-10-17), git-tag pinned (see below) | MIT | Server mode over TCP, sync+async |
 | JSON | **ArduinoJson** | 7.4.3 (2026-03-02) | MIT | v7 is current; v6 is legacy |
 | MQTT | **espMqttClient** | 1.7.3 (2026-06-22) | MIT | Non-blocking, QoS 0/1/2, LWT, auto-reconnect |
 | Web server | **ESP32Async/ESPAsyncWebServer** | 3.12.1 | **LGPL-3.0** | Only maintained variant |
 | TCP layer | **ESP32Async/AsyncTCP** | 3.5.0 | LGPL-3.0 | Belongs with the above |
-| OTA | **`Update.h`** (core) + `esp_ota_ops` | core 3.3.10 | LGPL-2.1 / Apache-2.0 | No extra dependency |
-| Tests | **Unity** via PlatformIO | 2.7.0 (2026-07-16) | MIT | Host-based `native` env |
+| OTA | **`Update.h`** (core) + `esp_ota_ops` | ships with the core | LGPL-2.1 / Apache-2.0 | No extra dependency |
+| Tests | **Unity** via PlatformIO | 2.6.1 (2025-01-01), see note | MIT | Host-based `native` env |
 
 > A library bump is not done when it builds. eModbus 1.7.5 and ESPAsyncWebServer 3.12.1 were
 > reviewed twice at the desk and found API-compatible, with no effect on the SSE path and a
@@ -77,6 +78,14 @@ from the work instructions: familiar name, current releases, wrong contents.
 > known baseline of 103; zero checksum errors, zero invalid frames, no coredump. The same
 > reasoning as the toolchain note above — a release from something nobody booted is a release
 > nobody checked.
+
+> **Unity is the one version here that PlatformIO chooses unless the project says otherwise.**
+> `test_framework = unity` makes PlatformIO Core 6.2.0 ask the registry for
+> `throwtheswitch/Unity@^2.6.1`, and the registry's newest is 2.6.1. Upstream tagged 2.7.0 on
+> 2026-07-16, and this table has said 2.7.0 since the first public release while the native
+> tests ran on 2.6.1. A caret is not a pin: without an exact `throwtheswitch/Unity` entry in the
+> `lib_deps` of `[env:native]`, the day the registry gets 2.7.0 the native tests move to it
+> without a commit.
 
 > **The toolchain moved to 55.03.312-1 (core 3.3.11 → 3.3.12, IDF libs 5.5.5) without being
 > announced**, and the way it happened is worth keeping rather than tidying away. The edit was
@@ -146,11 +155,11 @@ write your own Modbus parser". **Your call.**
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| eModbus releases lag its commits, and its tags are not always manifest-bumped | Unpredictable build | Pin to an exact tag (`v1.7.5stable`), not `latest` |
+| eModbus releases lag its commits, and its tags are not always manifest-bumped | Unpredictable build | Pin to an exact tag (`v1.7.6.stable`), not `latest` |
 | pioarduino is a community fork | Bus factor | Apache-2.0, active; pin the exact release URL |
 | PlatformIO registry names sometimes point to archived sources | Silent legacy | Dependencies as explicit Git URLs on the ESP32Async org |
 | PlatformIO not installed on this machine | Can't build right now | `pip install platformio` before Phase 2 |
-| ESP-IDF 6.0.2 already exists | No IDF6 features via Arduino | Deliberately stay on IDF 5.5.4 (LTS through Jan 2028) |
+| ESP-IDF 6.0.2 already exists | No IDF6 features via Arduino | Deliberately stay on IDF 5.5.x (LTS through Jan 2028) |
 
 ## Decision 3: build environment
 
@@ -173,8 +182,10 @@ ESP32 environments compile and link cleanly.
    pin was `miq19/eModbus@1.7.4` -- and it is no longer a registry pin at all. The
    `v1.7.5stable` tag shipped with `library.json` still at 1.7.4, so the registry never got a
    1.7.5 and `miq19/eModbus@1.7.5` does not resolve either. It is pinned by git tag now
-   (`https://github.com/eModbus/eModbus#v1.7.5stable`); PlatformIO reports the result as
-   `1.7.4+sha.8cdbcc9`, and that sha is the tag commit. `platformio.ini` carries the detail.
+   (`https://github.com/eModbus/eModbus#v1.7.6.stable`). That tag did bump its manifest, so
+   PlatformIO reports `1.7.6+sha.0d9992c`, and that sha is the tag commit; under `v1.7.5stable`
+   it read `1.7.4+sha.8cdbcc9`. The registry is still at 1.7.4. `platformio.ini` carries the
+   detail.
 2. **`board_build.partitions` was only in this document, not in `platformio.ini`.**
    As a result, PlatformIO silently used the board default of ~3.2 MB with a single
    app partition — meaning no OTA fallback. That's exactly the kind of bug that only
