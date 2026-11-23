@@ -2,8 +2,10 @@
 #
 # LuxPower SNA single-phase hybrid, low-voltage battery -- Modbus RTU register profile.
 #
-# STATUS: every mapped row is carried by at least two INDEPENDENT sources that agree on the
-# address, the width and the scale. NOT confirmed against a real inverter by this project, and
+# STATUS: every mapped row is in the vendor document (D) and in an implementation that was
+# reverse-engineered without it (C), and those two agree on the address, the width and the
+# scale. A and B both drew on D, so they are not a second opinion on the map; what they add is
+# that they ran it on real units. NOT confirmed against a real inverter by this project, and
 # nobody on it owns one. See docs/luxpower-sna-protocol.md for the comparison, what the sources
 # would not agree on, and what a tester needs to send back.
 #
@@ -12,8 +14,9 @@
 #      The register layer under joyfulhouse/eg4_web_monitor, which polls this inverter family
 #      over PLAIN Modbus RTU (pymodbus, through a USB adapter or a Modbus TCP<->RTU gateway).
 #   B. nicolaERTT/ESP32-luxpower, esp-luxpower.yaml
-#      ESPHome `modbus_controller` -- plain Modbus RTU and nothing else -- wired to an SNA's RJ45
-#      port. Carries fewer rows than A, and is the only source that is an SNA on the wire.
+#      ESPHome `modbus_controller` -- plain Modbus RTU and nothing else -- wired to an RJ45 port.
+#      B never names its model; that it is an SNA is inferred (see the protocol document). Its
+#      rows were loaded from D's table, which it reproduces.
 #   C. celsworth/lxp-bridge, src/lxp/packet.rs + doc/LXP_REGISTERS.txt
 #      Reverse-engineered from the WiFi dongle's TCP stream. Same register numbers, a different
 #      frame (see below), so it corroborates the MAP and says nothing about the wire.
@@ -63,14 +66,15 @@ stop_bits = 1
 
 # ------------------------------------------------------------------------------------------
 # Read blocks. D section 2, item 9: at most 40 registers per query, and the inverter groups its
-# registers as 0-39, 40-79, 80-119 -- a query may not cross a group. An LXP-3600 on the dongle
-# port was observed answering a longer read with exception 03 (f-garofalo/openlux issue 7). So
-# every block here IS one group, exactly, and none may be widened or shifted.
+# registers as 0-39, 40-79, 80-119 -- a query may not cross a group. Units differ in practice:
+# an LXP-3600 answered a longer read with exception 03 (f-garofalo/openlux issue 7), while
+# other projects report long reads working on other models. Every block here IS one documented
+# group, exactly, which is the form no unit has been seen to refuse.
 #
-# Three blocks map nothing and are marked `probe`: their contents are what the bring-up TRACE
+# Four blocks map nothing and are marked `probe`: their contents are what the bring-up TRACE
 # dump needs (the battery current whose scale the sources dispute, the function word holding
-# the AC-charge bit, the charge and export settings), and a unit that refuses one must not put
-# a bus error on the counters at every poll.
+# the AC-charge bit, the charge and export settings, the active-power enable bit), and a unit
+# that refuses one must not put a bus error on the counters at every poll.
 # ------------------------------------------------------------------------------------------
 
 [[block]]
@@ -104,6 +108,12 @@ probe = true
 space = "holding"
 start = 80
 count = 40      # 80-119: export limit at 103, discharge cut-off SOC at 105, function word at 110
+probe = true
+
+[[block]]
+space = "holding"
+start = 160
+count = 40      # 160-199: the second function word at 179, whose bit 6 enables the limit at 60
 probe = true
 
 # --- Operating state ------------------------------------------------------------------------
@@ -301,7 +311,7 @@ unit = "%"
 # DELIBERATELY NOT MAPPED -- full reasoning in docs/luxpower-sna-protocol.md
 # ==============================================================================================
 #
-# battery.soc (input 5). All four sources agree, and it still cannot be mapped: the register
+# battery.soc (input 5). A, B and C agree, and it still cannot be mapped: the register
 # packs state of charge in its LOW BYTE and state of health in its HIGH BYTE. A row reads a
 # whole word or one bit, so a healthy battery at 80 % would be published as 25680 %. This is the
 # gap that hurts most -- the dashboard's battery card reads battery.soc -- and it is a limit of
@@ -315,15 +325,14 @@ unit = "%"
 # the whole-array figure is a sum. Registers 31 and 46 are the grid-side inverter output, which
 # on a unit that mostly feeds its backup output is not what it produced.
 #
-# battery.current (input 98). Signed in every source, direction stated by none, and the scale
-# is disputed: B, C and D say 0.01 A, A says 0.1 A. Read in the third block.
+# battery.current (input 98). Direction stated by no source, and the scale is disputed: C and
+# D say 0.01 A, A and B -- the two that ran it on hardware -- use 0.1 A. Read in the third block.
 #
 # dc.mppt_N.current. A places PV currents at 72-74; the Lux Power copy of D places the grid
 # self-test registers there. A conflict, so neither.
 #
 # load.power. D has a load register at input 170, valid "when working in on-grid mode", and one
-# LXP-3600 was observed reading 0 there, then refusing it. The backup output (24) is a
-# different quantity.
+# LXP-3600 was observed refusing to read it. The backup output (24) is a different quantity.
 
 # ------------------------------------------------------------------------------------------
 # Writable setpoint -- DECLARED, DORMANT.
@@ -331,8 +340,8 @@ unit = "%"
 # Holding 60 limits the inverter's active power as a percentage. It is the one control register
 # of this family that fits what this firmware can write: a whole 16-bit register, a plain
 # number with fixed bounds from D, reversed by writing 100, and read back by the row above.
-# FC06 over plain Modbus RTU is what A uses for every setting and what B uses for the SOC
-# limits at 105 and 125, so the function code is not a guess here.
+# FC06 over plain Modbus RTU is what A uses for every single-register setting and what B uses
+# for the SOC limits at 105 and 125, so the function code is not a guess here.
 #
 # What nobody has shown: that an SNA ACTS on it. D names an enable bit for the active-power
 # command elsewhere (holding 179 bit 6, ActPowerCMDEn) and does not say whether 60 is obeyed
