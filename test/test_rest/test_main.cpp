@@ -95,7 +95,7 @@ static void test_config_response_contains_no_secret_anywhere() {
 static void test_config_reports_whether_a_secret_is_set() {
     auto        c = configWithSecrets();
     std::string json;
-    serializeConfig(c, json);
+    TEST_ASSERT_TRUE(serializeConfig(c, json));
     auto doc = parse(json);
 
     TEST_ASSERT_TRUE(doc["wifi"]["password_set"].as<bool>());
@@ -120,7 +120,7 @@ static void test_config_reports_whether_a_secret_is_set() {
     c.mqtt.password.clear();
     c.mqtt.username.clear();
     c.security.adminPassword.clear();
-    serializeConfig(c, json);
+    TEST_ASSERT_TRUE(serializeConfig(c, json));
     doc = parse(json);
     TEST_ASSERT_FALSE(doc["wifi"]["password_set"].as<bool>());
     TEST_ASSERT_FALSE(doc["mqtt"]["password_set"].as<bool>());
@@ -791,14 +791,14 @@ static void test_reboot_required_flag_is_patch_only() {
     auto        c = configWithSecrets();
     std::string json;
     // GET path: no flag emitted.
-    serializeConfig(c, json);
+    TEST_ASSERT_TRUE(serializeConfig(c, json));
     TEST_ASSERT_TRUE(parse(json)["reboot_required"].isNull());
     // PATCH path: the caller's computed value is echoed verbatim.
     bool needed = true;
-    serializeConfig(c, json, 4096, &needed);
+    TEST_ASSERT_TRUE(serializeConfig(c, json, 4096, &needed));
     TEST_ASSERT_TRUE(parse(json)["reboot_required"].as<bool>());
     needed = false;
-    serializeConfig(c, json, 4096, &needed);
+    TEST_ASSERT_TRUE(serializeConfig(c, json, 4096, &needed));
     TEST_ASSERT_FALSE(parse(json)["reboot_required"].as<bool>());
 }
 
@@ -1113,7 +1113,7 @@ static void test_driver_options_are_opaque_to_the_config_model() {
     TEST_ASSERT_EQUAL_STRING("dual", c.driver.options["layout"].c_str());
 
     std::string json;
-    serializeConfig(c, json);
+    TEST_ASSERT_TRUE(serializeConfig(c, json));
     TEST_ASSERT_EQUAL_STRING("dual", parse(json)["driver"]["options"]["layout"]);
 }
 
