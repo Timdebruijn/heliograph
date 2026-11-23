@@ -109,7 +109,8 @@ options = [
 **The hard limit: whole registers only.** Several vendors pack a mode into *part* of a register
 alongside unrelated flags (`bitmask = 0x03` in some community maps). FC06 writes all sixteen bits,
 so setting a masked field needs read-modify-write, which this path does not do — it would clear
-whatever shares the register. The build rejects a `bitmask` key by name rather than ignoring it.
+whatever shares the register. The build rejects a `bitmask`, `bit` or `byte` key on a write row by
+name rather than ignoring it.
 On Deye/Sunsynk, for instance, "Load Limit" (register 244) is a whole-register selector and
 mappable; "Priority Load" and "Solar Export" are single bits inside a shared register and are not.
 

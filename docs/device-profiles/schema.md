@@ -232,7 +232,9 @@ value "low" could mean either word, so map the register that holds the byte as i
 Two things this does not do. A field that is not a whole byte (three bits of mode, a nibble) has
 no key, because no shipped profile needs one; open an issue with the register and its source.
 And it is for reading: a `[[write]]` row refuses `byte` for the same reason it refuses `bit`,
-which is that FC06 writes all sixteen bits and would overwrite the other half.
+which is that FC06 writes all sixteen bits and would overwrite the other half. For that reason a
+`byte` row does not count as the [read-back](write-path.md#a-read-back-is-required) of a setpoint
+either.
 
 ## `[status_register]` — optional: what the inverter is doing
 

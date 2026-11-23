@@ -659,8 +659,10 @@ def parse_profile(
         # `verified` (write, READ BACK, compare) cannot be done. Unverified rows without one stay
         # valid research; the driver just never serves them, opt-in or not.
         readback = READBACK.get(cmd)
+        # Read as the whole register, like the write: a `byte` row sees half of what FC06 sets, so
+        # it could agree with a write that had overwritten the other half.
         has_readback = readback is not None and any(
-            r["measurement"] == readback for r in parsed_regs
+            r["measurement"] == readback and r["byte"] is None for r in parsed_regs
         )
         if verified and not has_readback:
             raise ProfileError(

@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gen_profiles
-from check_readback_rule import parse
+from check_readback_rule import READBACK, parse
 
 
 def row(data: dict, rtype: str) -> dict:
@@ -48,6 +48,7 @@ def flag_row(data: dict) -> None:
 REFUSED = {
     "a value that is not low or high": edit_row(byte="middle"),
     "a value that is not a string": edit_row(byte=1),
+    "a list": edit_row(byte=["low"]),
     "a signed register": edit_row(byte="low", type="s16"),
     "a 32-bit register": edit_row("u32", byte="high"),
     "a bit row": flag_row,
@@ -68,9 +69,11 @@ def main() -> int:
             gen_profiles.load_vocabulary(),
             gen_profiles.load_command_vocabulary(),
         )
-        assert emitted.count(f"RegByte::{enumerator}}}") == 1, (
-            f"byte = {half!r} must reach the generated table as RegByte::{enumerator}"
-        )
+        # The tail of the row, in RegisterMapping's field order: scale, signed, offset, word
+        # order, the sentinel and its value, bit, byte. One string, so a key that is dropped or
+        # lands in another field fails here.
+        tail = f"0.5, false, 0.0, false, true, 255, -1, RegByte::{enumerator}}},"
+        assert emitted.count(tail) == 1, f"byte = {half!r}: no row ends in {tail}"
     for what, edit in REFUSED.items():
         try:
             parse(edit)
@@ -78,6 +81,14 @@ def main() -> int:
             assert "byte" in str(e), f"{what}: refused for another reason: {e}"
         else:
             raise AssertionError(f"byte on {what} must be refused")
+
+    def half_readback(data: dict) -> None:
+        rows = [r for r in data["register"] if r["measurement"] == READBACK]
+        rows[0]["byte"] = "low"
+
+    assert not parse(half_readback)["writes"][0]["has_readback"], (
+        "half a register is not a read-back of a setpoint that is written whole"
+    )
     print(f"byte rule: OK ({len(REFUSED)} refusals)")
     return 0
 
