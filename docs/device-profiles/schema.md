@@ -127,7 +127,8 @@ map, not about the wire. See [prometheus.md](../prometheus.md).
 
 One canonical measurement fed by one register (or register pair).
 Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`. `raw` is the
-whole register unless the row says otherwise with `bit` or `byte`.
+whole value (one register, or the pair for a 32-bit type) unless the row says otherwise with
+`bit` or `byte`.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
@@ -232,9 +233,11 @@ value "low" could mean either word, so map the register that holds the byte as i
 Two things this does not do. A field that is not a whole byte (three bits of mode, a nibble) has
 no key, because no shipped profile needs one; open an issue with the register and its source.
 And it is for reading: a `[[write]]` row refuses `byte` for the same reason it refuses `bit`,
-which is that FC06 writes all sixteen bits and would overwrite the other half. For that reason a
-`byte` row does not count as the [read-back](write-path.md#a-read-back-is-required) of a setpoint
-either.
+which is that FC06 writes all sixteen bits and would overwrite the other half. A `byte` row does
+not count as the [read-back](write-path.md#a-read-back-is-required) of a setpoint either: it sees
+half of what FC06 set, so it could agree with a write that had overwritten the other half. That
+is stricter than a device needs which reports a setpoint in one byte of a *different* register;
+none has come up.
 
 ## `[status_register]` — optional: what the inverter is doing
 

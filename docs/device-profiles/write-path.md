@@ -137,7 +137,8 @@ profile **also reads the setpoint back** as the command's canonical measurement,
 `control.active_power_limit` for `set_active_power_limit_percent`. The pairs are listed in
 `READBACK` in `tools/gen_profiles.py`, and `--list-commands` prints each one. The requirement holds with or without the
 `allow_unverified_writes` opt-in, and the generator refuses `verified = true` on a row without a
-read-back.
+read-back. The read row has to read the whole register: one with a `byte` key does not count,
+because half a register could agree with a write that had overwritten the other half.
 
 The reason: the read-back shows what the inverter is actually limited to, as opposed to what it
 was last asked for. The two differ whenever a write was refused, a second controller is on the

@@ -2,9 +2,9 @@
 """Self-check for gen_profiles.py's `byte` key (docs/device-profiles/schema.md).
 
 A profile that uses the key proves the accepted case and nothing else, so every refusal below is
-otherwise never executed. Each case parses a shipped profile with one row edited in memory --
-nothing is written to the tree -- and a refusal must name the key, so a row that fails for some
-other reason does not pass as a refusal of this one.
+otherwise never executed. Each case parses a shipped profile with one row edited or added in
+memory -- nothing is written to the tree -- and a refusal must name the key, so a row that fails
+for some other reason does not pass as a refusal of this one.
 
 Run by tools/check_layering.sh.
 """
@@ -17,6 +17,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gen_profiles
 from check_readback_rule import READBACK, parse
+
+# Which enumerator each value must reach. Spelled out here and not read from gen_profiles.BYTES:
+# a table checked against itself agrees with itself, swapped or not, and a swap reads the wrong
+# half on the device.
+HALVES = {"low": "Low", "high": "High"}
 
 
 def row(data: dict, rtype: str) -> dict:
@@ -58,7 +63,7 @@ REFUSED = {
 
 
 def main() -> int:
-    for half, enumerator in gen_profiles.BYTES.items():
+    for half, enumerator in HALVES.items():
         profile = parse(edit_row(byte=half, invalid=0xFF, scale=0.5))
         rows = [r for r in profile["registers"] if r["byte"] is not None]
         assert [r["byte"] for r in rows] == [half], rows

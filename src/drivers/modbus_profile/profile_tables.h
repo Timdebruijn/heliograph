@@ -25,8 +25,8 @@ namespace heliograph::profile {
 
 enum class RegSpace : uint8_t { Input, Holding };
 
-/// Which part of a 16-bit register a mapping reads. Whole is every row there was before this
-/// existed; Low and High are for a device that puts two small readings in one word.
+/// Which part of a 16-bit register a mapping reads. Whole is the default, a row without the key;
+/// Low and High are for a device that puts two small readings in one word.
 enum class RegByte : uint8_t { Whole, Low, High };
 
 /// How far a register map has been proven. Deliberately the same rungs as DriverSupportLevel:
@@ -92,9 +92,9 @@ struct RegisterMapping {
     /// reading is (raw >> bit) & 1 and nothing else applies: scale, offset, sign and sentinel are
     /// refused on such a row by the generator.
     int8_t bit = -1;
-    /// One byte of a 16-bit register, for a word that holds two readings: a charge level in one
-    /// half and a health figure in the other is the case that asked for it. Decoded as a whole
-    /// word, such a register reads as tens of thousands of percent.
+    /// One byte of a 16-bit register, for a word that holds two readings, such as a charge level
+    /// in one half and a health figure in the other. Decoded as a whole word the two run
+    /// together: 0x6450 is 25680, not 80 and 100.
     ///
     /// The byte takes the place of the raw value, so scale, offset and the sentinel all apply to
     /// it and `invalidRaw` is a byte value. The generator allows it on an unsigned single

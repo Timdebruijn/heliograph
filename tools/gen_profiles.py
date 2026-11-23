@@ -647,8 +647,8 @@ def parse_profile(
         # ignored -- an ignored `bitmask` would produce a row that looks masked and writes whole.
         if "bitmask" in wr or "bit" in wr or "byte" in wr:
             raise ProfileError(
-                f"{ww}: bit/bitmask/byte is not supported -- FC06 writes the whole register, so setting "
-                f"part of one needs read-modify-write, which the write path does not do. A "
+                f"{ww}: bit/bitmask/byte is not supported -- FC06 writes the whole register, so "
+                f"setting part of one needs read-modify-write, which the write path does not do. A "
                 f"masked field would clear its neighbours in the same register"
             )
         verified = wr.get("verified", False)
