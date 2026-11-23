@@ -1958,6 +1958,7 @@ static void test_the_declared_word_order_is_consistent_within_each_family() {
         {"deye_sg0x_lp3", true, "source C names the low word first; A and B read it so"},
         {"deye_sg0x_lp3_dual", true, "the same rows as deye_sg0x_lp3"},
         {"solis_rhi_hybrid", false, "source B lists [low, high], so high sits at the lower address"},
+        {"luxpower_sna", true, "the vendor table names each pair L then H at ascending addresses"},
         {"huawei_sun2000", false, "the library decodes with a big-endian struct format"},
         {"goodwe_et_hybrid", false, "read_bytes4 is int.from_bytes(..., byteorder='big')"},
         {"mic_tl_x", false, "growatt-local assembles (value << 16) | next"},
