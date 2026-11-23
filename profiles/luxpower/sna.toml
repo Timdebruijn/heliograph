@@ -44,9 +44,7 @@
 [profile]
 driver = "modbus_profile"
 id = "luxpower_sna"
-# Kept short on purpose. GET /api/v1/drivers lists every profile's name in one response capped
-# at 8192 bytes, and the longer name this profile first had put the list 24 bytes over.
-display_name = "LuxPower SNA 3-6K hybrid"
+display_name = "LuxPower SNA 3-6K hybrid (single phase, LV battery)"
 manufacturer = "LuxPower"
 
 # How far this MAP is proven -- its own property, never inherited from the driver.
