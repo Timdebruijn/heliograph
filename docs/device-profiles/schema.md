@@ -126,7 +126,9 @@ map, not about the wire. See [prometheus.md](../prometheus.md).
 ## `[[register]]` — 1 or more per file
 
 One canonical measurement fed by one register (or register pair).
-Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`.
+Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`. `raw` is the
+whole value (one register, or the pair for a 32-bit type) unless the row says otherwise with
+`bit` or `byte`.
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
@@ -138,8 +140,9 @@ Decoded as `value = raw * scale + offset`, after sign extension for `s16`/`s32`.
 | `scale` | number | no (1.0) | Multiplier for the raw integer. A device reporting tenths uses `0.1`. Must not be 0. **May be negative** — see below. |
 | `offset` | number | no (0.0) | Added after scaling. For registers that store a *biased* value so it never goes negative on the wire: several vendors report `1000` for 0 °C, which is `scale = 0.1, offset = -100`. |
 | `word_order` | string | no (`"high_first"`) | 32-bit values only. `"low_first"` when the device stores the LOW half at the lower address. Refused on a 16-bit row and on write rows. |
-| `invalid` | int | no | A raw value the device uses to mean "not available" (e.g. `0x7FFF`, `0xFFFF`). A matching register is left **undeclared** rather than published. Compared before sign extension; must fit the register width. Refused on write rows. |
-| `bit` | int | no | `0`–`15`: read one bit of a flag register instead of its value. The reading is `(raw >> bit) & 1`, published as a yes/no (a `binary_sensor` in Home Assistant). Required on, and only allowed on, a yes/no id such as `grid.connected`. Needs `type = "u16"`; `unit`, `scale`, `offset`, `invalid` and `word_order` are refused on such a row. |
+| `invalid` | int | no | A raw value the device uses to mean "not available" (e.g. `0x7FFF`, `0xFFFF`). A matching register is left **undeclared** rather than published. Compared before sign extension; must fit the register width, or one byte on a `byte` row. Refused on write rows. |
+| `bit` | int | no | `0`–`15`: read one bit of a flag register instead of its value. The reading is `(raw >> bit) & 1`, published as a yes/no (a `binary_sensor` in Home Assistant). Required on, and only allowed on, a yes/no id such as `grid.connected`. Needs `type = "u16"`; `unit`, `scale`, `offset`, `invalid`, `word_order` and `byte` are refused on such a row. |
+| `byte` | string | no | `"low"` or `"high"`: read one byte of a register that holds two readings. That byte, 0–255, becomes `raw`, so `scale`, `offset` and `invalid` apply to it. Needs `type = "u16"`. Refused together with `bit` and on write rows. See [Two readings in one register](#two-readings-in-one-register). |
 | `unit` | string | yes | One of `W` `V` `A` `Hz` `°C` (or `C`) `kWh` `h` `%` `dBm` `s`. The measurement *type* (Power, Voltage, …) is derived from the unit, so you never touch internal enums. |
 
 ### Sentinels: when a device says "unknown" in numbers
@@ -197,6 +200,44 @@ bit          = 2
 Read what a bit *is* from the source, not from the values you happen to see: a relay bitmask
 that reads `7` and later `3` looks like a phase dropping out, while it is the grid relay
 opening.
+
+### Two readings in one register
+
+Some devices put two small numbers in one 16-bit register, such as a battery's charge level in
+the low byte and a second percentage in the high byte. Read as a whole word that register is
+neither: 80 % under a high byte of 100 comes out as 25680 %. `byte` picks the half, and each
+half is its own row, so the same `address` appears twice:
+
+```toml
+[[register]]
+measurement  = "battery.soc"
+display_name = "Battery SoC"
+space        = "input"
+address      = 5
+type         = "u16"
+byte         = "low"
+unit         = "%"
+```
+
+The **low** byte is the least significant one, `raw & 0xFF`; the **high** byte is `raw >> 8`.
+That is a statement about the register's value, not about the order of bytes on the wire, which
+Modbus fixes and the bridge has already undone. A source written for a vendor's own framing
+may list the bytes in transmission order, so check which half it means against a value you can
+recognise.
+
+Everything else on the row then describes the byte. `invalid` is a byte value (`0xFF`, not
+`0xFFFF`), compared with this half only: a sentinel in the other half says nothing about this
+one. The type must be `u16`. A byte has no sign of its own, so `s16` is refused; and in a 32-bit
+value "low" could mean either word, so map the register that holds the byte as its own `u16`.
+
+Two things this does not do. A field that is not a whole byte (three bits of mode, a nibble) has
+no key, because no shipped profile needs one; open an issue with the register and its source.
+And it is for reading: a `[[write]]` row refuses `byte` for the same reason it refuses `bit`,
+which is that FC06 writes all sixteen bits and would overwrite the other half. A `byte` row does
+not count as the [read-back](write-path.md#a-read-back-is-required) of a setpoint either: it sees
+half of what FC06 set, so it could agree with a write that had overwritten the other half. That
+is stricter than a device needs which reports a setpoint in one byte of a *different* register;
+none has come up.
 
 ## `[status_register]` — optional: what the inverter is doing
 

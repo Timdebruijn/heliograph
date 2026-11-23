@@ -113,6 +113,14 @@ else
     status=1
 fi
 
+echo "==> 3d. The generator refuses a byte selector wherever it cannot be honoured"
+# A profile using the key only ever exercises the accepted case.
+if python3 tools/check_byte_rule.py; then
+    :
+else
+    status=1
+fi
+
 echo "==> 4. Every REST payload builder is reachable from a route"
 # A builder with no route is dead code that unit tests happily cover. Three of them shipped
 # that way in Phase 7 -- buildDevicePayload, buildMeasurementsPayload and
