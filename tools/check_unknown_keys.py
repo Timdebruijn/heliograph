@@ -77,13 +77,14 @@ NAMED = [
     (MISSPELT["[[register]]"][0], "bitmask", "bitmask is not a key"),
     *(
         (BIT_ROW, key, f"takes no {key}")
-        for key in ("scale", "offset", "invalid", "word_order", "unit")
+        for key in ("scale", "offset", "invalid", "word_order", "unit", "byte")
     ),
     (WRITE, "offset", "offset is not supported"),
     (WRITE, "word_order", "word_order is not supported"),
     (WRITE, "invalid", "invalid is a READ concept"),
-    (WRITE, "bit", "bit/bitmask is not supported"),
-    (WRITE, "bitmask", "bit/bitmask is not supported"),
+    (WRITE, "bit", "bit/bitmask/byte is not supported"),
+    (WRITE, "bitmask", "bit/bitmask/byte is not supported"),
+    (WRITE, "byte", "bit/bitmask/byte is not supported"),
 ]
 
 

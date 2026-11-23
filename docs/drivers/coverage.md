@@ -22,6 +22,7 @@ driver must not promote a map nobody has confirmed.
 | `min_tl_x` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | · | · | · |
 | `sph` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | ✔ | · |
 | `huawei_sun2000` | Huawei | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | · |
+| `luxpower_sna` | LuxPower | experimental | · | ✔ | · | ✔ | · | ✔ | ✔ | · | · | ✔ | ✔ | · | ✔ | ✔ | · |
 | `sofar_hyd_3ph` | Sofar Solar | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `sofar_hyd_ep` | Sofar Solar | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `solis_rhi_hybrid` | Solis | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ |
@@ -39,6 +40,7 @@ the profile's own comments — see [Why a channel is missing](#why-a-channel-is-
 | `mic_tl_x` | `set_active_power_limit_percent` | holding 3 | yes | **no** |
 | `min_tl_x` | `set_active_power_limit_percent` | holding 3 | yes | **no** |
 | `huawei_sun2000` | `set_active_power_limit_percent` | holding 40125 | yes | **no** |
+| `luxpower_sna` | `set_active_power_limit_percent` | holding 60 | yes | **no** |
 | `solis_rhi_hybrid` | `set_export_limit_watts` | holding 43074 | no — no read-back | **no** |
 | `solis_rhi_hybrid` | `set_battery_operating_mode` | holding 43110 | no — no read-back | **no** |
 | `sungrow_sh_hybrid` | `set_export_limit_watts` | holding 13073 | no — no read-back | **no** |
@@ -60,6 +62,7 @@ the profile's own comments — see [Why a channel is missing](#why-a-channel-is-
 | `min_tl_x` | see profile header | see profile header | **no** |
 | `sph` | see profile header | see profile header | **no** |
 | `huawei_sun2000` | see profile header | see profile header | **no** |
+| `luxpower_sna` | see profile header | see profile header | **no** |
 | `sofar_hyd_3ph` | see profile header | see profile header | **no** |
 | `sofar_hyd_ep` | see profile header | see profile header | **no** |
 | `solis_rhi_hybrid` | see profile header | see profile header | **no** |

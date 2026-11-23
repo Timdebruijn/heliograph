@@ -113,7 +113,15 @@ else
     status=1
 fi
 
-echo "==> 3d. The generator refuses a key a profile section does not have"
+echo "==> 3d. The generator refuses a byte selector wherever it cannot be honoured"
+# A profile using the key only ever exercises the accepted case.
+if python3 tools/check_byte_rule.py; then
+    :
+else
+    status=1
+fi
+
+echo "==> 3e. The generator refuses a key a profile section does not have"
 # Every shipped profile is spelt correctly, so nothing else ever executes that refusal either.
 if python3 tools/check_unknown_keys.py; then
     :

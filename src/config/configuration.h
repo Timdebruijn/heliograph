@@ -279,6 +279,10 @@ bool validate(const Configuration& config, ConfigError& error);
 /// When `rebootRequired` is non-null its value is emitted as a top-level `reboot_required`
 /// boolean -- the PATCH handler passes the result of configChangeRequiresReboot(); GET passes
 /// nullptr and the field is absent.
+///
+/// [[nodiscard]] because a refusal leaves `out` untouched, so a caller that ignores the result
+/// sends whatever the string held before, which for a fresh one is an empty body.
+[[nodiscard]]
 bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes = 4096,
                      const bool* rebootRequired = nullptr);
 

@@ -52,7 +52,11 @@ ApiError invalidConfig(const ConfigError& error) {
 void sendError(AsyncWebServerRequest* request, const ApiError& error) {
     std::string body;
     if (!buildErrorPayload(error, "", body)) {
-        request->send(error.httpStatus, kJson, "{\"error\":{\"code\":\"internal\"}}");
+        // With a message, because docs/rest-api.md promises one on every error. No interpolated
+        // value: this runs when the builder that would have escaped one has just refused.
+        request->send(error.httpStatus, kJson,
+                      "{\"error\":{\"code\":\"internal\","
+                      "\"message\":\"the error response could not be built\"}}");
         return;
     }
     // Never a 200 with an error inside: a client must be able to trust the status code.
@@ -442,7 +446,14 @@ bool RestApi::begin() {
                  [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         std::string body;
-        buildDevicesPayload(context_.devices->devices(), body);
+        // At most kMaxDevices ids, which in practice is nowhere near the bound, so a refusal
+        // here means the document could not be allocated. An empty 200 would hide that behind
+        // a JSON parse error.
+        if (!buildDevicesPayload(context_.devices->devices(), body)) {
+            sendError(request, {500, "payload_too_large",
+                                "device list exceeded its bound or could not be allocated"});
+            return;
+        }
         request->send(200, kJson, body.c_str());
     });
 
@@ -522,7 +533,14 @@ bool RestApi::begin() {
     g_server->on("/api/v1/diagnostics", HTTP_GET, [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         std::string body;
-        buildDiagnosticsPayload(context_.diagnostics->snapshot(), context_.bridgeInfo(), body);
+        // Low memory is one of the two things that make this builder refuse, and it is also
+        // what sends someone here to look. An empty 200 at that moment explains nothing.
+        if (!buildDiagnosticsPayload(context_.diagnostics->snapshot(), context_.bridgeInfo(),
+                                     body)) {
+            sendError(request, {500, "payload_too_large",
+                                "diagnostics exceeded their bound or could not be allocated"});
+            return;
+        }
         request->send(200, kJson, body.c_str());
     });
 
@@ -565,7 +583,13 @@ bool RestApi::begin() {
     g_server->on("/api/v1/drivers", HTTP_GET, [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         std::string body;
-        buildDriversPayload(context_.registry->availableDrivers(), body);
+        // Checked, because the builder leaves `body` empty when the list does not fit, and an
+        // empty 200 is a failure dressed as a success: the client gets a JSON parse error and
+        // nothing that says why.
+        if (!buildDriversPayload(context_.registry->availableDrivers(), body)) {
+            sendError(request, {500, "payload_too_large", "driver list exceeded its bound"});
+            return;
+        }
         request->send(200, kJson, body.c_str());
     });
 
@@ -689,8 +713,16 @@ bool RestApi::begin() {
             }
             const bool  rebootRequired = configChangeRequiresReboot(before, updated);
             std::string body;
-            serializeConfig(updated, body, 4096, &rebootRequired);
-            request->send(200, kJson, body.c_str());
+            // Still a 200 when the document cannot be rendered: the change is saved and applied
+            // by now, and an error status would report a failure that did not happen. The
+            // fallback keeps the one thing the caller cannot get from a later GET, and carries
+            // no interpolated value, so it cannot fail in turn. Same reasoning as /provision.
+            if (serializeConfig(updated, body, 4096, &rebootRequired)) {
+                request->send(200, kJson, body.c_str());
+            } else {
+                request->send(200, kJson, rebootRequired ? "{\"reboot_required\":true}"
+                                                         : "{\"reboot_required\":false}");
+            }
         },
         nullptr,
         [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index,
@@ -1349,9 +1381,9 @@ bool RestApi::begin() {
             }
             const auto result = g_ota.end();
             if (result != ota::OtaResult::Ok) {
-                std::string body;
-                buildErrorPayload({400, ota::otaResultName(result), g_ota.lastError()}, "", body);
-                request->send(400, kJson, body.c_str());
+                // Through sendError like every other failure: it has a fixed fallback for the
+                // case where the error document itself cannot be built.
+                sendError(request, {400, ota::otaResultName(result), g_ota.lastError()});
                 return;
             }
             // end() only flips the boot partition; without this the response promised

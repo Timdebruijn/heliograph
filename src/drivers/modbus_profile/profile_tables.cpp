@@ -123,6 +123,13 @@ void applyProfile(const DeviceProfile& profile, const BlockData* blocks, size_t 
             const uint16_t low  = mp.lowWordFirst ? hi : second;
             raw = (static_cast<int64_t>(high) << 16) | low;
         }
+        // Half of the word. From here on that byte IS the raw value: the sentinel is compared
+        // with it and scale and offset are applied to it.
+        if (mp.byte == RegByte::Low) {
+            raw = hi & 0xFFU;
+        } else if (mp.byte == RegByte::High) {
+            raw = hi >> 8;
+        }
 
         // Before sign extension: the sentinel is a bit pattern the vendor documents, not a
         // number, so it is compared as one.

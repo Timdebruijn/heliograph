@@ -76,6 +76,8 @@ count = 125
 #   invalid       optional raw value meaning "not available" (e.g. 0x7FFF). The reading is
 #                 then left ABSENT instead of published. Some vendors report a sentinel
 #                 rather than an exception, and 3276.7 °C looks like data.
+#   byte          optional, u16 only: "low" or "high" when the register holds two readings,
+#                 one per byte. scale, offset and invalid then apply to that byte.
 #   unit          W V A Hz °C kWh h % dBm s — must match the measurement's physics
 # ------------------------------------------------------------------------------------------
 
