@@ -20,6 +20,10 @@ gen_profiles.py: 10 profile(s) valid: deye_sun_xk_sg, goodwe_et_hybrid, mic_tl_x
 
 Files whose name starts with `_` (like the template) are skipped.
 
+A key that a section does not have is refused, not ignored, and the message names the key it
+probably meant: `scal = 0.1` on a `[[register]]` row fails the build instead of publishing the
+raw integer. The tables below are the complete set for each section.
+
 ## `[profile]` — one per file
 
 | Key | Type | Required | Meaning |
