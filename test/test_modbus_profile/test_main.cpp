@@ -291,6 +291,96 @@ static void test_a_low_word_first_pair_still_sign_extends() {
     TEST_ASSERT_EQUAL_DOUBLE(-2000.0, m.find(measurement_id::kBatteryPower)->value);
 }
 
+// --- byte = "low" | "high" ----------------------------------------------------------------
+// One word holding two readings: charge in the low byte, a second figure in the high byte. The
+// second row is mapped to battery temperature only because the decoder needs SOME id there.
+
+// {id, type, unit, name, space, address, words, scale, signed, offset, lowWordFirst, hasInvalid,
+//  invalidRaw, bit, byte}
+static const RegisterMapping kPackedBytes[] = {
+    {measurement_id::kBatterySoc, MeasurementType::Ratio, Unit::Percent, "Battery SoC",
+     RegSpace::Input, 5, 1, 1.0, false, 0.0, false, false, 0, -1, RegByte::Low},
+    {measurement_id::kBatteryTemperature, MeasurementType::Temperature, Unit::Celsius,
+     "High byte", RegSpace::Input, 5, 1, 1.0, false, 0.0, false, false, 0, -1, RegByte::High},
+};
+
+static DeviceProfile profileWithMappings(const RegisterMapping* mappings, size_t count) {
+    static const RegBlock kBlock[] = {{RegSpace::Input, 0, 8}};
+    DeviceProfile p = *findProfile("mic_tl_x");
+    p.blocks        = kBlock;
+    p.blockCount    = 1;
+    p.mappings      = mappings;
+    p.mappingCount  = count;
+    return p;
+}
+
+static void test_each_byte_of_a_packed_register_decodes_on_its_own() {
+    BlockData blocks[1] = {{RegSpace::Input, 0, 8, {}}};
+    // 0x64 above 0x50: unequal halves, so a decoder that swaps them fails both asserts.
+    setReg(blocks[0], 5, 0x6450);
+
+    MeasurementSet m;
+    applyProfile(profileWithMappings(kPackedBytes, 2), blocks, 1, m, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(80.0, m.find(measurement_id::kBatterySoc)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, m.find(measurement_id::kBatteryTemperature)->value);
+
+    // The same word without the key is the reading this exists to prevent: 25680 %.
+    static const RegisterMapping kWhole[] = {
+        {measurement_id::kBatterySoc, MeasurementType::Ratio, Unit::Percent, "Battery SoC",
+         RegSpace::Input, 5, 1, 1.0, false},
+    };
+    MeasurementSet whole;
+    applyProfile(profileWithMappings(kWhole, 1), blocks, 1, whole, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(25680.0, whole.find(measurement_id::kBatterySoc)->value);
+}
+
+// The byte takes the place of the raw value, so everything after it works on the byte: scale and
+// offset, and a sentinel that is compared with this half only. 0xFF in the OTHER half is that
+// half's business and must not blank this one.
+static void test_scale_offset_and_sentinel_apply_to_the_selected_byte() {
+    static const RegisterMapping kMappings[] = {
+        {measurement_id::kBatterySoc, MeasurementType::Ratio, Unit::Percent, "Battery SoC",
+         RegSpace::Input, 5, 1, 0.5, false, -10.0, false, /*hasInvalid=*/true, 0xFF, -1,
+         RegByte::Low},
+        {measurement_id::kBatteryTemperature, MeasurementType::Temperature, Unit::Celsius,
+         "High byte", RegSpace::Input, 5, 1, 1.0, false, 0.0, false, false, 0, -1, RegByte::High},
+    };
+    const DeviceProfile p = profileWithMappings(kMappings, 2);
+    BlockData blocks[1] = {{RegSpace::Input, 0, 8, {}}};
+
+    setReg(blocks[0], 5, 0xFFC8);  // low 200 -> 200 * 0.5 - 10; high 0xFF is no sentinel here
+    MeasurementSet scaled;
+    applyProfile(p, blocks, 1, scaled, 1000);
+    TEST_ASSERT_EQUAL_DOUBLE(90.0, scaled.find(measurement_id::kBatterySoc)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(255.0, scaled.find(measurement_id::kBatteryTemperature)->value);
+
+    setReg(blocks[0], 5, 0x64FF);  // low byte is the sentinel: absent, and the high byte is not
+    MeasurementSet sentinel;
+    applyProfile(p, blocks, 1, sentinel, 1000);
+    TEST_ASSERT_NULL(sentinel.find(measurement_id::kBatterySoc));
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, sentinel.find(measurement_id::kBatteryTemperature)->value);
+}
+
+// A zero byte is a reading (an empty battery); a word that was never read is not.
+static void test_a_byte_row_in_an_unread_block_is_absent_not_zero() {
+    const DeviceProfile p = profileWithMappings(kPackedBytes, 2);
+
+    BlockData elsewhere[1] = {{RegSpace::Input, 100, 8, {}}};
+    MeasurementSet unread;
+    applyProfile(p, elsewhere, 1, unread, 1000);
+    TEST_ASSERT_NULL(unread.find(measurement_id::kBatterySoc));
+    TEST_ASSERT_NULL(unread.find(measurement_id::kBatteryTemperature));
+
+    BlockData blocks[1] = {{RegSpace::Input, 0, 8, {}}};
+    setReg(blocks[0], 5, 0x6400);
+    MeasurementSet empty;
+    applyProfile(p, blocks, 1, empty, 1000);
+    const Measurement* soc = empty.find(measurement_id::kBatterySoc);
+    TEST_ASSERT_NOT_NULL(soc);
+    TEST_ASSERT_TRUE(soc->valid);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, soc->value);
+}
+
 static void test_a_register_in_an_unread_block_is_left_undeclared() {
     // Only the base block present; battery registers live in a block we did not pass.
     BlockData blocks[1];
@@ -1934,6 +2024,70 @@ static void test_the_deye_lp3_grid_relay_bit_is_read_on_its_own() {
     TEST_ASSERT_NULL(m.find(measurement_id::kGridConnected));
 }
 
+// --- the LuxPower SNA single-phase hybrid profile -------------------------------------------
+
+// Three things in this map are easy to transcribe wrong and decode plausibly: the 32-bit
+// counters are LOW word first, the temperatures are signed, and register 5 is two values in one
+// word, of which only the low byte is the state of charge.
+static void test_the_luxpower_profile_decodes_a_realistic_frame() {
+    // The three blocks rows are mapped from. The four probe blocks feed nothing.
+    BlockData blocks[3];
+    blocks[0] = {RegSpace::Input, 0, 40, {}};
+    blocks[1] = {RegSpace::Input, 40, 40, {}};
+    blocks[2] = {RegSpace::Holding, 40, 40, {}};
+
+    setReg(blocks[0], 1, 3180);              // PV1 V       -> 318.0 V
+    setReg(blocks[0], 2, 2960);              // PV2 V       -> 296.0 V
+    setReg(blocks[0], 4, 512);               // Batt V      -> 51.2 V
+    setReg(blocks[0], 5, (100u << 8) | 80);  // SOH 100 % high, SOC 80 % low -> 80 %, not 25680
+    setReg(blocks[0], 7, 1500);              // PV1 W
+    setReg(blocks[0], 8, 1300);              // PV2 W
+    setReg(blocks[0], 10, 900);              // into the battery
+    setReg(blocks[0], 11, 0);                // out of the battery
+    setReg(blocks[0], 12, 2342);             // Grid V      -> 234.2 V
+    setReg(blocks[0], 15, 4998);             // Freq        -> 49.98 Hz
+    setReg(blocks[0], 26, 0);                // export
+    setReg(blocks[0], 27, 420);              // import
+    setReg(blocks[1], 50, 0x1170);           // charged, LOW word
+    setReg(blocks[1], 51, 0x0001);           //   0x00011170 = 70000 -> 7000.0 kWh
+    setReg(blocks[1], 52, 61234);            // discharged  -> 6123.4 kWh
+    setReg(blocks[1], 53, 0);
+    setReg(blocks[1], 64, 41);               // Inverter    -> 41 °C
+    setReg(blocks[1], 67, 0xFFFD);           // Battery     -> -3 °C
+    setReg(blocks[2], 60, 100);              // limit       -> 100 %
+
+    MeasurementSet m;
+    applyProfile(*findProfile("luxpower_sna"), blocks, 3, m, 1000);
+
+    TEST_ASSERT_EQUAL_DOUBLE(318.0, m.find(measurement_id::kDcMppt1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(296.0, m.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(1500.0, m.find(measurement_id::kDcMppt1Power)->value);
+    // No whole-array register: the driver sums the two strings and says that it did.
+    TEST_ASSERT_EQUAL_DOUBLE(2800.0, m.find(measurement_id::kDcPowerTotal)->value);
+    TEST_ASSERT_TRUE(m.find(measurement_id::kDcPowerTotal)->derived);
+    TEST_ASSERT_EQUAL_DOUBLE(51.2, m.find(measurement_id::kBatteryVoltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(900.0, m.find(measurement_id::kBatteryChargePower)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, m.find(measurement_id::kBatteryDischargePower)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(234.2, m.find(measurement_id::kAcL1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(49.98, m.find(measurement_id::kAcFrequency)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, m.find(measurement_id::kGridExportPower)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(420.0, m.find(measurement_id::kGridImportPower)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(7000.0, m.find(measurement_id::kBatteryEnergyCharged)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(6123.4, m.find(measurement_id::kBatteryEnergyDischarged)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(41.0, m.find(measurement_id::kTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(-3.0, m.find(measurement_id::kBatteryTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, m.find(measurement_id::kActivePowerLimitPct)->value);
+
+    TEST_ASSERT_EQUAL_DOUBLE(80.0, m.find(measurement_id::kBatterySoc)->value);
+
+    // Left out on purpose, and pinned absent so none drifts back in unnoticed: two channels
+    // that need arithmetic, and one whose scale the sources dispute.
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryCurrent));
+    TEST_ASSERT_NULL(m.find(measurement_id::kAcPowerTotal));
+    TEST_ASSERT_NULL(m.find(measurement_id::kEnergyToday));
+}
+
 // Word order is a per-FAMILY property, and this pins it per family rather than per row.
 //
 // This is the test that would have caught the bug it exists because of. The Sungrow profile
@@ -1958,6 +2112,7 @@ static void test_the_declared_word_order_is_consistent_within_each_family() {
         {"deye_sg0x_lp3", true, "source C names the low word first; A and B read it so"},
         {"deye_sg0x_lp3_dual", true, "the same rows as deye_sg0x_lp3"},
         {"solis_rhi_hybrid", false, "source B lists [low, high], so high sits at the lower address"},
+        {"luxpower_sna", true, "the vendor table names each pair L then H at ascending addresses"},
         {"huawei_sun2000", false, "the library decodes with a big-endian struct format"},
         {"goodwe_et_hybrid", false, "read_bytes4 is int.from_bytes(..., byteorder='big')"},
         {"mic_tl_x", false, "growatt-local assembles (value << 16) | next"},
@@ -2654,6 +2809,9 @@ int main(int, char**) {
     RUN_TEST(test_a_negative_scale_negates_the_reading);
     RUN_TEST(test_a_low_word_first_pair_decodes_the_other_way_round);
     RUN_TEST(test_a_low_word_first_pair_still_sign_extends);
+    RUN_TEST(test_each_byte_of_a_packed_register_decodes_on_its_own);
+    RUN_TEST(test_scale_offset_and_sentinel_apply_to_the_selected_byte);
+    RUN_TEST(test_a_byte_row_in_an_unread_block_is_absent_not_zero);
     RUN_TEST(test_a_register_in_an_unread_block_is_left_undeclared);
     RUN_TEST(test_find_register_reports_out_of_range);
     RUN_TEST(test_a_full_poll_decodes_measurements_over_the_bus);
@@ -2688,6 +2846,7 @@ int main(int, char**) {
     RUN_TEST(test_the_solis_ac_power_goes_negative_while_importing);
     RUN_TEST(test_the_solis_profile_publishes_nothing_the_sources_disputed);
     RUN_TEST(test_the_solis_setpoints_are_declared_and_dormant);
+    RUN_TEST(test_the_luxpower_profile_decodes_a_realistic_frame);
     RUN_TEST(test_the_sungrow_profile_decodes_a_realistic_frame);
     RUN_TEST(test_the_sungrow_battery_power_is_reordered_and_reoriented);
     RUN_TEST(test_the_sungrow_setpoints_are_declared_and_dormant);

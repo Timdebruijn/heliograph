@@ -85,6 +85,11 @@ save, including ones touching nothing driver-related.
 must be able to show the available drivers and their support level without hardcoding
 them in the frontend.
 
+The list is fixed when the firmware is built and grows with every profile, so it has its own
+bound of 12 KB (`kMaxDriversResponseBytes`) instead of the 8 KB default
+(`kMaxResponseBytes`). A build whose list does not fit answers 500 `payload_too_large` rather
+than an empty 200; a native test fails 1 KB before that point.
+
 ## Commands
 
 `POST /api/v1/devices/<id>/commands` submits one setpoint. It **accepts for a queue** rather than
@@ -204,6 +209,7 @@ Uniform, for every error:
 | 409 | Discovery already in progress; RS485 bus busy |
 | 413 | Body > 4 KB (8 KB on `/config/restore`, which carries a whole configuration) |
 | 429 | Rate limit — 1 req/s, shared across **every** write-ish route: `/actions/*`, `POST /devices/<id>/commands`, `POST /relays/<n>` and `POST /drm/set`. One limiter, not one per path |
+| 500 | The bridge could not produce the answer: a response that does not fit its bound or could not be allocated (`payload_too_large`), or a save, backup, restore preview, reset or relay action that failed |
 | 503 | No valid data yet (cold start) |
 
 Never an HTTP 200 with an error message in the body.
@@ -698,6 +704,10 @@ a client knows whether to call `POST /api/v1/actions/reboot`:
 ```
 
 `GET` does not include the field (nothing was changed).
+
+If the bridge cannot render the document after a save that succeeded, it still answers 200, with
+only the flag, true or false: `{ "reboot_required": true }`. The change is stored; read it back
+with `GET`. An error status there would report a failure that did not happen.
 
 ## Backup and restore
 

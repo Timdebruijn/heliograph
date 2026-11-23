@@ -139,7 +139,7 @@ map and what the support-level progression means.
 | Family | Protocol | Driver |
 |---|---|---|
 | EverSolar / Zeversolar legacy TL | PMU (AA55) over RS485 | `src/drivers/eversolar_legacy/` |
-| Modbus devices described by a TOML profile in `profiles/`: Growatt, Deye, GoodWe, Huawei, Sofar, Solis, Sungrow | Modbus RTU | `src/drivers/modbus_profile/` |
+| Modbus devices described by a TOML profile in `profiles/`: Growatt, Deye, GoodWe, Huawei, LuxPower, Sofar, Solis, Sungrow | Modbus RTU | `src/drivers/modbus_profile/` |
 | SolaX X1 series | PMU (AA55) over RS485 | `src/drivers/solax_x1/` |
 | SolarMax | MaxTalk over RS485 | `src/drivers/solarmax/` |
 | SunSpec-capable devices | Modbus RTU | `src/drivers/sunspec/` |

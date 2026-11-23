@@ -609,6 +609,30 @@ const tick=setInterval(async()=>{
     }
   }catch(e){ say('the save assertions threw: '+e.message); }
   finally{ window.patch=rp; panel=null; }
+  // The real patch() this time, against a bridge that saved but could not render the result: a
+  // 200 carrying only the flag. cfg used to become that body, and the next tab to read
+  // cfg.driver.id threw.
+  const rf=window.fetch;
+  try{
+    sessionStorage.setItem('hg_auth',btoa('a:b'));
+    let gets=0;
+    window.fetch=(u,o)=>{
+      if(o&&o.method==='PATCH')
+        return Promise.resolve(new Response('{"reboot_required":false}',{status:200}));
+      if(u==='/api/v1/config')gets++;
+      return rf(u,o);
+    };
+    const r=await patch({polling:{interval_seconds:10}});
+    if(!r.ok) say('a save answered with only reboot_required was reported as failed');
+    if(!cfg||!cfg.driver||!cfg.mqtt) say('a save answered with only reboot_required replaced cfg with that answer');
+    if(gets!==1) say('expected one GET /api/v1/config after the bare answer, saw '+gets);
+    window.fetch=(u,o)=>o&&o.method==='PATCH'
+      ?Promise.resolve(new Response('{"reboot_required":false}',{status:200}))
+      :Promise.resolve(new Response('{}',{status:500}));
+    await patch({polling:{interval_seconds:10}});
+    if(!cfg||!cfg.driver) say('cfg was dropped when the config could not be fetched after a bare answer');
+  }catch(e){ say('the bare-answer assertions threw: '+e.message); }
+  finally{ window.fetch=rf; sessionStorage.removeItem('hg_auth'); }
   document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
 },25);
 })();

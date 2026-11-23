@@ -54,7 +54,7 @@ in as well, still Experimental.
 [eversolar-protocol.md](docs/eversolar-protocol.md)
 
 **A new Modbus inverter is a data file, not firmware.** Register maps are TOML, turned into code at
-build time and validated in CI. 13 maps ship today. A tester whose three-phase Deye did not match the
+build time and validated in CI. 14 maps ship today. A tester whose three-phase Deye did not match the
 bundled one wrote their own and got *"a pretty stable readout"*
 ([HA community thread](https://community.home-assistant.io/t/heliograph-esp32-firmware-that-speaks-your-inverters-native-protocol-mqtt-ha-modbus-tcp-rest-prometheus-looking-for-testers/1022820/3) ·
 [adding-a-device.md](docs/adding-a-device.md)).
@@ -86,7 +86,7 @@ You need an inverter with an **RS485 port**.
 |---|---|---|
 | EverSolar / Zeversolar **TL** | **Stable** | Yes. A TL3000-20 in production, the author's own. Also a TL1500, by its owner's report |
 | Zeversolar **TLC** | **Beta** | Yes. One TLC8000, a contributor's. It now runs in production, by its owner's report |
-| Modbus maps: Deye (3), GoodWe ET, Growatt (SPH, MIN TL-X, MIC TL-X), Huawei SUN2000, Sofar (2), Solis (2), Sungrow SH | Experimental | Has a map, needs a tester. None of the 13 shipped maps has met a device yet |
+| Modbus maps: Deye (3), GoodWe ET, Growatt (SPH, MIN TL-X, MIC TL-X), Huawei SUN2000, LuxPower SNA, Sofar (2), Solis (2), Sungrow SH | Experimental | Has a map, needs a tester. None of the 14 shipped maps has met a device yet |
 | SunSpec (any inverter that implements it) | Experimental | No |
 | SolarMax (MaxTalk) | Experimental | No |
 | SolaX X1 | Experimental | One field attempt, zero bytes back |
@@ -183,7 +183,7 @@ Host tests prove the code does what its author intended. They do not prove your 
 - **Local and monitoring-only by default, not "secure".** No authentication on Modbus TCP, REST reads or
   `/metrics`; admin auth is HTTP Basic over plain HTTP; OTA images are unsigned (SHA-256 checks
   integrity, not origin). Keep it on a network you trust: [security.md](docs/security.md).
-- **None of the 13 Modbus maps, SunSpec or SolarMax has met a device.**
+- **None of the 14 Modbus maps, SunSpec or SolarMax has met a device.**
 - **No control path has reached an inverter.** The Relay-6CH was measured for order, polarity,
   failsafe and boot state; the 1CH switches, but its polarity has not been put on a meter.
 - **Discovering an EverSolar or SolaX transmits** (it assigns a bus address), so `read_only_mode`

@@ -259,6 +259,13 @@ struct ConfigError {
 /// Checks ranges and enum values. Returns false and fills `error` on the first problem.
 bool validate(const Configuration& config, ConfigError& error);
 
+/// Ceiling on the configuration as the API shows it: GET /api/v1/config and the answer to a
+/// PATCH. It has to stay above what storage accepts (kMaxStoredConfigBytes in
+/// configuration_store.h), or a bridge could save a configuration and then be unable to show
+/// it. The two documents differ by a few bytes, not by a ratio, and
+/// test_whatever_storage_accepts_the_api_can_show holds the margin.
+inline constexpr size_t kMaxConfigResponseBytes = 4096;
+
 /// Serialises for `GET /api/v1/config` and the `PATCH` response.
 ///
 /// Credential material is NOT included -- not masked, omitted. Masking with "***" still tells
@@ -279,7 +286,12 @@ bool validate(const Configuration& config, ConfigError& error);
 /// When `rebootRequired` is non-null its value is emitted as a top-level `reboot_required`
 /// boolean -- the PATCH handler passes the result of configChangeRequiresReboot(); GET passes
 /// nullptr and the field is absent.
-bool serializeConfig(const Configuration& config, std::string& out, size_t maxBytes = 4096,
+///
+/// [[nodiscard]] because a refusal leaves `out` untouched, so a caller that ignores the result
+/// sends whatever the string held before, which for a fresh one is an empty body.
+[[nodiscard]]
+bool serializeConfig(const Configuration& config, std::string& out,
+                     size_t maxBytes = kMaxConfigResponseBytes,
                      const bool* rebootRequired = nullptr);
 
 /// True when moving from `before` to `after` changes any setting the firmware reads only at

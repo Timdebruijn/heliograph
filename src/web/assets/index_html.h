@@ -1597,7 +1597,14 @@ async function patch(body){
         if(JSON.stringify(now)!==JSON.stringify(pick_(cfg,path))&&!pending.includes(label))pending.push(label);
       }
     }
-    cfg=d.config||d;
+    // A 200 does not promise the document: when the bridge cannot render the saved config it
+    // answers with the flag alone, and firmware before that answered with nothing. Taking either
+    // as cfg left every settings tab reading sections off an object that has none. Ask for it
+    // instead, which helps when the refusal was a failed allocation; a document that has outgrown
+    // its bound is refused again. Then the old one stays, stale until a reload but whole.
+    const full=d.config||d;
+    if(full.driver)cfg=full;
+    else try{cfg=await getJson('/api/v1/config')}catch(e){}
     const el=$('#pending');
     el.textContent=pending.length+' change'+(pending.length===1?'':'s')+' waiting for a restart';
     el.classList.toggle('hide',!pending.length);

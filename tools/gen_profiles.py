@@ -23,6 +23,7 @@ TOML, the build does the rest. See docs/adding-a-device.md.
 
 from __future__ import annotations
 
+import difflib
 import re
 import sys
 from collections import Counter
@@ -101,6 +102,10 @@ SPACES = {"input": "Input", "holding": "Holding"}
 # that same datasheet recommends using.
 WORD_ORDERS = {"high_first": "false", "low_first": "true"}
 
+# One byte of a 16-bit register, mapping to RegByte in profile_tables.h. For a device that puts
+# two small readings in one word; a row without the key reads the whole register.
+BYTES = {"low": "Low", "high": "High"}
+
 PARITIES = {"none": "None", "even": "Even", "odd": "Odd"}
 
 # How far a register MAP has been proven, mapping to ProfileStatus in profile_tables.h. The
@@ -132,6 +137,69 @@ READBACK = {
 }
 
 ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+# Every key parse_profile() reads, per section; anything else is refused by _no_unknown_keys().
+# tomllib hands over whatever the file holds, so a key nobody reads is not an error on its own --
+# it is a typo that sits in the file looking honoured: `scal = 0.1` would publish the raw integer.
+# A key the parser starts reading has to be added here too, or the first profile that uses it
+# fails --check.
+KEYS: dict[str, set[str]] = {
+    "top": {
+        "profile",
+        "serial",
+        "tcp",
+        "block",
+        "register",
+        "status_register",
+        "write",
+    },
+    "profile": {
+        "driver",
+        "id",
+        "display_name",
+        "manufacturer",
+        "status",
+        "default",
+        "phases",
+        "mppts",
+        "battery",
+        "transports",
+    },
+    "serial": {"baud", "parity", "stop_bits"},
+    "tcp": {"port"},
+    "block": {"space", "start", "count", "probe"},
+    "register": {
+        "measurement",
+        "display_name",
+        "space",
+        "address",
+        "type",
+        "scale",
+        "offset",
+        "word_order",
+        "invalid",
+        "bit",
+        "byte",
+        "unit",
+    },
+    "status_register": {"space", "address", "values"},
+    "write": {
+        "command",
+        "display_name",
+        "space",
+        "address",
+        "type",
+        "function",
+        "scale",
+        "unit",
+        "minimum",
+        "maximum",
+        "step",
+        "options",
+        "verified",
+    },
+    "option": {"value", "label"},
+}
 
 
 def load_vocabulary() -> dict[str, str]:
@@ -216,6 +284,30 @@ def _require(table: dict, key: str, kind: type, where: str):
     return value
 
 
+def _no_unknown_keys(
+    table: dict, section: str, where: str, refused: tuple[str, ...] = ()
+) -> None:
+    """Refuse a key this section does not have, naming the one it probably meant.
+
+    `refused` holds keys the caller rejects by name further down, with a message that says why
+    (a `bitmask`, an `offset` on a write row). They pass here so that message is the one the
+    author gets, and they are kept out of the suggestions: they are not keys to reach for.
+    """
+    # `[[serial]]` for `[serial]`, or `[register]` for `[[register]]`: valid TOML, wrong shape.
+    if not isinstance(table, dict):
+        raise ProfileError(f"{where}: must be a table, got {type(table).__name__}")
+    allowed = KEYS[section]
+    unknown = sorted(table.keys() - allowed - set(refused))
+    if not unknown:
+        return
+    near = difflib.get_close_matches(unknown[0], sorted(allowed), n=1)
+    raise ProfileError(
+        f"{where}: unknown key '{unknown[0]}'"
+        + (f" -- did you mean '{near[0]}'?" if near else "")
+        + f" (known: {', '.join(sorted(allowed))})"
+    )
+
+
 def parse_profile(
     path: Path,
     vocabulary: dict[str, str],
@@ -225,8 +317,10 @@ def parse_profile(
     with path.open("rb") as f:
         data = tomllib.load(f)
     where = path.relative_to(ROOT)
+    _no_unknown_keys(data, "top", f"{where}")
 
     meta = _require(data, "profile", dict, f"{where}")
+    _no_unknown_keys(meta, "profile", f"{where} [profile]")
     driver = _require(meta, "driver", str, f"{where} [profile]")
     if driver != "modbus_profile":
         raise ProfileError(
@@ -285,6 +379,7 @@ def parse_profile(
     parsed_serial = None
     if serial is not None:
         sw = f"{where} [serial]"
+        _no_unknown_keys(serial, "serial", sw)
         baud = _require(serial, "baud", int, sw)
         if baud not in (2400, 4800, 9600, 19200, 38400, 57600, 115200):
             raise ProfileError(f"{sw}: baud {baud} is not a standard rate")
@@ -299,6 +394,7 @@ def parse_profile(
     tcp = data.get("tcp")
     tcp_port = 0
     if tcp is not None:
+        _no_unknown_keys(tcp, "tcp", f"{where} [tcp]")
         if "tcp" not in transports:
             raise ProfileError(f"{where}: [tcp] section without 'tcp' in transports")
         tcp_port = tcp.get("port", 502)
@@ -321,6 +417,7 @@ def parse_profile(
     parsed_blocks = []
     for i, b in enumerate(blocks):
         bw = f"{where} [[block]] #{i + 1}"
+        _no_unknown_keys(b, "block", bw)
         space = _require(b, "space", str, bw)
         if space not in SPACES:
             raise ProfileError(f"{bw}: space must be one of {sorted(SPACES)}")
@@ -356,6 +453,7 @@ def parse_profile(
     parsed_regs = []
     for i, r in enumerate(registers):
         rw = f"{where} [[register]] #{i + 1}"
+        _no_unknown_keys(r, "register", rw, refused=("bitmask",))
         mid = _require(r, "measurement", str, rw)
         if mid not in vocabulary:
             known = ", ".join(sorted(vocabulary))
@@ -417,7 +515,7 @@ def parse_profile(
             if rtype != "u16":
                 raise ProfileError(f"{rw}: bit needs type 'u16', got '{rtype}'")
             extra = sorted(
-                {"scale", "offset", "invalid", "word_order", "unit"} & r.keys()
+                {"scale", "offset", "invalid", "word_order", "unit", "byte"} & r.keys()
             )
             if extra:
                 raise ProfileError(
@@ -436,9 +534,22 @@ def parse_profile(
                     "invalid": None,
                     "unit": None,
                     "bit": bit,
+                    "byte": None,
                 }
             )
             continue
+        # One byte of a register that holds two readings. Unsigned and one register only: a byte
+        # has no sign of its own, and in a 32-bit pair "low" could mean either word. Refused
+        # rather than ignored, like every other key that does not apply to a row.
+        byte = r.get("byte")
+        if byte is not None:
+            if not isinstance(byte, str) or byte not in BYTES:
+                raise ProfileError(f"{rw}: byte must be one of {sorted(BYTES)}")
+            if rtype != "u16":
+                raise ProfileError(
+                    f"{rw}: byte needs type 'u16', got '{rtype}' -- it selects half of one "
+                    f"unsigned register"
+                )
         scale = r.get("scale", 1.0)
         if isinstance(scale, bool) or not isinstance(scale, (int, float)):
             raise ProfileError(f"{rw}: scale must be a number")
@@ -470,10 +581,17 @@ def parse_profile(
                     f"{rw}: invalid must not be 0 -- zero is a real reading on almost every "
                     f"channel, and a sentinel of 0 would suppress it forever"
                 )
-            limit = 0xFFFF if words == 1 else 0xFFFFFFFF
+            # On a byte row the sentinel is compared with the extracted byte, so it has to be
+            # one: 0xFFFF there would be a sentinel that can never match.
+            limit = 0xFF if byte else 0xFFFF if words == 1 else 0xFFFFFFFF
             if not 0 <= invalid <= limit:
                 raise ProfileError(
-                    f"{rw}: invalid must fit the register width (0-{limit} for '{rtype}')"
+                    f"{rw}: invalid must fit "
+                    + (
+                        f"the selected byte (0-{limit})"
+                        if byte
+                        else f"the register width (0-{limit} for '{rtype}')"
+                    )
                 )
         word_order = r.get("word_order", "high_first")
         if word_order not in WORD_ORDERS:
@@ -498,6 +616,7 @@ def parse_profile(
                 "invalid": invalid,
                 "unit": unit,
                 "bit": None,
+                "byte": byte,
             }
         )
 
@@ -507,6 +626,7 @@ def parse_profile(
     parsed_status = None
     if status_register is not None:
         sw = f"{where} [status_register]"
+        _no_unknown_keys(status_register, "status_register", sw)
         space = _require(status_register, "space", str, sw)
         if space not in SPACES:
             raise ProfileError(f"{sw}: space must be one of {sorted(SPACES)}")
@@ -548,6 +668,12 @@ def parse_profile(
     parsed_writes = []
     for i, wr in enumerate(writes):
         ww = f"{where} [[write]] #{i + 1}"
+        _no_unknown_keys(
+            wr,
+            "write",
+            ww,
+            refused=("offset", "word_order", "invalid", "bitmask", "bit", "byte"),
+        )
         cmd = _require(wr, "command", str, ww)
         if cmd not in commands:
             raise ProfileError(
@@ -620,10 +746,10 @@ def parse_profile(
         # masked field would clear whatever shares the register with it. Several vendors do pack a
         # mode in beside unrelated flags, so the key is recognised and refused by name rather than
         # ignored -- an ignored `bitmask` would produce a row that looks masked and writes whole.
-        if "bitmask" in wr or "bit" in wr:
+        if "bitmask" in wr or "bit" in wr or "byte" in wr:
             raise ProfileError(
-                f"{ww}: bit/bitmask is not supported -- FC06 writes the whole register, so setting "
-                f"part of one needs read-modify-write, which the write path does not do. A "
+                f"{ww}: bit/bitmask/byte is not supported -- FC06 writes the whole register, so "
+                f"setting part of one needs read-modify-write, which the write path does not do. A "
                 f"masked field would clear its neighbours in the same register"
             )
         verified = wr.get("verified", False)
@@ -634,8 +760,10 @@ def parse_profile(
         # `verified` (write, READ BACK, compare) cannot be done. Unverified rows without one stay
         # valid research; the driver just never serves them, opt-in or not.
         readback = READBACK.get(cmd)
+        # Read as the whole register, like the write: a `byte` row sees half of what FC06 sets, so
+        # it could agree with a write that had overwritten the other half.
         has_readback = readback is not None and any(
-            r["measurement"] == readback for r in parsed_regs
+            r["measurement"] == readback and r["byte"] is None for r in parsed_regs
         )
         if verified and not has_readback:
             raise ProfileError(
@@ -695,6 +823,7 @@ def parse_profile(
                     raise ProfileError(
                         f"{ow}: each option must be a table with value + label"
                     )
+                _no_unknown_keys(opt, "option", ow)
                 value = _require(opt, "value", int, ow)
                 if not 0 <= value <= 0xFFFF:
                     raise ProfileError(f"{ow}: value must be 0-65535")
@@ -866,7 +995,8 @@ def generate(
                 f"{cpp_float(r['offset'])}, {WORD_ORDERS[r['word_order']]}, "
                 f"{'true' if r['invalid'] is not None else 'false'}, "
                 f"{r['invalid'] if r['invalid'] is not None else 0}, "
-                f"{r['bit'] if r['bit'] is not None else -1}}},"
+                f"{r['bit'] if r['bit'] is not None else -1}, "
+                f"RegByte::{BYTES.get(r['byte'], 'Whole')}}},"
             )
         w("};")
         w(f"constexpr RegBlock k{sym}Blocks[] = {{")
