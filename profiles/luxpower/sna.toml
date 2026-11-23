@@ -4,10 +4,11 @@
 #
 # STATUS: every mapped row is in the vendor document (D) and in an implementation that was
 # reverse-engineered without it (C), and those two agree on the address, the width and the
-# scale. One exception, marked at the row: which byte of register 5 is the state of charge. A and B both drew on D, so they are not a second opinion on the map; what they add is
-# that they ran it on real units. NOT confirmed against a real inverter by this project, and
-# nobody on it owns one. See docs/luxpower-sna-protocol.md for the comparison, what the sources
-# would not agree on, and what a tester needs to send back.
+# scale. One exception, marked at the row: which byte of register 5 is the state of charge.
+# A and B both drew on D, so they are not a second opinion on the map; what they add is that
+# they ran it on real units. NOT confirmed against a real inverter by this project, and nobody
+# on it owns one. See docs/luxpower-sna-protocol.md for the comparison, what the sources would
+# not agree on, and what a tester needs to send back.
 #
 # SOURCES (read directly, not summarised; commit ids in the protocol document):
 #   A. joyfulhouse/pylxpweb, src/pylxpweb/registers/inverter_input.py + inverter_holding.py

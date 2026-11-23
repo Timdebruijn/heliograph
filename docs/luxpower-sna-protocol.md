@@ -7,8 +7,8 @@ Single-phase hybrid with a low-voltage battery, sold as the SNA 3–6K. The prof
 owns one.** Every mapped row is in the vendor's protocol document and in an implementation that
 was reverse-engineered without it, and the two agree on address, width and scale. One
 exception: which byte of register 5 is the state of charge comes from the implementations
-alone. Whether a given unit answers this firmware *at all* is a separate and
-larger question than the map — read the next section first.
+alone. Whether a given unit answers this firmware *at all* is a separate and larger question
+than the map — read the next section first.
 
 Each claim below is labelled: **documented** (the vendor's protocol document says it),
 **observed** (another project reports it from a real unit; this project has not seen it), or
