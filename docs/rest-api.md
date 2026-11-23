@@ -706,8 +706,8 @@ a client knows whether to call `POST /api/v1/actions/reboot`:
 `GET` does not include the field (nothing was changed).
 
 If the bridge cannot render the document after a save that succeeded, it still answers 200, with
-only the flag: `{ "reboot_required": true }`. The change is stored; read it back with `GET`. An
-error status there would report a failure that did not happen.
+only the flag, true or false: `{ "reboot_required": true }`. The change is stored; read it back
+with `GET`. An error status there would report a failure that did not happen.
 
 ## Backup and restore
 

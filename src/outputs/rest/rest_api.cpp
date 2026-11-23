@@ -52,7 +52,11 @@ ApiError invalidConfig(const ConfigError& error) {
 void sendError(AsyncWebServerRequest* request, const ApiError& error) {
     std::string body;
     if (!buildErrorPayload(error, "", body)) {
-        request->send(error.httpStatus, kJson, "{\"error\":{\"code\":\"internal\"}}");
+        // With a message, because docs/rest-api.md promises one on every error. No interpolated
+        // value: this runs when the builder that would have escaped one has just refused.
+        request->send(error.httpStatus, kJson,
+                      "{\"error\":{\"code\":\"internal\","
+                      "\"message\":\"the error response could not be built\"}}");
         return;
     }
     // Never a 200 with an error inside: a client must be able to trust the status code.

@@ -36,7 +36,7 @@ struct ApiError {
 
 /// Uniform error body. Every failure looks the same, and a failure is never a 200.
 ///
-/// [[nodiscard]] because a refusal leaves `out` empty: the caller needs a fallback, and
+/// [[nodiscard]] because a refusal leaves `out` untouched: the caller needs a fallback, and
 /// sendError in rest_api.cpp is the one place that has it.
 [[nodiscard]]
 bool buildErrorPayload(const ApiError& error, const std::string& requestId, std::string& out);
