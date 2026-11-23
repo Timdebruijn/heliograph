@@ -442,8 +442,9 @@ bool RestApi::begin() {
                  [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         std::string body;
-        // At most kMaxDevices ids, far below the bound, so a refusal here means the document
-        // could not be allocated. An empty 200 would hide that behind a JSON parse error.
+        // At most kMaxDevices ids, which in practice is nowhere near the bound, so a refusal
+        // here means the document could not be allocated. An empty 200 would hide that behind
+        // a JSON parse error.
         if (!buildDevicesPayload(context_.devices->devices(), body)) {
             sendError(request, {500, "payload_too_large",
                                 "device list exceeded its bound or could not be allocated"});

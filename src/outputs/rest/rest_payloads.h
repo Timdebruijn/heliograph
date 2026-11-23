@@ -148,8 +148,8 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
                         const std::vector<DeviceSummary>& fleet, std::string& out,
                         size_t maxBytes = kMaxResponseBytes);
 
-/// [[nodiscard]] here and on buildDiagnosticsPayload for the reason given at
-/// buildDriversPayload: both handlers once dropped the result and served an empty 200.
+/// [[nodiscard]] for the reason given at buildDriversPayload: the handler once dropped the
+/// result and served an empty 200.
 [[nodiscard]]
 bool buildDevicesPayload(const std::vector<std::string>& deviceIds, std::string& out,
                          size_t maxBytes = kMaxResponseBytes);
@@ -165,6 +165,7 @@ bool buildDevicePayload(const DeviceState& state, const std::string& deviceId,
 bool buildMeasurementsPayload(const DeviceState& state, std::string& out,
                               size_t maxBytes = kMaxResponseBytes);
 
+/// [[nodiscard]] for the same reason as buildDevicesPayload above.
 [[nodiscard]]
 bool buildDiagnosticsPayload(const DiagnosticsSnapshot& diagnostics, const BridgeInfo& bridge,
                              std::string& out, size_t maxBytes = kMaxResponseBytes);
