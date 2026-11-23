@@ -209,6 +209,7 @@ Uniform, for every error:
 | 409 | Discovery already in progress; RS485 bus busy |
 | 413 | Body > 4 KB (8 KB on `/config/restore`, which carries a whole configuration) |
 | 429 | Rate limit — 1 req/s, shared across **every** write-ish route: `/actions/*`, `POST /devices/<id>/commands`, `POST /relays/<n>` and `POST /drm/set`. One limiter, not one per path |
+| 500 | The bridge could not produce the answer: a response that does not fit its bound or could not be allocated (`payload_too_large`), or a save, backup, reset or relay action that failed |
 | 503 | No valid data yet (cold start) |
 
 Never an HTTP 200 with an error message in the body.
