@@ -22,7 +22,7 @@ driver must not promote a map nobody has confirmed.
 | `min_tl_x` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | · | · | · |
 | `sph` | Growatt | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | · | ✔ | ✔ | ✔ | ✔ | ✔ | · |
 | `huawei_sun2000` | Huawei | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | · |
-| `luxpower_sna` | LuxPower | experimental | · | ✔ | · | ✔ | · | ✔ | ✔ | · | · | ✔ | · | · | ✔ | ✔ | · |
+| `luxpower_sna` | LuxPower | experimental | · | ✔ | · | ✔ | · | ✔ | ✔ | · | · | ✔ | ✔ | · | ✔ | ✔ | · |
 | `sofar_hyd_3ph` | Sofar Solar | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `sofar_hyd_ep` | Sofar Solar | experimental | ✔ | ✔ | ✔ | ✔ | · | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `solis_rhi_hybrid` | Solis | experimental | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | · | ✔ | · | ✔ |

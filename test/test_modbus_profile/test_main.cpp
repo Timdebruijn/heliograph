@@ -2028,7 +2028,7 @@ static void test_the_deye_lp3_grid_relay_bit_is_read_on_its_own() {
 
 // Three things in this map are easy to transcribe wrong and decode plausibly: the 32-bit
 // counters are LOW word first, the temperatures are signed, and register 5 is two values in one
-// word and must not come out as a state of charge.
+// word, of which only the low byte is the state of charge.
 static void test_the_luxpower_profile_decodes_a_realistic_frame() {
     // The three blocks rows are mapped from. The four probe blocks feed nothing.
     BlockData blocks[3];
@@ -2039,7 +2039,7 @@ static void test_the_luxpower_profile_decodes_a_realistic_frame() {
     setReg(blocks[0], 1, 3180);              // PV1 V       -> 318.0 V
     setReg(blocks[0], 2, 2960);              // PV2 V       -> 296.0 V
     setReg(blocks[0], 4, 512);               // Batt V      -> 51.2 V
-    setReg(blocks[0], 5, (100u << 8) | 80);  // SOH 100 %, SOC 80 %, packed: not published
+    setReg(blocks[0], 5, (100u << 8) | 80);  // SOH 100 % high, SOC 80 % low -> 80 %, not 25680
     setReg(blocks[0], 7, 1500);              // PV1 W
     setReg(blocks[0], 8, 1300);              // PV2 W
     setReg(blocks[0], 10, 900);              // into the battery
@@ -2078,9 +2078,10 @@ static void test_the_luxpower_profile_decodes_a_realistic_frame() {
     TEST_ASSERT_EQUAL_DOUBLE(-3.0, m.find(measurement_id::kBatteryTemperature)->value);
     TEST_ASSERT_EQUAL_DOUBLE(100.0, m.find(measurement_id::kActivePowerLimitPct)->value);
 
-    // Left out on purpose, and pinned absent so none drifts back in unnoticed: a packed word,
-    // two channels that need arithmetic, and one whose scale the sources dispute.
-    TEST_ASSERT_NULL(m.find(measurement_id::kBatterySoc));
+    TEST_ASSERT_EQUAL_DOUBLE(80.0, m.find(measurement_id::kBatterySoc)->value);
+
+    // Left out on purpose, and pinned absent so none drifts back in unnoticed: two channels
+    // that need arithmetic, and one whose scale the sources dispute.
     TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPower));
     TEST_ASSERT_NULL(m.find(measurement_id::kBatteryCurrent));
     TEST_ASSERT_NULL(m.find(measurement_id::kAcPowerTotal));

@@ -5,7 +5,9 @@ Single-phase hybrid with a low-voltage battery, sold as the SNA 3–6K. The prof
 
 **STATUS: Experimental. No LuxPower device has answered this map, and nobody on this project
 owns one.** Every mapped row is in the vendor's protocol document and in an implementation that
-was reverse-engineered without it, and the two agree on address, width and scale. Whether a given unit answers this firmware *at all* is a separate and
+was reverse-engineered without it, and the two agree on address, width and scale. One
+exception: which byte of register 5 is the state of charge comes from the implementations
+alone. Whether a given unit answers this firmware *at all* is a separate and
 larger question than the map — read the next section first.
 
 Each claim below is labelled: **documented** (the vendor's protocol document says it),
@@ -115,6 +117,7 @@ Input registers unless marked. `value = raw × scale`.
 | 1 | u16 | 0.1 | `dc.mppt_1.voltage` | A B C D | |
 | 2 | u16 | 0.1 | `dc.mppt_2.voltage` | A B C D | |
 | 4 | u16 | 0.1 | `battery.voltage` | A B C D | |
+| 5, low byte | u16 | 1 | `battery.soc` | A B C; D for the address | % — see [State of charge](#state-of-charge--one-byte-of-a-shared-register) |
 | 7 | u16 | 1 | `dc.mppt_1.power` | A B C D | |
 | 8 | u16 | 1 | `dc.mppt_2.power` | A B C D | |
 | 10 | u16 | 1 | `battery.charge_power` | A B C D | power into the battery |
@@ -132,20 +135,22 @@ Input registers unless marked. `value = raw × scale`.
 `dc.power.total` is not a row: with both strings mapped, the driver publishes their sum and
 marks it derived.
 
-## What is not mapped, and why
-
-### State of charge — agreed by everyone, and not expressible
+### State of charge — one byte of a shared register
 
 Input register **5** holds state of charge in its **low byte** and state of health in its
-**high byte**. A states the packing outright, B masks the low byte to get the charge level, and
-C parses two bytes in that order; D lists both values under address 5 without saying which
-byte is which. A profile row reads a whole word or a single bit, so there is no way to say
-"the low byte". Mapped as a word, a healthy battery at 80 % reads 25680.
+**high byte**. Read as a whole word, a healthy battery at 80 % comes out as 25680, so the row
+is declared `byte = "low"`.
 
-This is the gap that matters most: the dashboard's battery card is driven by `battery.soc`, so
-a unit on this profile shows battery voltage, temperature and both power rails, and no charge
-level. It is a limit of the profile schema and needs a byte selector on a read row. It is not
-in this change.
+Which byte is which is the implementations' word and not the vendor's: A states the packing
+outright, B masks the word with `0xFF` to get the charge level, and C parses two bytes in that
+order. D lists both values under address 5 without saying. That is why the raw value of 5 is
+still on the tester's list below. State of health is not mapped; there is no canonical id for
+it.
+
+`battery.power` stays absent (see the two rails at 10 and 11), so a dashboard that wants one
+signed battery figure will show the charge level without it.
+
+## What is not mapped, and why
 
 ### AC power — two rails
 

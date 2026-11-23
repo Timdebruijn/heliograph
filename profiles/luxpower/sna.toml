@@ -4,7 +4,7 @@
 #
 # STATUS: every mapped row is in the vendor document (D) and in an implementation that was
 # reverse-engineered without it (C), and those two agree on the address, the width and the
-# scale. A and B both drew on D, so they are not a second opinion on the map; what they add is
+# scale. One exception, marked at the row: which byte of register 5 is the state of charge. A and B both drew on D, so they are not a second opinion on the map; what they add is
 # that they ran it on real units. NOT confirmed against a real inverter by this project, and
 # nobody on it owns one. See docs/luxpower-sna-protocol.md for the comparison, what the sources
 # would not agree on, and what a tester needs to send back.
@@ -182,6 +182,22 @@ type = "u16"
 scale = 0.1
 unit = "V"
 
+# Input 5 is two readings in one word: state of charge in the LOW byte, state of health in the
+# HIGH byte. Read whole, a healthy battery at 80 % would be published as 25680 %. A states the
+# packing outright, B masks the word with 0xFF to get the charge level, and C parses two bytes
+# in that order from a little-endian stream. D lists both under address 5 and does not say
+# which byte is which, so the byte is the implementations' word, not the vendor's. State of
+# health has no canonical id and is not mapped.
+[[register]]                    # A, B, C agree on the byte; D on the address
+measurement = "battery.soc"
+display_name = "Battery SoC"
+space = "input"
+address = 5
+type = "u16"
+byte = "low"
+scale = 1.0
+unit = "%"
+
 # Two unsigned rails, each its own register, so there is no sign to get backwards: D calls 10
 # "power flowing into the battery" and 11 "power flowing out of battery". The single signed
 # battery.power would be their difference, which a profile cannot compute.
@@ -308,12 +324,6 @@ unit = "%"
 # ==============================================================================================
 # DELIBERATELY NOT MAPPED -- full reasoning in docs/luxpower-sna-protocol.md
 # ==============================================================================================
-#
-# battery.soc (input 5). A, B and C agree, and it still cannot be mapped: the register
-# packs state of charge in its LOW BYTE and state of health in its HIGH BYTE. A row reads a
-# whole word or one bit, so a healthy battery at 80 % would be published as 25680 %. This is the
-# gap that hurts most -- the dashboard's battery card reads battery.soc -- and it is a limit of
-# the schema, not of the sources. It needs a byte selector on a read row.
 #
 # ac.power.total (input 16 and 17). Inverter output and AC-charge rectifier power are two
 # unsigned rails; the signed total is their difference. Mapping 16 alone would publish 0 W
