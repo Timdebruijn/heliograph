@@ -621,6 +621,42 @@ static void test_the_stored_blob_fits_nvs_comfortably() {
     TEST_ASSERT_TRUE_MESSAGE(typical.size() < 1200, std::to_string(typical.size()).c_str());
 }
 
+/// Whatever storage accepts, the API must be able to show.
+///
+/// Every save goes through serializeConfigForStorage first, so a configuration that reaches
+/// GET /api/v1/config or the answer to a PATCH measured at most kMaxStoredConfigBytes there.
+/// The two documents share config_sections::writeCommon and differ only in credentials against
+/// *_set flags. Measured 2026-11-23: the API view is 1 byte larger than the blob, 25 with
+/// reboot_required, when every credential is at its shortest. That is the case built here: a
+/// longer credential grows the blob and not the API view.
+///
+/// If this fails, serializeConfig gained something the blob does not carry, or one of the two
+/// bounds moved. A bridge with a large configuration would then save it and answer every later
+/// GET /api/v1/config with 500.
+static void test_whatever_storage_accepts_the_api_can_show() {
+    Configuration c;
+    c.wifi.password.clear();
+    c.mqtt.username.clear();
+    c.mqtt.password.clear();
+    c.security.adminUsername = "a";  // validate() refuses an empty one
+    c.security.adminPassword.clear();
+
+    // Pad a field both documents carry until the blob sits exactly on its bound. No name is
+    // this long; only the size matters, and neither serialiser validates.
+    std::string blob;
+    TEST_ASSERT_TRUE(serializeConfigForStorage(c, blob));
+    c.bridgeName.append(kMaxStoredConfigBytes - blob.size(), 'x');
+    TEST_ASSERT_TRUE(serializeConfigForStorage(c, blob));
+    TEST_ASSERT_EQUAL_UINT32(kMaxStoredConfigBytes, blob.size());
+
+    std::string body;
+    const bool  reboot = false;  // the longer of its two values
+    TEST_ASSERT_TRUE_MESSAGE(
+        serializeConfig(c, body, kMaxConfigResponseBytes, &reboot),
+        "a configuration storage accepts no longer fits kMaxConfigResponseBytes: the bridge "
+        "would save it and then answer GET /api/v1/config with 500");
+}
+
 static Configuration staticConfig() {
     auto c         = provisionedConfig();
     c.wifi.ip      = "192.168.1.50";
@@ -1411,6 +1447,7 @@ int main(int, char**) {
     RUN_TEST(test_a_stored_config_that_no_longer_validates_is_corrupt);
     RUN_TEST(test_missing_fields_fall_back_to_defaults);
     RUN_TEST(test_the_stored_blob_fits_nvs_comfortably);
+    RUN_TEST(test_whatever_storage_accepts_the_api_can_show);
     RUN_TEST(test_everything_the_writer_emits_the_reader_takes_back);
     RUN_TEST(test_a_sound_static_configuration_is_accepted);
     RUN_TEST(test_an_empty_ip_means_dhcp_and_needs_nothing_else);

@@ -717,7 +717,7 @@ bool RestApi::begin() {
             // by now, and an error status would report a failure that did not happen. The
             // fallback keeps the one thing the caller cannot get from a later GET, and carries
             // no interpolated value, so it cannot fail in turn. Same reasoning as /provision.
-            if (serializeConfig(updated, body, 4096, &rebootRequired)) {
+            if (serializeConfig(updated, body, kMaxConfigResponseBytes, &rebootRequired)) {
                 request->send(200, kJson, body.c_str());
             } else {
                 request->send(200, kJson, rebootRequired ? "{\"reboot_required\":true}"
