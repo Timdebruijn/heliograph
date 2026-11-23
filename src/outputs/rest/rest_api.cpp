@@ -565,7 +565,13 @@ bool RestApi::begin() {
     g_server->on("/api/v1/drivers", HTTP_GET, [this](AsyncWebServerRequest* request) {
         context_.diagnostics->recordRestRequest();
         std::string body;
-        buildDriversPayload(context_.registry->availableDrivers(), body);
+        // Checked, because the builder leaves `body` empty when the list does not fit, and an
+        // empty 200 is a failure dressed as a success: the client gets a JSON parse error and
+        // nothing that says why.
+        if (!buildDriversPayload(context_.registry->availableDrivers(), body)) {
+            sendError(request, {500, "payload_too_large", "driver list exceeded its bound"});
+            return;
+        }
         request->send(200, kJson, body.c_str());
     });
 
