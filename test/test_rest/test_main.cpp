@@ -2056,6 +2056,10 @@ static void test_drivers_payload_drives_the_wizard() {
 /// state, so what this test measures is byte for byte what a board serves, and a payload over
 /// its ceiling is a settings page without a driver list on every device running that build.
 /// The margin makes that a failing test about ten profiles early instead.
+///
+/// "What a board serves" holds because [env:native] and [esp32common] in platformio.ini enable
+/// the same ENABLE_DRIVER_* set. Nothing enforces that: a driver enabled for the boards only
+/// is a payload this test does not see.
 static void test_drivers_payload_keeps_headroom() {
     constexpr size_t kMarginBytes = 1024;  // about ten profiles; see kMaxDriversResponseBytes
 
@@ -2069,9 +2073,9 @@ static void test_drivers_payload_keeps_headroom() {
     // LESS_OR_EQUAL, not TRUE(<=): Unity prints both numbers, so the report says how far in.
     TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(
         rest::kMaxDriversResponseBytes - kMarginBytes, json.size(),
-        "GET /api/v1/drivers is within kMarginBytes of rest::kMaxDriversResponseBytes. Shorten "
-        "the profile's display_name, or raise the ceiling in rest_payloads.h after reading "
-        "what it costs in heap");
+        "GET /api/v1/drivers is within kMarginBytes of rest::kMaxDriversResponseBytes. Raise "
+        "that ceiling in rest_payloads.h after reading what it costs in heap; a shorter "
+        "display_name only postpones this");
 
     // And the ceiling refuses rather than truncates, leaving the caller's string alone: that
     // is what lets the handler answer 500 instead of a 200 with half a document.

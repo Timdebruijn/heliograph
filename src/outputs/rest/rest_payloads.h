@@ -197,11 +197,10 @@ bool buildFaultFramesPayload(const std::vector<faultlog::StoredFault>& records,
                              const FaultFrameDecoder& decode, std::string& out,
                              size_t maxBytes = kMaxResponseBytes);
 
-/// The driver list has its own ceiling because it is the one response that grows with the
-/// build instead of with the installation: every file under profiles/ adds its id and label
-/// to the `profile` option. Measured 2026-11-23: 56-122 bytes each, and thirteen profiles had
-/// it at 8119 of the 8192 bytes of kMaxResponseBytes; one more would have emptied the
-/// settings page.
+/// The driver list has its own ceiling because it is the one response that grows without a
+/// line of C++ changing: every file under profiles/ adds its id and label to the `profile`
+/// option. Measured 2026-11-23: 56-122 bytes each, and thirteen profiles had it at 8119 of the
+/// 8192 bytes of kMaxResponseBytes; one more would have emptied the settings page.
 ///
 /// Its own constant rather than a larger kMaxResponseBytes: that one bounds the payloads that
 /// scale with runtime state, and raising it would raise the worst case of all of them at once.
@@ -212,6 +211,11 @@ bool buildFaultFramesPayload(const std::vector<faultlog::StoredFault>& records,
 inline constexpr size_t kMaxDriversResponseBytes = 12288;
 /// Drivers compiled into this build. The discovery wizard needs this rather than a hardcoded
 /// list in the frontend.
+///
+/// [[nodiscard]] because the handler lives in a file the host tests do not compile: it once
+/// dropped this result and served an empty 200, and the compiler is the only thing placed to
+/// notice if it does so again.
+[[nodiscard]]
 bool buildDriversPayload(const std::vector<DriverDescriptor>& drivers, std::string& out,
                          size_t maxBytes = kMaxDriversResponseBytes);
 
