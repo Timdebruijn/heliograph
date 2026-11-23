@@ -619,7 +619,7 @@ const tick=setInterval(async()=>{
     window.fetch=(u,o)=>{
       if(o&&o.method==='PATCH')
         return Promise.resolve(new Response('{"reboot_required":false}',{status:200}));
-      if(String(u).startsWith('/api/v1/config'))gets++;
+      if(u==='/api/v1/config')gets++;
       return rf(u,o);
     };
     const r=await patch({polling:{interval_seconds:10}});
@@ -632,7 +632,7 @@ const tick=setInterval(async()=>{
     await patch({polling:{interval_seconds:10}});
     if(!cfg||!cfg.driver) say('cfg was dropped when the config could not be fetched after a bare answer');
   }catch(e){ say('the bare-answer assertions threw: '+e.message); }
-  finally{ window.fetch=rf; }
+  finally{ window.fetch=rf; sessionStorage.removeItem('hg_auth'); }
   document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
 },25);
 })();

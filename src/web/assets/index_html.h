@@ -1600,7 +1600,8 @@ async function patch(body){
     // A 200 does not promise the document: when the bridge cannot render the saved config it
     // answers with the flag alone, and firmware before that answered with nothing. Taking either
     // as cfg left every settings tab reading sections off an object that has none. Ask for it
-    // instead; if that fails too, the old one stays, stale until a reload but whole.
+    // instead, which helps when the refusal was a failed allocation; a document that has outgrown
+    // its bound is refused again. Then the old one stays, stale until a reload but whole.
     const full=d.config||d;
     if(full.driver)cfg=full;
     else try{cfg=await getJson('/api/v1/config')}catch(e){}
