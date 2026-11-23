@@ -2057,7 +2057,7 @@ static void test_drivers_payload_drives_the_wizard() {
 /// its ceiling is a settings page without a driver list on every device running that build.
 /// The margin makes that a failing test about ten profiles early instead.
 static void test_drivers_payload_keeps_headroom() {
-    constexpr size_t kMarginBytes = 1024;  // about ten profiles at 56-122 bytes each
+    constexpr size_t kMarginBytes = 1024;  // about ten profiles; see kMaxDriversResponseBytes
 
     DriverRegistry reg;
     registerBuiltinDrivers(reg);
@@ -2069,7 +2069,7 @@ static void test_drivers_payload_keeps_headroom() {
     // LESS_OR_EQUAL, not TRUE(<=): Unity prints both numbers, so the report says how far in.
     TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(
         rest::kMaxDriversResponseBytes - kMarginBytes, json.size(),
-        "GET /api/v1/drivers is within 1024 bytes of rest::kMaxDriversResponseBytes. Shorten "
+        "GET /api/v1/drivers is within kMarginBytes of rest::kMaxDriversResponseBytes. Shorten "
         "the profile's display_name, or raise the ceiling in rest_payloads.h after reading "
         "what it costs in heap");
 
