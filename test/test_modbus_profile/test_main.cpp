@@ -1934,6 +1934,69 @@ static void test_the_deye_lp3_grid_relay_bit_is_read_on_its_own() {
     TEST_ASSERT_NULL(m.find(measurement_id::kGridConnected));
 }
 
+// --- the LuxPower SNA single-phase hybrid profile -------------------------------------------
+
+// Three things in this map are easy to transcribe wrong and decode plausibly: the 32-bit
+// counters are LOW word first, the temperatures are signed, and register 5 is two values in one
+// word and must not come out as a state of charge.
+static void test_the_luxpower_profile_decodes_a_realistic_frame() {
+    // The three blocks rows are mapped from. The four probe blocks feed nothing.
+    BlockData blocks[3];
+    blocks[0] = {RegSpace::Input, 0, 40, {}};
+    blocks[1] = {RegSpace::Input, 40, 40, {}};
+    blocks[2] = {RegSpace::Holding, 40, 40, {}};
+
+    setReg(blocks[0], 1, 3180);              // PV1 V       -> 318.0 V
+    setReg(blocks[0], 2, 2960);              // PV2 V       -> 296.0 V
+    setReg(blocks[0], 4, 512);               // Batt V      -> 51.2 V
+    setReg(blocks[0], 5, (100u << 8) | 80);  // SOH 100 %, SOC 80 %, packed: not published
+    setReg(blocks[0], 7, 1500);              // PV1 W
+    setReg(blocks[0], 8, 1300);              // PV2 W
+    setReg(blocks[0], 10, 900);              // into the battery
+    setReg(blocks[0], 11, 0);                // out of the battery
+    setReg(blocks[0], 12, 2342);             // Grid V      -> 234.2 V
+    setReg(blocks[0], 15, 4998);             // Freq        -> 49.98 Hz
+    setReg(blocks[0], 26, 0);                // export
+    setReg(blocks[0], 27, 420);              // import
+    setReg(blocks[1], 50, 0x1170);           // charged, LOW word
+    setReg(blocks[1], 51, 0x0001);           //   0x00011170 = 70000 -> 7000.0 kWh
+    setReg(blocks[1], 52, 61234);            // discharged  -> 6123.4 kWh
+    setReg(blocks[1], 53, 0);
+    setReg(blocks[1], 64, 41);               // Inverter    -> 41 °C
+    setReg(blocks[1], 67, 0xFFFD);           // Battery     -> -3 °C
+    setReg(blocks[2], 60, 100);              // limit       -> 100 %
+
+    MeasurementSet m;
+    applyProfile(*findProfile("luxpower_sna"), blocks, 3, m, 1000);
+
+    TEST_ASSERT_EQUAL_DOUBLE(318.0, m.find(measurement_id::kDcMppt1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(296.0, m.find(measurement_id::kDcMppt2Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(1500.0, m.find(measurement_id::kDcMppt1Power)->value);
+    // No whole-array register: the driver sums the two strings and says that it did.
+    TEST_ASSERT_EQUAL_DOUBLE(2800.0, m.find(measurement_id::kDcPowerTotal)->value);
+    TEST_ASSERT_TRUE(m.find(measurement_id::kDcPowerTotal)->derived);
+    TEST_ASSERT_EQUAL_DOUBLE(51.2, m.find(measurement_id::kBatteryVoltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(900.0, m.find(measurement_id::kBatteryChargePower)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, m.find(measurement_id::kBatteryDischargePower)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(234.2, m.find(measurement_id::kAcL1Voltage)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(49.98, m.find(measurement_id::kAcFrequency)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, m.find(measurement_id::kGridExportPower)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(420.0, m.find(measurement_id::kGridImportPower)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(7000.0, m.find(measurement_id::kBatteryEnergyCharged)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(6123.4, m.find(measurement_id::kBatteryEnergyDischarged)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(41.0, m.find(measurement_id::kTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(-3.0, m.find(measurement_id::kBatteryTemperature)->value);
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, m.find(measurement_id::kActivePowerLimitPct)->value);
+
+    // Left out on purpose, and pinned absent so none drifts back in unnoticed: a packed word,
+    // two channels that need arithmetic, and one whose scale the sources dispute.
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatterySoc));
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryPower));
+    TEST_ASSERT_NULL(m.find(measurement_id::kBatteryCurrent));
+    TEST_ASSERT_NULL(m.find(measurement_id::kAcPowerTotal));
+    TEST_ASSERT_NULL(m.find(measurement_id::kEnergyToday));
+}
+
 // Word order is a per-FAMILY property, and this pins it per family rather than per row.
 //
 // This is the test that would have caught the bug it exists because of. The Sungrow profile
@@ -1958,6 +2021,7 @@ static void test_the_declared_word_order_is_consistent_within_each_family() {
         {"deye_sg0x_lp3", true, "source C names the low word first; A and B read it so"},
         {"deye_sg0x_lp3_dual", true, "the same rows as deye_sg0x_lp3"},
         {"solis_rhi_hybrid", false, "source B lists [low, high], so high sits at the lower address"},
+        {"luxpower_sna", true, "the vendor table names each pair L then H at ascending addresses"},
         {"huawei_sun2000", false, "the library decodes with a big-endian struct format"},
         {"goodwe_et_hybrid", false, "read_bytes4 is int.from_bytes(..., byteorder='big')"},
         {"mic_tl_x", false, "growatt-local assembles (value << 16) | next"},
@@ -2688,6 +2752,7 @@ int main(int, char**) {
     RUN_TEST(test_the_solis_ac_power_goes_negative_while_importing);
     RUN_TEST(test_the_solis_profile_publishes_nothing_the_sources_disputed);
     RUN_TEST(test_the_solis_setpoints_are_declared_and_dormant);
+    RUN_TEST(test_the_luxpower_profile_decodes_a_realistic_frame);
     RUN_TEST(test_the_sungrow_profile_decodes_a_realistic_frame);
     RUN_TEST(test_the_sungrow_battery_power_is_reordered_and_reoriented);
     RUN_TEST(test_the_sungrow_setpoints_are_declared_and_dormant);

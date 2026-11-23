@@ -1,0 +1,367 @@
+# SPDX-License-Identifier: MIT
+#
+# LuxPower SNA single-phase hybrid, low-voltage battery -- Modbus RTU register profile.
+#
+# STATUS: every mapped row is in the vendor document (D) and in an implementation that was
+# reverse-engineered without it (C), and those two agree on the address, the width and the
+# scale. A and B both drew on D, so they are not a second opinion on the map; what they add is
+# that they ran it on real units. NOT confirmed against a real inverter by this project, and
+# nobody on it owns one. See docs/luxpower-sna-protocol.md for the comparison, what the sources
+# would not agree on, and what a tester needs to send back.
+#
+# SOURCES (read directly, not summarised; commit ids in the protocol document):
+#   A. joyfulhouse/pylxpweb, src/pylxpweb/registers/inverter_input.py + inverter_holding.py
+#      The register layer under joyfulhouse/eg4_web_monitor, which polls this inverter family
+#      over PLAIN Modbus RTU (pymodbus, through a USB adapter or a Modbus TCP<->RTU gateway).
+#   B. nicolaERTT/ESP32-luxpower, esp-luxpower.yaml
+#      ESPHome `modbus_controller` -- plain Modbus RTU and nothing else -- wired to an RJ45 port.
+#      B never names its model; that it is an SNA is inferred (see the protocol document). Its
+#      rows were loaded from D's table, which it reproduces.
+#   C. celsworth/lxp-bridge, src/lxp/packet.rs + doc/LXP_REGISTERS.txt
+#      Reverse-engineered from the WiFi dongle's TCP stream. Same register numbers, a different
+#      frame (see below), so it corroborates the MAP and says nothing about the wire.
+#   D. The vendor protocol document, in two copies that were read and are not redistributed
+#      here: "EG4 18KPV-12LV Modbus RTU Protocol" and the Lux Power "Register Mapping Table"
+#      excerpt that source B carries. ant0nkr/luxpower-ha-integration is a transcription of D
+#      and is counted as D, not as a further source.
+#
+# THE FRAME IS THE OPEN QUESTION, NOT THE MAP. Document D does not describe Modbus RTU as a
+# standard master speaks it: its frame carries a 10-byte serial number after the function code
+# and every 16-bit value low byte first. That dialect is what the dongle port speaks, and this
+# firmware does not speak it. This profile rests on A and B, which both send STANDARD frames
+# (big-endian, no serial number) and both report answers. That is an observation by two other
+# projects, documented by the vendor nowhere. If a unit does not answer plain Modbus RTU on the
+# port described in the protocol document, this profile cannot work and no setting will fix it.
+#
+# WORD ORDER: low word first for every 32-bit value. D names each pair "L" then "H" at
+# ascending addresses, A declares "register pair, low word first", C parses them as
+# little-endian u32. Byte order INSIDE a word is the ordinary big-endian of standard Modbus on
+# this port -- the low-byte-first rule in D belongs to the serial-number frame.
+#
+# REGISTER SPACE: input registers (function 04) for readings, holding (function 03) for
+# settings. D lists 03, 04, 06 and 16.
+
+[profile]
+driver = "modbus_profile"
+id = "luxpower_sna"
+display_name = "LuxPower SNA 3-6K hybrid (single phase, LV battery)"
+manufacturer = "LuxPower"
+
+# How far this MAP is proven -- its own property, never inherited from the driver.
+# The sources agree; no SNA has answered this map.
+status = "experimental"
+default = false        # sph.toml holds the driver default
+phases = 1
+mppts = 2
+battery = true
+transports = ["rtu"]
+
+# D section 2: 19200 bps, 8 data bits, no parity, one stop bit. A and B use the same.
+[serial]
+baud = 19200
+parity = "none"
+stop_bits = 1
+
+# ------------------------------------------------------------------------------------------
+# Read blocks. D section 2, item 9: at most 40 registers per query, and the inverter groups its
+# registers as 0-39, 40-79, 80-119 -- a query may not cross a group. Units differ in practice:
+# an LXP-3600 answered a longer read with exception 03 (f-garofalo/openlux issue 7), while
+# other projects report long reads working on other models. Every block here IS one documented
+# group, exactly, which is the form no unit has been seen to refuse.
+#
+# Four blocks map nothing and are marked `probe`: their contents are what the bring-up TRACE
+# dump needs (the battery current whose scale the sources dispute, the function word holding
+# the AC-charge bit, the charge and export settings, the active-power enable bit), and a unit
+# that refuses one must not put a bus error on the counters at every poll.
+# ------------------------------------------------------------------------------------------
+
+[[block]]
+space = "input"
+start = 0
+count = 40      # 0-39: state, PV, battery, grid, EPS, today's energy counters
+
+[[block]]
+space = "input"
+start = 40
+count = 40      # 40-79: lifetime energy counters, fault and warning words, temperatures
+
+[[block]]
+space = "input"
+start = 80
+count = 40      # 80-119: what the BMS reports -- limits, current, cell extremes. Nothing mapped
+probe = true
+
+[[block]]
+space = "holding"
+start = 40
+count = 40      # 40-79: the active-power limit at 60 (mapped), charge settings at 64-67
+
+[[block]]
+space = "holding"
+start = 0
+count = 40      # 0-39: model, serial, firmware, bus address at 15, function word at 21
+probe = true
+
+[[block]]
+space = "holding"
+start = 80
+count = 40      # 80-119: export limit at 103, discharge cut-off SOC at 105, function word at 110
+probe = true
+
+[[block]]
+space = "holding"
+start = 160
+count = 40      # 160-199: the second function word at 179, whose bit 6 enables the limit at 60
+probe = true
+
+# --- Operating state ------------------------------------------------------------------------
+#
+# Input register 0. D points to a separate "operation mode" file that none of the copies
+# include, so the names come from the implementations: B, C and ant0nkr/luxpower-ha-integration
+# each carry a table, and a code is listed only where two of them agree in MEANING. Left out
+# on purpose: 17 (one says bypass, another standby), 128 (PV off-grid in one, "PV power
+# unstable" in another), 25 and 96 (one table each). A code not listed here is published as
+# "Unknown (<n>)", which is the honest answer.
+
+[status_register]
+space = "input"
+address = 0
+values = { 0 = "Standby", 1 = "Fault", 2 = "Firmware update", 4 = "PV on-grid", 8 = "PV charging", 12 = "PV charging, on-grid", 16 = "Battery on-grid", 20 = "PV and battery on-grid", 32 = "AC charging", 40 = "PV and AC charging", 64 = "Battery off-grid", 136 = "PV charging, off-grid", 192 = "PV and battery off-grid" }
+
+# --- DC / PV side -------------------------------------------------------------------------
+
+[[register]]                    # A, B, C, D agree
+measurement = "dc.mppt_1.voltage"
+display_name = "PV1 Voltage"
+space = "input"
+address = 1
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # A, B, C, D agree
+measurement = "dc.mppt_2.voltage"
+display_name = "PV2 Voltage"
+space = "input"
+address = 2
+type = "u16"
+scale = 0.1
+unit = "V"
+
+# Power per string, whole watts. With both strings mapped and no whole-array register, the
+# driver publishes their sum as dc.power.total, marked derived. That sum is right for a
+# two-tracker unit and SHORT on a three-tracker one, which is why this profile is scoped to the
+# 3-6K models: register 9 is the third string on the larger ones, and D's note on it ("PV3
+# power (total PV power, obtained by adding PV1, 2, 3)") can be read either way.
+[[register]]                    # A, B, C, D agree
+measurement = "dc.mppt_1.power"
+display_name = "PV1 Power"
+space = "input"
+address = 7
+type = "u16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # A, B, C, D agree
+measurement = "dc.mppt_2.power"
+display_name = "PV2 Power"
+space = "input"
+address = 8
+type = "u16"
+scale = 1.0
+unit = "W"
+
+# --- Battery ------------------------------------------------------------------------------
+
+[[register]]                    # A, B, C, D agree
+measurement = "battery.voltage"
+display_name = "Battery Voltage"
+space = "input"
+address = 4
+type = "u16"
+scale = 0.1
+unit = "V"
+
+# Two unsigned rails, each its own register, so there is no sign to get backwards: D calls 10
+# "power flowing into the battery" and 11 "power flowing out of battery". The single signed
+# battery.power would be their difference, which a profile cannot compute.
+[[register]]                    # A, B, C, D agree
+measurement = "battery.charge_power"
+display_name = "Battery Charge Power"
+space = "input"
+address = 10
+type = "u16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # A, B, C, D agree
+measurement = "battery.discharge_power"
+display_name = "Battery Discharge Power"
+space = "input"
+address = 11
+type = "u16"
+scale = 1.0
+unit = "W"
+
+# Whole degrees. Signed on B's authority (S_WORD); A and C read it unsigned. The two decode
+# identically above zero, and s16 survives a battery in an unheated shed.
+[[register]]                    # A, B, C, D agree on address and scale; signedness from B
+measurement = "battery.temperature"
+display_name = "Battery Temperature"
+space = "input"
+address = 67
+type = "s16"
+scale = 1.0
+unit = "°C"
+
+# Lifetime counters, tenths of a kWh, LOW word at the lower address (see WORD ORDER above).
+[[register]]                    # A, C, D agree
+measurement = "battery.energy_charged"
+display_name = "Battery Charged Total"
+space = "input"
+address = 50
+type = "u32"
+word_order = "low_first"
+scale = 0.1
+unit = "kWh"
+
+[[register]]                    # A, C, D agree
+measurement = "battery.energy_discharged"
+display_name = "Battery Discharged Total"
+space = "input"
+address = 52
+type = "u32"
+word_order = "low_first"
+scale = 0.1
+unit = "kWh"
+
+# --- Grid ---------------------------------------------------------------------------------
+
+[[register]]                    # A, B, C, D agree ("R-phase utility grid voltage")
+measurement = "ac.phase_l1.voltage"
+display_name = "Grid Voltage"
+space = "input"
+address = 12
+type = "u16"
+scale = 0.1
+unit = "V"
+
+[[register]]                    # A, B, C, D agree
+measurement = "ac.frequency"
+display_name = "Grid Frequency"
+space = "input"
+address = 15
+type = "u16"
+scale = 0.01
+unit = "Hz"
+
+# Two unsigned rails again. D's English for them is unhelpful ("User on-grid power", "Grid
+# power capacity"); A, C and D's transcription all read 26 as export and 27 as import. B
+# carries 27 only, as its grid power.
+[[register]]                    # A, C, D agree
+measurement = "grid.export_power"
+display_name = "Grid Export Power"
+space = "input"
+address = 26
+type = "u16"
+scale = 1.0
+unit = "W"
+
+[[register]]                    # A, B, C, D agree
+measurement = "grid.import_power"
+display_name = "Grid Import Power"
+space = "input"
+address = 27
+type = "u16"
+scale = 1.0
+unit = "W"
+
+# --- Temperature --------------------------------------------------------------------------
+
+# Whole degrees, D's "internal ring temperature". Signed on A's authority; C reads it
+# unsigned, which is the same number for anything a running inverter reports.
+[[register]]                    # A, C, D agree on address and scale; signedness from A
+measurement = "inverter.temperature"
+display_name = "Inverter Temperature"
+space = "input"
+address = 64
+type = "s16"
+scale = 1.0
+unit = "°C"
+
+# --- Active-power limit (read-back of the setpoint below) -----------------------------------
+#
+# Holding 60, D's ActivePowerPercentCMD, 0-100 %. C carries the same name at the same address,
+# and so do the vendor-portal parameter dumps kept in A's repository (docs/inverters/, an SNA
+# 12K and two LXP-EU 12K among them), each reading 100. A's register table is the one dissent:
+# it labels 60 as a reactive-power mode, against those dumps. Recorded, not smoothed over --
+# see the protocol document.
+[[register]]                    # C, D agree; A's dumps agree, A's table does not
+measurement = "control.active_power_limit"
+display_name = "Active Power Limit"
+space = "holding"
+address = 60
+type = "u16"
+scale = 1.0
+unit = "%"
+
+# ==============================================================================================
+# DELIBERATELY NOT MAPPED -- full reasoning in docs/luxpower-sna-protocol.md
+# ==============================================================================================
+#
+# battery.soc (input 5). A, B and C agree, and it still cannot be mapped: the register
+# packs state of charge in its LOW BYTE and state of health in its HIGH BYTE. A row reads a
+# whole word or one bit, so a healthy battery at 80 % would be published as 25680 %. This is the
+# gap that hurts most -- the dashboard's battery card reads battery.soc -- and it is a limit of
+# the schema, not of the sources. It needs a byte selector on a read row.
+#
+# ac.power.total (input 16 and 17). Inverter output and AC-charge rectifier power are two
+# unsigned rails; the signed total is their difference. Mapping 16 alone would publish 0 W
+# while the unit pulls 3 kW from the grid into the battery.
+#
+# energy.today / energy.total. Generation is kept per string (28-30 today, 40-45 lifetime) and
+# the whole-array figure is a sum. Registers 31 and 46 are the grid-side inverter output, which
+# on a unit that mostly feeds its backup output is not what it produced.
+#
+# battery.current (input 98). Direction stated by no source, and the scale is disputed: C and
+# D say 0.01 A, A and B -- the two that ran it on hardware -- use 0.1 A. Read in the third block.
+#
+# dc.mppt_N.current. A places PV currents at 72-74; the Lux Power copy of D places the grid
+# self-test registers there. A conflict, so neither.
+#
+# load.power. D has a load register at input 170, valid "when working in on-grid mode", and one
+# LXP-3600 was observed refusing to read it. The backup output (24) is a different quantity.
+
+# ------------------------------------------------------------------------------------------
+# Writable setpoint -- DECLARED, DORMANT.
+#
+# Holding 60 limits the inverter's active power as a percentage. It is the one control register
+# of this family that fits what this firmware can write: a whole 16-bit register, a plain
+# number with fixed bounds from D, reversed by writing 100, and read back by the row above.
+# FC06 over plain Modbus RTU is what A uses for every single-register setting and what B uses
+# for the SOC limits at 105 and 125, so the function code is not a guess here.
+#
+# What nobody has shown: that an SNA ACTS on it. D names an enable bit for the active-power
+# command elsewhere (holding 179 bit 6, ActPowerCMDEn) and does not say whether 60 is obeyed
+# without it; what the limit means on a unit feeding its backup output rather than the grid is
+# undocumented too. `verified = false` until
+# somebody writes a value, reads 60 back, and watches the output follow.
+#
+# The registers the vendor portal exposes for AC charging and charge/discharge rates are listed
+# in the protocol document and NOT declared here: none of them can be read back under the
+# current rules, and the AC-charge switch is one bit of a shared word.
+# ------------------------------------------------------------------------------------------
+
+[[write]]
+command = "set_active_power_limit_percent"
+display_name = "Active Power Limit"
+space = "holding"
+address = 60
+type = "u16"
+function = "write_single"
+scale = 1.0
+unit = "%"
+minimum = 0
+maximum = 100
+step = 1
+verified = false
