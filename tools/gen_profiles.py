@@ -288,6 +288,9 @@ def _no_unknown_keys(
     (a `bitmask`, an `offset` on a write row). They pass here so that message is the one the
     author gets, and they are kept out of the suggestions: they are not keys to reach for.
     """
+    # `[[serial]]` for `[serial]`, or `[register]` for `[[register]]`: valid TOML, wrong shape.
+    if not isinstance(table, dict):
+        raise ProfileError(f"{where}: must be a table, got {type(table).__name__}")
     allowed = KEYS[section]
     unknown = sorted(table.keys() - allowed - set(refused))
     if not unknown:
