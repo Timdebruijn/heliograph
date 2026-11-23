@@ -197,10 +197,22 @@ bool buildFaultFramesPayload(const std::vector<faultlog::StoredFault>& records,
                              const FaultFrameDecoder& decode, std::string& out,
                              size_t maxBytes = kMaxResponseBytes);
 
+/// The driver list has its own ceiling because it is the one response that grows with the
+/// build instead of with the installation: every file under profiles/ adds its id and label
+/// to the `profile` option, 56-122 bytes each. Thirteen profiles had it at 8119 of the 8192
+/// bytes of kMaxResponseBytes (2026-11-23); one more would have emptied the settings page.
+///
+/// Its own constant rather than a larger kMaxResponseBytes: that one bounds the payloads that
+/// scale with runtime state, and raising it would raise the worst case of all of them at once.
+/// This list is fixed at compile time, so the native tests see the exact bytes a board serves
+/// and fail (test_drivers_payload_keeps_headroom) a kilobyte before a build reaches the
+/// ceiling. Raising it is a decision about heap, not a formality: the handler holds roughly
+/// three times the payload while it serialises.
+inline constexpr size_t kMaxDriversResponseBytes = 12288;
 /// Drivers compiled into this build. The discovery wizard needs this rather than a hardcoded
 /// list in the frontend.
 bool buildDriversPayload(const std::vector<DriverDescriptor>& drivers, std::string& out,
-                         size_t maxBytes = kMaxResponseBytes);
+                         size_t maxBytes = kMaxDriversResponseBytes);
 
 /// Recent log lines, oldest first. Bounded separately: a hex-dump log is bulkier than any
 /// other response, and truncating it silently would defeat the point of reading it.
