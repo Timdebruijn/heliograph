@@ -459,6 +459,12 @@ bool ConfigurationStore::saveKeepingUndo(const Configuration& config, bool& undo
     undoStored = backend_.read(kStorageKeyConfig, current) && !current.empty() &&
                  backend_.write(kStorageKeyRollback, current);
     if (backend_.write(kStorageKeyConfig, blob)) {
+        // The restore happened without its undo copy. One left over from an earlier restore
+        // is now two configurations back, and undo would go there while the answer said no
+        // undo was stored. Emptied rather than left: an empty value fits where a copy did not.
+        if (!undoStored && !earlierUndo.empty()) {
+            backend_.write(kStorageKeyRollback, "");
+        }
         return true;
     }
     // The restore did not happen, so the undo copy must not say it did. Best effort: this is a

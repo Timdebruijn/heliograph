@@ -117,10 +117,12 @@ public:
     /// then refuses its write after the stash, the undo copy is put back as it was.
     ///
     /// `undoStored` is false when there was nothing to keep (a factory-fresh board) or the
-    /// stash was refused. That is not a reason to abandon the restore -- NVS here is 20 KB
-    /// shared with the WiFi stack's own calibration data, so a second copy of the configuration
-    /// is the first thing that will not fit, and losing the safety net is a smaller harm than
-    /// refusing the operation the safety net was for. The caller reports it instead.
+    /// stash was refused. An undo copy from an earlier restore is then dropped, so that undo
+    /// never reaches back past the restore that just happened. A refused stash is not a reason
+    /// to abandon the restore -- NVS here is 20 KB shared with the WiFi stack's own calibration
+    /// data, so a second copy of the configuration is the first thing that will not fit, and
+    /// losing the safety net is a smaller harm than refusing the operation the safety net was
+    /// for. The caller reports it instead.
     bool saveKeepingUndo(const Configuration& config, bool& undoStored);
 
     /// True when a rollback copy is available.
