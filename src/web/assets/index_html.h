@@ -2378,18 +2378,21 @@ async function applyRestore(){
     (d.reboot_required?' The bridge is restarting — reload this page in ~30 seconds.':' No restart needed.')+
     (d.rollback_stored?' To go back, press “Undo the last restore” in the Backup card.':' No undo point was stored for this restore, so “Undo the last restore” cannot bring back the configuration from just before it. Usually that means the flash had no room for a second copy.'));
 }
-// What the undo point holds is not always "before the last restore", and the page cannot ask:
-// after one undo it holds the restored configuration (the bridge swaps the two, so a second
-// press goes forward again), and after a restore whose own copy did not fit it can hold an
-// older one. So the question says what is normal and names the case the reader can know about.
+// The bridge swaps the undo point with the running configuration, so this button toggles
+// between two configurations and the page cannot ask which one is running. The question and
+// the answer are therefore worded to hold on every press, not only the first.
+//
+// One case they do not cover: after a restore whose own undo copy did not fit, an older copy
+// can be left behind, and the swap then goes further back than "before the last restore".
+// Only the bridge could tell, and it reports nothing the page could show.
 async function undoRestore(){
-  if(!confirm('Swap to the configuration in the undo point? Normally that is the one this bridge had before the last restore. If you have just pressed this, it is the restored one again.'))return;
-  say('#bk_msg','','Swapping…');
+  if(!confirm('Undo the last restore? The bridge switches between the restored configuration and the one from before it, so pressing this a second time brings the restored one back.'))return;
+  say('#bk_msg','','Switching…');
   const r=await authFetch('/api/v1/actions/undo-restore',{method:'POST'});
   const d=await r.json().catch(()=>({}));
   if(!r.ok){say('#bk_msg','err',esc((d.error&&d.error.message)||httpWhy(r)));return}
-  say('#bk_msg','ok','Swapped to the configuration from the undo point.'+(d.rebooting?' The bridge is restarting — reload in ~30 seconds.':' No restart needed.')+
-    ' Pressing this again swaps back.');
+  say('#bk_msg','ok','Switched to the other configuration.'+(d.rebooting?' The bridge is restarting — reload in ~30 seconds.':' No restart needed.')+
+    ' Pressing this again switches back.');
 }
 
 // ---------------- firmware update ----------------
