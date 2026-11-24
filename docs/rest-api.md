@@ -25,7 +25,7 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | PATCH | `/api/v1/config` | **✔** | Change config |
 | GET | `/api/v1/config/backup` | **✔** | Download the whole configuration as a file (`?secrets=true` to include passwords) |
 | POST | `/api/v1/config/restore` | **✔** | Apply a backup file (`?dry_run=true` to preview only) |
-| POST | `/api/v1/actions/undo-restore` | **✔** | Swap back to the configuration from before the last restore |
+| POST | `/api/v1/actions/undo-restore` | **✔** | Swap the configuration with the one from before the last restore; a second call swaps them back |
 | POST | `/api/v1/actions/discover` | **✔** | Start discovery |
 | POST | `/api/v1/actions/capture` | **✔** | Record the bus (`?mode=passive\|driver&seconds=&frames=`, plus line settings in `passive`) |
 | GET | `/api/v1/capture` | — | The last passive capture, with per-frame hex and checksum verdicts |
