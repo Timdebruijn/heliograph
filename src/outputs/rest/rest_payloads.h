@@ -303,9 +303,9 @@ bool buildRestorePreviewPayload(const BackupContents& backup,
 /// configuration and the undo point, in the same shape as the restore preview's.
 ///
 /// `sameAsRunning` says the undo point holds exactly what is already running, so the undo
-/// would change nothing. Reported as its own field because an empty list of changes does not
-/// mean that: passwords are compared as set or not set, so two configurations that differ only
-/// in a password's value also list no change.
+/// would change nothing. Reported as its own field because it is the stronger statement: it
+/// compares the stored bytes, where an empty list of changes says only that no setting differs,
+/// which is also what two copies of one configuration written by different firmware give.
 bool buildUndoPreviewPayload(const std::vector<ConfigDiffEntry>& diff, bool rebootRequired,
                              bool sameAsRunning, std::string& out,
                              size_t maxBytes = kMaxRestorePreviewBytes);

@@ -664,7 +664,6 @@ const tick=setInterval(async()=>{
     if(!asked||!asked.includes('f1: a1 → b1')) say('the undo question does not show what would change');
     if(!asked||!asked.includes('and 2 more')) say('the undo question does not say how many changes it left out');
     if(!asked||!asked.includes('restarts')) say('the undo question does not mention the restart');
-    if(!asked||!asked.includes('password')) say('the undo question does not say a changed password is not shown');
     if(asked&&asked.includes('x'.repeat(61))) say('the undo question shows a long value uncut');
     if(swapped()) say('undo swapped after the question was declined');
 
@@ -676,8 +675,7 @@ const tick=setInterval(async()=>{
     posts=[]; asked=null; answer=false;
     preview={same_as_running:false,change_count:0,reboot_required:false,changes:[]};
     await undoRestore();
-    if(!asked||!asked.includes('No setting')||!asked.includes('password'))
-      say('undo with nothing to list did not say so, or did not mention the password');
+    if(!asked||!asked.includes('No setting')) say('undo with nothing to list did not say so');
 
     // An answer that is not a preview: a bridge that does not know dry_run has already swapped.
     posts=[]; asked=null; answer=true;

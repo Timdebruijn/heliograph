@@ -838,7 +838,11 @@ bool RestApi::begin() {
             }
 
             std::vector<ConfigDiffEntry> diff;
-            if (!diffConfigurations(before, merged, diff)) {
+            // The setup portal lets a bridge without an admin password be restored by whoever
+            // can reach its open network. Such a bridge can still hold WiFi and MQTT passwords
+            // (PATCH clears the admin password with null), and that caller must not be told
+            // whether a password they sent matches the stored one.
+            if (!diffConfigurations(before, merged, diff, !(portal && unsealed))) {
                 sendError(request, {500, "diff_failed", "could not compare the two configurations"});
                 return;
             }

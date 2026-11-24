@@ -389,13 +389,27 @@ static void test_diff_never_renders_a_password_value() {
         TEST_ASSERT_NULL(std::strstr(e.before.c_str(), "secret"));
         TEST_ASSERT_NULL(std::strstr(e.after.c_str(), "secret"));
     }
-    // Changing one secret for another is not a reportable change -- both sides are "(set)" and
-    // there is nothing truthful to show. Clearing one is.
-    TEST_ASSERT_NULL(find(diff, "wifi.password"));
+    // Changing one secret for another is reported as a change, without either value. It used
+    // to be left out, on the reasoning that both sides are "(set)" -- which made a restore or an
+    // undo that replaces the admin password read as one that leaves it alone.
+    const ConfigDiffEntry* wifi = find(diff, "wifi.password");
+    TEST_ASSERT_NOT_NULL_MESSAGE(wifi, "a password that changes value is missing from the diff");
+    TEST_ASSERT_EQUAL_STRING("(set)", wifi->before.c_str());
+    TEST_ASSERT_EQUAL_STRING("(set, but different)", wifi->after.c_str());
+    // Clearing one is reported as before.
     const ConfigDiffEntry* admin = find(diff, "security.admin_password");
     TEST_ASSERT_NOT_NULL(admin);
     TEST_ASSERT_EQUAL_STRING("(set)", admin->before.c_str());
     TEST_ASSERT_EQUAL_STRING("(not set)", admin->after.c_str());
+    // And one that stays what it was is not a change: the MQTT password was not touched.
+    TEST_ASSERT_NULL(find(diff, "mqtt.password"));
+
+    // For a caller who has not signed in, the changed-value row would say whether a password
+    // they sent is the stored one. It is left out; what was reported before still is.
+    TEST_ASSERT_TRUE(diffConfigurations(populated(), after, diff, false));
+    TEST_ASSERT_NULL_MESSAGE(find(diff, "wifi.password"),
+                             "an unauthenticated diff confirms or denies a guessed password");
+    TEST_ASSERT_NOT_NULL(find(diff, "security.admin_password"));
 }
 
 /// The preview is capped at kMaxRestorePreviewBytes and answers 500 when it does not fit, so

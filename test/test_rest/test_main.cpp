@@ -1878,8 +1878,8 @@ static void test_restore_result_reports_a_missing_undo_separately() {
     TEST_ASSERT_FALSE(doc["rollback_stored"].as<bool>());
 }
 
-/// The undo preview says where the swap would go. same_as_running is its own field because an
-/// empty list of changes does not mean "the same": a password that differs lists nothing.
+/// The undo preview says where the swap would go. same_as_running is its own field because it
+/// compares the stored bytes; an empty list of changes only says that no setting differs.
 static void test_undo_preview_lists_the_changes_and_says_when_there_is_nothing_to_switch_to() {
     const std::vector<ConfigDiffEntry> diff = {{"bridge_name", "Zolder", "Schuur"},
                                                {"mqtt.port", "1883", "8883"}};
