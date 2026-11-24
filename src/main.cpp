@@ -1441,9 +1441,11 @@ void startRestApi() {
         return std::vector<FaultFrameField>{};
     };
     ctx.requestFactoryReset = [] { return g_store.factoryReset(); };
-    // The undo behind a configuration restore. Straight through to the store, which owns both
-    // the stash and the swap; the REST layer only decides when.
-    ctx.stashRollback  = [] { return g_store.stashRollback(); };
+    // The undo behind a configuration restore. Straight through to the store, which owns the
+    // stash, the save it belongs to and the swap; the REST layer only decides when.
+    ctx.saveKeepingUndo = [](const Configuration& c, bool& undoStored) {
+        return g_store.saveKeepingUndo(c, undoStored);
+    };
     ctx.hasRollback    = [] { return g_store.hasRollback(); };
     ctx.rollbackConfig = [](Configuration& out) {
         const auto result = g_store.rollback(out);
