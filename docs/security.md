@@ -69,6 +69,12 @@ protocol, not our implementation. Only offer it on a trusted or filtered network
 readable) over the network. TLS on an ESP32 with an async web server isn't worth the
 complexity here; anyone who wants it should put a reverse proxy in front.
 
+**The cross-site check does not stop DNS rebinding.** A page whose own name has been re-pointed
+at the bridge sends an `Origin` equal to its `Host`. It holds no credential for the bridge (a
+browser keys those to the bridge's own name), so it reaches only what needs none: the read-only
+GETs, and the setup portal's provision and restore routes while no admin password exists, which
+anyone on the open setup AP can reach anyway.
+
 **NVS is not encrypted.** The stored configuration contains the wifi and MQTT password in
 plain text. Anyone who can read the flash over USB can read them. Flash encryption would solve
 this but makes OTA and recovery considerably more complex; given the threat model (LAN, no

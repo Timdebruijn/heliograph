@@ -3802,6 +3802,13 @@ static void test_cross_site_requests_are_told_apart_from_the_bridges_own_page() 
     // A prefix is not a match.
     TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://192.168.20.25", "192.168.20.254"));
     TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://192.168.20.254.evil.example", "192.168.20.254"));
+    // Malformed or missing parts refuse rather than accept.
+    TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://", "192.168.20.254"));
+    TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://192.168.20.254", ""));
+    // Exact comparison. Browsers lowercase the host and drop a default port in both headers, so
+    // these only ever come from a hand-made client, and they fail closed (a false reject).
+    TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://Heliograph.local", "heliograph.local"));
+    TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://192.168.20.254:80", "192.168.20.254"));
 }
 
 static void test_error_raw_is_in_the_rest_status_payload_as_a_string_or_null() {

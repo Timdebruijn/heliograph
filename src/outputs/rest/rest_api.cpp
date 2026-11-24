@@ -211,8 +211,13 @@ bool RestApi::begin() {
     // link from elsewhere to a page or a backup download must keep working.
     //
     // Called from authorised(), so every admin route has it, and separately on the two routes
-    // that skip authorised() while the setup portal is unsealed (provision, restore).
-    auto crossSiteRefused = [](AsyncWebServerRequest* request) -> bool {
+    // that skip authorised() while the setup portal is unsealed (provision, restore). A NEW
+    // route that changes anything must go through one of the two; no host test can see it.
+    //
+    // The log line is throttled to one per 10 s with a count: a refused request needs no
+    // credential, so without it any page could flood the log ring and push out boot and fault
+    // history, and stall this task on the serial console.
+    auto crossSiteRefused = [this](AsyncWebServerRequest* request) -> bool {
         const WebRequestMethod method = request->method();
         if (method == HTTP_GET || method == HTTP_HEAD) {
             return false;
@@ -224,11 +229,20 @@ bool RestApi::begin() {
         if (!isCrossSiteRequest(header("Sec-Fetch-Site"), header("Origin"), header("Host"))) {
             return false;
         }
-        log::warn("REST: refused %s %s from another site (Origin '%s')",
-                  request->methodToString(), request->url().c_str(), header("Origin").c_str());
+        ++crossSiteRefusals_;
+        const uint64_t now = context_.clock();
+        if (!crossSiteLogged_ || now - lastCrossSiteLogMs_ >= kCrossSiteLogIntervalMs) {
+            log::warn("REST: refused %u cross-site write(s), latest %s %.48s from Origin '%.64s'",
+                      static_cast<unsigned>(crossSiteRefusals_), request->methodToString(),
+                      request->url().c_str(), header("Origin").c_str());
+            crossSiteRefusals_  = 0;
+            crossSiteLogged_    = true;
+            lastCrossSiteLogMs_ = now;
+        }
         sendError(request, {403, "cross_site",
-                            "refused: a page from another site sent this request; use the "
-                            "bridge's own page, or a client that sends no Origin header"});
+                            "refused: this request came from another site's page. Use the "
+                            "bridge's own page; if that is where it came from, a browser "
+                            "setting or extension is hiding the page's origin (Origin: null)"});
         return true;
     };
 

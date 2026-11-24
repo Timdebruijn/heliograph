@@ -250,6 +250,10 @@ private:
     bool        started_        = false;
     uint64_t    lastSseMs_      = 0;
     uint64_t    lastActionMs_   = 0;
+    // Cross-site refusals since the last log line about them (see crossSiteRefused).
+    uint32_t    crossSiteRefusals_  = 0;
+    uint64_t    lastCrossSiteLogMs_ = 0;
+    bool        crossSiteLogged_    = false;
 
     // Request body accumulation.
     //
@@ -268,6 +272,8 @@ private:
 
 /// Minimum spacing between /actions/* calls, per the security model.
 inline constexpr uint32_t kActionRateLimitMs = 1000;
+/// At most one log line per this interval about refused cross-site writes.
+inline constexpr uint32_t kCrossSiteLogIntervalMs = 10000;
 /// Maximum SSE clients. Bounded to protect the heap.
 inline constexpr size_t kMaxSseClients = 4;
 inline constexpr uint32_t kSseMinIntervalMs = 1000;
