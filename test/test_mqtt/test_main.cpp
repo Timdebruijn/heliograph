@@ -1360,12 +1360,13 @@ static void test_the_rest_of_the_payload_rides_along_as_attributes() {
 // A command is an event. The broker replays a retained one on every new subscription -- each
 // boot, reconnect and gate reopening -- and acting on that replay re-asserted a DRM mode after
 // the boot had released every relay. A live delivery never carries the flag (MQTT 3.1.1), so
-// refusing it costs a real command nothing.
+// refusing it costs a real command nothing. This pins the rule; the ESP32-only call site that
+// feeds it `properties.retain` is covered by the firmware build, not by this suite.
 static void test_a_retained_delivery_is_never_a_command() {
     using heliograph::mqtt::MqttOutput;
     TEST_ASSERT_TRUE(MqttOutput::isLiveCommand(false, 0, 4, 4));
     TEST_ASSERT_FALSE(MqttOutput::isLiveCommand(true, 0, 4, 4));
-    // An empty retained delivery is how a broker clears one; still not a command.
+    // An empty payload with the flag set is refused too (an empty command is no command).
     TEST_ASSERT_FALSE(MqttOutput::isLiveCommand(true, 0, 0, 0));
     // Fragments stay refused, retained or not.
     TEST_ASSERT_FALSE(MqttOutput::isLiveCommand(false, 4, 4, 8));

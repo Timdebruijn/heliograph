@@ -86,7 +86,8 @@ public:
     /// 3.1.1 (the protocol espMqttClient speaks) the broker sets the retain flag on a delivery
     /// only when it replays a stored message to a NEW subscription; a live publish reaches an
     /// existing subscriber with the flag cleared, even when the publisher set it. So a retained
-    /// `drm1` on `drm/set` still acts once, when it is sent, and is then never replayed: not
+    /// `drm1` on `drm/set` still acts once, when it reaches a connected bridge, and is then
+    /// never replayed (one published while the bridge was offline is therefore lost): not
     /// after a reboot, not on a reconnect, not when a gate reopens and the topic is subscribed
     /// again. Before this, every one of those replayed it, and a board whose failsafe is
     /// "boot = all released" (docs/drm.md) curtailed again seconds after boot, on a command

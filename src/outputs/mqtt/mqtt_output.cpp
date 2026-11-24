@@ -124,7 +124,8 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
             if (!isLiveCommand(properties.retain, index, len, total)) {
                 // Named, because a retained command sits on the broker and is refused again on
                 // every reconnect: without a line nobody learns why "it does nothing". Once per
-                // delivery, so per (re)subscription, not per poll.
+                // delivery, not per poll -- and a delivery per subscribe, which for the bridge's
+                // relay/DRM topics happens once per device channel on each connect.
                 if (properties.retain && index == 0) {
                     log::warn("MQTT: ignored a retained message on %s -- commands act only when "
                               "published live; clear it with an empty retained publish",
