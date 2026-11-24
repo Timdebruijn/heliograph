@@ -14,6 +14,7 @@ the same LAN", not "someone holding the PCB in their hands".
 | Raw TCP bridge | Not implemented |
 | REST GET | Unsecured (local network) |
 | REST PATCH/POST | HTTP Basic required; **rejected** without a configured password, not left open |
+| Cross-site requests (CSRF) | A write a browser sends from another site's page is refused with 403, by `Origin`/`Sec-Fetch-Site`; clients that send neither (curl, scripts) are unaffected. See `docs/rest-api.md` → Auth |
 | OTA | Same auth + firmware magic check (0xE9) before the first byte hits flash |
 | Completing setup | Refuses without an admin password |
 | Secrets in logs/REST/MQTT/Prometheus | Never. `serializeConfig()` omits every password **and both usernames** — the MQTT one and `security.admin_username` (not masked, absent); `serializeConfigForStorage()` is the only one that writes them |

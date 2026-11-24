@@ -28,6 +28,7 @@
 #include <optional>
 
 #include "outputs/rest/capture_request.h"
+#include "outputs/rest/cross_site.h"
 #include "outputs/rest/rest_payloads.h"
 #include "state/state_store.h"
 #include "support/configured_device.h"
@@ -3770,6 +3771,39 @@ static std::string statusJson(Rig& r, const DeviceState& state) {
     return json;
 }
 
+// CSRF. Basic auth is ambient: once typed into the browser's prompt, any page can make the
+// browser send it. What a page cannot forge is where the browser says the request came from.
+static void test_cross_site_requests_are_told_apart_from_the_bridges_own_page() {
+    using heliograph::rest::isCrossSiteRequest;
+    // The bridge's own page on its plain-HTTP address: no Sec-Fetch-Site (browsers send it only
+    // to a secure origin), Origin equal to Host -- by IP, by mDNS name, on a non-default port.
+    TEST_ASSERT_FALSE(isCrossSiteRequest("", "http://192.168.20.254", "192.168.20.254"));
+    TEST_ASSERT_FALSE(isCrossSiteRequest("", "http://heliograph.local", "heliograph.local"));
+    TEST_ASSERT_FALSE(isCrossSiteRequest("", "http://10.0.0.5:8080", "10.0.0.5:8080"));
+    // Behind a TLS reverse proxy: the scheme differs from what the bridge speaks; the host does
+    // not. And there the browser does send Sec-Fetch-Site, which then decides alone.
+    TEST_ASSERT_FALSE(isCrossSiteRequest("", "https://solar.example.nl", "solar.example.nl"));
+    TEST_ASSERT_FALSE(isCrossSiteRequest("same-origin", "https://solar.example.nl", "10.0.0.5"));
+    TEST_ASSERT_FALSE(isCrossSiteRequest("none", "", "solar.example.nl"));
+
+    // Not a browser: curl, Home Assistant's rest_command, a script. No ambient credential to
+    // abuse, so they keep working exactly as before.
+    TEST_ASSERT_FALSE(isCrossSiteRequest("", "", "192.168.20.254"));
+
+    // The attack: a page elsewhere posting to the bridge.
+    TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://evil.example", "192.168.20.254"));
+    TEST_ASSERT_TRUE(isCrossSiteRequest("cross-site", "https://evil.example", "solar.example.nl"));
+    // Another host on the same site is still another origin.
+    TEST_ASSERT_TRUE(isCrossSiteRequest("same-site", "https://ha.example.nl", "solar.example.nl"));
+    // A different port on the same host is a different origin too.
+    TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://192.168.20.254:8123", "192.168.20.254"));
+    // Sandboxed frames and file:// pages send `null`; never our own page.
+    TEST_ASSERT_TRUE(isCrossSiteRequest("", "null", "192.168.20.254"));
+    // A prefix is not a match.
+    TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://192.168.20.25", "192.168.20.254"));
+    TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://192.168.20.254.evil.example", "192.168.20.254"));
+}
+
 static void test_error_raw_is_in_the_rest_status_payload_as_a_string_or_null() {
     Rig r;
     r.device.payload = FakeEversolarDevice::Payload::Captured;
@@ -3817,6 +3851,7 @@ int main(int, char**) {
     RUN_TEST(test_a_time_is_published_when_the_clock_was_synced_and_decoding_is_optional);
     RUN_TEST(test_an_empty_fault_log_is_an_empty_list_and_the_size_bound_is_enforced);
     RUN_TEST(test_a_full_ring_of_fully_decoded_records_fits_the_response_bound);
+    RUN_TEST(test_cross_site_requests_are_told_apart_from_the_bridges_own_page);
     RUN_TEST(test_error_raw_is_in_the_rest_status_payload_as_a_string_or_null);
     RUN_TEST(test_unset_fault_flags_are_null_in_the_rest_measurements);
     RUN_TEST(test_config_response_contains_no_secret_anywhere);
