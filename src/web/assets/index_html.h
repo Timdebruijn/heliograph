@@ -2362,7 +2362,7 @@ async function previewRestore(){
     </tbody></table>
     <div class="hint">${esc(d.change_count)} setting(s) would change.${
       d.reboot_required?' The bridge <b>restarts</b> afterwards — some of these only take effect at boot.':''}${
-      d.rollback_exists?' You already have an undo point from an earlier restore; this <b>replaces</b> it, so undoing afterwards comes back to the configuration the bridge has right now.':''}</div>
+      d.rollback_exists?' You already have an undo point from an earlier restore; this <b>replaces</b> it, so undoing afterwards comes back to the configuration the bridge has right now. If the flash has no room for the new undo point, this restore cannot be undone.':''}</div>
     <div class="acts"><button onclick="applyRestore()">Apply these ${esc(d.change_count)} change(s)</button></div>`;
 }
 async function applyRestore(){
@@ -2376,7 +2376,7 @@ async function applyRestore(){
   rsPending=null;
   say('#rs_msg','ok','Restored '+esc(d.changed_fields||0)+' setting(s).'+
     (d.reboot_required?' The bridge is restarting — reload this page in ~30 seconds.':' No restart needed.')+
-    (d.rollback_stored?' To go back, press “Undo the last restore” in the Backup card.':' No undo was stored — the flash was full.'));
+    (d.rollback_stored?' To go back, press “Undo the last restore” in the Backup card.':' This restore cannot be undone: no undo point was stored. That happens when the flash has no room for a second copy of the configuration.'));
 }
 async function undoRestore(){
   if(!confirm('Go back to the configuration this bridge had before the last restore?'))return;

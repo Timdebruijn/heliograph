@@ -809,10 +809,11 @@ Only a restore creates a restore point; an ordinary `PATCH` does not. Writing on
 would double the flash wear and, worse, make "the configuration from before the restore" mean
 nothing in particular.
 
-`rollback_stored: false` means the copy did not fit. NVS here is 20 KB shared with the WiFi
-stack's own calibration data, so a second copy of the configuration is the first thing that will
-not fit — and the restore still goes ahead, because losing the safety net is a smaller harm than
-refusing the operation the safety net was for. A restore point left by an earlier restore is
+`rollback_stored: false` means no copy was kept: it did not fit, or, on a board that has never
+been set up, there was no configuration yet to copy. NVS here is 20 KB shared with the WiFi stack's own
+calibration data, so a second copy of the configuration is the first thing that will not fit —
+and the restore still goes ahead, because losing the safety net is a smaller harm than refusing
+the operation the safety net was for. A restore point left by an earlier restore is
 then emptied, where the flash allows it: it would lead back past the restore that just happened,
 so the undo answers that there is nothing to go back to.
 
