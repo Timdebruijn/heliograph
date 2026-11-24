@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 
 #include <cstring>
+#include <utility>
 
 namespace heliograph {
 namespace {
@@ -483,6 +484,27 @@ bool ConfigurationStore::hasRollback() {
     return backend_.read(kStorageKeyRollback, blob) && !blob.empty();
 }
 
+LoadResult ConfigurationStore::peekRollback(Configuration& out, bool& sameAsLive) {
+    sameAsLive = false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::string                 previous;
+    if (!backend_.read(kStorageKeyRollback, previous) || previous.empty()) {
+        return LoadResult::NotFound;
+    }
+    // The same parse rollback() does before it swaps, so the preview refuses what the swap
+    // would refuse.
+    Configuration parsed;
+    const auto    result = deserializeConfigFromStorage(previous, parsed);
+    if (result != LoadResult::Ok && result != LoadResult::Migrated) {
+        return result;
+    }
+    std::string current;
+    backend_.read(kStorageKeyConfig, current);
+    sameAsLive = previous == current;
+    out        = std::move(parsed);
+    return result;
+}
+
 LoadResult ConfigurationStore::rollback(Configuration& out) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::string                 previous;
@@ -512,7 +534,7 @@ LoadResult ConfigurationStore::rollback(Configuration& out) {
     if (!current.empty()) {
         backend_.write(kStorageKeyRollback, current);
     }
-    out = parsed;
+    out = std::move(parsed);
     return result;
 }
 

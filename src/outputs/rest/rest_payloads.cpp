@@ -854,6 +854,25 @@ bool buildDriverCapturePayload(const DriverCaptureReport& report, uint64_t nowMs
     return finish(doc, out, maxBytes);
 }
 
+namespace {
+
+/// The part the restore preview and the undo preview share: how many settings change, whether
+/// that needs a restart, and each one as field / before / after.
+void writeChanges(JsonDocument& doc, const std::vector<ConfigDiffEntry>& diff,
+                  bool rebootRequired) {
+    doc["change_count"]    = diff.size();
+    doc["reboot_required"] = rebootRequired;
+    JsonArray changes      = doc["changes"].to<JsonArray>();
+    for (const auto& entry : diff) {
+        JsonObject e = changes.add<JsonObject>();
+        e["field"]   = entry.field;
+        e["before"]  = entry.before;
+        e["after"]   = entry.after;
+    }
+}
+
+}  // namespace
+
 bool buildRestorePreviewPayload(const BackupContents& backup,
                                 const std::vector<ConfigDiffEntry>& diff, bool rebootRequired,
                                 bool rollbackExists, std::string& out, size_t maxBytes) {
@@ -868,16 +887,16 @@ bool buildRestorePreviewPayload(const BackupContents& backup,
     if (!backup.firmwareVersion.empty()) source["firmware_version"] = backup.firmwareVersion;
     if (!backup.exportedAt.empty()) source["exported_at"] = backup.exportedAt;
 
-    doc["change_count"]       = diff.size();
-    doc["reboot_required"]    = rebootRequired;
     doc["rollback_exists"] = rollbackExists;
-    JsonArray changes         = doc["changes"].to<JsonArray>();
-    for (const auto& entry : diff) {
-        JsonObject e = changes.add<JsonObject>();
-        e["field"]   = entry.field;
-        e["before"]  = entry.before;
-        e["after"]   = entry.after;
-    }
+    writeChanges(doc, diff, rebootRequired);
+    return finish(doc, out, maxBytes);
+}
+
+bool buildUndoPreviewPayload(const std::vector<ConfigDiffEntry>& diff, bool rebootRequired,
+                             bool sameAsRunning, std::string& out, size_t maxBytes) {
+    JsonDocument doc;
+    doc["same_as_running"] = sameAsRunning;
+    writeChanges(doc, diff, rebootRequired);
     return finish(doc, out, maxBytes);
 }
 

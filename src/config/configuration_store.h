@@ -139,6 +139,15 @@ public:
     /// refuses, because the operator reaching for it is already recovering from something.
     LoadResult rollback(Configuration& out);
 
+    /// What rollback() would make live, without making it live: the undo point, parsed, and
+    /// nothing written. For a preview, so the question "undo?" can say where the undo goes.
+    ///
+    /// `sameAsLive` is true when the undo point holds byte for byte what is stored as the live
+    /// configuration. That is the one case a list of differences cannot show for what it is:
+    /// an undo that would change nothing, which is what a swap leaves behind when its second
+    /// write was refused. Results as for rollback().
+    LoadResult peekRollback(Configuration& out, bool& sameAsLive);
+
 private:
     KeyValueBackend&   backend_;
     mutable std::mutex mutex_;

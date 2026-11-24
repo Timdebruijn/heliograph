@@ -454,6 +454,53 @@ static void test_rolling_back_twice_returns_to_the_restored_configuration() {
     TEST_ASSERT_EQUAL_STRING("after restore", second.bridgeName.c_str());
 }
 
+/// The undo preview reads the undo point. It has to show what rollback() would then make live,
+/// and it must not move anything while doing so.
+static void test_peeking_at_the_undo_point_shows_it_and_moves_nothing() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    Configuration      seen;
+    bool               same = true;
+    TEST_ASSERT_EQUAL(LoadResult::NotFound, store.peekRollback(seen, same));
+    TEST_ASSERT_FALSE(same);
+
+    auto before       = provisionedConfig();
+    before.bridgeName = "before restore";
+    store.save(before);
+    auto after       = provisionedConfig();
+    after.bridgeName = "after restore";
+    bool undoStored  = false;
+    store.saveKeepingUndo(after, undoStored);
+    const std::string live = backend.raw(kStorageKeyConfig);
+    const std::string undo = backend.raw(kStorageKeyRollback);
+
+    same = true;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.peekRollback(seen, same));
+    TEST_ASSERT_EQUAL_STRING("before restore", seen.bridgeName.c_str());
+    TEST_ASSERT_FALSE(same);
+    TEST_ASSERT_EQUAL_STRING(live.c_str(), backend.raw(kStorageKeyConfig).c_str());
+    TEST_ASSERT_EQUAL_STRING(undo.c_str(), backend.raw(kStorageKeyRollback).c_str());
+
+    // It is what the swap then delivers, and after the swap it shows the way forward again.
+    Configuration swapped;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.rollback(swapped));
+    TEST_ASSERT_EQUAL_STRING("before restore", swapped.bridgeName.c_str());
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.peekRollback(seen, same));
+    TEST_ASSERT_EQUAL_STRING("after restore", seen.bridgeName.c_str());
+    TEST_ASSERT_FALSE(same);
+
+    // What a swap leaves when its second write is refused: the undo point holds what is live.
+    // A list of differences is empty for that and for a changed password alike; this is not.
+    backend.write(kStorageKeyRollback, backend.raw(kStorageKeyConfig));
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.peekRollback(seen, same));
+    TEST_ASSERT_TRUE(same);
+
+    // And it refuses what rollback() refuses.
+    backend.write(kStorageKeyRollback, "{not json");
+    TEST_ASSERT_EQUAL(LoadResult::Corrupt, store.peekRollback(seen, same));
+    TEST_ASSERT_FALSE(same);
+}
+
 /// The safety net is allowed to fail. NVS here is 20 KB shared with the WiFi stack, so a
 /// second copy of the configuration is the first thing that will not fit -- and the restore
 /// must still be possible, with the caller told there is no undo.
@@ -1619,6 +1666,7 @@ int main(int, char**) {
     RUN_TEST(test_nothing_to_roll_back_to_on_a_fresh_board);
     RUN_TEST(test_stash_then_rollback_returns_the_earlier_configuration);
     RUN_TEST(test_rolling_back_twice_returns_to_the_restored_configuration);
+    RUN_TEST(test_peeking_at_the_undo_point_shows_it_and_moves_nothing);
     RUN_TEST(test_a_rollback_slot_that_does_not_fit_is_reported_not_fatal);
     RUN_TEST(test_a_restore_saved_without_its_undo_copy_drops_the_older_one);
     RUN_TEST(test_a_refused_restore_leaves_the_earlier_undo_copy_alone);
