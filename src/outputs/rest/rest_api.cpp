@@ -163,7 +163,7 @@ bool RestApi::applyBodyTo(AsyncWebServerRequest* request, Configuration& updated
 
 bool RestApi::saveAndApply(AsyncWebServerRequest* request, const Configuration& updated) {
     if (!context_.saveConfig(updated)) {
-        sendError(request, {500, "save_failed", "could not persist the configuration"});
+        sendError(request, saveFailure(updated));
         return false;
     }
     context_.applyConfig(updated);  // lock-guarded publish; see RestContext

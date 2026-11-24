@@ -6,6 +6,7 @@
 
 #include <ArduinoJson.h>
 
+#include "config/configuration_store.h"
 #include "outputs/json_util.h"
 #include "relays/drm.h"
 
@@ -37,6 +38,17 @@ std::string hexBytes(const std::vector<uint8_t>& bytes) {
 }
 
 }  // namespace
+
+ApiError saveFailure(const Configuration& refused) {
+    const size_t needed = storedConfigSize(refused);
+    if (needed > kMaxStoredConfigBytes) {
+        return {400, "invalid_config",
+                "the configuration needs " + std::to_string(needed) +
+                    " bytes and the bridge can store " + std::to_string(kMaxStoredConfigBytes) +
+                    "; shorten device labels, names or topics, or remove a device"};
+    }
+    return {500, "save_failed", "could not persist the configuration"};
+}
 
 bool buildErrorPayload(const ApiError& error, const std::string& requestId, std::string& out) {
     JsonDocument doc;

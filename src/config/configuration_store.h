@@ -145,6 +145,13 @@ private:
 /// is a visible mistake rather than a silent leak.
 bool serializeConfigForStorage(const Configuration& config, std::string& out);
 
+/// How many bytes the stored blob of `config` needs, whether or not that fits
+/// kMaxStoredConfigBytes. 0 when the document could not be built at all (out of memory).
+///
+/// For the one caller that has to explain a refused save: validate() bounds every string but
+/// not their sum, so a configuration can pass it and still be too large to store.
+size_t storedConfigSize(const Configuration& config);
+
 /// Parses a stored blob, applying migrations from `storedVersion` to kConfigVersion.
 LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& out);
 
