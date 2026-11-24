@@ -639,40 +639,66 @@ const tick=setInterval(async()=>{
   try{
     sessionStorage.setItem('hg_auth',btoa('a:b'));
     goTab('bridge'); panel=null; paint();
-    let posts=[], asked=null, answer=true, preview={};
+    let posts=[], asked=null, answer=true, preview={}, previewStatus=200;
     window.fetch=(u,o)=>{
       if(!String(u).startsWith('/api/v1/actions/undo-restore')) return rf(u,o);
       posts.push(String(u));
-      return Promise.resolve(new Response(JSON.stringify(String(u).includes('dry_run=true')
-        ?preview:{status:'rolled_back',rebooting:false}),{status:200}));
+      return Promise.resolve(String(u).includes('dry_run=true')
+        ?new Response(JSON.stringify(preview),{status:previewStatus})
+        :new Response(JSON.stringify({status:'rolled_back',rebooting:false}),{status:200}));
     };
     window.confirm=t=>{asked=t;return answer};
     const shown=()=>{const m=document.getElementById('bk_msg');return m&&!m.classList.contains('hide')?m.textContent:''};
+    const swapped=()=>posts.some(u=>!u.includes('dry_run'));
 
     preview={same_as_running:true,change_count:0,reboot_required:false,changes:[]};
     await undoRestore();
     if(asked!==null) say('undo asked a question although the undo point is what already runs');
-    if(posts.length!==1) say('undo swapped although the undo point is what already runs');
+    if(swapped()) say('undo swapped although the undo point is what already runs');
     if(!shown().includes('already running')) say('undo did not say the undo point is what already runs');
 
     posts=[]; asked=null; answer=false;
     preview={same_as_running:false,change_count:14,reboot_required:true,
-      changes:Array.from({length:14},(_,i)=>({field:'f'+i,before:'a'+i,after:'b'+i}))};
+      changes:Array.from({length:14},(_,i)=>({field:'f'+i,before:'a'+i,after:i?'b'+i:'x'.repeat(200)}))};
     await undoRestore();
-    if(!asked||!asked.includes('f0: a0 → b0')) say('the undo question does not show what would change');
+    if(!asked||!asked.includes('f1: a1 → b1')) say('the undo question does not show what would change');
     if(!asked||!asked.includes('and 2 more')) say('the undo question does not say how many changes it left out');
     if(!asked||!asked.includes('restarts')) say('the undo question does not mention the restart');
-    if(posts.length!==1) say('undo swapped after the question was declined');
+    if(!asked||!asked.includes('password')) say('the undo question does not say a changed password is not shown');
+    if(asked&&asked.includes('x'.repeat(61))) say('the undo question shows a long value uncut');
+    if(swapped()) say('undo swapped after the question was declined');
 
     posts=[]; answer=true;
     await undoRestore();
-    if(posts.length!==2||posts[1].includes('dry_run')) say('undo did not swap after the question was accepted');
+    if(posts.length!==2||!swapped()) say('undo did not swap after the question was accepted');
     if(!shown().includes('Switched')) say('undo left no confirmation on screen');
 
     posts=[]; asked=null; answer=false;
     preview={same_as_running:false,change_count:0,reboot_required:false,changes:[]};
     await undoRestore();
-    if(!asked||!asked.includes('password')) say('undo with nothing to list did not say a password may differ');
+    if(!asked||!asked.includes('No setting')||!asked.includes('password'))
+      say('undo with nothing to list did not say so, or did not mention the password');
+
+    // An answer that is not a preview: a bridge that does not know dry_run has already swapped.
+    posts=[]; asked=null; answer=true;
+    preview={status:'rolled_back',rebooting:false};
+    await undoRestore();
+    if(asked!==null||swapped()) say('undo went on after an answer that was not a preview');
+    if(!shown().includes('Reload')) say('undo did not say to reload after an answer that was not a preview');
+
+    // A preview the bridge could not build must not take the undo with it.
+    posts=[]; asked=null; answer=true; previewStatus=500;
+    preview={error:{code:'payload_too_large',message:'the undo preview exceeded its bound'}};
+    await undoRestore();
+    if(!asked||!asked.includes('could not show')) say('a failed preview did not offer the undo anyway');
+    if(!swapped()) say('a failed preview blocked the undo');
+
+    // No undo point: the refusal is shown and nothing is asked.
+    posts=[]; asked=null; previewStatus=404;
+    preview={error:{code:'no_rollback',message:'there is no earlier configuration to go back to'}};
+    await undoRestore();
+    if(asked!==null||swapped()) say('undo went on although there is no undo point');
+    if(!shown().includes('no earlier configuration')) say('undo did not show why there is nothing to undo');
   }catch(e){ say('the undo assertions threw: '+e.message); }
   finally{ window.fetch=rf; window.confirm=rc; sessionStorage.removeItem('hg_auth'); }
   document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';

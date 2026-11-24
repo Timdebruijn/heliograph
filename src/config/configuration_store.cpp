@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 
 #include <cstring>
+#include <utility>
 
 namespace heliograph {
 namespace {
@@ -500,7 +501,7 @@ LoadResult ConfigurationStore::peekRollback(Configuration& out, bool& sameAsLive
     std::string current;
     backend_.read(kStorageKeyConfig, current);
     sameAsLive = previous == current;
-    out        = parsed;
+    out        = std::move(parsed);
     return result;
 }
 
@@ -533,7 +534,7 @@ LoadResult ConfigurationStore::rollback(Configuration& out) {
     if (!current.empty()) {
         backend_.write(kStorageKeyRollback, current);
     }
-    out = parsed;
+    out = std::move(parsed);
     return result;
 }
 

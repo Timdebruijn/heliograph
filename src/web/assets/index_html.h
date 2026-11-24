@@ -2387,21 +2387,41 @@ async function undoRestore(){
   say('#bk_msg','','Checking the undo point…');
   const p=await authFetch('/api/v1/actions/undo-restore?dry_run=true',{method:'POST'});
   const pv=await p.json().catch(()=>({}));
-  if(!p.ok){say('#bk_msg','err',esc((pv.error&&pv.error.message)||httpWhy(p)));return}
-  // Not a question worth asking: the swap would write the same configuration back.
-  if(pv.same_as_running){
-    say('#bk_msg','ok','The undo point holds the configuration the bridge is already running, so there is nothing to switch to.');
+  let what;
+  if(p.ok){
+    // A bridge that does not know the preview would have swapped on that request. Seen from
+    // here that is an answer without the field every preview carries, and the one thing not
+    // to do is ask a question and send a second swap after it.
+    if(typeof pv.same_as_running!=='boolean'){
+      say('#bk_msg','err','The bridge gave no preview. Reload this page before pressing this again.');
+      return;
+    }
+    // Not a question worth asking: the swap would write the same configuration back.
+    if(pv.same_as_running){
+      say('#bk_msg','ok','The undo point holds the configuration the bridge is already running, so there is nothing to switch to.');
+      return;
+    }
+    // A native dialog has no table and, on a phone, little room: a value is cut where the
+    // restore preview would wrap it.
+    const cut=v=>{v=String(v);return v.length>60?v.slice(0,57)+'…':v};
+    const rows=(pv.changes||[]).slice(0,UNDO_PREVIEW_ROWS).map(c=>c.field+': '+cut(c.before)+' → '+cut(c.after));
+    const more=(pv.change_count||0)-rows.length;
+    // Said every time, list or no list: a password is compared as set or not set, so one whose
+    // value differs shows nothing, and the swap replaces it all the same.
+    what=(rows.length
+        ?'This changes '+pv.change_count+' setting(s):\n\n'+rows.join('\n')+(more>0?'\n…and '+more+' more':'')
+        :'No setting that can be shown differs.')+
+      '\n\nA password that changes is not shown.'+
+      (pv.reboot_required?'\n\nThe bridge restarts afterwards.':'');
+  }else if(p.status>=500){
+    // Undo is what someone reaches for after a restore went wrong, and a bridge short of memory
+    // is when the preview fails. It must not take the way back with it.
+    what='The bridge could not show what would change ('+((pv.error&&pv.error.message)||httpWhy(p))+').';
+  }else{
+    say('#bk_msg','err',esc((pv.error&&pv.error.message)||httpWhy(p)));
     return;
   }
-  const rows=(pv.changes||[]).slice(0,UNDO_PREVIEW_ROWS).map(c=>c.field+': '+c.before+' → '+c.after);
-  const more=(pv.change_count||0)-rows.length;
-  // No rows does not mean no difference: passwords are compared as set or not set, so a
-  // changed password value shows nothing here.
-  const what=rows.length
-    ?'This changes '+pv.change_count+' setting(s):\n\n'+rows.join('\n')+(more>0?'\n…and '+more+' more':'')
-    :'No setting that can be shown differs. A password may.';
   if(!confirm('Switch to the configuration in the undo point?\n\n'+what+
-      (pv.reboot_required?'\n\nThe bridge restarts afterwards.':'')+
       '\n\nPressing this button again switches back.')){
     const m=$('#bk_msg');if(m)m.classList.add('hide');
     return;

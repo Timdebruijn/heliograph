@@ -810,9 +810,11 @@ nothing the second time.
 
 `changes` has the shape of the restore preview's, with `before` the running configuration and
 `after` the one the swap would make live. `same_as_running: true` means the restore point holds
-exactly what is running, so the swap would change nothing. An empty `changes` does not mean that
-by itself: passwords are compared as set or not set, so a password that differs lists no change.
-The preview is not rate-limited, so the swap can follow it at once.
+byte for byte what is stored as the running configuration, so the swap would change nothing. An
+empty `changes` does not mean that by itself: passwords are compared as set or not set, so one
+whose value changes while it stays set lists no change, and the swap replaces it all the same.
+With no restore point the preview answers `404 no_rollback`, as the swap does. It is not
+rate-limited, so the swap can follow it at once.
 
 A restore that is refused, because the configuration is too large to store or the write fails,
 leaves the restore point as it was: the undo still goes back to before the last restore that
