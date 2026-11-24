@@ -2378,14 +2378,18 @@ async function applyRestore(){
     (d.reboot_required?' The bridge is restarting — reload this page in ~30 seconds.':' No restart needed.')+
     (d.rollback_stored?' To go back, press “Undo the last restore” in the Backup card.':' No undo point was stored for this restore, so “Undo the last restore” cannot bring back the configuration from just before it. Usually that means the flash had no room for a second copy.'));
 }
+// What the undo point holds is not always "before the last restore", and the page cannot ask:
+// after one undo it holds the restored configuration (the bridge swaps the two, so a second
+// press goes forward again), and after a restore whose own copy did not fit it can hold an
+// older one. So the question says what is normal and names the case the reader can know about.
 async function undoRestore(){
-  if(!confirm('Go back to the configuration this bridge had before the last restore?'))return;
-  say('#bk_msg','','Rolling back…');
+  if(!confirm('Swap to the configuration in the undo point? Normally that is the one this bridge had before the last restore. If you have just pressed this, it is the restored one again.'))return;
+  say('#bk_msg','','Swapping…');
   const r=await authFetch('/api/v1/actions/undo-restore',{method:'POST'});
   const d=await r.json().catch(()=>({}));
   if(!r.ok){say('#bk_msg','err',esc((d.error&&d.error.message)||httpWhy(r)));return}
-  say('#bk_msg','ok','Rolled back.'+(d.rebooting?' The bridge is restarting — reload in ~30 seconds.':' No restart needed.')+
-    ' Pressing this again returns to the restored configuration.');
+  say('#bk_msg','ok','Swapped to the configuration from the undo point.'+(d.rebooting?' The bridge is restarting — reload in ~30 seconds.':' No restart needed.')+
+    ' Pressing this again swaps back.');
 }
 
 // ---------------- firmware update ----------------
