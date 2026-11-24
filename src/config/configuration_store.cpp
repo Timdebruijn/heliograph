@@ -461,7 +461,8 @@ bool ConfigurationStore::saveKeepingUndo(const Configuration& config, bool& undo
     if (backend_.write(kStorageKeyConfig, blob)) {
         // The restore happened without its undo copy. One left over from an earlier restore
         // is now two configurations back, and undo would go there while the answer said no
-        // undo was stored. Emptied rather than left: an empty value fits where a copy did not.
+        // undo was stored. Emptied rather than left, as far as the flash allows: an empty value
+        // should fit where a copy did not, and if that is refused too the old copy stays.
         if (!undoStored && !earlierUndo.empty()) {
             backend_.write(kStorageKeyRollback, "");
         }

@@ -813,8 +813,8 @@ nothing in particular.
 stack's own calibration data, so a second copy of the configuration is the first thing that will
 not fit — and the restore still goes ahead, because losing the safety net is a smaller harm than
 refusing the operation the safety net was for. A restore point left by an earlier restore is
-dropped in that case: it would lead back past the restore that just happened, so the undo
-answers that there is nothing to go back to.
+then emptied, where the flash allows it: it would lead back past the restore that just happened,
+so the undo answers that there is nothing to go back to.
 
 ### Restoring during setup
 
