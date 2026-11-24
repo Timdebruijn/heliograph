@@ -79,6 +79,23 @@ public:
             : id(std::move(deviceId)), state(deviceState), primary(isPrimary) {}
     };
 
+    /// Whether a message the broker delivered on a command topic is one to act on: whole, and
+    /// sent by a publisher NOW rather than replayed from the broker's retained store.
+    ///
+    /// Retained deliveries are refused because a command is an event, not a state. Under MQTT
+    /// 3.1.1 (the protocol espMqttClient speaks) the broker sets the retain flag on a delivery
+    /// only when it replays a stored message to a NEW subscription; a live publish reaches an
+    /// existing subscriber with the flag cleared, even when the publisher set it. So a retained
+    /// `drm1` on `drm/set` still acts once, when it is sent, and is then never replayed: not
+    /// after a reboot, not on a reconnect, not when a gate reopens and the topic is subscribed
+    /// again. Before this, every one of those replayed it, and a board whose failsafe is
+    /// "boot = all released" (docs/drm.md) curtailed again seconds after boot, on a command
+    /// nobody had sent since.
+    ///
+    /// Fragmented messages are refused as before: these payloads are far below one fragment.
+    /// Static and outside the ESP32 build so the rule is testable on the host.
+    static bool isLiveCommand(bool retained, size_t index, size_t len, size_t total);
+
     /// Drives reconnects and publishing. Call regularly from the MQTT task; never blocks.
     ///
     /// `devices` is every polled device, in a stable order -- the FIRST one keeps the
