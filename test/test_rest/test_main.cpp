@@ -2091,6 +2091,7 @@ static void test_a_save_refused_for_size_says_so() {
     Configuration edge;
     edge.bridgeName.append(kMaxStoredConfigBytes - blob.size(), 'x');
     TEST_ASSERT_EQUAL_UINT32(kMaxStoredConfigBytes, storedConfigSize(edge));
+    TEST_ASSERT_TRUE(serializeConfigForStorage(edge, blob));
     TEST_ASSERT_EQUAL_INT(500, rest::saveFailure(edge).httpStatus);
 }
 

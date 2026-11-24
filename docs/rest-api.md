@@ -711,7 +711,7 @@ with `GET`. An error status there would report a failure that did not happen.
 
 The stored configuration is bounded as a whole, at 3900 bytes including the credentials. Each
 field has its own limit, but their sum has none: eight devices with labels in multi-byte
-characters and every text field full add up to more. A save that would pass the bound, whether
+characters and every text field full add up to more. A save that would exceed the bound, whether
 a `PATCH`, a restore or the first-time setup, is refused with `400 invalid_config` and a message
 giving both numbers; nothing is stored.
 
