@@ -149,8 +149,16 @@ void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& 
                 const char* s = v.as<const char*>();
                 return (s != nullptr && s[0] != '\0') ? "(set)" : "(not set)";
             };
-            if (std::strcmp(flag(old), flag(kv.value())) != 0) {
-                out.push_back({path, flag(old), flag(kv.value())});
+            const char* was = flag(old);
+            const char* now = flag(kv.value());
+            if (std::strcmp(was, now) != 0) {
+                out.push_back({path, was, now});
+            } else if (std::strcmp(now, "(set)") == 0 &&
+                       std::strcmp(old.as<const char*>(), kv.value().as<const char*>()) != 0) {
+                // Set on both sides, and not the same. That it changes is not the secret, and
+                // leaving it out made a restore or an undo that replaces the admin password look
+                // like one that leaves it alone -- found out at the next login.
+                out.push_back({path, was, "(set, but different)"});
             }
             continue;
         }

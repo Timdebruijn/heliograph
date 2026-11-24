@@ -2406,12 +2406,11 @@ async function undoRestore(){
     const cut=v=>{v=String(v);return v.length>60?v.slice(0,57)+'…':v};
     const rows=(pv.changes||[]).slice(0,UNDO_PREVIEW_ROWS).map(c=>c.field+': '+cut(c.before)+' → '+cut(c.after));
     const more=(pv.change_count||0)-rows.length;
-    // Said every time, list or no list: a password is compared as set or not set, so one whose
-    // value differs shows nothing, and the swap replaces it all the same.
+    // No rows while the undo point is not what runs: the same settings, stored differently.
+    // A password that changes is a row of its own, as "(set)" becoming "(set, but different)".
     what=(rows.length
         ?'This changes '+pv.change_count+' setting(s):\n\n'+rows.join('\n')+(more>0?'\n…and '+more+' more':'')
-        :'No setting that can be shown differs.')+
-      '\n\nA password that changes is not shown.'+
+        :'No setting differs.')+
       (pv.reboot_required?'\n\nThe bridge restarts afterwards.':'');
   }else if(p.status>=500){
     // Undo is what someone reaches for after a restore went wrong, and a bridge short of memory

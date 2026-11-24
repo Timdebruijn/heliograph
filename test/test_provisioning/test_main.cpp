@@ -490,7 +490,8 @@ static void test_peeking_at_the_undo_point_shows_it_and_moves_nothing() {
     TEST_ASSERT_FALSE(same);
 
     // What a swap leaves when its second write is refused: the undo point holds what is live.
-    // A list of differences is empty for that and for a changed password alike; this is not.
+    // A list of differences is empty for that and for one configuration stored two ways alike;
+    // this is not.
     backend.write(kStorageKeyRollback, backend.raw(kStorageKeyConfig));
     TEST_ASSERT_EQUAL(LoadResult::Ok, store.peekRollback(seen, same));
     TEST_ASSERT_TRUE(same);

@@ -128,7 +128,9 @@ struct ConfigDiffEntry {
 ///
 /// Passwords are never rendered as values. Any key named `password` or ending in `_password`
 /// comes out as "(set)" or "(not set)" -- a rule rather than a list of three, so a credential
-/// added in future is redacted before anyone has to remember that it should be.
+/// added in future is redacted before anyone has to remember that it should be. One that is set
+/// on both sides with a different value is reported as "(set)" becoming "(set, but different)":
+/// that it changes is worth knowing and gives nothing of the value away.
 ///
 /// False only if either configuration fails to serialise.
 bool diffConfigurations(const Configuration& before, const Configuration& after,

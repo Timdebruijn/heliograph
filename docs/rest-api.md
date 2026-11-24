@@ -776,7 +776,8 @@ The diff is computed against the **merged result**, not against the file, so it 
 about a redacted backup: those credentials show as unchanged, because leaving them alone is
 what applying it will do. Password values never appear — any key named `password` or ending in
 `_password` renders as `(set)` / `(not set)`, as a rule rather than a list, so a credential
-added later is redacted before anyone has to remember it should be.
+added later is redacted before anyone has to remember it should be. A password that is set
+before and after with a different value is listed as `(set)` becoming `(set, but different)`.
 
 Nothing is staged on the bridge between the two calls. The apply re-sends the file rather than
 confirming a token, so there is no server-side session to expire, to be raced by a second
@@ -811,8 +812,8 @@ nothing the second time.
 `changes` has the shape of the restore preview's, with `before` the running configuration and
 `after` the one the swap would make live. `same_as_running: true` means the restore point holds
 byte for byte what is stored as the running configuration, so the swap would change nothing. An
-empty `changes` does not mean that by itself: passwords are compared as set or not set, so one
-whose value changes while it stays set lists no change, and the swap replaces it all the same.
+empty `changes` with `same_as_running: false` means no setting differs although the stored bytes
+do, as when the restore point was written by other firmware.
 With no restore point the preview answers `404 no_rollback`, as the swap does. It is not
 rate-limited, so the swap can follow it at once.
 
