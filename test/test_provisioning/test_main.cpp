@@ -383,13 +383,14 @@ static void test_a_config_without_the_setting_keeps_the_default() {
 
 // --- the rollback slot ------------------------------------------------------------------------
 
-/// A flash that refuses one key and takes the rest: the undo copy that does not fit while the
-/// configuration does, or the other way round. MemoryBackend::writeFails refuses everything,
-/// which cannot tell those two apart.
+/// A flash with no room left for one key, while it takes the rest: the undo copy that does
+/// not fit while the configuration does, or the other way round. MemoryBackend::writeFails
+/// refuses everything, which cannot tell those two apart. An empty value is still taken under
+/// the refused key, because emptying an entry is what fits when a copy does not.
 struct OneKeyRefused : MemoryBackend {
     std::string refused;
     bool write(const std::string& key, const std::string& value) override {
-        return key != refused && MemoryBackend::write(key, value);
+        return (key != refused || value.empty()) && MemoryBackend::write(key, value);
     }
 };
 
@@ -471,6 +472,37 @@ static void test_a_rollback_slot_that_does_not_fit_is_reported_not_fatal() {
     Configuration live;
     TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(live));
     TEST_ASSERT_EQUAL_STRING("restored anyway", live.bridgeName.c_str());
+}
+
+/// A restore that is saved without its undo copy must not leave an older one behind. The slot
+/// then held the configuration from before the restore BEFORE this one: the answer said no undo
+/// was stored, and pressing undo went back two restores.
+static void test_a_restore_saved_without_its_undo_copy_drops_the_older_one() {
+    OneKeyRefused      backend;
+    ConfigurationStore store(backend);
+    auto               one = provisionedConfig();
+    one.bridgeName         = "one";
+    store.save(one);
+    auto two        = provisionedConfig();
+    two.bridgeName  = "two";
+    bool undoStored = false;
+    TEST_ASSERT_TRUE(store.saveKeepingUndo(two, undoStored));
+    TEST_ASSERT_TRUE(store.hasRollback());  // undo goes to "one"
+
+    auto three       = provisionedConfig();
+    three.bridgeName = "three";
+    backend.refused  = kStorageKeyRollback;
+    undoStored       = true;
+    TEST_ASSERT_TRUE(store.saveKeepingUndo(three, undoStored));
+    TEST_ASSERT_FALSE(undoStored);
+    TEST_ASSERT_FALSE_MESSAGE(store.hasRollback(),
+                              "undo still offers the configuration from two restores ago");
+    Configuration out;
+    TEST_ASSERT_EQUAL(LoadResult::NotFound, store.rollback(out));
+
+    Configuration live;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(live));
+    TEST_ASSERT_EQUAL_STRING("three", live.bridgeName.c_str());
 }
 
 /// A restore that is refused must leave the undo copy of the restore before it alone. The stash
@@ -1588,6 +1620,7 @@ int main(int, char**) {
     RUN_TEST(test_stash_then_rollback_returns_the_earlier_configuration);
     RUN_TEST(test_rolling_back_twice_returns_to_the_restored_configuration);
     RUN_TEST(test_a_rollback_slot_that_does_not_fit_is_reported_not_fatal);
+    RUN_TEST(test_a_restore_saved_without_its_undo_copy_drops_the_older_one);
     RUN_TEST(test_a_refused_restore_leaves_the_earlier_undo_copy_alone);
     RUN_TEST(test_a_refused_first_restore_leaves_no_undo_copy);
     RUN_TEST(test_an_unreadable_rollback_leaves_the_live_config_untouched);
