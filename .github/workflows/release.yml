@@ -18,6 +18,17 @@
 # published until every board has built AND every check has passed. `needs` enforces that
 # exactly as running them in sequence did. A release that shipped three good images and one bad
 # one would be far worse than a slow release.
+#
+# A FOURTH JOB FOR THE PAGES DEPLOY. It used to be the last step of the publish job, directly
+# after the step that uploads the site. v0.35.1 was tagged on 2026-11-24 and that step failed
+# on both attempts that reached it, with "No artifacts named github-pages were found": the
+# deploy action lists the run's artifacts within a second of the upload and the new one is not
+# in the list yet (actions/deploy-pages issue 451). The GitHub Release was created and the
+# feed was not, so the release existed and no bridge was offered it.
+#
+# In its own job the deploy starts on a fresh runner, seconds after the upload instead of
+# within the same second, and it can be re-run alone. That second part matters as much: the
+# publish job could not be re-run at all, see "Download images" below.
 
 name: Release
 
@@ -190,9 +201,15 @@ jobs:
       # transfer is the worst outcome available -- worse than no release. The hash in
       # latest.json is computed further down from these same files, so without this check a
       # mangled image would simply be hashed faithfully and published as correct.
+      #
+      # ONLY THE IMAGES. Without a pattern this step downloads every artifact of the run, and on
+      # a re-run that includes the `github-pages` artifact an earlier attempt of this job
+      # uploaded. It lands in fw/ beside the boards, the count below reads four where it expects
+      # three, and the job stops -- which is what happened to the first re-run of v0.35.1.
       - name: Download images
         uses: actions/download-artifact@v8
         with:
+          pattern: fw-*
           path: fw
 
       - name: Stage release assets
@@ -280,5 +297,17 @@ jobs:
         with:
           path: site
 
+  # The flasher site and the update feed go live here, and only here. See the header for why
+  # this is not a step of the job above. It needs nothing but the artifact that job uploaded:
+  # no checkout, no images.
+  #
+  # `needs: publish` keeps the order: a feed is never deployed for a release that was not
+  # created. The reverse can still happen -- a release with no feed -- and when it does, this
+  # is the job to re-run. Not tried yet: no tag has gone through this layout.
+  deploy:
+    name: Deploy flasher and update feed
+    runs-on: ubuntu-latest
+    needs: publish
+    steps:
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v5
