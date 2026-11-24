@@ -113,8 +113,8 @@ public:
     /// One call rather than a stash followed by a save, because the order between the two is
     /// what went wrong when they were separate: the stash ran first, so a restore that was then
     /// refused had already replaced the undo copy of the restore before it. Here nothing is
-    /// touched until `config` is known to be storable, and if its write is refused after the
-    /// stash, the undo copy is put back as it was.
+    /// touched until `config` has passed validate() and fits the stored size, and if the flash
+    /// then refuses its write after the stash, the undo copy is put back as it was.
     ///
     /// `undoStored` is false when there was nothing to keep (a factory-fresh board) or the
     /// stash was refused. That is not a reason to abandon the restore -- NVS here is 20 KB
