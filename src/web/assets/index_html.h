@@ -1383,7 +1383,7 @@ function paintBridge(){
   </div>
   <div class="card">
     <b>Backup</b>
-    <div class="hint">One file with every setting. Keep it somewhere other than this bridge — it turns a dead board into a twenty-minute job. A restore shows exactly what would change before anything happens, and the configuration from just before it is kept, so a wrong file is undoable.</div>
+    <div class="hint">One file with every setting. Keep it somewhere other than this bridge — it turns a dead board into a twenty-minute job. A restore shows exactly what would change before anything happens, and the configuration from just before it is kept when the flash has room for it, so a wrong file is undoable.</div>
     <label class="check"><input id="bk_sec" type="checkbox"> Include passwords (WiFi, MQTT, admin)</label>
     <div class="hint"><b>Off by default, and think before turning it on.</b> With it on the file holds those passwords in plain text, and it will sit in your downloads folder, sync to whatever cloud drive is watching it, and be the obvious thing to attach to a bug report. Without them a restore onto <i>this</i> bridge still works — an absent password means keep the one it already has. Even so the file names your WiFi network, the broker and both usernames: treat it as private either way.</div>
     <div class="acts">
@@ -2362,7 +2362,7 @@ async function previewRestore(){
     </tbody></table>
     <div class="hint">${esc(d.change_count)} setting(s) would change.${
       d.reboot_required?' The bridge <b>restarts</b> afterwards — some of these only take effect at boot.':''}${
-      d.rollback_exists?' You already have an undo point from an earlier restore; this <b>replaces</b> it, so undoing afterwards comes back to the configuration the bridge has right now. If the flash has no room for the new undo point, this restore cannot be undone.':''}</div>
+      d.rollback_exists?' You already have an undo point from an earlier restore; this <b>replaces</b> it, so undoing afterwards comes back to the configuration the bridge has right now. If the flash has no room for the new one, there will be no way back to the configuration the bridge has right now.':''}</div>
     <div class="acts"><button onclick="applyRestore()">Apply these ${esc(d.change_count)} change(s)</button></div>`;
 }
 async function applyRestore(){
@@ -2376,7 +2376,7 @@ async function applyRestore(){
   rsPending=null;
   say('#rs_msg','ok','Restored '+esc(d.changed_fields||0)+' setting(s).'+
     (d.reboot_required?' The bridge is restarting — reload this page in ~30 seconds.':' No restart needed.')+
-    (d.rollback_stored?' To go back, press “Undo the last restore” in the Backup card.':' This restore cannot be undone: no undo point was stored. That happens when the flash has no room for a second copy of the configuration.'));
+    (d.rollback_stored?' To go back, press “Undo the last restore” in the Backup card.':' No undo point was stored for this restore, so “Undo the last restore” cannot bring back the configuration from just before it. Usually that means the flash had no room for a second copy.'));
 }
 async function undoRestore(){
   if(!confirm('Go back to the configuration this bridge had before the last restore?'))return;
