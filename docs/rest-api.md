@@ -778,6 +778,8 @@ what applying it will do. Password values never appear — any key named `passwo
 `_password` renders as `(set)` / `(not set)`, as a rule rather than a list, so a credential
 added later is redacted before anyone has to remember it should be. A password that is set
 before and after with a different value is listed as `(set)` becoming `(set, but different)`.
+Not during setup on a bridge without an admin password, where the preview needs no sign-in:
+there that row would tell whoever sent the file whether a password in it is the stored one.
 
 Nothing is staged on the bridge between the two calls. The apply re-sends the file rather than
 confirming a token, so there is no server-side session to expire, to be raced by a second

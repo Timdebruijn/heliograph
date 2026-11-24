@@ -93,7 +93,7 @@ std::string renderValue(JsonVariantConst v) {
 }
 
 void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& prefix,
-              std::vector<ConfigDiffEntry>& out);
+              std::vector<ConfigDiffEntry>& out, bool showChangedSecrets);
 
 /// Arrays element by element, `prefix[i]`, descending into each one exactly as objects already
 /// were.
@@ -111,7 +111,7 @@ void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& 
 /// one case and would require this walker to know what identifies a device -- exactly the
 /// hand-written per-field knowledge that diffConfigurations was built to avoid.
 void walkDiffArray(JsonArrayConst before, JsonArrayConst after, const std::string& prefix,
-                   std::vector<ConfigDiffEntry>& out) {
+                   std::vector<ConfigDiffEntry>& out, bool showChangedSecrets) {
     const size_t count = std::max(before.size(), after.size());
     for (size_t i = 0; i < count; ++i) {
         const std::string path = prefix + "[" + std::to_string(i) + "]";
@@ -120,11 +120,11 @@ void walkDiffArray(JsonArrayConst before, JsonArrayConst after, const std::strin
         // Either side being an object is enough: walkDiff renders the missing side's fields as
         // "(absent)", which is what an added or removed element should look like field by field.
         if (a.is<JsonObjectConst>() || b.is<JsonObjectConst>()) {
-            walkDiff(a.as<JsonObjectConst>(), b.as<JsonObjectConst>(), path, out);
+            walkDiff(a.as<JsonObjectConst>(), b.as<JsonObjectConst>(), path, out, showChangedSecrets);
             continue;
         }
         if (a.is<JsonArrayConst>() || b.is<JsonArrayConst>()) {
-            walkDiffArray(a.as<JsonArrayConst>(), b.as<JsonArrayConst>(), path, out);
+            walkDiffArray(a.as<JsonArrayConst>(), b.as<JsonArrayConst>(), path, out, showChangedSecrets);
             continue;
         }
         const std::string sa = renderValue(a);
@@ -136,7 +136,7 @@ void walkDiffArray(JsonArrayConst before, JsonArrayConst after, const std::strin
 }
 
 void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& prefix,
-              std::vector<ConfigDiffEntry>& out) {
+              std::vector<ConfigDiffEntry>& out, bool showChangedSecrets) {
     // Driven by `after`, then swept for keys only `before` had. Iterating one side alone would
     // miss a setting the restore REMOVES, which is a change like any other.
     for (JsonPairConst kv : after) {
@@ -153,21 +153,24 @@ void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& 
             const char* now = flag(kv.value());
             if (std::strcmp(was, now) != 0) {
                 out.push_back({path, was, now});
-            } else if (std::strcmp(now, "(set)") == 0 &&
+            } else if (showChangedSecrets && std::strcmp(now, "(set)") == 0 &&
                        std::strcmp(old.as<const char*>(), kv.value().as<const char*>()) != 0) {
                 // Set on both sides, and not the same. That it changes is not the secret, and
                 // leaving it out made a restore or an undo that replaces the admin password look
                 // like one that leaves it alone -- found out at the next login.
+                //
+                // Only for a caller who has signed in. To anyone else this row answers "is the
+                // stored password the one I just sent?", which is a way to guess it.
                 out.push_back({path, was, "(set, but different)"});
             }
             continue;
         }
         if (kv.value().is<JsonObjectConst>() || old.is<JsonObjectConst>()) {
-            walkDiff(old.as<JsonObjectConst>(), kv.value().as<JsonObjectConst>(), path, out);
+            walkDiff(old.as<JsonObjectConst>(), kv.value().as<JsonObjectConst>(), path, out, showChangedSecrets);
             continue;
         }
         if (kv.value().is<JsonArrayConst>() || old.is<JsonArrayConst>()) {
-            walkDiffArray(old.as<JsonArrayConst>(), kv.value().as<JsonArrayConst>(), path, out);
+            walkDiffArray(old.as<JsonArrayConst>(), kv.value().as<JsonArrayConst>(), path, out, showChangedSecrets);
             continue;
         }
         const std::string a = renderValue(old);
@@ -186,9 +189,9 @@ void walkDiff(JsonObjectConst before, JsonObjectConst after, const std::string& 
             // A whole section the restore drops still reports field by field. Rendering it as
             // one blob here would have been the same unreadable row the array case had, just
             // reached from the other direction.
-            walkDiff(kv.value().as<JsonObjectConst>(), JsonObjectConst(), path, out);
+            walkDiff(kv.value().as<JsonObjectConst>(), JsonObjectConst(), path, out, showChangedSecrets);
         } else if (kv.value().is<JsonArrayConst>()) {
-            walkDiffArray(kv.value().as<JsonArrayConst>(), JsonArrayConst(), path, out);
+            walkDiffArray(kv.value().as<JsonArrayConst>(), JsonArrayConst(), path, out, showChangedSecrets);
         } else {
             out.push_back({path, renderValue(kv.value()), "(absent)"});
         }
@@ -349,14 +352,14 @@ void applyBackup(const BackupContents& backup, Configuration& target) {
 }
 
 bool diffConfigurations(const Configuration& before, const Configuration& after,
-                        std::vector<ConfigDiffEntry>& out) {
+                        std::vector<ConfigDiffEntry>& out, bool showChangedSecrets) {
     out.clear();
     JsonDocument a;
     JsonDocument b;
     if (!storageDocument(before, a) || !storageDocument(after, b)) {
         return false;
     }
-    walkDiff(a.as<JsonObjectConst>(), b.as<JsonObjectConst>(), "", out);
+    walkDiff(a.as<JsonObjectConst>(), b.as<JsonObjectConst>(), "", out, showChangedSecrets);
     return true;
 }
 
