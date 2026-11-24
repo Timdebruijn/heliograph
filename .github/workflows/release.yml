@@ -21,14 +21,22 @@
 #
 # A FOURTH JOB FOR THE PAGES DEPLOY. It used to be the last step of the publish job, directly
 # after the step that uploads the site. v0.35.1 was tagged on 2026-11-24 and that step failed
-# on both attempts that reached it, with "No artifacts named github-pages were found": the
-# deploy action lists the run's artifacts within a second of the upload and the new one is not
-# in the list yet (actions/deploy-pages issue 451). The GitHub Release was created and the
-# feed was not, so the release existed and no bridge was offered it.
+# on both attempts that reached it: `No artifacts named "github-pages" were found for this
+# workflow run`. In that run the deploy step started in the same second the artifact was
+# created, and its listing held the three firmware artifacts only. The GitHub Release was
+# created and the feed was not, so the release existed and no bridge was offered it.
 #
-# In its own job the deploy starts on a fresh runner, seconds after the upload instead of
-# within the same second, and it can be re-run alone. That second part matters as much: the
-# publish job could not be re-run at all, see "Download images" below.
+# Upstream knows it as intermittent (actions/deploy-pages issue 451, open; the retry that
+# would fix it, PR 455, is not merged, so the pinned v5 has none). In its own job the deploy
+# starts on a fresh runner, seconds after the upload instead of within the same second. That
+# makes the race much less likely. It does not make it impossible.
+#
+# What the split does guarantee is a way out: when the deploy fails, "Re-run failed jobs"
+# runs this one job again and nothing else. Before, the publish job could not be re-run at
+# all, see "Download images" below.
+#
+# NOT "Re-run all jobs". That runs publish again, which uploads a second `github-pages`
+# artifact to the same run, and the deploy action refuses a run that has two.
 
 name: Release
 
@@ -303,7 +311,12 @@ jobs:
   #
   # `needs: publish` keeps the order: a feed is never deployed for a release that was not
   # created. The reverse can still happen -- a release with no feed -- and when it does, this
-  # is the job to re-run. Not tried yet: no tag has gone through this layout.
+  # is the job to re-run, within the day: the site artifact is kept for one. Not tried yet: no
+  # tag has gone through this layout.
+  #
+  # No `environment:` key, as before the split. The step has always deployed without one; the
+  # `github-pages` environment allows only `main`, and what it would make of a tag ref has not
+  # been tried.
   deploy:
     name: Deploy flasher and update feed
     runs-on: ubuntu-latest
