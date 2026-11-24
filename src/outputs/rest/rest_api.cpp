@@ -894,7 +894,41 @@ bool RestApi::begin() {
 
     g_server->on("/api/v1/actions/undo-restore", HTTP_POST,
                  [this, authorised, rateLimited](AsyncWebServerRequest* request) {
-        if (!authorised(request) || rateLimited(request)) {
+        if (!authorised(request)) {
+            return;
+        }
+        // The preview: where the undo would go, and nothing done. Answered before the rate
+        // limit rather than through it, because it changes nothing and the call it is the
+        // preview FOR follows within the second -- limited, it would make that one a 429.
+        const bool dryRun = request->hasParam("dry_run") &&
+                            request->getParam("dry_run")->value() == "true";
+        if (dryRun) {
+            context_.diagnostics->recordRestRequest();
+            Configuration undoPoint;
+            bool          sameAsRunning = false;
+            if (context_.peekRollback == nullptr ||
+                !context_.peekRollback(undoPoint, sameAsRunning)) {
+                sendError(request, {404, "no_rollback",
+                                    "there is no earlier configuration to go back to"});
+                return;
+            }
+            std::vector<ConfigDiffEntry> diff;
+            if (!diffConfigurations(*context_.config, undoPoint, diff)) {
+                sendError(request, {500, "diff_failed", "could not compare the two configurations"});
+                return;
+            }
+            std::string body;
+            if (!buildUndoPreviewPayload(
+                    diff, configChangeRequiresReboot(*context_.config, undoPoint), sameAsRunning,
+                    body)) {
+                sendError(request, {500, "payload_too_large",
+                                    "the undo preview exceeded its bound"});
+                return;
+            }
+            request->send(200, kJson, body.c_str());
+            return;
+        }
+        if (rateLimited(request)) {
             return;
         }
         context_.diagnostics->recordRestRequest();

@@ -125,6 +125,10 @@ struct RestContext {
     /// Swaps the rollback copy back in and hands over the configuration that is now live.
     /// False when there is no rollback copy, or it could not be read.
     std::function<bool(Configuration&)> rollbackConfig;
+    /// The configuration rollbackConfig would make live, without swapping anything, and
+    /// whether it is exactly what is running already. False when there is no rollback copy,
+    /// or it could not be read.
+    std::function<bool(Configuration&, bool& sameAsRunning)> peekRollback;
     /// Whether an undo is currently available, for the preview to say so up front.
     std::function<bool()> hasRollback;
     /// Erases a stored crash dump. Returns false when there was none, or the flash refused.

@@ -222,6 +222,12 @@
     if (u.startsWith('/api/v1/capture')) return json({status:'idle'});
     if (u.startsWith('/api/v1/registers')) return json({status:'done', unit:1,
       space:'holding', address:500, count:3, result:'ok', values:[2, 0xFFFF, 0x8001]});
+    // The undo button asks where the swap would go before it swaps. Without this the generic
+    // answer below reads as "nothing to list" and the demo then claims to have switched.
+    if (u.startsWith('/api/v1/actions/undo-restore')) return json(u.includes('dry_run=true')
+      ? {same_as_running:false, change_count:1, reboot_required:false,
+         changes:[{field:'bridge_name', before:config.bridge_name, after:'Zonnehuis'}]}
+      : {status:'rolled_back', rebooting:false});
     if (u.startsWith('/api/v1/')) return json({ok: true}, 202);
     // Everything else is refused rather than passed through. The page's update check goes out
     // to GitHub Pages, and a layout check that reaches the network is one that fails on a

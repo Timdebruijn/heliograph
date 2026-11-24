@@ -2379,19 +2379,38 @@ async function applyRestore(){
     (d.rollback_stored?' To go back, press “Undo the last restore” in the Backup card.':' No undo point was stored for this restore, so “Undo the last restore” cannot bring back the configuration from just before it. Usually that means the flash had no room for a second copy.'));
 }
 // The bridge swaps the undo point with the running configuration, so this button toggles
-// between two configurations and the page cannot ask which one is running. The question and
-// the answer are therefore worded to hold on every press, not only the first.
-//
-// One case they do not cover: after a restore whose own undo copy did not fit, an older copy
-// can be left behind, and the swap then goes further back than "before the last restore".
-// Only the bridge could tell, and it reports nothing the page could show.
+// between two configurations, and which one a press leads to depends on what happened before:
+// one undo, two, or a restore whose own undo copy did not fit. Rather than describe that, the
+// page asks the bridge where this press would go and puts the answer in the question.
+const UNDO_PREVIEW_ROWS=12;
 async function undoRestore(){
-  if(!confirm('Undo the last restore? The bridge switches between the restored configuration and the one from before it, so pressing this a second time brings the restored one back.'))return;
+  say('#bk_msg','','Checking the undo point…');
+  const p=await authFetch('/api/v1/actions/undo-restore?dry_run=true',{method:'POST'});
+  const pv=await p.json().catch(()=>({}));
+  if(!p.ok){say('#bk_msg','err',esc((pv.error&&pv.error.message)||httpWhy(p)));return}
+  // Not a question worth asking: the swap would write the same configuration back.
+  if(pv.same_as_running){
+    say('#bk_msg','ok','The undo point holds the configuration the bridge is already running, so there is nothing to switch to.');
+    return;
+  }
+  const rows=(pv.changes||[]).slice(0,UNDO_PREVIEW_ROWS).map(c=>c.field+': '+c.before+' → '+c.after);
+  const more=(pv.change_count||0)-rows.length;
+  // No rows does not mean no difference: passwords are compared as set or not set, so a
+  // changed password value shows nothing here.
+  const what=rows.length
+    ?'This changes '+pv.change_count+' setting(s):\n\n'+rows.join('\n')+(more>0?'\n…and '+more+' more':'')
+    :'No setting that can be shown differs. A password may.';
+  if(!confirm('Switch to the configuration in the undo point?\n\n'+what+
+      (pv.reboot_required?'\n\nThe bridge restarts afterwards.':'')+
+      '\n\nPressing this button again switches back.')){
+    const m=$('#bk_msg');if(m)m.classList.add('hide');
+    return;
+  }
   say('#bk_msg','','Switching…');
   const r=await authFetch('/api/v1/actions/undo-restore',{method:'POST'});
   const d=await r.json().catch(()=>({}));
   if(!r.ok){say('#bk_msg','err',esc((d.error&&d.error.message)||httpWhy(r)));return}
-  say('#bk_msg','ok','Switched to the other configuration.'+(d.rebooting?' The bridge is restarting — reload in ~30 seconds.':' No restart needed.')+
+  say('#bk_msg','ok','Switched.'+(d.rebooting?' The bridge is restarting — reload in ~30 seconds.':' No restart needed.')+
     ' Pressing this again switches back.');
 }
 

@@ -1451,6 +1451,10 @@ void startRestApi() {
         const auto result = g_store.rollback(out);
         return result == LoadResult::Ok || result == LoadResult::Migrated;
     };
+    ctx.peekRollback = [](Configuration& out, bool& sameAsRunning) {
+        const auto result = g_store.peekRollback(out, sameAsRunning);
+        return result == LoadResult::Ok || result == LoadResult::Migrated;
+    };
     // Clears a dump the operator has dealt with. Without it every later diagnostics read keeps
     // reporting the same old crash, and "is this new?" becomes unanswerable. The cached copy is
     // updated in the same breath so the next payload agrees with the flash.

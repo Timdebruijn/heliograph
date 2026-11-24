@@ -1878,6 +1878,35 @@ static void test_restore_result_reports_a_missing_undo_separately() {
     TEST_ASSERT_FALSE(doc["rollback_stored"].as<bool>());
 }
 
+/// The undo preview says where the swap would go. same_as_running is its own field because an
+/// empty list of changes does not mean "the same": a password that differs lists nothing.
+static void test_undo_preview_lists_the_changes_and_says_when_there_is_nothing_to_switch_to() {
+    const std::vector<ConfigDiffEntry> diff = {{"bridge_name", "Zolder", "Schuur"},
+                                               {"mqtt.port", "1883", "8883"}};
+    std::string body;
+    TEST_ASSERT_TRUE(rest::buildUndoPreviewPayload(diff, true, false, body));
+    JsonDocument doc;
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_FALSE(doc["same_as_running"].as<bool>());
+    TEST_ASSERT_EQUAL_INT(2, doc["change_count"].as<int>());
+    TEST_ASSERT_TRUE(doc["reboot_required"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("mqtt.port", doc["changes"][1]["field"]);
+    TEST_ASSERT_EQUAL_STRING("1883", doc["changes"][1]["before"]);
+    TEST_ASSERT_EQUAL_STRING("8883", doc["changes"][1]["after"]);
+    // Nothing about a backup file: there is none in an undo.
+    TEST_ASSERT_TRUE(doc["backup"].isNull());
+
+    TEST_ASSERT_TRUE(rest::buildUndoPreviewPayload({}, false, true, body));
+    TEST_ASSERT_TRUE(deserializeJson(doc, body) == DeserializationError::Ok);
+    TEST_ASSERT_TRUE(doc["same_as_running"].as<bool>());
+    TEST_ASSERT_EQUAL_INT(0, doc["change_count"].as<int>());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["changes"].size());
+
+    std::string refused = "untouched";
+    TEST_ASSERT_FALSE(rest::buildUndoPreviewPayload(diff, true, false, refused, 16));
+    TEST_ASSERT_EQUAL_STRING("untouched", refused.c_str());
+}
+
 static void test_status_payload_reports_clock_sync_state() {
     Rig        r;
     const auto state = r.poll();
@@ -3955,6 +3984,7 @@ int main(int, char**) {
     RUN_TEST(test_restore_preview_omits_an_absent_export_date);
     RUN_TEST(test_restore_preview_of_a_real_backup_leaks_no_password);
     RUN_TEST(test_restore_result_reports_a_missing_undo_separately);
+    RUN_TEST(test_undo_preview_lists_the_changes_and_says_when_there_is_nothing_to_switch_to);
     RUN_TEST(test_a_driver_query_needs_a_configured_device_and_a_query_it_lists);
     RUN_TEST(test_a_driver_query_runs_on_the_bus_task_and_reports_raw_hex);
     RUN_TEST(test_the_driver_query_runner_refuses_unknown_devices_and_queries);

@@ -633,6 +633,48 @@ const tick=setInterval(async()=>{
     if(!cfg||!cfg.driver) say('cfg was dropped when the config could not be fetched after a bare answer');
   }catch(e){ say('the bare-answer assertions threw: '+e.message); }
   finally{ window.fetch=rf; sessionStorage.removeItem('hg_auth'); }
+  // The undo button asks the bridge where the swap would go before it asks the person, and
+  // does not swap on an answer that says there is nothing to switch to.
+  const rc=window.confirm;
+  try{
+    sessionStorage.setItem('hg_auth',btoa('a:b'));
+    goTab('bridge'); panel=null; paint();
+    let posts=[], asked=null, answer=true, preview={};
+    window.fetch=(u,o)=>{
+      if(!String(u).startsWith('/api/v1/actions/undo-restore')) return rf(u,o);
+      posts.push(String(u));
+      return Promise.resolve(new Response(JSON.stringify(String(u).includes('dry_run=true')
+        ?preview:{status:'rolled_back',rebooting:false}),{status:200}));
+    };
+    window.confirm=t=>{asked=t;return answer};
+    const shown=()=>{const m=document.getElementById('bk_msg');return m&&!m.classList.contains('hide')?m.textContent:''};
+
+    preview={same_as_running:true,change_count:0,reboot_required:false,changes:[]};
+    await undoRestore();
+    if(asked!==null) say('undo asked a question although the undo point is what already runs');
+    if(posts.length!==1) say('undo swapped although the undo point is what already runs');
+    if(!shown().includes('already running')) say('undo did not say the undo point is what already runs');
+
+    posts=[]; asked=null; answer=false;
+    preview={same_as_running:false,change_count:14,reboot_required:true,
+      changes:Array.from({length:14},(_,i)=>({field:'f'+i,before:'a'+i,after:'b'+i}))};
+    await undoRestore();
+    if(!asked||!asked.includes('f0: a0 → b0')) say('the undo question does not show what would change');
+    if(!asked||!asked.includes('and 2 more')) say('the undo question does not say how many changes it left out');
+    if(!asked||!asked.includes('restarts')) say('the undo question does not mention the restart');
+    if(posts.length!==1) say('undo swapped after the question was declined');
+
+    posts=[]; answer=true;
+    await undoRestore();
+    if(posts.length!==2||posts[1].includes('dry_run')) say('undo did not swap after the question was accepted');
+    if(!shown().includes('Switched')) say('undo left no confirmation on screen');
+
+    posts=[]; asked=null; answer=false;
+    preview={same_as_running:false,change_count:0,reboot_required:false,changes:[]};
+    await undoRestore();
+    if(!asked||!asked.includes('password')) say('undo with nothing to list did not say a password may differ');
+  }catch(e){ say('the undo assertions threw: '+e.message); }
+  finally{ window.fetch=rf; window.confirm=rc; sessionStorage.removeItem('hg_auth'); }
   document.title=fail.length?'LAYOUT-FAIL '+fail.join(' || '):'LAYOUT-OK';
 },25);
 })();

@@ -25,7 +25,7 @@ Versioning is in the path: `/api/v1/`. Breaking changes → `/api/v2/`.
 | PATCH | `/api/v1/config` | **✔** | Change config |
 | GET | `/api/v1/config/backup` | **✔** | Download the whole configuration as a file (`?secrets=true` to include passwords) |
 | POST | `/api/v1/config/restore` | **✔** | Apply a backup file (`?dry_run=true` to preview only) |
-| POST | `/api/v1/actions/undo-restore` | **✔** | Swap the configuration with the one from before the last restore; a second call swaps them back |
+| POST | `/api/v1/actions/undo-restore` | **✔** | Swap the configuration with the one from before the last restore; a second call swaps them back. `?dry_run=true` shows what would change |
 | POST | `/api/v1/actions/discover` | **✔** | Start discovery |
 | POST | `/api/v1/actions/capture` | **✔** | Record the bus (`?mode=passive\|driver&seconds=&frames=`, plus line settings in `passive`) |
 | GET | `/api/v1/capture` | — | The last passive capture, with per-frame hex and checksum verdicts |
@@ -800,6 +800,19 @@ Immediately before a restore overwrites it, the current configuration is copied 
 key. `POST /api/v1/actions/undo-restore` **swaps** the two back — pressing it twice returns to
 the restored configuration, which is what makes the button honest rather than silently doing
 nothing the second time.
+
+`?dry_run=true` answers where the swap would go and does nothing:
+
+```json
+{ "same_as_running": false, "change_count": 1, "reboot_required": false,
+  "changes": [ { "field": "bridge_name", "before": "Schuur", "after": "Zolder" } ] }
+```
+
+`changes` has the shape of the restore preview's, with `before` the running configuration and
+`after` the one the swap would make live. `same_as_running: true` means the restore point holds
+exactly what is running, so the swap would change nothing. An empty `changes` does not mean that
+by itself: passwords are compared as set or not set, so a password that differs lists no change.
+The preview is not rate-limited, so the swap can follow it at once.
 
 A restore that is refused, because the configuration is too large to store or the write fails,
 leaves the restore point as it was: the undo still goes back to before the last restore that
