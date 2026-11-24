@@ -203,7 +203,7 @@ Uniform, for every error:
 
 | HTTP | When |
 |---|---|
-| 400 | Invalid JSON, unknown config field, value out of range |
+| 400 | Invalid JSON, unknown config field, value out of range, or a configuration too large to store |
 | 401 | Auth missing/incorrect on a secured endpoint |
 | 404 | Unknown device or path |
 | 409 | Discovery already in progress; RS485 bus busy |
@@ -708,6 +708,12 @@ a client knows whether to call `POST /api/v1/actions/reboot`:
 If the bridge cannot render the document after a save that succeeded, it still answers 200, with
 only the flag, true or false: `{ "reboot_required": true }`. The change is stored; read it back
 with `GET`. An error status there would report a failure that did not happen.
+
+The stored configuration is bounded as a whole, at 3900 bytes including the credentials. Each
+field has its own limit, but their sum has none: eight devices with labels in multi-byte
+characters and every text field full add up to more. A save that would pass the bound, whether
+a `PATCH`, a restore or the first-time setup, is refused with `400 invalid_config` and a message
+giving both numbers; nothing is stored.
 
 ## Backup and restore
 

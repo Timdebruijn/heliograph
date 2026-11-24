@@ -34,6 +34,14 @@ struct ApiError {
     std::string message;
 };
 
+/// The answer to a save that was refused, given the configuration that was not stored.
+///
+/// A configuration that passes validate() can still be too large for storage, because
+/// validate() bounds each string and not their sum. That is the caller's doing and something
+/// they can fix, so it is a 400 that says how far over it is. Every other refusal (the write
+/// failed, memory ran out) stays the 500 it was.
+ApiError saveFailure(const Configuration& refused);
+
 /// Uniform error body. Every failure looks the same, and a failure is never a 200.
 ///
 /// [[nodiscard]] because a refusal leaves `out` untouched: the caller needs a fallback, and

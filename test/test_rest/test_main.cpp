@@ -12,6 +12,7 @@
 #include <ArduinoJson.h>
 
 #include "config/configuration.h"
+#include "config/configuration_store.h"
 #include "diagnostics/breadcrumbs.h"
 #include "diagnostics/coredump.h"
 #include "diagnostics/fault_frame_log.h"
@@ -2051,6 +2052,48 @@ static void test_drivers_payload_drives_the_wizard() {
     TEST_ASSERT_TRUE(foundEversolar);
 }
 
+/// validate() bounds every string and not their sum, so a configuration can pass it and still
+/// be refused by storage. That used to come back as 500 "could not persist the configuration",
+/// which names nothing the person saving can act on.
+static void test_a_save_refused_for_size_says_so() {
+    Configuration c;
+    for (int i = 0; i < 30; ++i) {
+        c.driver.options["option_" + std::to_string(i)] = std::string(128, 'x');
+    }
+    ConfigError error;
+    TEST_ASSERT_TRUE_MESSAGE(validate(c, error), "the case needs a config validate() accepts");
+    std::string blob;
+    TEST_ASSERT_FALSE_MESSAGE(serializeConfigForStorage(c, blob),
+                              "the case needs a config storage refuses");
+
+    const size_t needed = storedConfigSize(c);
+    TEST_ASSERT_GREATER_THAN_UINT32(kMaxStoredConfigBytes, needed);
+    const rest::ApiError tooLarge = rest::saveFailure(c);
+    TEST_ASSERT_EQUAL_INT(400, tooLarge.httpStatus);
+    TEST_ASSERT_EQUAL_STRING("invalid_config", tooLarge.code.c_str());
+    TEST_ASSERT_NOT_NULL_MESSAGE(std::strstr(tooLarge.message.c_str(),
+                                             std::to_string(needed).c_str()),
+                                 tooLarge.message.c_str());
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        std::strstr(tooLarge.message.c_str(), std::to_string(kMaxStoredConfigBytes).c_str()),
+        tooLarge.message.c_str());
+
+    // A configuration that does fit was refused for some other reason: still a 500, and the
+    // size reported for it is the size of the blob that would have been written.
+    const Configuration fits;
+    TEST_ASSERT_TRUE(serializeConfigForStorage(fits, blob));
+    TEST_ASSERT_EQUAL_UINT32(blob.size(), storedConfigSize(fits));
+    const rest::ApiError other = rest::saveFailure(fits);
+    TEST_ASSERT_EQUAL_INT(500, other.httpStatus);
+    TEST_ASSERT_EQUAL_STRING("save_failed", other.code.c_str());
+
+    // Exactly on the bound is stored, so it is not "too large".
+    Configuration edge;
+    edge.bridgeName.append(kMaxStoredConfigBytes - blob.size(), 'x');
+    TEST_ASSERT_EQUAL_UINT32(kMaxStoredConfigBytes, storedConfigSize(edge));
+    TEST_ASSERT_EQUAL_INT(500, rest::saveFailure(edge).httpStatus);
+}
+
 /// GET /api/v1/drivers is the one payload a profile author grows without touching C++: each
 /// profile adds its id and label to the `profile` option. Nothing in it depends on runtime
 /// state, so what this test measures is byte for byte what a board serves, and a payload over
@@ -3834,6 +3877,7 @@ int main(int, char**) {
     RUN_TEST(test_measurements_payload_omits_unsupported);
     RUN_TEST(test_drivers_payload_drives_the_wizard);
     RUN_TEST(test_drivers_payload_keeps_headroom);
+    RUN_TEST(test_a_save_refused_for_size_says_so);
     RUN_TEST(test_poll_duration_math);
     RUN_TEST(test_poll_duration_payload_absent_until_sampled);
     RUN_TEST(test_breadcrumbs_cold_then_warm);

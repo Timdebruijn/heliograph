@@ -108,8 +108,9 @@ std::string MemoryBackend::raw(const std::string& key) const {
     return it == values_.end() ? std::string{} : it->second;
 }
 
-bool serializeConfigForStorage(const Configuration& config, std::string& out) {
-    JsonDocument doc;
+namespace {
+
+void buildStorageDocument(JsonDocument& doc, const Configuration& config) {
     // The version the blob is WRITTEN in, which is what the migration chain reads back on the
     // next boot.
     doc["version"] = kConfigVersion;
@@ -125,9 +126,21 @@ bool serializeConfigForStorage(const Configuration& config, std::string& out) {
     security["admin_username"] = config.security.adminUsername;
     security["admin_password"] = config.security.adminPassword;
     security["read_only_mode"] = config.security.readOnlyMode;
+}
 
+}  // namespace
+
+bool serializeConfigForStorage(const Configuration& config, std::string& out) {
+    JsonDocument doc;
+    buildStorageDocument(doc, config);
     // Refuse rather than write a truncated blob -- see kMaxStoredConfigBytes.
     return json_limits::finish(doc, out, kMaxStoredConfigBytes);
+}
+
+size_t storedConfigSize(const Configuration& config) {
+    JsonDocument doc;
+    buildStorageDocument(doc, config);
+    return doc.overflowed() ? 0 : measureJson(doc);
 }
 
 namespace {

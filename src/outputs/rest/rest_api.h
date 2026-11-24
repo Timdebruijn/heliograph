@@ -227,8 +227,8 @@ private:
     bool applyBodyTo(AsyncWebServerRequest* request, Configuration& updated,
                      const DriverLookupFn& lookupDriver = {});
 
-    /// Persists `updated` and publishes it to the running system, or answers 500 and
-    /// returns false.
+    /// Persists `updated` and publishes it to the running system, or answers with
+    /// rest::saveFailure and returns false.
     ///
     /// The ORDER is the invariant: save first, publish second. Publishing a configuration that
     /// failed to persist leaves the device running something it will not have after a reboot.
