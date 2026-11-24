@@ -161,8 +161,12 @@ bool RestApi::applyBodyTo(AsyncWebServerRequest* request, Configuration& updated
     return true;
 }
 
-bool RestApi::saveAndApply(AsyncWebServerRequest* request, const Configuration& updated) {
-    if (!context_.saveConfig(updated)) {
+bool RestApi::saveAndApply(AsyncWebServerRequest* request, const Configuration& updated,
+                           bool* undoStored) {
+    const bool saved = undoStored != nullptr && context_.saveKeepingUndo != nullptr
+                           ? context_.saveKeepingUndo(updated, *undoStored)
+                           : context_.saveConfig(updated);
+    if (!saved) {
         sendError(request, saveFailure(updated));
         return false;
     }
@@ -858,14 +862,12 @@ bool RestApi::begin() {
                 return;
             }
 
-            // The undo copy goes in BEFORE the new configuration overwrites the old one --
-            // afterwards there is nothing left to copy. A refusal here (a full NVS) is reported,
-            // not fatal: losing the safety net is a smaller harm than refusing the operation it
-            // was for.
-            const bool rollbackStored =
-                context_.stashRollback != nullptr && context_.stashRollback();
-
-            if (!saveAndApply(request, merged)) {
+            // The undo copy is taken by the save itself, not ahead of it: stashed first, a
+            // restore that was then refused had already replaced the undo copy of the restore
+            // before it. A copy that does not fit (a full NVS) is reported, not fatal: losing
+            // the safety net is a smaller harm than refusing the operation it was for.
+            bool rollbackStored = false;
+            if (!saveAndApply(request, merged, &rollbackStored)) {
                 return;
             }
 
@@ -1588,7 +1590,7 @@ void RestApi::releaseBody() {
 bool RestApi::applyBodyTo(AsyncWebServerRequest*, Configuration&, const DriverLookupFn&) {
     return false;
 }
-bool RestApi::saveAndApply(AsyncWebServerRequest*, const Configuration&) { return false; }
+bool RestApi::saveAndApply(AsyncWebServerRequest*, const Configuration&, bool*) { return false; }
 
 }  // namespace heliograph::rest
 

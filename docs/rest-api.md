@@ -801,6 +801,10 @@ key. `POST /api/v1/actions/undo-restore` **swaps** the two back — pressing it 
 the restored configuration, which is what makes the button honest rather than silently doing
 nothing the second time.
 
+A restore that is refused, because the configuration is too large to store or the write fails,
+leaves the restore point as it was: the undo still goes back to before the last restore that
+did happen.
+
 Only a restore creates a restore point; an ordinary `PATCH` does not. Writing one on every save
 would double the flash wear and, worse, make "the configuration from before the restore" mean
 nothing in particular.

@@ -383,13 +383,28 @@ static void test_a_config_without_the_setting_keeps_the_default() {
 
 // --- the rollback slot ------------------------------------------------------------------------
 
+/// A flash that refuses one key and takes the rest: the undo copy that does not fit while the
+/// configuration does, or the other way round. MemoryBackend::writeFails refuses everything,
+/// which cannot tell those two apart.
+struct OneKeyRefused : MemoryBackend {
+    std::string refused;
+    bool write(const std::string& key, const std::string& value) override {
+        return key != refused && MemoryBackend::write(key, value);
+    }
+};
+
 static void test_nothing_to_roll_back_to_on_a_fresh_board() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
     TEST_ASSERT_FALSE(store.hasRollback());
-    TEST_ASSERT_FALSE(store.stashRollback());
     Configuration out;
     TEST_ASSERT_EQUAL(LoadResult::NotFound, store.rollback(out));
+
+    // A restore onto it is saved, and there is still nothing to undo to.
+    bool undoStored = true;
+    TEST_ASSERT_TRUE(store.saveKeepingUndo(provisionedConfig(), undoStored));
+    TEST_ASSERT_FALSE(undoStored);
+    TEST_ASSERT_FALSE(store.hasRollback());
 }
 
 static void test_stash_then_rollback_returns_the_earlier_configuration() {
@@ -399,12 +414,12 @@ static void test_stash_then_rollback_returns_the_earlier_configuration() {
     before.bridgeName         = "before restore";
     TEST_ASSERT_TRUE(store.save(before));
 
-    TEST_ASSERT_TRUE(store.stashRollback());
-    TEST_ASSERT_TRUE(store.hasRollback());
-
     auto after       = provisionedConfig();
     after.bridgeName = "after restore";
-    TEST_ASSERT_TRUE(store.save(after));
+    bool undoStored  = false;
+    TEST_ASSERT_TRUE(store.saveKeepingUndo(after, undoStored));
+    TEST_ASSERT_TRUE(undoStored);
+    TEST_ASSERT_TRUE(store.hasRollback());
 
     Configuration recovered;
     TEST_ASSERT_EQUAL(LoadResult::Ok, store.rollback(recovered));
@@ -424,10 +439,10 @@ static void test_rolling_back_twice_returns_to_the_restored_configuration() {
     auto               before = provisionedConfig();
     before.bridgeName         = "before restore";
     store.save(before);
-    store.stashRollback();
     auto after       = provisionedConfig();
     after.bridgeName = "after restore";
-    store.save(after);
+    bool undoStored  = false;
+    store.saveKeepingUndo(after, undoStored);
 
     Configuration first;
     TEST_ASSERT_EQUAL(LoadResult::Ok, store.rollback(first));
@@ -442,12 +457,80 @@ static void test_rolling_back_twice_returns_to_the_restored_configuration() {
 /// second copy of the configuration is the first thing that will not fit -- and the restore
 /// must still be possible, with the caller told there is no undo.
 static void test_a_rollback_slot_that_does_not_fit_is_reported_not_fatal() {
-    MemoryBackend      backend;
+    OneKeyRefused      backend;
     ConfigurationStore store(backend);
     store.save(provisionedConfig());
-    backend.writeFails = true;
-    TEST_ASSERT_FALSE(store.stashRollback());
-    backend.writeFails = false;
+    backend.refused  = kStorageKeyRollback;
+    auto restored    = provisionedConfig();
+    restored.bridgeName = "restored anyway";
+    bool undoStored  = true;
+    TEST_ASSERT_TRUE(store.saveKeepingUndo(restored, undoStored));
+    TEST_ASSERT_FALSE(undoStored);
+    TEST_ASSERT_FALSE(store.hasRollback());
+
+    Configuration live;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(live));
+    TEST_ASSERT_EQUAL_STRING("restored anyway", live.bridgeName.c_str());
+}
+
+/// A restore that is refused must leave the undo copy of the restore before it alone. The stash
+/// used to be its own call ahead of the save, so by the time the save said no, the undo point
+/// had already been replaced by a copy of what was running: undo then did nothing, and the
+/// configuration it should have gone back to was gone.
+static void test_a_refused_restore_leaves_the_earlier_undo_copy_alone() {
+    OneKeyRefused      backend;
+    ConfigurationStore store(backend);
+    auto               one = provisionedConfig();
+    one.bridgeName         = "one";
+    store.save(one);
+    auto two       = provisionedConfig();
+    two.bridgeName = "two";
+    bool undoStored = false;
+    TEST_ASSERT_TRUE(store.saveKeepingUndo(two, undoStored));
+    const std::string undoToOne = backend.raw(kStorageKeyRollback);
+    const std::string liveTwo   = backend.raw(kStorageKeyConfig);
+    TEST_ASSERT_FALSE(undoToOne.empty());
+
+    // Refused before the flash is involved: validate() accepts it, storage does not.
+    auto tooLarge = provisionedConfig();
+    for (int i = 0; i < 30; ++i) {
+        tooLarge.driver.options["option_" + std::to_string(i)] = std::string(128, 'x');
+    }
+    ConfigError error;
+    TEST_ASSERT_TRUE(validate(tooLarge, error));
+    undoStored = true;
+    TEST_ASSERT_FALSE(store.saveKeepingUndo(tooLarge, undoStored));
+    TEST_ASSERT_FALSE(undoStored);
+    TEST_ASSERT_EQUAL_STRING(undoToOne.c_str(), backend.raw(kStorageKeyRollback).c_str());
+    TEST_ASSERT_EQUAL_STRING(liveTwo.c_str(), backend.raw(kStorageKeyConfig).c_str());
+
+    // Refused by the flash, after the stash went in: the stash is taken back out.
+    auto three       = provisionedConfig();
+    three.bridgeName = "three";
+    backend.refused  = kStorageKeyConfig;
+    undoStored       = true;
+    TEST_ASSERT_FALSE(store.saveKeepingUndo(three, undoStored));
+    TEST_ASSERT_FALSE(undoStored);
+    TEST_ASSERT_EQUAL_STRING(undoToOne.c_str(), backend.raw(kStorageKeyRollback).c_str());
+    TEST_ASSERT_EQUAL_STRING(liveTwo.c_str(), backend.raw(kStorageKeyConfig).c_str());
+
+    // And undo still goes where it went before either refusal.
+    backend.refused.clear();
+    Configuration recovered;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.rollback(recovered));
+    TEST_ASSERT_EQUAL_STRING("one", recovered.bridgeName.c_str());
+}
+
+/// The same refusal with no earlier restore behind it: there was no undo point, and a restore
+/// that did not happen must not leave one.
+static void test_a_refused_first_restore_leaves_no_undo_copy() {
+    OneKeyRefused      backend;
+    ConfigurationStore store(backend);
+    store.save(provisionedConfig());
+    backend.refused = kStorageKeyConfig;
+    bool undoStored = true;
+    TEST_ASSERT_FALSE(store.saveKeepingUndo(provisionedConfig(), undoStored));
+    TEST_ASSERT_FALSE(undoStored);
     TEST_ASSERT_FALSE(store.hasRollback());
 }
 
@@ -474,7 +557,9 @@ static void test_factory_reset_takes_the_rollback_slot_with_it() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
     store.save(provisionedConfig());
-    TEST_ASSERT_TRUE(store.stashRollback());
+    bool undoStored = false;
+    TEST_ASSERT_TRUE(store.saveKeepingUndo(provisionedConfig(), undoStored));
+    TEST_ASSERT_TRUE(undoStored);
 
     TEST_ASSERT_TRUE(store.factoryReset());
     TEST_ASSERT_FALSE(store.hasRollback());
@@ -1503,6 +1588,8 @@ int main(int, char**) {
     RUN_TEST(test_stash_then_rollback_returns_the_earlier_configuration);
     RUN_TEST(test_rolling_back_twice_returns_to_the_restored_configuration);
     RUN_TEST(test_a_rollback_slot_that_does_not_fit_is_reported_not_fatal);
+    RUN_TEST(test_a_refused_restore_leaves_the_earlier_undo_copy_alone);
+    RUN_TEST(test_a_refused_first_restore_leaves_no_undo_copy);
     RUN_TEST(test_an_unreadable_rollback_leaves_the_live_config_untouched);
     RUN_TEST(test_factory_reset_takes_the_rollback_slot_with_it);
     return UNITY_END();

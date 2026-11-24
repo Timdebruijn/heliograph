@@ -117,10 +117,11 @@ struct RestContext {
     /// The same wipe the BOOT-hold performs, reached over the network instead of the button --
     /// which is what a user without physical access has when a config locks them out.
     std::function<bool()> requestFactoryReset;
-    /// Copies the stored configuration into the rollback slot, so the restore about to run can
-    /// be undone. False when there was nothing stored yet, or the write was refused -- both
-    /// are reported to the caller rather than aborting the restore over them.
-    std::function<bool()> stashRollback;
+    /// Persist the configuration as a restore does: what it replaces becomes the undo copy,
+    /// and a save that is refused leaves the undo copy as it was. `undoStored` is false when
+    /// there was nothing stored yet or the copy was refused -- reported to the caller rather
+    /// than aborting the restore over it.
+    std::function<bool(const Configuration&, bool& undoStored)> saveKeepingUndo;
     /// Swaps the rollback copy back in and hands over the configuration that is now live.
     /// False when there is no rollback copy, or it could not be read.
     std::function<bool(Configuration&)> rollbackConfig;
@@ -236,7 +237,10 @@ private:
     /// Deliberately NOT used by the rollback route. rollbackConfig() has already swapped the
     /// two stored blobs, so calling saveConfig() there would re-serialise the same
     /// configuration over the copy just put in place -- it applies without saving, and says so.
-    bool saveAndApply(AsyncWebServerRequest* request, const Configuration& updated);
+    ///
+    /// With `undoStored`, the save goes through saveKeepingUndo: the restore route, and only it.
+    bool saveAndApply(AsyncWebServerRequest* request, const Configuration& updated,
+                      bool* undoStored = nullptr);
 
     RestContext context_;
     bool        started_        = false;

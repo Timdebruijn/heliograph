@@ -443,13 +443,31 @@ bool ConfigurationStore::setAnnouncement(const mqtt::AnnouncementRecord& record)
     return backend_.write(kStorageKeyAnnounced, raw);
 }
 
-bool ConfigurationStore::stashRollback() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::string                 blob;
-    if (!backend_.read(kStorageKeyConfig, blob) || blob.empty()) {
-        return false;  // nothing stored yet: a factory-fresh board has nothing to undo to
+bool ConfigurationStore::saveKeepingUndo(const Configuration& config, bool& undoStored) {
+    undoStored = false;
+    // Everything that can refuse without the flash being involved, before anything is written.
+    ConfigError error;
+    std::string blob;
+    if (!validate(config, error) || !serializeConfigForStorage(config, blob)) {
+        return false;
     }
-    return backend_.write(kStorageKeyRollback, blob);
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::string                 current;
+    std::string                 earlierUndo;
+    backend_.read(kStorageKeyRollback, earlierUndo);
+    // Nothing stored yet means nothing to undo to: a factory-fresh board.
+    undoStored = backend_.read(kStorageKeyConfig, current) && !current.empty() &&
+                 backend_.write(kStorageKeyRollback, current);
+    if (backend_.write(kStorageKeyConfig, blob)) {
+        return true;
+    }
+    // The restore did not happen, so the undo copy must not say it did. Best effort: this is a
+    // write to a flash that has just refused one.
+    if (undoStored) {
+        backend_.write(kStorageKeyRollback, earlierUndo);
+        undoStored = false;
+    }
+    return false;
 }
 
 bool ConfigurationStore::hasRollback() {

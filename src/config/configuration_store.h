@@ -106,18 +106,22 @@ public:
     mqtt::AnnouncementRecord announcement();
     bool setAnnouncement(const mqtt::AnnouncementRecord& record);
 
-    /// Copies the stored configuration into the rollback slot, so the restore about to
-    /// overwrite it can be undone. Call immediately before a restore, and nowhere else: doing
-    /// it on every save would double the write wear and, worse, make "the configuration from
-    /// before the restore" mean nothing in particular.
+    /// save(), with the configuration it replaces kept as the undo copy. What a restore calls,
+    /// and nothing else: doing it on every save would double the write wear and, worse, make
+    /// "the configuration from before the restore" mean nothing in particular.
     ///
-    /// False when nothing is stored yet (a factory-fresh board has nothing to roll back to)
-    /// or when the write was refused. A refusal is not a reason to abandon the restore -- NVS
-    /// here is 20 KB shared with the WiFi stack's own calibration data, so a second copy of
-    /// the configuration is the first thing that will not fit, and losing the safety net is
-    /// a smaller harm than refusing the operation the safety net was for. The caller reports
-    /// it instead.
-    bool stashRollback();
+    /// One call rather than a stash followed by a save, because the order between the two is
+    /// what went wrong when they were separate: the stash ran first, so a restore that was then
+    /// refused had already replaced the undo copy of the restore before it. Here nothing is
+    /// touched until `config` is known to be storable, and if its write is refused after the
+    /// stash, the undo copy is put back as it was.
+    ///
+    /// `undoStored` is false when there was nothing to keep (a factory-fresh board) or the
+    /// stash was refused. That is not a reason to abandon the restore -- NVS here is 20 KB
+    /// shared with the WiFi stack's own calibration data, so a second copy of the configuration
+    /// is the first thing that will not fit, and losing the safety net is a smaller harm than
+    /// refusing the operation the safety net was for. The caller reports it instead.
+    bool saveKeepingUndo(const Configuration& config, bool& undoStored);
 
     /// True when a rollback copy is available.
     bool hasRollback();
