@@ -39,14 +39,38 @@ struct DeviceIdentity {
     /// inverters of the same model on one bus apart. Only when neither exists is it the bare
     /// driver id -- which is correct for the single-device case that has always been the norm,
     /// and is why the collision went unnoticed.
+    ///
+    /// Made of [A-Za-z0-9_-] only; see idSafe(). The serial itself stays verbatim in
+    /// `serialNumber`, which is what identity payloads report.
     std::string deviceId() const {
         if (!serialNumber.empty()) {
-            return driverId + "-" + serialNumber;
+            return idSafe(driverId + "-" + serialNumber);
         }
         if (!instanceKey.empty()) {
-            return driverId + "-" + instanceKey;
+            return idSafe(driverId + "-" + instanceKey);
         }
-        return driverId;
+        return idSafe(driverId);
+    }
+
+    /// Every character outside [A-Za-z0-9_-] replaced by '_'.
+    ///
+    /// The id ends up in an MQTT topic, a Home Assistant discovery node id and a REST path, and
+    /// a serial number is whatever the inverter sends: SunSpec passes any byte but trailing
+    /// spaces, a SolaX serial may carry any printable ASCII. A '+' or '#' in a PUBLISH topic is
+    /// a protocol violation -- the broker drops the connection and the reconnect loop repeats
+    /// it forever; a '/' splits the topic and the REST path (the device answers 404); anything
+    /// outside this set in the node id makes Home Assistant ignore the discovery config. Ids
+    /// already in the set -- every driver id, every numeric instance key, the serials seen so
+    /// far -- come out unchanged, so no existing topic or entity moves.
+    static std::string idSafe(std::string id) {
+        for (char& c : id) {
+            const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                            (c >= '0' && c <= '9') || c == '_' || c == '-';
+            if (!ok) {
+                c = '_';
+            }
+        }
+        return id;
     }
 };
 

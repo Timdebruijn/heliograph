@@ -44,7 +44,9 @@ discovery config topics. Devices beyond the first also carry their address in th
 
 `<device_id>` is the id REST uses, frozen at boot: the driver id plus the configured address,
 e.g. `modbus_profile-2`. It is **not** the serial number even for drivers that report one — the
-serial arrives during the first poll, long after the id is needed.
+serial arrives during the first poll, long after the id is needed. It only ever contains letters,
+digits, `_` and `-`: anything else a driver reports becomes `_`, so the id is always valid in a
+topic, a Home Assistant node id and a URL.
 
 ### Removing or re-addressing a device
 
