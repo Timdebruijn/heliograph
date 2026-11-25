@@ -61,6 +61,14 @@ std::vector<DiscoveryEntity> buildCommandRemovals(const DeviceState& state,
                                                   const std::string& discoveryPrefix,
                                                   const std::string& uniqueBase);
 
+/// Every discovery config topic a device under `uniqueBase` could ever have announced:
+/// each measurement id as sensor and as binary_sensor, status, inverter liveness, and every
+/// command type in the domain it would use. What forgetDevice() clears when a device is
+/// removed. Derived here, beside the builders that announce, so the two cannot drift; a native
+/// test asserts every topic the builders can produce for a device is on this list.
+std::vector<std::string> deviceConfigTopics(const std::string& discoveryPrefix,
+                                            const std::string& uniqueBase);
+
 /// Diagnostic entities for the bridge itself (RSSI, uptime, heap, poll counters).
 std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  bridge,
                                                            const MqttTopics&  topics,

@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 #include "device/command.h"
 #include "diagnostics/logger.h"
@@ -378,6 +379,27 @@ std::string commandConfigTopic(InverterCommandType type, const std::string& disc
 }
 
 }  // namespace
+
+std::vector<std::string> deviceConfigTopics(const std::string& discoveryPrefix,
+                                            const std::string& uniqueBase) {
+    std::vector<std::string> topics;
+    topics.reserve(std::size(measurement_id::kAll) * 2 + 2 + kCommandTypeCount);
+    // Both components per id: which one an id was announced under depends on the type the
+    // driver declared it with (a flag is a binary_sensor), and a removed device's driver is gone.
+    for (const char* mid : measurement_id::kAll) {
+        for (const char* component : {"/sensor/", "/binary_sensor/"}) {
+            topics.push_back(discoveryPrefix + component + uniqueBase + "/" + sanitizeId(mid) +
+                             "/config");
+        }
+    }
+    topics.push_back(discoveryPrefix + "/sensor/" + uniqueBase + "/status/config");
+    topics.push_back(discoveryPrefix + "/binary_sensor/" + uniqueBase + "/inverter_online/config");
+    for (size_t i = 0; i < kCommandTypeCount; ++i) {
+        topics.push_back(
+            commandConfigTopic(static_cast<InverterCommandType>(i), discoveryPrefix, uniqueBase));
+    }
+    return topics;
+}
 
 std::vector<DiscoveryEntity> buildCommandRemovals(const DeviceState& state,
                                                   const BridgeInfo&  bridge,

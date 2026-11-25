@@ -616,19 +616,13 @@ bool MqttOutput::forgetDevice(const DeviceId& id, const BridgeInfo& bridge) {
         clear(topic);
     }
 
-    // Every discovery config it could have announced. Enumerated rather than derived from the
-    // measurement set, which is gone along with the device. Publishing an empty retained
-    // payload to a topic that was never used is harmless -- Home Assistant has nothing to
-    // remove and the broker drops the retained entry.
-    // Both components per id: which one an id was announced under depends on the type the
-    // driver declared it with (a flag is a binary_sensor), and that is gone too.
-    for (const char* mid : measurement_id::kAll) {
-        for (const char* component : {"/sensor/", "/binary_sensor/"}) {
-            clear(config_.discoveryPrefix + component + base + "/" + sanitizeId(mid) + "/config");
-        }
+    // Every discovery config it could have announced, commands included. Enumerated rather than
+    // derived from the measurement set, which is gone along with the device. Publishing an empty
+    // retained payload to a topic that was never used is harmless -- Home Assistant has nothing
+    // to remove and the broker drops the retained entry.
+    for (const auto& topic : deviceConfigTopics(config_.discoveryPrefix, base)) {
+        clear(topic);
     }
-    clear(config_.discoveryPrefix + "/sensor/" + base + "/status/config");
-    clear(config_.discoveryPrefix + "/binary_sensor/" + base + "/inverter_online/config");
 
     if (ok) {
         heliograph::log::info("MQTT: cleared retained topics for removed device %s", id.c_str());
