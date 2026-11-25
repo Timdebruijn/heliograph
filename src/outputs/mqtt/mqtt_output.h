@@ -193,6 +193,8 @@ private:
         /// outcome for, or empty when nothing is outstanding. Set in onMessage on a successful
         /// submitCommand(); cleared by loop() once commandOutcomeProvider_ resolves it.
         std::string pendingCommandRequestId;
+        /// The state payload last refused for size has been logged; cleared once one fits.
+        bool stateRefusalLogged = false;
     };
 
     /// publish() whose refusals are counted. Every publish in this class goes through it --

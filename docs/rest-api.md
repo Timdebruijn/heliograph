@@ -90,6 +90,10 @@ bound of 12 KB (`kMaxDriversResponseBytes`) instead of the 8 KB default
 (`kMaxResponseBytes`). A build whose list does not fit answers 500 `payload_too_large` rather
 than an empty 200; a native test fails 1 KB before that point.
 
+`/status` and `/devices/<id>/measurements` carry a device's whole measurement list and have
+16 KB (`kMaxMeasurementResponseBytes`). With every canonical measurement valid they come to about
+8.6 KB, past the 8 KB default; a native test fails at three quarters of the bound.
+
 ## Commands
 
 `POST /api/v1/devices/<id>/commands` submits one setpoint. It **accepts for a queue** rather than

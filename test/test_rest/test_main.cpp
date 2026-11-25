@@ -418,6 +418,44 @@ static void test_the_device_manager_refuses_past_its_cap() {
 /// with. Both, because on a bridge whose static address was refused they disagree -- and that
 /// disagreement is the only visible sign of it. Reporting only the configuration would state an
 /// intention as if it were a fact.
+// The worst case the vocabulary allows, as test_mqtt has for the state payload: every canonical
+// id supported and valid, with values that serialise long, plus a full fleet on /status. A device
+// past the bound makes the route answer 500 payload_too_large and the dashboard tab goes blank
+// for it, so the ceiling is asserted with headroom, not "just fits".
+static DeviceState everyChannelValid() {
+    DeviceState state;
+    state.inverterOnline        = true;
+    state.dataValid             = true;
+    state.identity.manufacturer = "Manufacturer Name Ltd";
+    state.identity.model        = "SUN-20K-SG05LP3-EU-SM2";
+    state.identity.serialNumber = "2512052525";
+    state.identity.driverId     = "modbus_profile";
+    for (const char* id : measurement_id::kAll) {
+        state.measurements.declare(id, MeasurementType::Power, Unit::Watt, id);
+        state.measurements.set(id, -12345.678901234567, 1'800'000'000'000ULL);
+    }
+    return state;
+}
+
+static void test_every_canonical_channel_at_once_fits_the_rest_bound() {
+    const DeviceState state = everyChannelValid();
+    std::string       json;
+    TEST_ASSERT_TRUE_MESSAGE(rest::buildMeasurementsPayload(state, json),
+                             "measurements payload refused");
+    TEST_ASSERT_TRUE(json.size() < rest::kMaxMeasurementResponseBytes * 3 / 4);
+
+    std::vector<rest::DeviceSummary> fleet(kMaxDevices);
+    for (size_t i = 0; i < fleet.size(); ++i) {
+        fleet[i].id    = "modbus_profile-" + std::to_string(200 + i);
+        fleet[i].label = "Dak achter, links, string " + std::to_string(i);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(rest::buildStatusPayload(state, "modbus_profile-200", makeBridge(),
+                                                      Diagnostics{}.snapshot(), nullptr,
+                                                      2'000'000'000'000ULL, fleet, json),
+                             "status payload refused");
+    TEST_ASSERT_TRUE(json.size() < rest::kMaxMeasurementResponseBytes * 3 / 4);
+}
+
 static void test_the_status_payload_reports_the_address_and_how_it_was_obtained() {
     Rig         r;
     const auto  state = r.poll();
@@ -4093,6 +4131,7 @@ int main(int, char**) {
     RUN_TEST(test_a_lone_device_without_either_keeps_the_bare_driver_id);
     RUN_TEST(test_re_adding_an_id_returns_the_same_store_rather_than_failing);
     RUN_TEST(test_the_device_manager_refuses_past_its_cap);
+    RUN_TEST(test_every_canonical_channel_at_once_fits_the_rest_bound);
     RUN_TEST(test_the_status_payload_reports_the_address_and_how_it_was_obtained);
     RUN_TEST(test_the_status_payload_publishes_the_device_cap);
     RUN_TEST(test_only_a_device_that_is_online_valid_and_fresh_is_answering);

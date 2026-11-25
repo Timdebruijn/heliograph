@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "device/device_context.h"
+#include "diagnostics/log_buffer.h"
 #include "drivers/eversolar_legacy/eversolar_driver.h"
 #include "drivers/mock/mock_driver.h"
 #include "outputs/json_util.h"
@@ -317,6 +318,27 @@ static void test_the_mock_hybrid_payload_also_fits() {
     TEST_ASSERT_TRUE(json.size() < kMaxPayloadBytes);
     auto doc = parse(json);
     TEST_ASSERT_FALSE(doc["measurements"]["battery.soc"]["value"].isNull());
+}
+
+// A discovery config too large to send used to vanish: the entity was skipped and nothing said
+// so, leaving Home Assistant one sensor short with no explanation anywhere. Each refusal is
+// named with its topic.
+static void test_an_oversized_discovery_config_is_named_not_dropped_silently() {
+    Rig  r;
+    auto state = r.poll();
+    state.identity.model = std::string(kMaxPayloadBytes, 'M');  // in every entity's device block
+    const auto       bridge = makeBridge();
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId);
+    heliograph::log::clearLines();
+    const auto entities = buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                                                 kDefaultDiscoveryPrefix, bridge.bridgeId);
+    TEST_ASSERT_EQUAL(0, static_cast<int>(entities.size()));
+    bool named = false;
+    for (const auto& line : heliograph::log::recentLines(64)) {
+        named = named || (line.find("exceeds") != std::string::npos &&
+                          line.find("/ac_power_total/config") != std::string::npos);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(named, "no log line names the refused config topic");
 }
 
 static void test_every_canonical_channel_at_once_fits() {
@@ -1918,6 +1940,7 @@ int main(int, char**) {
     RUN_TEST(test_oversized_payload_is_refused_rather_than_truncated);
     RUN_TEST(test_state_payload_stays_well_within_the_bound);
     RUN_TEST(test_the_mock_hybrid_payload_also_fits);
+    RUN_TEST(test_an_oversized_discovery_config_is_named_not_dropped_silently);
     RUN_TEST(test_every_canonical_channel_at_once_fits);
     RUN_TEST(test_the_backtrace_stays_off_the_mqtt_payload);
     RUN_TEST(test_diagnostics_payload);
