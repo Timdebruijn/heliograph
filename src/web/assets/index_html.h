@@ -620,7 +620,7 @@ function paintLive(){
       <div>
         <div class="k">Output now · all inverters</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px">
-          <span class="big">${esc(sp(Math.round(tot.ac_power_w??0)))}</span><span style="font-size:20px" class="dim">W</span></div>
+          <span class="big">${esc(tot.ac_power_w==null?'—':sp(Math.round(tot.ac_power_w)))}</span><span style="font-size:20px" class="dim">W</span></div>
         <div class="hint" style="margin-top:2px${short?';color:var(--bad)':''}">${
           short?`${esc(answering)} of ${esc(expected)} inverters answering — this total is short`
                :`${esc(expected)} of ${esc(expected)} inverters answering`}</div>
@@ -631,7 +631,7 @@ function paintLive(){
         <div class="totals">
           <div><div class="v">${fmt(tot.energy_today_kwh,2)}<span class="u"> kWh</span></div><div class="hint">today${
             tot.energy_today_devices!==expected?', '+esc(tot.energy_today_devices??0)+' of '+esc(expected)+' reporting':''}</div></div>
-          <div><div class="v">${esc(sp(Math.round(tot.energy_total_kwh??0)))}<span class="u"> kWh</span></div><div class="hint">lifetime</div></div>
+          <div><div class="v">${esc(tot.energy_total_kwh==null?'—':sp(Math.round(tot.energy_total_kwh)))}<span class="u"> kWh</span></div><div class="hint">lifetime</div></div>
         </div>
       </div></div>`;
   }else{
@@ -677,8 +677,12 @@ function paintLive(){
   for(const f of batts){
     const soc=f.single?(m['battery.soc']||{}).value:f.battery_soc_pct;
     const p=f.single?(m['battery.power']||{}).value:f.battery_power_w;
-    const idle=p==null||Math.round(Math.abs(p))===0;
-    const state=idle?'idle':(p>0?'charging':'discharging');
+    // Unknown power is not idle. A half-mapped profile reports a state of charge and no power;
+    // reading that as "idle, 0 W" tells the owner the battery is doing nothing, which nobody
+    // measured. It shows as "—", with no direction.
+    const unknownP=p==null;
+    const idle=!unknownP&&Math.round(Math.abs(p))===0;
+    const state=unknownP?'unknown':idle?'idle':(p>0?'charging':'discharging');
     // Direction, not level -- the bar below answers the other question. Up and green is the
     // battery gaining, down and red is it giving back, so every cue on this card points the
     // same way: green and upward mean more energy available.
@@ -692,10 +696,10 @@ function paintLive(){
     const rows=f.single
       ?MEAS.filter(([id,,g])=>g==='Battery'&&shown(m,id)).map(([id,label])=>
         `<div class="fact"><div class="k">${esc(label)}</div><div>${esc(reading(m,id))}</div></div>`).join('')
-      :`<div class="fact"><div class="k">Power</div><div>${esc(fmt(Math.abs(p),0))} W ${state==='charging'?'in':'out'}</div></div>`;
+      :`<div class="fact"><div class="k">Power</div><div>${unknownP?'—':`${esc(fmt(Math.abs(p),0))} W ${state==='charging'?'in':'out'}`}</div></div>`;
     h+=`<div class="card" style="margin-top:20px">
       <div class="between"><div class="k">Battery${f.single?'':' · '+esc(f.label||f.id)}</div>
-        <div style="font-size:13px;color:${dirColour}" title="${esc(state)}">${arrow} ${esc(idle?'idle':state+' at '+fmt(Math.abs(p),0)+' W')}</div></div>
+        <div style="font-size:13px;color:${dirColour}" title="${esc(state)}">${arrow} ${esc(unknownP?'power —':idle?'idle':state+' at '+fmt(Math.abs(p),0)+' W')}</div></div>
       <div class="soc">
         <div style="display:flex;align-items:baseline;gap:6px"><span class="pct">${esc(fmt(soc,0))}</span><span class="dim" style="font-size:16px">%</span></div>
         <div class="track"><div class="bar2"><svg width="100%" height="8" viewBox="0 0 100 8" preserveAspectRatio="none">
@@ -2748,8 +2752,11 @@ function liveFields(){
   if(clock)clock.textContent=clockText();
   const d=liveDiag();
   const set=(id,html)=>{const e=$(id);if(e)e.innerHTML=html};
-  set('#h_polls',`${esc(sp(d.poll_success_total??'—'))}<span class="u"> · ${esc(sp(d.poll_failure_total??0))} failed</span>`);
-  set('#h_bus',`${esc(sp((d.checksum_error_total||0)+(d.rs485_timeout_total||0)+(d.invalid_frame_total||0)))}<span class="u"> since boot</span>`);
+  set('#h_polls',`${esc(sp(d.poll_success_total??'—'))}<span class="u"> · ${esc(sp(d.poll_failure_total??'—'))} failed</span>`);
+  // "—" until the diagnostics have loaded, not 0: "0 bus errors" is the all-clear reading, and
+  // a first fetch that failed or is still on its way has measured nothing.
+  const bus=[d.checksum_error_total,d.rs485_timeout_total,d.invalid_frame_total];
+  set('#h_bus',`${esc(bus.some(v=>v==null)?'—':sp(bus.reduce((a,v)=>a+v,0)))}<span class="u"> since boot</span>`);
   set('#h_mem',`${esc(kb(d.free_heap_bytes))}<span class="u"> · low ${esc(kb(d.minimum_free_heap_bytes))}</span>`);
   set('#h_up',`${esc(d.uptime_seconds!=null?up(d.uptime_seconds):'—')}<span class="u"> · ${esc(why(d.reset_reason,d))}</span>`);
   // The whole Counters card, not four tiles: everything in it moves, and the tile above it

@@ -32,7 +32,13 @@ bool buildStatePayload(const DeviceState& state, std::string& out, size_t maxByt
     addOptional(root, "manufacturer", state.identity.manufacturer);
     addOptional(root, "model", state.identity.model);
     addOptional(root, "serial_number", state.identity.serialNumber);
-    doc["last_successful_poll_ms"] = state.lastSuccessfulPollMs;
+    // Milliseconds of uptime at the last successful poll; null before the first. 0 used to mean
+    // both "never" and nothing at all, and a consumer could not tell it from a value.
+    if (state.lastSuccessfulPollMs != 0) {
+        doc["last_successful_poll_ms"] = state.lastSuccessfulPollMs;
+    } else {
+        doc["last_successful_poll_ms"] = nullptr;
+    }
 
     JsonObject measurements = doc["measurements"].to<JsonObject>();
     for (const auto& m : state.measurements.all()) {

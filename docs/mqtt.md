@@ -179,7 +179,7 @@ those fields simply do not exist in the payload:
   "manufacturer": "Ever-Solar",
   "model": "TL3000-20",
   "serial_number": "XH300060115506193600V610",
-  "last_successful_poll_ms": 1752670000000,
+  "last_successful_poll_ms": 1843250,
   "measurements": {
     "ac.power.total":       { "value": 1842.0, "unit": "W",   "valid": true, "stale": false },
     "ac.phase_l1.voltage":  { "value": 233.4,  "unit": "V",   "valid": true, "stale": false },
@@ -209,6 +209,8 @@ Deliberate choices:
    change, because automations may match on them.
 2. **`error_code` is `null`, not `0`.** `0` would mean "no error" and this protocol does not tell
    us that.
+   The same goes for **`last_successful_poll_ms`**: milliseconds of bridge uptime at the last
+   successful poll (not a wall-clock time), and `null` before the first one.
 3. **`error_raw`** carries the device's undecoded error words as text (`"FF00 0000"`), or `null`
    when the device reports none or the reading is stale. It is not `error_code` on purpose: a
    healthy unit reads `FF00 0000`, which `error_code` would show as a fault. Nothing decodes the

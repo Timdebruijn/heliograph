@@ -91,6 +91,21 @@ static void test_state_payload_is_valid_json_with_the_expected_values() {
     TEST_ASSERT_EQUAL_STRING("W", doc["measurements"]["ac.power.total"]["unit"]);
 }
 
+// Never polled is null, not 0: a 0 could not be told from a value, and it is not one.
+static void test_last_successful_poll_ms_is_null_until_the_first_success() {
+    DeviceState never;
+    std::string json;
+    TEST_ASSERT_TRUE(buildStatePayload(never, json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["last_successful_poll_ms"].isNull());
+
+    Rig r;
+    const auto polled = r.poll();
+    TEST_ASSERT_TRUE(buildStatePayload(polled, json));
+    doc = parse(json);
+    TEST_ASSERT_TRUE(doc["last_successful_poll_ms"].is<uint64_t>());
+}
+
 static void test_unsupported_measurements_are_absent_not_null() {
     // The TL3000-20 has no L2 and no battery. Those keys must not exist at all: a null would
     // imply "this device has it but we do not know the value".
@@ -1887,6 +1902,7 @@ int main(int, char**) {
     RUN_TEST(test_two_devices_produce_distinct_unique_ids_and_ha_devices);
     RUN_TEST(test_topics_are_built_consistently);
     RUN_TEST(test_state_payload_is_valid_json_with_the_expected_values);
+    RUN_TEST(test_last_successful_poll_ms_is_null_until_the_first_success);
     RUN_TEST(test_unsupported_measurements_are_absent_not_null);
     RUN_TEST(test_an_unsupported_declared_channel_is_absent_from_the_payload);
     RUN_TEST(test_no_discovery_entity_for_an_unsupported_declared_channel);

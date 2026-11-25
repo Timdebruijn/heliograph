@@ -89,6 +89,17 @@ BATTERY_CASES = [
         ['height="8" fill="var(--dim)"'],
         ['height="8" fill="var(--bad)"'],
     ),
+    # The mirror image: a state of charge and no power. That used to read "idle" and "0 W out" --
+    # a battery doing nothing, which nobody measured. Unknown power says so and claims no
+    # direction: the direction line carries no arrow (the legend below has both, so the card
+    # as a whole cannot be searched for one).
+    (
+        "power unknown",
+        55,
+        "null",
+        ['title="unknown"> power —'],
+        ["idle", " W out"],
+    ),
 ]
 
 # Runs after the page has painted. Verdict goes in document.title, which --dump-dom gives back.
