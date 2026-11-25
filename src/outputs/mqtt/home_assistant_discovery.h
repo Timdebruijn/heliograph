@@ -64,9 +64,8 @@ std::vector<DiscoveryEntity> buildCommandRemovals(const DeviceState& state,
 /// Every discovery config topic a device under `uniqueBase` could ever have announced:
 /// each measurement id as sensor and as binary_sensor, status, inverter liveness, and every
 /// command type in the domain it would use. What forgetDevice() clears when a device is
-/// removed. Derived here, beside the builders that announce, so the two cannot drift: the list
-/// forgetDevice() kept by hand lacked the command entities, and a removed device's number,
-/// select and button entities stayed in Home Assistant, pointing at a topic nothing serves.
+/// removed. Derived here, beside the builders that announce, so the two cannot drift; a native
+/// test asserts every topic the builders can produce for a device is on this list.
 std::vector<std::string> deviceConfigTopics(const std::string& discoveryPrefix,
                                             const std::string& uniqueBase);
 
