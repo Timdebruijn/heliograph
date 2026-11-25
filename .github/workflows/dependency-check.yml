@@ -12,7 +12,7 @@
 # a new way of pinning something needs a new source, not a hope that an old one catches it.
 #
 #   1. `pio pkg outdated`  -- registry packages.
-#   2. git pins            -- `OWNER/REPO#tag` in platformio.ini. Invisible to (1), which
+#   2. git pins            -- `OWNER/REPO#tag-or-sha` in platformio.ini. Invisible to (1), which
 #                             compares registry versions and a git-pinned copy has none.
 #                             ESPAsyncWebServer sat two months at 3.11.x while this job said
 #                             "up-to-date"; the blind spot was inside the automation meant to
@@ -88,9 +88,9 @@ jobs:
       # repository's latest release. A PIN is a tag or, for the libraries pinned by commit, a
       # 40-character sha; a sha is compared by commit (the latest release's commit must be the
       # pinned one) and reported with the tag that points at it, so pinning by commit kept this
-      # source working instead of turning it into a report of shas that never match a tag name. Derived from the file rather than listing the libraries
-      # here: a second git pin added later is covered the day it is added, which is the whole
-      # failure this step exists for.
+      # source working instead of turning it into a report of shas that never match a tag name.
+      # Derived from the file rather than listing the libraries here: a second git pin added
+      # later is covered the day it is added, which is the whole failure this step exists for.
       #
       # Reports nothing when a pin is already current, and says so out loud when the answer
       # could not be obtained -- "no newer version" and "cannot tell" must not look the same.
@@ -114,7 +114,7 @@ jobs:
               REPORT="${REPORT}${repo}: pinned at ${have}; could not determine the latest release"$'\n'
             elif [[ "$have" =~ ^[0-9a-f]{40}$ ]]; then
               latest_sha=$(gh api "repos/${repo}/commits/${latest}" --jq '.sha' 2>/dev/null || true)
-              tag=$(gh api "repos/${repo}/tags?per_page=100" \
+              tag=$(gh api --paginate "repos/${repo}/tags?per_page=100" \
                       --jq ".[] | select(.commit.sha == \"${have}\") | .name" 2>/dev/null | head -1 || true)
               if [ -z "$latest_sha" ]; then
                 REPORT="${REPORT}${repo}: pinned at ${have:0:7} (${tag:-no tag}); could not resolve ${latest}"$'\n'
@@ -317,7 +317,7 @@ jobs:
           CDN_REPORT: ${{ steps.cdnpins.outputs.report }}
         run: |
           TITLE="Dependencies have updates available"
-          BODY=$(printf 'Monthly dependency report. Six sources, because no single one sees everything — each was added after something went stale unnoticed under the previous set.\n\n**Registry packages** (`pio pkg outdated`):\n\n```\n%s\n```\n\n**Git-pinned libraries** (`OWNER/REPO#tag`; invisible to the above, which compares registry versions):\n\n```\n%s\n```\n\n**Release-URL-pinned platforms** — the ESP32 toolchain; invisible to both of the above:\n\n```\n%s\n```\n\n**pip-pinned tools in .github/workflows/** — do not ship in the firmware; invisible to all three above, which read platformio.ini:\n\n```\n%s\n```\n\n**Unpinned pip installs** — invisible to every source above, which can only compare a pin that exists:\n\n```\n%s\n```\n\n**CDN-pinned scripts in flasher/** — the web installer; invisible to every source above, none of which reads HTML:\n\n```\n%s\n```\n\nReview the changelogs and bump deliberately — toolchain and library updates are hardware-tested changes, per docs/decisions.md. A toolchain bump is not done until a board has booted on it.' "$REPORT" "${GIT_REPORT:-none behind}" "${URL_REPORT:-none behind}" "${PIP_REPORT:-none behind}" "${UNPINNED_REPORT:-none unpinned}" "${CDN_REPORT:-none behind}")
+          BODY=$(printf 'Monthly dependency report. Six sources, because no single one sees everything — each was added after something went stale unnoticed under the previous set.\n\n**Registry packages** (`pio pkg outdated`):\n\n```\n%s\n```\n\n**Git-pinned libraries** (`OWNER/REPO#tag` or `#commit`; invisible to the above, which compares registry versions):\n\n```\n%s\n```\n\n**Release-URL-pinned platforms** — the ESP32 toolchain; invisible to both of the above:\n\n```\n%s\n```\n\n**pip-pinned tools in .github/workflows/** — do not ship in the firmware; invisible to all three above, which read platformio.ini:\n\n```\n%s\n```\n\n**Unpinned pip installs** — invisible to every source above, which can only compare a pin that exists:\n\n```\n%s\n```\n\n**CDN-pinned scripts in flasher/** — the web installer; invisible to every source above, none of which reads HTML:\n\n```\n%s\n```\n\nReview the changelogs and bump deliberately — toolchain and library updates are hardware-tested changes, per docs/decisions.md. A toolchain bump is not done until a board has booted on it.' "$REPORT" "${GIT_REPORT:-none behind}" "${URL_REPORT:-none behind}" "${PIP_REPORT:-none behind}" "${UNPINNED_REPORT:-none unpinned}" "${CDN_REPORT:-none behind}")
           EXISTING=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body "$BODY"
