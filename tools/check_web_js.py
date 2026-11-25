@@ -87,6 +87,7 @@ def main() -> int:
                 status |= check_state_event_gate(script, scratch)
                 status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
+                status |= check_guarded_poll(script, scratch)
                 status |= check_device_rows_fresh(script, scratch)
                 status |= check_asleep(script, scratch)
                 status |= check_control_confirm(script, scratch)
@@ -259,7 +260,10 @@ def extract_function(source, name):
 def run_node(label, filename, harness, scratch):
     """Run a JS harness under node; print "<label>: OK|FAIL" and return 0/1."""
     path = pathlib.Path(scratch) / filename
-    path.write_text(harness)
+    # Failure unless the harness says otherwise. node exits 0 when its event loop drains, and an
+    # async harness whose awaited promise never settles drains without reaching its verdict --
+    # which read as a pass. Every harness ends in an explicit process.exit().
+    path.write_text("process.exitCode = 1;\n" + harness)
     result = subprocess.run(
         ["node", str(path)], capture_output=True, text=True, check=False
     )
@@ -629,6 +633,73 @@ const run = async (label, pageRows, storedRows, idx, want) => {
 """
     )
     return run_node("device rows fresh", "device_rows.js", harness, scratch)
+
+
+def check_guarded_poll(script, scratch):
+    """A polling loop never has two requests in flight.
+
+    setInterval fires every second regardless; on a weak link a request takes up to its 10 s
+    timeout, so the loops behind a capture or a device search stacked ten requests on the bridge.
+    """
+    body = extract_function(script, "guarded")
+    if body is None:
+        print("FAIL: guarded() not found in index_html.h; this check needs updating")
+        return 1
+    # Every polling loop goes through it: one reverted to a bare setInterval passes the harness
+    # below and brings the request pile-up back.
+    bare = re.findall(r"setInterval\((?:async|poll)", script)
+    if bare:
+        print(
+            f"guarded polling: FAIL\n  {len(bare)} polling loop(s) without guarded(): {bare}"
+        )
+        return 1
+    capture = extract_function(script, "pollCapture")
+    if capture is None:
+        print(
+            "FAIL: pollCapture() not found in index_html.h; this check needs updating"
+        )
+        return 1
+    harness = (
+        body
+        + capture
+        + """
+// A tick of an OLD capture loop answering after a new capture started must leave the new one be.
+let capTimer = null, rendered = 0, cleared = [];
+const clearInterval = (t) => cleared.push(t);
+const $ = () => ({});
+const say = () => {};
+const renderCapture = () => { rendered++; };
+let answer;
+const getJson = () => new Promise(r => { answer = r; });
+let calls = 0, release;
+const slow = () => { calls++; return new Promise(r => { release = r; }); };
+const tick = guarded(slow);
+(async () => {
+  let bad = 0;
+  const first = tick();
+  for (let i = 0; i < 9; i++) tick();          // nine more ticks while the first is out
+  if (calls !== 1) { console.error(`ticks while in flight started ${calls} requests, want 1`); bad++; }
+  release(); await first;
+  tick();
+  if (calls !== 2) { console.error(`the tick after an answer started ${calls - 1} more, want 1`); bad++; }
+  release();
+  // A request that throws must not leave the loop stuck as "busy" for good.
+  const boom = guarded(async () => { calls++; throw new Error('x'); });
+  await boom().catch(() => {});
+  await boom().catch(() => {});
+  if (calls !== 4) { console.error('a failed request left the loop stuck'); bad++; }
+  capTimer = 'old';
+  const late = pollCapture('old');                 // its request goes out...
+  capTimer = 'new';                                 // ...a new capture starts...
+  answer({status: 'done', summary: {}});            // ...and the old answer lands
+  await late;
+  if (capTimer !== 'new') { console.error(`a late tick of the old capture stopped the new one (capTimer=${capTimer})`); bad++; }
+  if (rendered) { console.error('a late tick of the old capture rendered over the new one'); bad++; }
+  process.exit(bad === 0 ? 0 : 1);
+})();
+"""
+    )
+    return run_node("guarded polling", "guarded.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):
