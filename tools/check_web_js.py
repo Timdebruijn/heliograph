@@ -87,6 +87,7 @@ def main() -> int:
                 status |= check_state_event_gate(script, scratch)
                 status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
+                status |= check_image_board(script, scratch)
                 status |= check_history_span(script, scratch)
                 status |= check_inverters_single_flight(script, scratch)
                 status |= check_guarded_poll(script, scratch)
@@ -825,6 +826,57 @@ process.exit(bad === 0 ? 0 : 1);
 """
     )
     return run_node("history span", "history_span.js", harness, scratch)
+
+
+def check_image_board(script, scratch):
+    """A hand-picked OTA image is checked against this board by its file name.
+
+    Nothing in the image says which board it was built for, and the wrong one boots on the wrong
+    pins with the rollback none the wiser. The page reads the release naming; its list of boards
+    must stay the release workflow's, or a new board's images would install unchecked.
+    """
+    body = extract_function(script, "imageBoard")
+    ids = re.search(r"const BOARD_IDS=(\[.*?\]);", script)
+    if body is None or ids is None:
+        print(
+            "FAIL: imageBoard()/BOARD_IDS not found in index_html.h; this check needs updating"
+        )
+        return 1
+    release = (
+        pathlib.Path(__file__).resolve().parent.parent / ".github/workflows/release.yml"
+    )
+    m = re.search(r"^\s*BOARDS:\s*(.+)$", release.read_text(), re.M)
+    if m is None:
+        print("FAIL: BOARDS not found in release.yml; this check needs updating")
+        return 1
+    page = json.loads(ids.group(1).replace("'", '"'))
+    if sorted(page) != sorted(m.group(1).split()):
+        print(
+            f"image board: FAIL\n  BOARD_IDS {page} != release.yml BOARDS {m.group(1).split()}"
+        )
+        return 1
+    harness = (
+        ids.group(0)
+        + "\n"
+        + body
+        + """
+let bad = 0;
+const cases = [
+  ['heliograph-0.37.0-rs485-can.bin', 'rs485-can'],
+  ['heliograph-relay-6ch.bin', 'relay-6ch'],
+  ['Heliograph-0.38.0-rc.1-relay-1ch.BIN', 'relay-1ch'],
+  ['heliograph-0.37.0-rs485-can-factory.bin', 'factory'],
+  ['firmware.bin', null],
+  ['heliograph-0.37.0-rs485-can (1).bin', null],
+];
+for (const [name, want] of cases) {
+  const got = imageBoard(name);
+  if (got !== want) { console.error(`imageBoard(${name}) = ${got}, want ${want}`); bad++; }
+}
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("image board", "image_board.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):
