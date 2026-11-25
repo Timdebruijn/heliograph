@@ -28,6 +28,10 @@ namespace heliograph {
 ///    The rename itself lives in configuration_store.cpp's migration chain.
 inline constexpr uint16_t kConfigVersion = 2;
 
+/// The shortest admin password a patch may SET. Not a validate() rule: see applyConfigPatch for
+/// why a stored, shorter password from before this rule must keep loading.
+inline constexpr size_t kMinAdminPasswordLength = 8;
+
 enum class LogLevel : uint8_t { Error, Warn, Info, Debug, Trace };
 const char* logLevelName(LogLevel level);
 bool        parseLogLevel(const std::string& name, LogLevel& out);

@@ -209,7 +209,7 @@ Uniform, for every error:
 | 404 | Unknown device or path |
 | 409 | Discovery already in progress; RS485 bus busy |
 | 413 | Body > 4 KB (8 KB on `/config/restore`, which carries a whole configuration) |
-| 429 | Rate limit — 1 req/s, shared across **every** write-ish route: `/actions/*`, `POST /devices/<id>/commands`, `POST /relays/<n>` and `POST /drm/set`. One limiter, not one per path |
+| 429 | `auth_locked`: too many wrong admin passwords — five in a row from one address (30 s, doubling up to 15 min), or twenty a minute from everyone (60 s); the right password is refused too until it ends. `rate_limited`: rate limit — 1 req/s, shared across **every** write-ish route: `/actions/*`, `POST /devices/<id>/commands`, `POST /relays/<n>` and `POST /drm/set`. One limiter, not one per path |
 | 500 | The bridge could not produce the answer: a response that does not fit its bound or could not be allocated (`payload_too_large`), or a save, backup, restore preview, reset or relay action that failed |
 | 503 | No valid data yet (cold start) |
 
@@ -908,6 +908,14 @@ send `Sec-Fetch-Site` only to https and localhost, so on the bridge's own `http:
   includes it).
 - A browser setting or extension that forces `Referrer-Policy: no-referrer` makes even the
   bridge's own page send `Origin: null`, and its writes are refused.
+
+A new admin password must be at least 8 bytes, and it cannot be cleared (`null` or `""`) once
+set; both are refused with 400 on `security.admin_password`. The same floor applies to a restore
+whose backup brings a different password. A stored password from before that rule keeps working
+until it is changed. Wrong passwords are throttled (429 `auth_locked`): per source address, and
+at most 20 failures a minute across all of them, which an address that has signed in since
+boot is exempt from; `docs/security.md` has the numbers and what
+"address" means behind a proxy.
 
 ## SSE
 

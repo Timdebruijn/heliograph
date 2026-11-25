@@ -19,6 +19,7 @@
 #include "diagnostics/logger.h"
 #include "outputs/json_util.h"
 #include "outputs/prometheus/prometheus_metrics.h"
+#include "outputs/rest/auth_throttle.h"
 #include "outputs/rest/cross_site.h"
 #include "outputs/rest/rest_payloads.h"
 #include "config/configuration_store.h"
@@ -35,6 +36,7 @@ namespace {
 AsyncWebServer*   g_server = nullptr;
 AsyncEventSource* g_events = nullptr;
 ota::OtaManager   g_ota;
+AuthThrottle      g_authThrottle;  // AsyncTCP task only, like every handler; see auth_throttle.h
 
 constexpr const char* kJson = "application/json";
 
@@ -259,11 +261,42 @@ bool RestApi::begin() {
                                 "no admin password is set; configure one before making changes"});
             return false;
         }
-        if (!request->authenticate(sec.adminUsername.c_str(), sec.adminPassword.c_str())) {
-            request->requestAuthentication();
-            return false;
+        // Guessing is throttled; see auth_throttle.h. check() decides in the order that matters:
+        // a locked-out client's password is not even looked at, and only a credential that was
+        // SENT and wrong counts (a request without one is how a browser asks for the prompt).
+        AsyncClient*      tcp    = request->client();
+        const std::string client = tcp != nullptr ? tcp->remoteIP().toString().c_str() : "";
+        const uint64_t    now    = context_.clock();
+        switch (g_authThrottle.check(client, now, request->hasHeader("Authorization"), [&] {
+            return request->authenticate(sec.adminUsername.c_str(), sec.adminPassword.c_str());
+        })) {
+            case AuthVerdict::Ok:
+                return true;
+            case AuthVerdict::Locked: {
+                // A 429 and no WWW-Authenticate: re-prompting for a password that will be
+                // refused anyway only invites another guess.
+                const uint64_t seconds = (g_authThrottle.retryAfterMs(client, now) + 999) / 1000;
+                sendError(request, {429, "auth_locked",
+                                    "too many wrong admin passwords; try again in " +
+                                        std::to_string(seconds) + " s"});
+                return false;
+            }
+            case AuthVerdict::Wrong: {
+                // Bounded by the throttle itself: five per address, twenty a minute overall.
+                const uint64_t lockMs = g_authThrottle.retryAfterMs(client, now);
+                if (lockMs > 0) {
+                    log::warn("REST: wrong admin credentials from %s; refused for the next %u s",
+                              client.c_str(), static_cast<unsigned>((lockMs + 999) / 1000));
+                } else {
+                    log::warn("REST: wrong admin credentials from %s", client.c_str());
+                }
+                break;
+            }
+            case AuthVerdict::NoCredential:
+                break;
         }
-        return true;
+        request->requestAuthentication();
+        return false;
     };
 
     auto rateLimited = [this](AsyncWebServerRequest* request) -> bool {
@@ -890,6 +923,24 @@ bool RestApi::begin() {
                                     "this backup carries no admin password and this bridge has "
                                     "none yet; export again with secrets included, or complete "
                                     "setup first and restore afterwards"});
+                return;
+            }
+            // The floor a PATCH applies to a NEW admin password (applyConfigPatch), applied to
+            // the one a backup brings. A backup carrying the password this bridge already has
+            // passes whatever its length, like a stored one does.
+            if (merged.security.adminPassword != before.security.adminPassword &&
+                merged.security.adminPassword.size() < kMinAdminPasswordLength) {
+                sendError(request,
+                          invalidConfig({"security.admin_password",
+                                         "the backup's admin password is shorter than " +
+                                             std::to_string(kMinAdminPasswordLength) +
+                                             " bytes; set security.admin_password in the "
+                                             "file to a longer one" +
+                                             (before.security.adminPassword.empty()
+                                                  ? std::string()
+                                                  : std::string(", or remove it from the file "
+                                                                "to keep this bridge's "
+                                                                "password"))}));
                 return;
             }
 
