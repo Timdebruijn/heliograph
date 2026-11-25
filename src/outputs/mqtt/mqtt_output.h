@@ -132,6 +132,13 @@ public:
     void stop();
     bool connected() const;
 
+    /// The base topic and discovery prefix this output publishes under: the ones it was
+    /// constructed with. Fixed for its lifetime -- a change in the configuration takes effect at
+    /// the next restart -- so any task may read them without a lock, and they are what was
+    /// actually announced, which the live configuration need not be.
+    const std::string& baseTopic() const { return config_.baseTopic; }
+    const std::string& discoveryPrefix() const { return config_.discoveryPrefix; }
+
     void setDiagnostics(Diagnostics* diagnostics) { diagnostics_ = diagnostics; }
 
     /// Handles a relay command arriving on <prefix>/relay/<n>/set. Wired by main to the
@@ -216,7 +223,7 @@ private:
     bool subscribeBridge();
     bool publishDiscovery(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
 
-    MqttConfig   config_;
+    const MqttConfig config_;  // never reassigned: baseTopic()/discoveryPrefix() rely on it
     /// Bridge-scoped: availability, diagnostics, relay and DRM. Never a device's.
     MqttTopics   topics_;
     Diagnostics* diagnostics_ = nullptr;
