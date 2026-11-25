@@ -2073,9 +2073,23 @@ async function factoryReset(){
   alert(r.ok?'Erased. The bridge is restarting into setup mode.':r.networkError?r.why:'Failed: '+httpWhy(r));
 }
 
+// One request in flight per polling loop. setInterval fires every second whether or not the last
+// request came back, and on a weak WiFi link one can take up to its 10 s timeout: a capture or a
+// search then stacked up to ten requests on a board that is also driving the bus. A tick that
+// finds the previous one still running is skipped; the next one after it answers goes out.
+// The guard is per loop, so a NEW loop (a second search, a second capture) has its own -- and a
+// tick of the old one can still be out when the new one starts. Every loop therefore checks after
+// each await that it is still the current one (`wizPoll!==me` and the like) before it touches
+// shared state: an old answer arriving late would otherwise stop the new loop and paint its own
+// result over it.
+function guarded(fn){
+  let busy=false;
+  return async()=>{if(busy)return;busy=true;try{await fn()}finally{busy=false}};
+}
+
 // ---------------- discovery wizard ----------------
 let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null, wizOptions={}, wizFound={},
-    wizSavedSerial=null, wizStoredDriverId=null, wizStoredOptions={};
+    wizSavedSerial=null, wizStoredDriverId=null, wizStoredOptions={}, wizStopped=null;
 const STEPS=['Mode','Probing','Candidates','Confirm','Test poll','Save'];
 function stepBar(){
   return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">'+STEPS.map((n,i)=>
@@ -2094,8 +2108,10 @@ function wizardHtml(){
       <button class="alt" onclick="wizStep=4;paintInverters()">Skip — choose a driver myself</button>
     </div>`;
   }else if(wizStep===2){
-    h+=`<b>Probing</b><div class="hint">Talking to the bus… normal polling is paused.</div>
+    if(!wizStopped)h+=`<b>Probing</b><div class="hint">Talking to the bus… normal polling is paused.</div>
       <div class="hint">${esc(wizReport?wizReport.status:'starting')}${wizReport&&wizReport.elapsed_ms?' · '+Math.round(wizReport.elapsed_ms/1000)+' s':''}</div>`;
+    else h+=`<b>Search stopped</b><div class="msg err">${esc(wizStopped)}</div>
+      <div class="acts"><button onclick="wizStep=1;wizStopped=null;paintInverters()">Start over</button></div>`;
   }else if(wizStep===3){
     const c=(wizReport&&wizReport.candidates)||[];
     const swept=(wizReport&&wizReport.swept_addresses)||[];
@@ -2171,13 +2187,31 @@ async function startDiscovery(extended){
   if(r.cancelled||r.status===401){wizStep=1;paintInverters();return}
   if(!r.ok&&r.status!==202){wizStep=1;paintInverters();alert('Could not start discovery: '+httpWhy(r));return}
   clearInterval(wizPoll);
-  wizPoll=setInterval(async()=>{
-    try{wizReport=await getJson('/api/v1/discovery')}catch(e){return}
-    if(wizReport.busy){if(panel==='wiz')paintInverters();return}
-    clearInterval(wizPoll);
+  // It used to poll for as long as the page stayed open: a bridge that restarted mid-search, or
+  // dropped off the network, left "Probing" on screen for good. A minute without an answer, or a
+  // search still running after twenty (an extended one takes about one), ends it with the reason.
+  const started=Date.now();
+  let lastAnswer=started;
+  // wizReport goes with it: a last "busy" left behind would still read as a search in progress.
+  const giveUp=why=>{clearInterval(me);if(wizPoll!==me)return;wizPoll=null;wizReport=null;wizStopped=why;paintInverters()};
+  wizStopped=null;
+  const me=wizPoll=setInterval(guarded(async()=>{
+    let rep;
+    try{rep=await getJson('/api/v1/discovery');lastAnswer=Date.now()}
+    catch(e){
+      if(Date.now()-lastAnswer>60000)giveUp('No answer from the bridge for a minute, so this search is lost. Start over once the bridge is back.');
+      return;
+    }
+    if(wizPoll!==me){clearInterval(me);return}
+    wizReport=rep;
+    if(wizReport.busy){
+      if(Date.now()-started>20*60000){giveUp('Still searching after 20 minutes, which no search takes. The bridge may be stuck: restart it, then start over.');return}
+      if(panel==='wiz')paintInverters();return;
+    }
+    clearInterval(wizPoll);wizPoll=null;
     if(wizReport.auto_selected){wizChosen=wizReport.selected_driver_id;wizFound=wizReport.selected_options||{}}
     wizStep=3;paintInverters();
-  },1000);
+  }),1000);
 }
 async function wizLoadDrivers(){
   const sel=$('#wz_drv');
@@ -2282,13 +2316,15 @@ async function startCapture(){
   }
   say('#cap_msg','','Recording… make the other device talk now.');
   if(capTimer)clearInterval(capTimer);
-  capTimer=setInterval(pollCapture,1000);
+  const me=capTimer=setInterval(guarded(()=>pollCapture(me)),1000);
 }
-async function pollCapture(){
+async function pollCapture(me){
   // The panel can be replaced while a capture runs. Stop rather than throw on a null every
   // second for the rest of the session -- the report is still there to fetch.
+  if(capTimer!==me){clearInterval(me);return}
   if(!$('#cap_msg')){clearInterval(capTimer);capTimer=null;return}
   let d;try{d=await getJson('/api/v1/capture')}catch(e){return}
+  if(capTimer!==me){clearInterval(me);return}  // a newer capture started meanwhile (see guarded)
   if(d.status==='requested'||d.status==='running'){
     say('#cap_msg','','Recording… '+Math.round((d.elapsed_ms||0)/1000)+' of '+(d.requested_seconds||0)+
       ' s — '+(d.summary?d.summary.bytes:0)+' bytes so far.');
@@ -2370,13 +2406,15 @@ async function startRegRead(){
   const started=Date.now();
   // Keeps polling when the tab is left, so the answer is there on return. A read waits behind a
   // running discovery sweep, which can take a minute or more: say so instead of calling it lost.
-  regTimer=setInterval(async()=>{
+  const me=regTimer=setInterval(guarded(async()=>{
     const waited=Date.now()-started;
+    if(regTimer!==me){clearInterval(me);return}
     if(waited>180000){clearInterval(regTimer);regTimer=null;say('#rr_msg','err','No answer from the bridge in 3 minutes.');return}
     let d;try{d=await getJson('/api/v1/registers')}catch(e){return}
+    if(regTimer!==me){clearInterval(me);return}  // a newer read started meanwhile (see guarded)
     if(d.status!=='done'){if(waited>5000)say('#rr_msg','','Queued — the bus is busy with something else, the read goes out after it.');return}
     clearInterval(regTimer);regTimer=null;renderRegRead(d);
-  },1000);
+  }),1000);
 }
 const REG_RESULT={timeout:'Nothing answered. Check the unit id, and that this register space exists on the device.',
   exception:'The device answered and refused',crc:'Bytes arrived with a bad checksum — a wiring or line-speed problem, not the register.',
@@ -2435,11 +2473,13 @@ async function startDriverCapture(){
   }
   say('#dcap_msg','','Recording while the bridge polls…');
   if(dcapTimer)clearInterval(dcapTimer);
-  dcapTimer=setInterval(pollDriverCapture,1000);
+  const me=dcapTimer=setInterval(guarded(()=>pollDriverCapture(me)),1000);
 }
-async function pollDriverCapture(){
+async function pollDriverCapture(me){
+  if(dcapTimer!==me){clearInterval(me);return}
   if(!$('#dcap_msg')){clearInterval(dcapTimer);dcapTimer=null;return}
   let d;try{d=await getJson('/api/v1/capture/driver')}catch(e){return}
+  if(dcapTimer!==me){clearInterval(me);return}  // a newer capture started meanwhile (see guarded)
   if(d.status==='requested'||d.status==='running'){
     // No byte count while it runs: the frames belong to the bus task until it is done, so the
     // report genuinely has nothing to show yet. Claiming "0 bytes so far" would read as a
