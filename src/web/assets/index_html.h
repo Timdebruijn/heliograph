@@ -2168,7 +2168,12 @@ function guarded(fn){
 // ---------------- discovery wizard ----------------
 let wizStep=1, wizPoll=null, wizChosen=null, wizReport=null, wizOptions={}, wizFound={},
     wizSavedSerial=null, wizStoredDriverId=null, wizStoredOptions={}, wizStopped=null;
-const STEPS=['Mode','Probing','Candidates','Confirm','Test poll','Save'];
+// Step 5 polls the configuration the bridge is running NOW (the new driver only exists after a
+// restart), so it is a check that the bus is alive, not a test of the choice -- and is named so.
+const STEPS=['Mode','Probing','Candidates','Confirm','Bus check','Save'];
+// What a discovery score means, in words. 80 is DiscoveryConfig::minConfidence, the score below
+// which the bridge never picks a driver on its own; the number stays in the details.
+function matchWord(score){return score>=80?'Strong match':score>=50?'Possible match':'Weak match'}
 function stepBar(){
   return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">'+STEPS.map((n,i)=>
     `<span class="tag" style="${i+1===wizStep?'border-color:var(--acc);color:var(--fg)':''}">${i+1}. ${n}</span>`).join('')+'</div>';
@@ -2209,9 +2214,24 @@ function wizardHtml(){
     if(deviceCount>1)h+=`<div class="hint" style="margin-top:8px">${esc(deviceCount)} devices answered. ${sweptText} This configures one — add the rest afterwards, using the addresses below.</div>`;
     if(wizReport&&wizReport.candidates_omitted>0)h+=`<div class="hint">${esc(wizReport.candidates_omitted)} further lower-scoring candidate(s) are not shown.</div>`;
     for(const x of c){
+      // What a person needs to choose, first and in words: what it is, how sure the bridge is,
+      // where it answered. The protocol evidence a contributor reads is one click further down;
+      // as the only content of the card it made a homeowner pick a driver from a table of
+      // checksums and repeat probes.
+      const who=[x.detected_manufacturer,x.detected_model].filter(Boolean).join(' ');
+      // The score is not the whole rule: the bridge also refuses to pick when another driver
+      // comes within 20 points (DiscoveryConfig::minMargin). Two "Strong match" tags side by
+      // side would hide exactly that, so the close call is said on the card.
+      const rival=c.find(y=>y!==x&&y.driver_id!==x.driver_id&&Math.abs(y.confidence-x.confidence)<20);
       h+=`<div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:12px">
-        <div class="between"><b>${esc(x.display_name)}</b><span class="tag">${esc(x.confidence)}/100</span></div>
+        <div class="between"><b>${esc(x.display_name)}</b><span class="tag">${esc(matchWord(x.confidence))}</span></div>
+        <div style="margin-top:6px">${who?'It reported itself as <b>'+esc(who)+'</b>':'It answered in this protocol, without naming a model'}${
+          x.address!=null?', at bus address <b>'+esc(x.address)+'</b>':''}${x.serial_number?', serial '+esc(x.serial_number):''}.${
+          x.consistent?'':' <b>It answered differently the second time</b>, so treat this one with care.'}${
+          rival?' '+esc(rival.display_name)+' matched almost as well — compare the two before choosing.':''}</div>
+        <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--mid)">How ${esc(x.display_name)} was found</summary>
         <table>
+        <tr><td class="dim">Score</td><td>${esc(x.confidence)}/100</td></tr>
         <tr><td class="dim">Driver</td><td>${esc(x.driver_id)} <span class="tag">${esc(x.support_level)}</span></td></tr>
         <tr><td class="dim">Bus address</td><td>${x.address!=null?'<b>'+esc(x.address)+'</b>'
           :(swept.length?'<span class="dim">assigned by the protocol</span>'
@@ -2223,7 +2243,7 @@ function wizardHtml(){
         <tr><td class="dim">Detected</td><td>${esc(x.detected_manufacturer||'—')} ${esc(x.detected_model||'')}</td></tr>
         <tr><td class="dim">Serial number</td><td>${esc(x.serial_number||'—')}</td></tr>
         <tr><td class="dim">Evidence</td><td>${(x.evidence||[]).map(e=>'· '+esc(e)).join('<br>')||'—'}</td></tr>
-        </table>
+        </table></details>
         <div class="acts"><button data-act="wiz-pick" data-val="${esc(x.driver_id)}" data-opts="${esc(JSON.stringify(x.options||{}))}">Choose this device</button></div>
       </div>`;
     }
@@ -2239,11 +2259,11 @@ function wizardHtml(){
       <div id="wz_opts" data-form="wiz"></div>
       <div id="wz_note" class="msg err hide">Pick a register map first — it cannot be detected, and the wrong one produces believable numbers.</div>
       <div class="acts">
-        <button id="wz_go" disabled onclick="wizConfirm()">Confirm and test</button>
+        <button id="wz_go" disabled onclick="wizConfirm()">Confirm</button>
         <button class="alt" onclick="wizStep=3;paintInverters()">Back</button></div>`;
   }else if(wizStep===5){
-    h+=`<b>Test poll</b>
-      <div class="hint">This polls the configuration the bridge is <b>running now</b> — the driver is built once at boot, so nothing chosen above is in force yet. Useful for "is anything alive on this bus", not for confirming the register map. Check that after the restart, by the number of readings published.</div>
+    h+=`<b>Is the bus alive?</b>
+      <div class="hint">One poll with what the bridge is <b>running now</b> — the driver you chose only starts after the restart, so this cannot test it. It answers one question: does the configuration running now get a reply. Whether the choice is right shows after the restart, in the readings the inverter publishes.</div>
       <div id="wz_tp" class="hint">Polling…</div>`;
   }else if(wizStep===6){
     h+=`<b>Saved</b><div class="hint">The driver is stored. It takes effect after a restart.</div>`;
