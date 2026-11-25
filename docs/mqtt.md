@@ -209,8 +209,6 @@ Deliberate choices:
    change, because automations may match on them.
 2. **`error_code` is `null`, not `0`.** `0` would mean "no error" and this protocol does not tell
    us that.
-   The same goes for **`last_successful_poll_ms`**: milliseconds of bridge uptime at the last
-   successful poll (not a wall-clock time), and `null` before the first one.
 3. **`error_raw`** carries the device's undecoded error words as text (`"FF00 0000"`), or `null`
    when the device reports none or the reading is stale. It is not `error_code` on purpose: a
    healthy unit reads `FF00 0000`, which `error_code` would show as a fault. Nothing decodes the
@@ -221,6 +219,10 @@ Deliberate choices:
    `null` until that baseline exists. Home Assistant shows both as binary sensors
    (`inverter.fault` with device class `problem`), and a `null` shows as "unknown", never
    "off". The flags are only published by drivers that read the underlying mode or words.
+5. **`last_successful_poll_ms` is uptime, and `null` until the first poll.** Milliseconds of bridge
+   uptime at the last successful poll, not a wall-clock time. Before the first one it is `null`;
+   it used to be `0`, which a consumer could not tell from a value. The diagnostics payload carries
+   the same field with the same rule. A template that reads it should allow for `None`.
 
 On a nighttime outage:
 

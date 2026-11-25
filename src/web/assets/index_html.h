@@ -648,7 +648,7 @@ function paintLive(){
         <div class="k">${heroLabel}</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px">
           <span class="big">${esc(now==null?'—':sp(Math.round(now)))}</span><span style="font-size:20px" class="dim">W</span></div>
-        ${rated?bar((now||0)/rated*100)+`<div class="hint">${Math.round((now||0)/rated*100)}% of this inverter's ${esc(sp(rated))} W</div>`:''}
+        ${rated&&now!=null?bar(now/rated*100)+`<div class="hint">${Math.round(now/rated*100)}% of this inverter's ${esc(sp(rated))} W</div>`:''}
         <div class="hint">${d.online?'Last reply '+esc(d.last_successful_poll_seconds_ago??'—')+' s ago':'<span style="color:var(--bad)">not replying</span>'}${
           S.status_text?' · '+esc(S.status_text):''}</div>
       </div>

@@ -103,7 +103,7 @@ static void test_last_successful_poll_ms_is_null_until_the_first_success() {
     const auto polled = r.poll();
     TEST_ASSERT_TRUE(buildStatePayload(polled, json));
     doc = parse(json);
-    TEST_ASSERT_TRUE(doc["last_successful_poll_ms"].is<uint64_t>());
+    TEST_ASSERT_EQUAL_UINT64(100000, doc["last_successful_poll_ms"].as<uint64_t>());  // the rig clock
 }
 
 static void test_unsupported_measurements_are_absent_not_null() {
