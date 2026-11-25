@@ -429,6 +429,7 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         for (auto& c : channels_) {
             c.throttle.reset();
             c.discoveryPublished = false;
+            c.stateRefusalLogged = false;  // a refusal that persists is named again per session
         }
         bridgeAnnounced_  = false;
         bridgeSubscribed_ = false;

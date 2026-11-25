@@ -414,10 +414,6 @@ static void test_the_device_manager_refuses_past_its_cap() {
 // The settings page stops offering "Add a device" at this number, so it is a contract between
 // the firmware and the page, not a decoration. Nothing guarded it: renaming or dropping the
 // field would have degraded the UI to its hardcoded fallback with every test still green.
-/// ip_mode says how the address was ASKED FOR; ip_address says what the interface ended up
-/// with. Both, because on a bridge whose static address was refused they disagree -- and that
-/// disagreement is the only visible sign of it. Reporting only the configuration would state an
-/// intention as if it were a fact.
 // The worst case the vocabulary allows, as test_mqtt has for the state payload: every canonical
 // id supported and valid, with values that serialise long, plus a full fleet on /status. A device
 // past the bound makes the route answer 500 payload_too_large and the dashboard tab goes blank
@@ -447,7 +443,11 @@ static void test_every_canonical_channel_at_once_fits_the_rest_bound() {
     std::vector<rest::DeviceSummary> fleet(kMaxDevices);
     for (size_t i = 0; i < fleet.size(); ++i) {
         fleet[i].id    = "modbus_profile-" + std::to_string(200 + i);
-        fleet[i].label = "Dak achter, links, string " + std::to_string(i);
+        // The longest label validate() allows: 32 characters, two bytes each.
+        fleet[i].label.clear();
+        for (int k = 0; k < 32; ++k) {
+            fleet[i].label += "\xC3\xA9";  // é
+        }
     }
     TEST_ASSERT_TRUE_MESSAGE(rest::buildStatusPayload(state, "modbus_profile-200", makeBridge(),
                                                       Diagnostics{}.snapshot(), nullptr,
@@ -456,6 +456,10 @@ static void test_every_canonical_channel_at_once_fits_the_rest_bound() {
     TEST_ASSERT_TRUE(json.size() < rest::kMaxMeasurementResponseBytes * 3 / 4);
 }
 
+/// ip_mode says how the address was ASKED FOR; ip_address says what the interface ended up
+/// with. Both, because on a bridge whose static address was refused they disagree -- and that
+/// disagreement is the only visible sign of it. Reporting only the configuration would state an
+/// intention as if it were a fact.
 static void test_the_status_payload_reports_the_address_and_how_it_was_obtained() {
     Rig         r;
     const auto  state = r.poll();

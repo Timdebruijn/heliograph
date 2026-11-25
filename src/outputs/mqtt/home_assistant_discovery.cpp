@@ -4,6 +4,8 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -202,15 +204,26 @@ void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIde
 // to how a payload is bounded should not need finding in two places.
 //
 // A refused entity is left out of the announcement, and that used to be all: Home Assistant
-// silently lacked one sensor and nothing anywhere said so. Named here, once per build of the
-// list -- an announcement, not a poll -- with the topic that is missing. Not retried: a config
-// that does not fit will not fit next tick either.
+// silently lacked one sensor and nothing anywhere said so. Named here with the topic that is
+// missing. Not retried: a config that does not fit will not fit next tick either.
+//
+// Once per topic, not once per build. The builders run again on every tick while some OTHER
+// publish of the announcement keeps being refused (the outbox full, the memory guard), and a
+// warning per build would then be four lines a second per oversized entity, pushing the boot and
+// fault history out of the log ring. The last few topics named are remembered; only the MQTT
+// output's own task builds discovery, so no lock.
 bool serialise(const JsonDocument& doc, DiscoveryEntity& entity) {
     if (json_limits::finish(doc, entity.payload, kMaxPayloadBytes)) {
         return true;
     }
-    log::warn("MQTT: discovery config %s exceeds %u bytes and was not announced",
-              entity.configTopic.c_str(), static_cast<unsigned>(kMaxPayloadBytes));
+    static std::array<std::string, 8> named;
+    static size_t                     next = 0;
+    if (std::find(named.begin(), named.end(), entity.configTopic) == named.end()) {
+        log::warn("MQTT: discovery config %s exceeds %u bytes and was not announced",
+                  entity.configTopic.c_str(), static_cast<unsigned>(kMaxPayloadBytes));
+        named[next] = entity.configTopic;
+        next        = (next + 1) % named.size();
+    }
     return false;
 }
 

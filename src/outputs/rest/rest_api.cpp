@@ -14,6 +14,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <esp_heap_caps.h>
 
 #include "diagnostics/log_buffer.h"
 #include "diagnostics/logger.h"
@@ -64,6 +65,23 @@ void sendError(AsyncWebServerRequest* request, const ApiError& error) {
     }
     // Never a 200 with an error inside: a client must be able to trust the status code.
     request->send(error.httpStatus, kJson, body.c_str());
+}
+
+/// send() for the responses that carry a device's measurement list (up to
+/// kMaxMeasurementResponseBytes). AsyncBasicResponse copies the body into a String of its own, so
+/// for the life of the response the bytes exist twice, and the copy must be ONE contiguous block.
+/// On a fragmented heap that allocation can fail, and the library then sends an empty 200 with no
+/// error anywhere. Checked first, against the largest block malloc could hand out (PSRAM counts,
+/// on the boards that have it): a 503 a client can retry beats an empty body it cannot tell from
+/// "no data".
+void sendMeasurementBody(AsyncWebServerRequest* request, const std::string& body) {
+    constexpr size_t kMargin = 1024;  // the response object and its headers
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < body.size() + kMargin) {
+        sendError(request, {503, "low_memory",
+                            "not enough contiguous memory to send this response; try again"});
+        return;
+    }
+    request->send(200, kJson, body.c_str());
 }
 
 }  // namespace
@@ -488,7 +506,7 @@ bool RestApi::begin() {
                 sendError(request, {500, "payload_too_large", "status payload exceeded its bound"});
                 return;
             }
-            request->send(200, kJson, body.c_str());
+            sendMeasurementBody(request, body);
             return;
         }
         // The registered id: the key the per-device routes actually answer on.
@@ -523,7 +541,7 @@ bool RestApi::begin() {
             sendError(request, {500, "payload_too_large", "status payload exceeded its bound"});
             return;
         }
-        request->send(200, kJson, body.c_str());
+        sendMeasurementBody(request, body);
     });
 
     // AsyncURIMatcher::exact, not a bare string: a plain string URI defaults to
@@ -615,7 +633,7 @@ bool RestApi::begin() {
             sendError(request, {500, "payload_too_large", "response exceeded its bound"});
             return;
         }
-        request->send(200, kJson, body.c_str());
+        sendMeasurementBody(request, body);  // /measurements is the large one; the rest are small
     });
 
     g_server->on("/api/v1/diagnostics", HTTP_GET, [this](AsyncWebServerRequest* request) {
