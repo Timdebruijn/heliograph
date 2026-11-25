@@ -130,6 +130,17 @@ review and then misbehaves:
 Both remain legal on **read** rows, where a negative scale is the supported way to correct a
 device that reports the opposite sign convention.
 
+### Signed setpoints and the register's range
+
+A **negative `minimum`** is rejected for the same reason as a negative scale: `execute()` refuses a
+negative raw value, because it has no two's-complement encoding for an `s16`. A signed setpoint —
+battery charge/discharge power, a signed grid exchange — therefore cannot be expressed yet; that
+needs the encoding in `execute()` first, not a looser check here.
+
+And **`maximum / scale` must fit the `type`**: at most 32767 for an `s16`, 65535 for a `u16`. Past
+that the register receives a different number than the one requested — an `s16` given 35000 reads
+it as −30536.
+
 ### A read-back is required
 
 Writing a register does not make its value readable. A row is therefore served only when the
@@ -137,8 +148,11 @@ profile **also reads the setpoint back** as the command's canonical measurement,
 `control.active_power_limit` for `set_active_power_limit_percent`. The pairs are listed in
 `READBACK` in `tools/gen_profiles.py`, and `--list-commands` prints each one. The requirement holds with or without the
 `allow_unverified_writes` opt-in, and the generator refuses `verified = true` on a row without a
-read-back. The read row has to read the whole register: one with a `byte` key does not count,
-because half a register could agree with a write that had overwritten the other half.
+read-back. The read row has to read **the same register, the same way**: holding space, the
+write row's address, type and scale, and no `offset`, `byte` or `bit`. A row that reads the
+measurement from anywhere else does not count — it would open the gate on a reading that does not
+witness the register being written. Half a register (`byte`) does not count either, because it
+could agree with a write that had overwritten the other half.
 
 The reason: the read-back shows what the inverter is actually limited to, as opposed to what it
 was last asked for. The two differ whenever a write was refused, a second controller is on the
@@ -167,8 +181,8 @@ for listing drivers in the UI.
    comment above the row.
 3. Check it is a single 16-bit register and a numeric setpoint. If it is not, see above — declare
    it anyway with the reason, and expect it to stay dormant.
-4. Map the same setpoint as a `[[register]]` row with the command's read-back measurement —
-   see above. Without it the row is never served.
+4. Map the same setpoint as a `[[register]]` row with the command's read-back measurement, at the
+   same address with the same type and scale — see above. Without it the row is never served.
 5. Leave `verified = false`. That is not a formality: it is the flag that keeps unproven research
    out of somebody's inverter.
 6. To flip it, on a bench, with the inverter in view: write a value, read the register back,

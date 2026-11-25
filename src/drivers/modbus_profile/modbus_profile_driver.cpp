@@ -402,7 +402,11 @@ CommandResult ModbusProfileDriver::execute(const InverterCommand& command) {
             return CommandResult::Rejected;
         }
         const double value = *command.numericValue;
-        if (value < w->minimum || value > w->maximum) {
+        // Written so a NaN fails it: `value < min || value > max` is false for NaN, which then
+        // reached the uint16_t cast below -- undefined behaviour, an arbitrary register value.
+        // The parser and the dispatcher refuse non-finite values today; this check is meant to
+        // hold on its own.
+        if (!(value >= w->minimum && value <= w->maximum)) {
             return CommandResult::OutOfRange;
         }
         const double scaled = value / w->scale;

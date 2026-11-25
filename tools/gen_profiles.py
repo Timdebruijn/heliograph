@@ -762,8 +762,22 @@ def parse_profile(
         readback = READBACK.get(cmd)
         # Read as the whole register, like the write: a `byte` row sees half of what FC06 sets, so
         # it could agree with a write that had overwritten the other half.
+        #
+        # And the SAME register, read the same way: holding space, this address, this type and
+        # this scale, with no offset. Matching the measurement name alone let a profile "read
+        # back" a limit from an input register, another address or another scale -- the gate then
+        # opened on a reading that does not witness the register being written, and the
+        # skip-when-equal pre-read compared against a different value.
         has_readback = readback is not None and any(
-            r["measurement"] == readback and r["byte"] is None for r in parsed_regs
+            r["measurement"] == readback
+            and r["byte"] is None
+            and r["bit"] is None
+            and r["space"] == space
+            and r["address"] == address
+            and r["type"] == rtype
+            and r["scale"] == float(scale)
+            and r["offset"] == 0.0
+            for r in parsed_regs
         )
         if verified and not has_readback:
             raise ProfileError(
@@ -873,6 +887,28 @@ def parse_profile(
                 check_finite(float(val), ww, key)
             if not minimum < maximum:
                 raise ProfileError(f"{ww}: minimum must be < maximum")
+            # The write path computes raw = value / scale and refuses a negative raw, so a
+            # negative minimum would be advertised to Home Assistant and then refused every time.
+            if minimum < 0:
+                raise ProfileError(
+                    f"{ww}: minimum must be >= 0 -- the write path refuses a negative raw value, "
+                    f"so a negative bound would be offered and then never accepted"
+                )
+            # The largest raw value must fit the register's type. An s16 row with
+            # maximum / scale above 32767 would send, say, 35000 -- which the device reads as
+            # -30536: a value inside the declared range lands as its opposite.
+            raw_max = {
+                "u16": 0xFFFF,
+                "s16": 0x7FFF,
+                "u32": 0xFFFFFFFF,
+                "s32": 0x7FFFFFFF,
+            }[rtype]
+            if maximum / float(scale) > raw_max:
+                raise ProfileError(
+                    f"{ww}: maximum {maximum} / scale {scale} = {maximum / float(scale):g} does "
+                    f"not fit a {rtype} (largest {raw_max}); the device would read it as a "
+                    f"different number"
+                )
             step = wr.get("step", 1.0)
             if (
                 isinstance(step, bool)
