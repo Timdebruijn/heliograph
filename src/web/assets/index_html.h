@@ -317,7 +317,9 @@ async function authFetch(url,{timeoutMs,...opts}={}){
     }
     r=await go();
   }
-  if(r.status!==401)rememberUser();
+  // Only an answer that got past the password check proves the credentials. A 429 auth_locked
+  // never looked at them, so it must not promote an unproven username either.
+  if(r.status!==401&&r.status!==429)rememberUser();
   return r;
 }
 async function getJson(url){

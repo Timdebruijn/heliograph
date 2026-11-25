@@ -27,6 +27,7 @@
 #include <map>
 #include <optional>
 
+#include "outputs/rest/auth_throttle.h"
 #include "outputs/rest/capture_request.h"
 #include "outputs/rest/cross_site.h"
 #include "outputs/rest/rest_payloads.h"
@@ -3811,6 +3812,184 @@ static void test_cross_site_requests_are_told_apart_from_the_bridges_own_page() 
     TEST_ASSERT_TRUE(isCrossSiteRequest("", "http://192.168.20.254:80", "192.168.20.254"));
 }
 
+// Password guessing. Five free tries per address, then a lockout that doubles; while locked out
+// the right password is refused too, or the lockout would cost a guesser nothing.
+static void test_wrong_admin_passwords_lock_out_the_address_that_sent_them() {
+    using heliograph::rest::AuthThrottle;
+    AuthThrottle t;
+    const std::string a = "192.168.20.50";
+    const std::string b = "192.168.20.51";
+    uint64_t          now = 1000;
+
+    for (int i = 0; i < 4; ++i) {
+        t.recordFailure(a, now);
+        TEST_ASSERT_EQUAL_UINT64(0, t.retryAfterMs(a, now));  // typos are free
+    }
+    t.recordFailure(a, now);  // the fifth
+    TEST_ASSERT_EQUAL_UINT64(30000, t.retryAfterMs(a, now));
+    // Per address: the owner on another machine is not locked out by someone else's typos.
+    TEST_ASSERT_EQUAL_UINT64(0, t.retryAfterMs(b, now));
+
+    now += 30000;
+    TEST_ASSERT_EQUAL_UINT64(0, t.retryAfterMs(a, now));
+    t.recordFailure(a, now);  // still guessing: twice as long
+    TEST_ASSERT_EQUAL_UINT64(60000, t.retryAfterMs(a, now));
+    for (int i = 0; i < 20; ++i) {
+        now += t.retryAfterMs(a, now);
+        t.recordFailure(a, now);
+    }
+    TEST_ASSERT_EQUAL_UINT64(15ULL * 60 * 1000, t.retryAfterMs(a, now));  // capped, no overflow
+
+    // Waiting out the cap does not buy fresh attempts: forgiveness counts from the END of the
+    // lockout, so the next failure right after it locks again, at the cap.
+    now += t.retryAfterMs(a, now) + 1;
+    t.recordFailure(a, now);
+    TEST_ASSERT_EQUAL_UINT64(15ULL * 60 * 1000, t.retryAfterMs(a, now));
+
+    // The right password after a lockout clears the count.
+    now += t.retryAfterMs(a, now);
+    t.recordSuccess(a);
+    t.recordFailure(a, now);
+    TEST_ASSERT_EQUAL_UINT64(0, t.retryAfterMs(a, now));
+}
+
+// The decision as authorised() makes it: lock first, then the password; only a sent credential
+// counts. Each branch is one that a wiring mistake would silently break.
+static void test_the_auth_decision_checks_the_lock_before_the_password() {
+    using heliograph::rest::AuthThrottle;
+    using heliograph::rest::AuthVerdict;
+    AuthThrottle t;
+    const std::string a     = "10.0.0.7";
+    int               asked = 0;
+    const auto wrong = [&] { ++asked; return false; };
+    const auto right = [&] { ++asked; return true; };
+
+    // No credential sent: a browser asking for the prompt. Never counted, however often.
+    for (int i = 0; i < 50; ++i) {
+        TEST_ASSERT_EQUAL(AuthVerdict::NoCredential, t.check(a, 1000, false, wrong));
+    }
+    TEST_ASSERT_EQUAL_UINT64(0, t.retryAfterMs(a, 1000));
+
+    for (int i = 0; i < 5; ++i) {
+        TEST_ASSERT_EQUAL(AuthVerdict::Wrong, t.check(a, 1000, true, wrong));
+    }
+    asked = 0;
+    // Locked: the right password is refused, and not even checked.
+    TEST_ASSERT_EQUAL(AuthVerdict::Locked, t.check(a, 1000, true, right));
+    TEST_ASSERT_EQUAL(0, asked);
+
+    TEST_ASSERT_EQUAL(AuthVerdict::Ok, t.check(a, 1000 + 30000, true, right));
+    TEST_ASSERT_EQUAL_UINT64(0, t.retryAfterMs(a, 1000 + 30000));  // success cleared it
+}
+
+// A per-address table alone falls to a host with more addresses than slots: evicting a locked
+// entry would hand it fresh attempts. The global limit caps guessing however many are used.
+static void test_many_addresses_cannot_outguess_the_global_limit() {
+    using heliograph::rest::AuthThrottle;
+    AuthThrottle t;
+    const uint64_t now = 5000;
+    // Four addresses x five tries reaches the global twenty within the minute.
+    for (int ip = 0; ip < 4; ++ip) {
+        for (int k = 0; k < 5; ++k) {
+            t.recordFailure("10.2.0." + std::to_string(ip), now);
+        }
+    }
+    // Everyone is refused now, a fresh address and the owner's included, for the global lockout.
+    TEST_ASSERT_EQUAL_UINT64(60000, t.retryAfterMs("10.2.0.200", now));
+    TEST_ASSERT_EQUAL_UINT64(0, t.retryAfterMs("10.2.0.200", now + 60000));
+
+    // The cheap version of the attack: many aliases, one try each, so no address ever reaches
+    // its own lock and every entry is evictable. The twentieth failure locks everyone anyway.
+    AuthThrottle wide;
+    for (int ip = 0; ip < 19; ++ip) {
+        wide.recordFailure("10.6.0." + std::to_string(ip), now);
+        TEST_ASSERT_EQUAL_UINT64(0, wide.retryAfterMs("10.6.1.1", now));
+    }
+    wide.recordFailure("10.6.0.19", now);
+    TEST_ASSERT_EQUAL_UINT64(60000, wide.retryAfterMs("10.6.1.1", now));
+
+    // The window is a minute: nineteen now and one a minute later do not add up.
+    AuthThrottle spread;
+    for (int ip = 0; ip < 19; ++ip) {
+        spread.recordFailure("10.7.0." + std::to_string(ip), now);
+    }
+    spread.recordFailure("10.7.0.19", now + 60000);
+    TEST_ASSERT_EQUAL_UINT64(0, spread.retryAfterMs("10.7.1.1", now + 60000));
+
+    // Below the limit, a fresh address is unaffected by others' lockouts.
+    AuthThrottle quiet;
+    for (int k = 0; k < 5; ++k) {
+        quiet.recordFailure("10.3.0.1", now);
+    }
+    TEST_ASSERT_EQUAL_UINT64(0, quiet.retryAfterMs("10.3.0.2", now));
+}
+
+// The owner's way through an attack: an address that signed in with the right password since
+// boot is not subject to the global limit -- only to its own, which still locks it at five.
+static void test_an_address_that_signed_in_is_exempt_from_the_global_limit_only() {
+    using heliograph::rest::AuthThrottle;
+    using heliograph::rest::AuthVerdict;
+    AuthThrottle   t;
+    const std::string owner = "192.168.20.10";
+    const uint64_t now      = 9000;
+    TEST_ASSERT_EQUAL(AuthVerdict::Ok, t.check(owner, now, true, [] { return true; }));
+
+    for (int ip = 0; ip < 20; ++ip) {  // an attack from twenty other addresses
+        t.recordFailure("10.8.0." + std::to_string(ip), now);
+    }
+    TEST_ASSERT_EQUAL_UINT64(60000, t.retryAfterMs("10.8.1.1", now));  // a stranger: refused
+    TEST_ASSERT_EQUAL(AuthVerdict::Ok, t.check(owner, now, true, [] { return true; }));
+
+    // Not a free pass: the exempt address's own five-and-doubling still holds.
+    for (int k = 0; k < 5; ++k) {
+        t.check(owner, now, true, [] { return false; });
+    }
+    TEST_ASSERT_EQUAL(AuthVerdict::Locked, t.check(owner, now, true, [] { return true; }));
+
+    // Only the last kTrusted addresses are remembered.
+    AuthThrottle few;
+    for (size_t i = 0; i <= AuthThrottle::kTrusted; ++i) {
+        few.recordSuccess("10.9.0." + std::to_string(i));
+    }
+    for (int ip = 0; ip < 20; ++ip) {
+        few.recordFailure("10.9.1." + std::to_string(ip), now);
+    }
+    TEST_ASSERT_EQUAL_UINT64(60000, few.retryAfterMs("10.9.0.0", now));  // pushed out
+    TEST_ASSERT_EQUAL_UINT64(0, few.retryAfterMs("10.9.0.1", now));
+}
+
+static void test_eviction_prefers_unlocked_entries_and_an_unnamed_client_is_throttled() {
+    using heliograph::rest::AuthThrottle;
+    heliograph::rest::AuthThrottlePolicy policy;
+    policy.globalMaxFailures = 1000;  // this test is about the table, not the global limit
+    AuthThrottle t(policy);
+    // One locked address, then more unlocked ones than there are slots.
+    for (int k = 0; k < 5; ++k) {
+        t.recordFailure("10.4.0.250", 1000);
+    }
+    for (size_t i = 0; i < AuthThrottle::kSlots + 4; ++i) {
+        t.recordFailure("10.4.0." + std::to_string(i), 2000 + i);
+    }
+    // The locked one was the oldest, yet it is still locked: unlocked entries went first.
+    TEST_ASSERT_TRUE(t.retryAfterMs("10.4.0.250", 3000) > 0);
+
+    // An old run of typos is forgiven: quiet for longer than the longest lockout, the next
+    // failure is the first again.
+    AuthThrottle typos;
+    for (int k = 0; k < 4; ++k) {
+        typos.recordFailure("10.5.0.1", 1000);
+    }
+    typos.recordFailure("10.5.0.1", 1000 + 15ULL * 60 * 1000 + 1);
+    TEST_ASSERT_EQUAL_UINT64(0, typos.retryAfterMs("10.5.0.1", 1000 + 15ULL * 60 * 1000 + 1));
+
+    // A client the server could not name gets a bucket ("?"), not a free pass.
+    AuthThrottle unnamed;
+    for (int k = 0; k < 5; ++k) {
+        unnamed.recordFailure("", 1000);
+    }
+    TEST_ASSERT_TRUE(unnamed.retryAfterMs("", 1000) > 0);
+}
+
 static void test_error_raw_is_in_the_rest_status_payload_as_a_string_or_null() {
     Rig r;
     r.device.payload = FakeEversolarDevice::Payload::Captured;
@@ -3859,6 +4038,11 @@ int main(int, char**) {
     RUN_TEST(test_an_empty_fault_log_is_an_empty_list_and_the_size_bound_is_enforced);
     RUN_TEST(test_a_full_ring_of_fully_decoded_records_fits_the_response_bound);
     RUN_TEST(test_cross_site_requests_are_told_apart_from_the_bridges_own_page);
+    RUN_TEST(test_wrong_admin_passwords_lock_out_the_address_that_sent_them);
+    RUN_TEST(test_the_auth_decision_checks_the_lock_before_the_password);
+    RUN_TEST(test_many_addresses_cannot_outguess_the_global_limit);
+    RUN_TEST(test_an_address_that_signed_in_is_exempt_from_the_global_limit_only);
+    RUN_TEST(test_eviction_prefers_unlocked_entries_and_an_unnamed_client_is_throttled);
     RUN_TEST(test_error_raw_is_in_the_rest_status_payload_as_a_string_or_null);
     RUN_TEST(test_unset_fault_flags_are_null_in_the_rest_measurements);
     RUN_TEST(test_config_response_contains_no_secret_anywhere);

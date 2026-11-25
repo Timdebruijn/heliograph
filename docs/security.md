@@ -15,6 +15,8 @@ the same LAN", not "someone holding the PCB in their hands".
 | REST GET | Unsecured (local network) |
 | REST PATCH/POST | HTTP Basic required; **rejected** without a configured password, not left open |
 | Cross-site requests (CSRF) | A write a browser sends from another site's page is refused with 403, by `Origin`/`Sec-Fetch-Site`; clients that send neither (curl, scripts) are unaffected. See `docs/rest-api.md` → Auth |
+| Admin password | At least 8 bytes when set (PATCH, setup, or a restore that changes it), and it cannot be cleared once set; a stored shorter one from before this rule keeps working. Guessing is throttled, see below |
+| Password guessing | Five wrong passwords in a row from one source address lock that address out: 30 s, doubling, max 15 min, and the right password is refused too while it lasts. Across all addresses at most 20 failures a minute; past that every sign-in is refused for 60 s — a limit that 17 aliased addresses cannot get around. The last four addresses that signed in with the right password since boot are exempt from that global limit (not from their own), so an attacker cannot keep the owner out; right after a reboot, until the owner has signed in once, they can. Behind a reverse proxy or NAT the "address" is the proxy, shared by everyone behind it, and a script retrying an old password locks out its own machine. Kept in RAM: a reboot clears it |
 | OTA | Same auth + firmware magic check (0xE9) before the first byte hits flash |
 | Completing setup | Refuses without an admin password |
 | Secrets in logs/REST/MQTT/Prometheus | Never. `serializeConfig()` omits every password **and both usernames** — the MQTT one and `security.admin_username` (not masked, absent); `serializeConfigForStorage()` is the only one that writes them |
@@ -110,9 +112,9 @@ None of it is a secret — no password is served anywhere (see the table above) 
 grants control. But "an open AP that appears for a few minutes when your WiFi drops" is a
 disclosure surface worth knowing about.
 
-**`security.admin_username` used to be in that list and no longer is.** It is half of a login
-that has no brute-force protection, and serving it turned guessing the credentials into guessing
-only the password. It is now omitted from `GET /api/v1/config` exactly as `mqtt.username` always
+**`security.admin_username` used to be in that list and no longer is.** It is half of a login,
+and serving it turned guessing the credentials into guessing only the password. Guessing itself
+is throttled as well now; see the table above. It is now omitted from `GET /api/v1/config` exactly as `mqtt.username` always
 was.
 
 Be clear-eyed about the size of this. Almost every install keeps the factory `admin`, and for

@@ -82,7 +82,8 @@ tr:last-child td{border-bottom:0}
 
   <label for="admin">Admin password</label>
   <input id="admin" type="password" autocomplete="new-password">
-  <div class="hint">Required. Protects settings, OTA and reboot. There is no default.</div>
+  <div class="hint">Required, at least 8 characters. Protects settings, OTA and reboot. There is no
+  default.</div>
 
   <label for="admin2">Admin password (again)</label>
   <input id="admin2" type="password" autocomplete="new-password">
@@ -234,6 +235,9 @@ $('f').onsubmit=async e=>{
     if(!$('cur').value){refuse('Enter the admin password for this bridge.');return}
   }else{
     if(!$('admin').value){refuse('An admin password is required.');return}
+    // The bridge refuses a shorter one too (security.admin_password); saying it here saves a
+    // round trip on a phone joined to the setup AP.
+    if($('admin').value.length<8){refuse('The admin password needs at least 8 characters.');return}
     // A typo'd admin password costs a factory reset, so it is the one field worth the
     // friction of typing twice.
     if($('admin').value!==$('admin2').value){refuse('The admin passwords do not match.');return}

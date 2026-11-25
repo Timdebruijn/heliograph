@@ -944,6 +944,28 @@ bool applyConfigPatch(const std::string& json, Configuration& config, ConfigErro
     if (JsonObjectConst security = doc["security"]; !security.isNull()) {
         if (!patchString(security["admin_username"], merged.security.adminUsername, "security.admin_username", error)) return false;
         if (!patchSecret(security, "admin_password", merged.security.adminPassword, "security.admin_password", error)) return false;
+        // Rules for a NEW admin password only, checked here and deliberately not in validate().
+        // validate() also runs on the stored document at every boot, and a document it refuses
+        // is dropped down to WiFi and admin credentials (configuration_store.cpp, load). Raising
+        // the bar there would wipe the settings of every bridge whose existing password is
+        // shorter, on the first boot of the new firmware. Here it applies to the moment a
+        // password is set: provisioning, a PATCH from the settings page or the API.
+        if (hasKey(security, "admin_password") &&
+            merged.security.adminPassword != config.security.adminPassword) {
+            if (merged.security.adminPassword.empty()) {
+                // Cleared, by null or "". Every mutating route then answers 401
+                // not_configured, and the only way back is a five-second BOOT hold on site.
+                error = {"security.admin_password",
+                         "cannot be cleared; set a new password instead"};
+                return false;
+            }
+            if (merged.security.adminPassword.size() < kMinAdminPasswordLength) {
+                error = {"security.admin_password",
+                         "must be at least " + std::to_string(kMinAdminPasswordLength) +
+                             " bytes (8 plain characters)"};
+                return false;
+            }
+        }
         if (!patchBool(security["read_only_mode"], merged.security.readOnlyMode, "security.read_only_mode", error)) return false;
     }
 

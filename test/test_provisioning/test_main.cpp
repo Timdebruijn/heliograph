@@ -1586,6 +1586,49 @@ static void test_a_working_bridge_confirms_eventually_even_without_wifi() {
     TEST_ASSERT_TRUE(kOfflineConfirmThresholdMs >= 10 * kHealthyBootThresholdMs);
 }
 
+// The admin password is the only gate in front of every mutating route, so a new one has a
+// floor. Checked when it is SET, not in validate(): see the next test for why.
+static void test_a_new_admin_password_must_be_long_enough_and_cannot_be_cleared() {
+    auto        c = provisionedConfig();
+    const auto  before = c.security.adminPassword;
+    ConfigError e;
+
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"security":{"admin_password":"1234567"}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("security.admin_password", e.field.c_str());
+    TEST_ASSERT_EQUAL_STRING(before.c_str(), c.security.adminPassword.c_str());  // untouched
+
+    // Cleared, either way: every write would then answer not_configured, recoverable only on site.
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"security":{"admin_password":""}})", c, e));
+    TEST_ASSERT_FALSE(applyConfigPatch(R"({"security":{"admin_password":null}})", c, e));
+    TEST_ASSERT_EQUAL_STRING(before.c_str(), c.security.adminPassword.c_str());
+
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"security":{"admin_password":"12345678"}})", c, e));
+    TEST_ASSERT_EQUAL_STRING("12345678", c.security.adminPassword.c_str());
+
+    // A patch that does not touch the password is not affected by the rule, whatever is stored.
+    c.security.adminPassword = "kort";
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"bridge_name":"dak"})", c, e));
+    // Nor is re-sending the stored value: nothing is being set.
+    TEST_ASSERT_TRUE(applyConfigPatch(R"({"security":{"admin_password":"kort"}})", c, e));
+}
+
+// The rule must not reach validate(). validate() also judges the stored document at every boot,
+// and one it refuses is reduced to WiFi and admin credentials: every bridge with a shorter
+// password from before the rule would lose its settings on the first boot of the new firmware.
+static void test_a_stored_short_admin_password_still_loads() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    auto               c = provisionedConfig();
+    c.security.adminPassword = "kort";
+    c.mqtt.host              = "broker.lan";
+    TEST_ASSERT_TRUE(store.save(c));
+
+    Configuration loaded;
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(loaded));
+    TEST_ASSERT_EQUAL_STRING("kort", loaded.security.adminPassword.c_str());
+    TEST_ASSERT_EQUAL_STRING("broker.lan", loaded.mqtt.host.c_str());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_boot_is_confirmed_only_when_networked_and_settled);
@@ -1674,5 +1717,7 @@ int main(int, char**) {
     RUN_TEST(test_a_refused_first_restore_leaves_no_undo_copy);
     RUN_TEST(test_an_unreadable_rollback_leaves_the_live_config_untouched);
     RUN_TEST(test_factory_reset_takes_the_rollback_slot_with_it);
+    RUN_TEST(test_a_new_admin_password_must_be_long_enough_and_cannot_be_cleared);
+    RUN_TEST(test_a_stored_short_admin_password_still_loads);
     return UNITY_END();
 }
