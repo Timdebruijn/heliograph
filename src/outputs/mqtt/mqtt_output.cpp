@@ -318,10 +318,19 @@ bool MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
                                               channel.uniqueBase)) {
         ok = publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str()) && ok;
     }
-    // Bridge entities belong to the bridge and are announced once -- publishing them per
-    // device would create N copies of the same RSSI sensor. Tied to the bridge-scoped channel
-    // rather than to whichever channel happens to be first in the vector.
-    if (channel.uniqueBase == bridge.bridgeId) {
+    // The bridge's own entities (diagnostics, relays, DRM) are not here: announceBridge() owns
+    // them, so they no longer depend on the primary device having started.
+    // discoveryPublished/discoveredSignature are the CALLER's to commit, and only when this
+    // returns true -- one seam decides "did discovery really land", instead of this function
+    // asserting it unconditionally the way it used to.
+    return ok;
+}
+
+bool MqttOutput::announceBridge(const BridgeInfo& bridge) {
+    bool ok = publishTracked(topics_.availability().c_str(), 1, true, kPayloadOnline);
+    if (config_.discoveryEnabled) {
+        // Announced once, not per device: per device would create N copies of the same RSSI
+        // sensor.
         for (const auto& e :
              buildBridgeDiagnosticEntities(bridge, topics_, config_.discoveryPrefix)) {
             ok = publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str()) && ok;
@@ -332,19 +341,28 @@ bool MqttOutput::publishDiscovery(Channel& channel, const DeviceState& state,
             ok = publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str()) && ok;
         }
     }
-    // discoveryPublished/discoveredSignature are the CALLER's to commit, and only when this
-    // returns true -- one seam decides "did discovery really land", instead of this function
-    // asserting it unconditionally the way it used to.
+    return ok;
+}
+
+bool MqttOutput::subscribeBridge() {
+    // Once per connection, from here. They were subscribed from every device channel's
+    // onConnected(), so a bridge with no started device never subscribed at all, and one with N
+    // devices subscribed N times (and had a retained message replayed N times).
+    if (relayCount_ == 0) {
+        return true;
+    }
+    bool ok = g_client.subscribe(topics_.relaySetWildcard().c_str(), 1) != 0;
+    ok      = g_client.subscribe(topics_.drmSet().c_str(), 1) != 0 && ok;
+    relayStateForced_ = true;  // fresh session: ack the current states once
     return ok;
 }
 
 bool MqttOutput::onConnected(Channel& channel, const DeviceState& state,
                              const BridgeInfo& bridge) {
-    // Availability/identity/capabilities are not gated by discoveryPublished and never were --
-    // republishing retained state on a tick that only re-tries discovery is harmless. Only
-    // discovery's own success is reported up; see publishDiscovery and the caller in loop().
-    publishTracked(topics_.availability().c_str(), 1, true, kPayloadOnline);
-
+    // Identity/capabilities are not gated by discoveryPublished and never were -- republishing
+    // retained state on a tick that only re-tries discovery is harmless. Only discovery's own
+    // success is reported up; see publishDiscovery and the caller in loop(). Availability is the
+    // bridge's, published by announceBridge().
     std::string payload;
     if (buildIdentityPayload(state.identity, payload)) {
         publishTracked(channel.topics.identity().c_str(), 1, true, payload.c_str());
@@ -354,14 +372,9 @@ bool MqttOutput::onConnected(Channel& channel, const DeviceState& state,
     }
     const bool discoveryOk = publishDiscovery(channel, state, bridge);
 
-    if (relayCount_ > 0) {
-        g_client.subscribe(topics_.relaySetWildcard().c_str(), 1);
-        g_client.subscribe(topics_.drmSet().c_str(), 1);
-        relayStateForced_ = true;  // fresh session: ack the current states once
-    }
     // This channel's OWN command topic -- commandSet() differs per device (primary vs
-    // device-scoped prefix), unlike the relay/DRM topics above, which belong to the bridge and
-    // are subscribed once from `topics_`. Whether commanding does anything is a capabilities
+    // device-scoped prefix), unlike the relay/DRM topics, which belong to the bridge and are
+    // subscribed once, by subscribeBridge(). Whether commanding does anything is a capabilities
     // question the driver and CommandDispatcher answer, not this subscription: a read-only
     // driver still receives the message, and still answers Unsupported.
     if (commandSubmit_ != nullptr) {
@@ -417,6 +430,17 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
             c.throttle.reset();
             c.discoveryPublished = false;
         }
+        bridgeAnnounced_  = false;
+        bridgeSubscribed_ = false;
+    }
+
+    // The bridge first, and whatever devices there are or are not: `online` must precede any
+    // device's state, and none of it may wait for a device that never started.
+    if (!bridgeAnnounced_) {
+        bridgeAnnounced_ = announceBridge(bridge);
+    }
+    if (!bridgeSubscribed_) {
+        bridgeSubscribed_ = subscribeBridge();
     }
 
     // Per device: its own discovery announcement, its own throttle. Re-announce when the
@@ -510,12 +534,8 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         if (bridge.relaysOpen() != lastRelaysEnabled_ || rolesSig != lastRelayRolesSig_) {
             lastRelaysEnabled_  = bridge.relaysOpen();
             lastRelayRolesSig_  = rolesSig;
-            // Relay entities ride along with the bridge-scoped channel's announcement.
-            for (auto& c : channels_) {
-                if (c.uniqueBase == bridge.bridgeId) {
-                    c.discoveryPublished = false;
-                }
-            }
+            bridgeAnnounced_    = false;  // relay entities are the bridge's; re-announce, no
+                                          // re-subscribe (see subscribeBridge)
             relayStateForced_ = true;
         }
         if (relayStateForced_ || relayAckRequested_.exchange(false) ||

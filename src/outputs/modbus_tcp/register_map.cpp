@@ -42,8 +42,8 @@ RegisterMap::RegisterMap() {
     // Same inversion, same reasoning, on every other register where all-ones reads as an
     // assertion rather than as "unknown". A first version of this fix did only the bitmap;
     // review pointed out that the flags, the capability bitmaps and the identity strings tell
-    // the same lie, and for longer. refresh() only runs once a driver exists and has begun
-    // (main.cpp gates it on g_state), so on a bridge with no driver selected, or one whose
+    // the same lie, and for longer. refresh() updates a map only for a device that started, so
+    // on a bridge with no driver selected, or one whose
     // inverter never answered, this is not a boot-time window of a few hundred milliseconds --
     // it is what a Modbus client reads for the entire uptime: data_valid true, inverter_online
     // true, and a capability bitmap claiming the driver can write all 64 channels while
