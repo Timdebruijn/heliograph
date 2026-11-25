@@ -381,7 +381,7 @@ namespace {
 // implement. A wrong map can report a wrong number; it cannot put a device into an untested
 // state.
 #define HELIOGRAPH_VERSION_MAJOR 0
-#define HELIOGRAPH_VERSION_MINOR 37
+#define HELIOGRAPH_VERSION_MINOR 38
 //
 // 0.26.0 can record a conversation it is having, not just one it is overhearing.
 //
