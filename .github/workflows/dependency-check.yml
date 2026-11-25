@@ -84,8 +84,11 @@ jobs:
             echo "registry_updates=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Every `https://github.com/OWNER/REPO#vX.Y.Z` in platformio.ini, compared against that
-      # repository's latest release. Derived from the file rather than listing the libraries
+      # Every `https://github.com/OWNER/REPO#PIN` in platformio.ini, compared against that
+      # repository's latest release. A PIN is a tag or, for the libraries pinned by commit, a
+      # 40-character sha; a sha is compared by commit (the latest release's commit must be the
+      # pinned one) and reported with the tag that points at it, so pinning by commit kept this
+      # source working instead of turning it into a report of shas that never match a tag name. Derived from the file rather than listing the libraries
       # here: a second git pin added later is covered the day it is added, which is the whole
       # failure this step exists for.
       #
@@ -109,6 +112,17 @@ jobs:
               # equally a 404 and a transient API failure, and `gh api` exits non-zero for
               # both. Saying which one it was would be making it up.
               REPORT="${REPORT}${repo}: pinned at ${have}; could not determine the latest release"$'\n'
+            elif [[ "$have" =~ ^[0-9a-f]{40}$ ]]; then
+              latest_sha=$(gh api "repos/${repo}/commits/${latest}" --jq '.sha' 2>/dev/null || true)
+              tag=$(gh api "repos/${repo}/tags?per_page=100" \
+                      --jq ".[] | select(.commit.sha == \"${have}\") | .name" 2>/dev/null | head -1 || true)
+              if [ -z "$latest_sha" ]; then
+                REPORT="${REPORT}${repo}: pinned at ${have:0:7} (${tag:-no tag}); could not resolve ${latest}"$'\n'
+              elif [ "$latest_sha" != "$have" ]; then
+                # Either a newer release, or the tag the pin was taken from now points elsewhere;
+                # the tag column tells which.
+                REPORT="${REPORT}${repo}: pinned at ${have:0:7} (${tag:-no tag points at it}), latest is ${latest} (${latest_sha:0:7})"$'\n'
+              fi
             elif [ "$latest" != "$have" ]; then
               REPORT="${REPORT}${repo}: pinned at ${have}, latest is ${latest}"$'\n'
             fi
