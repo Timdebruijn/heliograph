@@ -87,6 +87,7 @@ def main() -> int:
                 status |= check_state_event_gate(script, scratch)
                 status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
+                status |= check_history_span(script, scratch)
                 status |= check_inverters_single_flight(script, scratch)
                 status |= check_guarded_poll(script, scratch)
                 status |= check_device_rows_fresh(script, scratch)
@@ -780,6 +781,50 @@ const getJson=async (u)=>{
 """
     )
     return run_node("inverters single flight", "inv_flight.js", harness, scratch)
+
+
+def check_history_span(script, scratch):
+    """The power curve is headed with the span it covers, not "Today".
+
+    At most 720 samples, one per refresh, is an hour or two of the page being open; a chart opened
+    at 14:00 read "Today" at 17:00 while it showed 15:30 onwards.
+    """
+    parts = []
+    for fn in ("record", "histSpan"):
+        body = extract_function(script, fn)
+        if body is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(body)
+    harness = (
+        "const HMAX=720; let hist={}, histT={};\n"
+        + "\n".join(parts)
+        + """
+let bad = 0;
+const want = (got, exp, label) => { if (got !== exp) { console.error(`${label}: ${got}, want ${exp}`); bad++; } };
+const T0 = new Date(2026, 10, 25, 14, 5).getTime();
+want(histSpan('all', T0), 'Recent', 'no samples');
+record('all', 100, T0);
+want(histSpan('all', T0 + 60000), 'Recent', 'one sample');
+record('all', 120, T0 + 47 * 60000);
+want(histSpan('all', T0 + 47 * 60000), 'Since 14:05', 'same day');
+want(histSpan('all', T0 + 12 * 3600000), 'Since yesterday 14:05', 'past midnight');
+// The cap drops the oldest samples AND their times, so the span is what is still drawn.
+hist = {}; histT = {};
+for (let i = 0; i < 800; i++) record('all', i, T0 + i * 10000);
+want(hist.all.length, 720, 'samples kept');
+want(histT.all.length, 720, 'times kept');
+want(histT.all[0], T0 + 80 * 10000, 'oldest time kept');
+want(histSpan('all', T0 + 799 * 10000), 'Since 14:18', 'start after the cap');
+// Values saved by an older page, without times: they start over rather than carry a wrong span.
+hist = {all: [1, 2, 3]}; histT = {};
+record('all', 4, T0);
+want(hist.all.join(), '4', 'untimed history kept');
+want(histT.all.length, 1, 'times after an untimed history');
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("history span", "history_span.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):
