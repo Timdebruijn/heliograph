@@ -206,6 +206,14 @@ const tick=setInterval(async()=>{
     goTab('inv');
     await new Promise(r=>setTimeout(r,300));
 
+    // The scenarios below set up what is STORED by writing the page's cfg. The page reads the
+    // stored rows fresh before every write to them (freshRows), so the stub's GET /config has
+    // to answer with that same scenario -- the demo's fixed document would replace it mid-test.
+    const demoFetch=window.fetch;
+    window.fetch=(u,o)=>String(u)==='/api/v1/config'&&!(o&&o.method&&o.method!=='GET')
+      ?Promise.resolve(new Response(JSON.stringify(cfg),{headers:{'Content-Type':'application/json'}}))
+      :demoFetch(u,o);
+
     // 1. "Add one by hand" must send a row the firmware will ACCEPT. It used to send
     // {driver_id:''}, which validate() refuses with "must name a driver" -- so the button did
     // nothing but raise an error, every time.

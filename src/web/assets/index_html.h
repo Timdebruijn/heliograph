@@ -1814,22 +1814,47 @@ async function saveAccess(){
   paintBridge();
   say('#ac_msg','ok','Saved and applied.');
 }
+// The extra device rows as the API stores them, in the one shape this page writes back.
+function rowsOf(c){
+  return ((c&&c.additional_devices)||[]).map(d=>({driver_id:d.driver_id,label:d.label||'',options:{...(d.options||{})}}));
+}
+function sameRow(a,b){return !!a&&!!b&&JSON.stringify(a)===JSON.stringify(b)}
+// additional_devices is replaced whole by the API, so every change to it travels as the whole
+// array -- and building that from this page's copy of the config, which is as old as its own
+// last save, wrote back whatever another tab had changed since: a row removed there came back
+// from here, and a removal by position removed the row that had moved into it. So the rows are
+// read fresh right before each write, and cfg with them. When that read fails the write is
+// refused (null): falling back to the cached copy would be the very write this exists to stop.
+async function freshRows(){
+  try{cfg=await getJson('/api/v1/config')}catch(e){return null}
+  return rowsOf(cfg);
+}
+const ROWS_UNREAD='The bridge did not answer when asked for its current list of inverters, so nothing was changed. Try again.';
 async function saveDevice(slot){
   // A slot the bridge could not name. Every started device is in the plan, so this should not
   // happen -- but the arithmetic below would quietly write nothing and report success, and a
   // Save that says "Saved" and changes nothing is the worst of the available failures.
   if(slot<0){say('#dv_msg','err','The bridge did not say which configured row this inverter came from, so this cannot be saved. Restarting it will re-establish that.');return}
   const opts=readOpts('dv_o_');
-  const body=slot===0
-    ?{driver:{id:val('dv_drv'),label:val('dv_label'),...(Object.keys(opts).length?{options:opts}:{})}}
-    :(()=>{
-      // The array is replaced wholesale by the API, so it travels whole -- built from the
-      // stored list with this one row rewritten, never from the DOM of the other rows.
-      const arr=((cfg.additional_devices)||[]).map(d=>({driver_id:d.driver_id,label:d.label||'',options:{...(d.options||{})}}));
-      const idx=slot-1;
-      if(idx>=0&&idx<arr.length)arr[idx]={driver_id:val('dv_drv'),label:val('dv_label'),options:opts};
-      return {additional_devices:arr};
-    })();
+  let body;
+  if(slot===0)body={driver:{id:val('dv_drv'),label:val('dv_label'),...(Object.keys(opts).length?{options:opts}:{})}};
+  else{
+    // The array travels whole: the stored list, read fresh, with this one row rewritten -- never
+    // the DOM of the other rows. The row this form was opened on must still be the one at that
+    // position; if another tab moved or changed it, writing here would overwrite the wrong one.
+    const idx=slot-1, was=rowsOf(cfg)[idx], row={driver_id:val('dv_drv'),label:val('dv_label'),options:opts};
+    const arr=await freshRows();
+    if(!arr){say('#dv_msg','err',ROWS_UNREAD);return}
+    if(!sameRow(was,arr[idx])){
+      // The form closes: left open on the new cfg, a second Save would no longer see a
+      // difference and would write this draft over the change made elsewhere.
+      devDraft=null;panel=null;invNextMs=0;await loadInverters(true);
+      alert('This inverter was changed or moved elsewhere since this page read it, so nothing was saved. The list is reloaded; open it again to see what is stored now.');
+      return;
+    }
+    arr[idx]=row;
+    body={additional_devices:arr};
+  }
   const problem=addressProblem(body);
   if(problem){say('#dv_msg','err',esc(problem));return}
   const r=await patch(body);
@@ -1919,9 +1944,17 @@ function addressProblem(body){
 /// something that did not exist, and the configuration could not be undone from the UI at all
 /// (hardware, 2026-07-29).
 async function removeExtraAt(idx){
-  const arr=(cfg.additional_devices)||[];
-  if(idx<0||idx>=arr.length){alert('That row is no longer in the configuration.');return}
+  const was=rowsOf(cfg)[idx];
+  if(!was){alert('That row is no longer in the configuration.');return}
   if(!confirm('Remove this inverter from the configuration? Its entities stay in Home Assistant showing their last value.'))return;
+  // By position, so the position must still hold the row that was on screen (see freshRows).
+  const arr=await freshRows();
+  if(!arr){alert(ROWS_UNREAD);return}
+  if(!sameRow(was,arr[idx])){
+    alert('That row was changed or moved elsewhere since this page read it, so nothing was removed. The list is reloaded; check it and try again.');
+    panel=null;invNextMs=0;loadInverters(true);
+    return;
+  }
   const r=await patch({additional_devices:arr.filter((_,i)=>i!==idx)});
   if(!r.ok){
     // #dv_msg only exists inside deviceForm, and a PENDING row has no form -- just this button.
@@ -1955,8 +1988,18 @@ function addressOf(driverId,options){
   const stored=String((options||{})[opt.key]??'').trim();
   return stored!==''?stored:String(opt.default_value??'').trim();
 }
+// One add at a time: two quick clicks would both read the same list and both pick the same
+// free address, which is the collision the picker below exists to prevent.
+let addingExtra=false;
 async function addExtra(){
-  const arr=((cfg.additional_devices)||[]).map(d=>({driver_id:d.driver_id,label:d.label||'',options:{...(d.options||{})}}));
+  if(addingExtra)return;
+  addingExtra=true;
+  try{await addExtraOnce()}finally{addingExtra=false}
+}
+async function addExtraOnce(){
+  // Fresh, like every write to this array (freshRows): the free address below is picked from it.
+  const arr=await freshRows();
+  if(!arr){alert(ROWS_UNREAD);return}
   if(arr.length+1>=((S&&S.bridge&&S.bridge.max_devices)||8)){alert('This firmware polls at most '+((S&&S.bridge&&S.bridge.max_devices)||8)+' inverters.');return}
 
   // The row has to arrive COMPLETE. It used to be pushed empty, with a comment explaining that
