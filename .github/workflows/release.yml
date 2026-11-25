@@ -27,7 +27,7 @@
 # created and the feed was not, so the release existed and no bridge was offered it.
 #
 # Upstream knows it as intermittent (actions/deploy-pages issue 451, open; the retry that
-# would fix it, PR 455, is not merged, so the pinned v5 has none). In its own job the deploy
+# would fix it, PR 455, is not merged, so the pinned release (v5.0.1, by commit) has none). In its own job the deploy
 # starts on a fresh runner, seconds after the upload instead of within the same second. That
 # makes the race much less likely. It does not make it impossible.
 #
@@ -78,7 +78,7 @@ jobs:
     name: Verify before shipping
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # FIRST, and before anything is installed: this needs only the checkout, fails in under a
       # second, and its whole point is to stop a release that would ship a firmware reporting a
@@ -107,14 +107,14 @@ jobs:
                exit 1 ;;
           esac
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
       # The native cache, not the firmware one: a different key and a fraction of the size.
       # Restore-only, because a tag ref cannot write a cache anything else would ever read.
       - name: Restore PlatformIO (native)
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.platformio
@@ -161,9 +161,9 @@ jobs:
       matrix:
         board: [rs485-can, relay-1ch, relay-6ch]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -172,7 +172,7 @@ jobs:
       # release. The writer is the warm-toolchain-cache job in cache-warm.yml, running on main,
       # whose scope every ref can read.
       - name: Restore PlatformIO toolchain
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.platformio
@@ -221,7 +221,7 @@ jobs:
              > .pio/build/waveshare-${{ matrix.board }}/firmware.elf.gz
 
       - name: Upload images
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fw-${{ matrix.board }}
           path: |
@@ -243,7 +243,7 @@ jobs:
     steps:
       # The write-scoped token is not left in .git/config for the steps that follow, the
       # third-party release action among them; it takes the token from its own input.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -262,7 +262,7 @@ jobs:
       # uploaded. It lands in fw/ beside the boards, the count below reads four where it expects
       # three, and the job stops -- which is what happened to the first re-run of v0.35.1.
       - name: Download images
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: fw-*
           path: fw
@@ -295,7 +295,7 @@ jobs:
       # `prerelease` for a tag with a suffix; see "A PRE-RELEASE TAG" in the header. GitHub
       # refuses to mark a pre-release as latest, so no `make_latest` is needed beside it.
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: dist/*
           generate_release_notes: true
@@ -356,7 +356,7 @@ jobs:
 
       - name: Upload Pages artifact
         if: ${{ !contains(github.ref_name, '-') }}
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
 
@@ -385,4 +385,4 @@ jobs:
     if: ${{ !contains(github.ref_name, '-') }}
     steps:
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

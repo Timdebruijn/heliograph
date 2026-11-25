@@ -1,8 +1,10 @@
 version: 2
 updates:
-  # Keeps the actions/* majors current so workflows never rot on a deprecated
-  # runtime. PlatformIO and its platforms are intentionally not managed here:
-  # an embedded toolchain bump must be a deliberate, hardware-tested change.
+  # Keeps the actions current so workflows never rot on a deprecated runtime. Every action is
+  # pinned to a full commit SHA with its release as a trailing comment (`@<sha> # v7.0.1`);
+  # Dependabot updates both, so the pin is immutable without going stale. PlatformIO and its
+  # platforms are intentionally not managed here: an embedded toolchain bump must be a
+  # deliberate, hardware-tested change.
   - package-ecosystem: github-actions
     directory: /
     schedule:
