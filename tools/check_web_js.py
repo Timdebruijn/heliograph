@@ -392,7 +392,9 @@ def check_asleep(script, scratch):
         parts.append(body)
     consts = re.search(r"const ASLEEP_BELOW_W=.*?;\n", script)
     if consts is None:
-        print("FAIL: ASLEEP_BELOW_W constants not found in index_html.h; this check needs updating")
+        print(
+            "FAIL: ASLEEP_BELOW_W constants not found in index_html.h; this check needs updating"
+        )
         return 1
     harness = (
         consts.group(0)
