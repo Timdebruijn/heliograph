@@ -25,7 +25,7 @@ namespace heliograph::rest {
 inline constexpr size_t kMaxResponseBytes = 8192;
 /// The two responses that carry a device's whole measurement list: /status and
 /// /devices/<id>/measurements. Measured with every canonical id valid and long values (the test
-/// that pins it): /measurements 8642 bytes, /status 8303, both past kMaxResponseBytes, so a
+/// that pins it): /measurements 8642 bytes, /status 8783, both past kMaxResponseBytes, so a
 /// hybrid with three phases, several MPPTs and two battery ports got a 500 and a blank
 /// dashboard tab. Held only while one response is built; see sendMeasurementBody in
 /// rest_api.cpp for the copy the web server makes of it.

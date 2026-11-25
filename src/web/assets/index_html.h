@@ -508,22 +508,42 @@ function groupsFor(m,skipHeadline){
   return html?`<div class="groups">${html}</div>`:'';
 }
 
-// An inverter that answered earlier and went quiet while producing next to nothing has switched
-// off for the night: a PV inverter runs on its own panels and goes dark with them. That is the
-// normal state for half of every day, so it is grey, not red -- a red alarm every evening is one
-// people learn to ignore, and then they miss the real one. Red stays for the two cases that are
-// faults: never answered at all, and went quiet at real output (last_ac_power_w, the reading from
-// before it went quiet; the live ac_power_w is null by then).
-// ponytail: a fixed threshold and no sun position. An inverter that fails on a dull winter noon
-// below it reads as asleep, but with the time it went quiet on screen ("since 12:40").
-const ASLEEP_BELOW_W=50;
-function asleep(f){
-  return !!f&&!f.online&&f.last_successful_poll_seconds_ago!=null&&
-    f.last_ac_power_w!=null&&Math.abs(f.last_ac_power_w)<ASLEEP_BELOW_W;
+// An inverter that answered earlier and went quiet at dusk while producing next to nothing has
+// switched off for the night: a PV inverter runs on its own panels and goes dark with them. That
+// is the normal state for half of every day, so it is grey, not red -- a red alarm every evening
+// is one people learn to ignore, and then they miss the real one.
+//
+// Three conditions, each closing a way to hide a real fault behind the grey:
+// - the last reading (last_ac_power_w; the live ac_power_w is null by then) was below 50 W, so an
+//   inverter that dropped out at real output is red at any hour;
+// - it went quiet in the evening or the night (from 15:00 until 04:00), so a dull-noon dropout at
+//   low output is red too;
+// - and the grey ends at 10:00 the next morning. An inverter that has not woken by then has not
+//   slept through the night: it tripped, or lost its cable, or never stopped answering in the
+//   first place (a hybrid on its battery stays on the bus all night). It goes red then, which is
+//   when its absence starts to cost production.
+// Never answered stays red throughout: there is no reading to judge.
+// ponytail: fixed hours and threshold in the browser's clock, no sun position or latitude. Far
+// north in winter an inverter may stop before 15:00 and show red until it wakes.
+const ASLEEP_BELOW_W=50, DUSK_FROM_H=15, NIGHT_UNTIL_H=4, WAKE_BY_H=10;
+function asleep(f,now=Date.now()){
+  if(!f||f.online||f.last_successful_poll_seconds_ago==null||f.last_ac_power_w==null||
+     Math.abs(f.last_ac_power_w)>=ASLEEP_BELOW_W)return false;
+  const q=new Date(now-f.last_successful_poll_seconds_ago*1000), h=q.getHours();
+  if(h>=NIGHT_UNTIL_H&&h<DUSK_FROM_H)return false;
+  const wake=new Date(q);wake.setHours(WAKE_BY_H,0,0,0);
+  if(wake<=q)wake.setDate(wake.getDate()+1);
+  return now<wake;
 }
-function quietSince(f){
-  const t=new Date(Date.now()-f.last_successful_poll_seconds_ago*1000);
-  return 'since '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+function quietSince(f,now=Date.now()){
+  const t=new Date(now-f.last_successful_poll_seconds_ago*1000);
+  const day=t.toDateString()===new Date(now).toDateString()?'':'yesterday ';
+  return 'since '+day+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+}
+// The colour for a set of inverters: green when all answer, grey when every one missing is asleep,
+// red otherwise. One function for the header and the hero, so the two cannot disagree.
+function fleetVerdict(answering,expected,sleeping){
+  return answering===expected?'ok':answering+sleeping===expected?'off':'bad';
 }
 
 // ---------------- header, chips, banner ----------------
@@ -543,7 +563,7 @@ function paintChrome(){
   // device this is the header it has always been, stale tag included.
   const sleeping=fleet.filter(asleep).length;
   const inv=multi
-    ?chip(answering===expected?'ok':answering+sleeping===expected?'off':'bad',
+    ?chip(fleetVerdict(answering,expected,sleeping),
        `Inverters ${esc(answering)}/${esc(expected)} answering`+(sleeping?` · ${esc(sleeping)} asleep`:''))
     // Orange, not red, and no stale/no-data tags: a bridge nobody has configured is not failing
     // at anything. It wants attention, which is what orange says, and the wiring alarm belongs
@@ -638,7 +658,7 @@ function paintLive(){
   if(multi){
     const answering=tot.devices_answering??0;
     const sleeping=fleet.filter(asleep).length;
-    const short=answering!==expected, dark=short&&answering+sleeping===expected;
+    const short=answering!==expected, dark=fleetVerdict(answering,expected,sleeping)==='off';
     h+=`<div class="hero">
       <div>
         <div class="k">Output now · all inverters</div>
