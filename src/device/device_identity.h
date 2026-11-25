@@ -39,14 +39,45 @@ struct DeviceIdentity {
     /// inverters of the same model on one bus apart. Only when neither exists is it the bare
     /// driver id -- which is correct for the single-device case that has always been the norm,
     /// and is why the collision went unnoticed.
+    ///
+    /// Made of [A-Za-z0-9_-] only; see idSafe(). The serial itself stays verbatim in
+    /// `serialNumber`, which is what identity payloads report.
     std::string deviceId() const {
         if (!serialNumber.empty()) {
-            return driverId + "-" + serialNumber;
+            return idSafe(driverId + "-" + serialNumber);
         }
         if (!instanceKey.empty()) {
-            return driverId + "-" + instanceKey;
+            return idSafe(driverId + "-" + instanceKey);
         }
-        return driverId;
+        return idSafe(driverId);
+    }
+
+    /// Every character outside [A-Za-z0-9_-] replaced by '_'.
+    ///
+    /// Defensive. The id is registered once, right after begin(), and no driver in this build has
+    /// a serial by then (they learn it on the first poll), so today it is always driver id plus a
+    /// numeric instance key -- already safe. This keeps it safe for the first driver that does
+    /// know its serial at begin(), and keeps the identity payload's `device_id` (which follows
+    /// the live identity) in the same alphabet. The id ends up in an MQTT topic, a Home
+    /// Assistant discovery node id and a REST path, and a serial number is whatever the inverter
+    /// sends: one protocol's string field passes any
+    /// byte but trailing spaces, another's any printable ASCII. A '+' or '#' in a PUBLISH topic is
+    /// a protocol violation -- the broker drops the connection and the reconnect loop repeats
+    /// it forever; a '/' splits the topic and the REST path (the device answers 404); anything
+    /// outside this set in the node id makes Home Assistant ignore the discovery config. Ids
+    /// already in the set -- every driver id, every numeric instance key, the serials seen so
+    /// far -- come out unchanged, so no existing topic or entity moves. Lossy: two serials that
+    /// differ only in replaced characters collapse, and the boot loop's duplicate-id check then
+    /// refuses the second device with a named problem.
+    static std::string idSafe(std::string id) {
+        for (char& c : id) {
+            const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                            (c >= '0' && c <= '9') || c == '_' || c == '-';
+            if (!ok) {
+                c = '_';
+            }
+        }
+        return id;
     }
 };
 

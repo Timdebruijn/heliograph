@@ -365,6 +365,21 @@ static void test_a_serial_number_outranks_the_address() {
     TEST_ASSERT_EQUAL_STRING("eversolar_legacy-XH300060115506193600V610", id.deviceId().c_str());
 }
 
+// Defensive (no driver has its serial when the id is registered, see idSafe), and pinned because
+// the day one does, its serial lands in MQTT topics, a Home Assistant node id and a REST path. '+' or '#' in a topic drops the broker connection, '/' splits topic and
+// path, anything outside [A-Za-z0-9_-] makes Home Assistant ignore the device. Those become '_';
+// a serial already in the set (every one seen so far) is untouched, so nothing existing moves.
+static void test_a_device_id_carries_only_topic_and_path_safe_characters() {
+    DeviceIdentity id;
+    id.driverId     = "sunspec";
+    id.serialNumber = "AB/12+3#x y.z\x7f";  // ends in DEL, a control character
+    TEST_ASSERT_EQUAL_STRING("sunspec-AB_12_3_x_y_z_", id.deviceId().c_str());
+    TEST_ASSERT_EQUAL_STRING("AB/12+3#x y.z\x7f", id.serialNumber.c_str());  // verbatim
+
+    id.serialNumber = "XH3000-60115506_V6";
+    TEST_ASSERT_EQUAL_STRING("sunspec-XH3000-60115506_V6", id.deviceId().c_str());
+}
+
 // One device and no address option: unchanged from before multi-device existed, which is what
 // keeps every existing install's REST path and MQTT topic exactly where it was.
 static void test_a_lone_device_without_either_keeps_the_bare_driver_id() {
@@ -4061,6 +4076,7 @@ int main(int, char**) {
     RUN_TEST(test_adding_a_device_requires_a_reboot);
     RUN_TEST(test_devices_on_one_bus_get_distinct_ids_without_a_serial);
     RUN_TEST(test_a_serial_number_outranks_the_address);
+    RUN_TEST(test_a_device_id_carries_only_topic_and_path_safe_characters);
     RUN_TEST(test_a_lone_device_without_either_keeps_the_bare_driver_id);
     RUN_TEST(test_re_adding_an_id_returns_the_same_store_rather_than_failing);
     RUN_TEST(test_the_device_manager_refuses_past_its_cap);
