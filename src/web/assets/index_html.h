@@ -683,7 +683,7 @@ function paintLive(){
   if(!S)return;
   // Before anything else: a bridge nobody has configured has no production to lead with, and a
   // headline dash over an empty page is not an answer to "what now".
-  if(neverConfigured()){$('#live').innerHTML=firstRunCard(false);return}
+  if(neverConfigured()){setLive(firstRunCard(false));return}
   const b=S.bridge, d=S.device, m=S.measurements||{}, fleet=S.devices||[], tot=S.totals||{};
   const expected=b.devices_configured??(tot.devices_polled??fleet.length);
   const multi=isFleet(S);
@@ -824,7 +824,14 @@ function paintLive(){
     if(g)h+=`<div style="margin-top:20px">${g}</div>
       <div class="hint" style="margin-top:12px">Only what this driver declares it can read. A driver that reports no battery shows no battery, rather than a row of dashes.</div>`;
   }
-  $('#live').innerHTML=h;
+  setLive(h);
+}
+// The Live tab was rebuilt on every refresh -- up to once a second while the event stream runs --
+// whether or not anything on it had changed. Its markup is its own signature, so identical markup
+// is left alone. (A selection on the tab holds the timer's repaint back: see readerIsBusy.)
+function setLive(html){
+  const el=$('#live');
+  drawIfChanged('live',html,()=>{el.innerHTML=html});
 }
 
 // ---------------- Inverters ----------------
@@ -3015,6 +3022,11 @@ function tzOptions(ntp){
 /// A repaint requested BY the page -- a wizard step, a driver change -- calls its paint
 /// function directly and is unaffected; only the timer-driven path defers.
 function readerIsBusy(){
+  // Text selected on the tab in front: someone is about to copy a reading, and a rebuild drops
+  // the selection. Only the timer asks this -- a tab switch or an action still draws (paint()),
+  // so a selection left behind cannot keep a tab showing old readings.
+  const sel=window.getSelection&&getSelection(), pane=$('#'+tab);
+  if(sel&&!sel.isCollapsed&&pane&&pane.contains(sel.anchorNode))return true;
   const el=document.activeElement;
   if(!el||el===document.body)return false;
   const tag=el.tagName;

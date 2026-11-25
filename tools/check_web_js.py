@@ -87,6 +87,7 @@ def main() -> int:
                 status |= check_state_event_gate(script, scratch)
                 status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
+                status |= check_live_repaint(script, scratch)
                 status |= check_image_board(script, scratch)
                 status |= check_history_span(script, scratch)
                 status |= check_inverters_single_flight(script, scratch)
@@ -877,6 +878,52 @@ process.exit(bad === 0 ? 0 : 1);
 """
     )
     return run_node("image board", "image_board.js", harness, scratch)
+
+
+def check_live_repaint(script, scratch):
+    """The Live tab is rebuilt only when what it shows changed, and the timer holds back under a
+    selection.
+
+    It was rebuilt on every refresh, up to once a second, and a rebuild drops a selection: a
+    reading could not be copied off the page that exists to show readings. The hold is the
+    timer's only (readerIsBusy): a tab switch still draws, or a selection left behind would keep
+    the tab on old readings.
+    """
+    parts = []
+    for fn in ("drawIfChanged", "setLive", "readerIsBusy"):
+        body = extract_function(script, fn)
+        if body is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(body)
+    harness = (
+        """
+let drawn = {}, writes = 0, selected = false, tab = 'live';
+const pane = { contains: (n) => n === 'inside' };
+const el = { set innerHTML(v) { writes++; }, contains: pane.contains };
+const $ = () => el;
+let anchor = 'inside';
+const getSelection = () => ({ isCollapsed: !selected, anchorNode: anchor });
+const window = { getSelection };
+const document = { activeElement: null, body: {} };
+"""
+        + "\n".join(parts)
+        + """
+let bad = 0;
+setLive('<b>1</b>'); setLive('<b>1</b>');
+if (writes !== 1) { console.error(`identical markup written ${writes} times, want 1`); bad++; }
+setLive('<b>2</b>');
+if (writes !== 2) { console.error('changed markup was not written'); bad++; }
+selected = true;
+if (!readerIsBusy()) { console.error('a selection on the tab does not hold the timer back'); bad++; }
+anchor = 'elsewhere';
+if (readerIsBusy()) { console.error('a selection outside the tab holds it back'); bad++; }
+selected = false;
+if (readerIsBusy()) { console.error('no selection, no focus, yet busy'); bad++; }
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("live repaint", "live_repaint.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):

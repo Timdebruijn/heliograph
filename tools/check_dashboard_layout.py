@@ -488,6 +488,9 @@ const tick=setInterval(async()=>{
       nav.focus();
       const marker=document.createElement('span');
       $('#live').appendChild(marker);
+      // A new reading, so there is something to update: identical markup is left alone by
+      // design (setLive), and an unchanged page would pass or fail this for the wrong reason.
+      S.totals.ac_power_w=(S.totals.ac_power_w||0)+7;
       paintTick();
       await new Promise(r=>setTimeout(r,50));
       if(marker.isConnected) say('a focused nav button stopped the Live tab from updating');
