@@ -49,24 +49,25 @@ BATTERY_STATE = "{soc:68,power:-1240}"
 # one width, because these are semantics and not layout.
 #
 # TWO questions, two answers, and the card must not confuse them. The DIRECTION line says which
-# way the charge is heading: up and green gaining, down and red giving back. The BAR says how
-# much is left, coloured by level alone. One variable used to drive both, so a full battery that
-# happened to be charging drew a red bar.
+# way the charge is heading: up and green gaining, down in the neutral text colour giving back --
+# not red, because a battery running the house at night is doing its job. The BAR says how much
+# is left, coloured by level alone, and owns the red. One variable used to drive both, so a full
+# battery that happened to be charging drew a red bar.
 #
 # Direction is carried by an ARROW as well as a colour, so it survives a reader who cannot tell
 # the red from the green, and the sign of the number never has to be decoded. Asserting only the
 # colour would let a future change drop the arrow and leave the meaning in a hue.
 BATTERY_CASES = [
     # (label, soc, power, must contain, must NOT contain)
-    # Discharging at a comfortable level: red on the line, green on the bar. Both appear, which
-    # is exactly what a single shared colour could not produce -- so this case alone would have
-    # failed before the split.
+    # Discharging at a comfortable level: neutral on the line, green on the bar, and no red
+    # anywhere -- a battery doing its evening job is not an alarm. And the power is said once,
+    # on the line: a second "1240 W out" under the bar repeated it.
     (
         "discharging",
         68,
         -1240,
-        ["↓", "var(--bad)", 'title="discharging"', "var(--ok)"],
-        ["-1240"],
+        ["↓", "var(--mid)", 'title="discharging"', "var(--ok)"],
+        ["-1240", "var(--bad)", "W out"],
     ),
     # Charging while nearly empty: green on the line, red on the bar. The mirror image.
     ("charging", 12, 1500, ["↑", "var(--ok)", 'title="charging"', "var(--bad)"], []),
@@ -75,8 +76,8 @@ BATTERY_CASES = [
     # The middle band, so the orange threshold is not left to inspection.
     ("half full", 35, -200, ["var(--warn)"], []),
     # A device reporting power but no state of charge. Asserted on the BAR's own markup, not on
-    # the card's text: this one is discharging, so var(--bad) is legitimately present on the
-    # direction line and a whole-card search would have passed for the wrong reason.
+    # the card's text: a whole-card search answers for the direction line too, and would pass or
+    # fail for the wrong reason the day that line's colour changes again.
     #
     # The fill is invisible here -- an unknown level draws a rect of zero width, same as a
     # genuine 0% -- and what tells them apart on screen is the em dash where the number goes.
