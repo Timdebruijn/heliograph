@@ -576,7 +576,7 @@ std::unique_ptr<rest::RestApi>    g_rest;
 
 /// One entry per configured device, in poll order. Element 0 is the `driver` section; the rest
 /// come from `additional_devices`. Held as parallel owning vectors rather than one struct so
-/// the existing single-device call sites (g_driver / g_context / g_state below) keep meaning
+/// the existing single-device call sites (g_driver / g_context below) keep meaning
 /// exactly what they meant: the FIRST device.
 std::vector<std::unique_ptr<InverterDriver>> g_drivers;
 std::vector<std::unique_ptr<DeviceContext>>  g_contexts;
@@ -584,12 +584,12 @@ std::vector<std::unique_ptr<DeviceContext>>  g_contexts;
 /// The first device, or nullptr. What is left that still speaks about "the" inverter: the
 /// boot-confirm check, the REST /status device block, and the "is anything polling at all"
 /// guard in the poll loop. Naming them rather than indexing at each call site keeps the
-/// remaining single-device assumptions countable -- every use of g_driver/g_context/g_state is
-/// a place that has not been taught about the others. The outputs no longer belong on that
-/// list: MQTT, REST, Modbus TCP and Prometheus all carry every device.
+/// remaining single-device assumptions countable -- every use of g_driver/g_context is a place
+/// that has not been taught about the others. The outputs no longer belong on that list: MQTT,
+/// REST, Modbus TCP and Prometheus all carry every device. (g_state, the first device's store,
+/// is gone: its last use was the guard that kept every output from running without a device.)
 InverterDriver* g_driver  = nullptr;
 DeviceContext*  g_context = nullptr;
-StateStore*     g_state   = nullptr;
 
 /// Round-robin cursor for the poll loop, so a device whose backoff has expired does not always
 /// lose to the one before it in the list.
@@ -1806,7 +1806,13 @@ void rs485Task(void* /*arg*/) {
         // Every output takes every device: MQTT/Home Assistant by topic subtree, REST by device
         // id, Modbus TCP by unit id, Prometheus by a `device` label. docs/architecture.md has
         // the table of what each one did about backwards compatibility for device 1.
-        if (g_state) {
+        //
+        // Unconditionally, and that is the point: this block used to sit under a guard that was
+        // true only once some device had started. A relay board with no inverter, or a bridge
+        // whose configured devices all failed to start, ran no output at all -- MQTT never said
+        // `online` and never subscribed to the relay/DRM topics, Modbus TCP never refreshed.
+        // With no device the views are empty and every output reports just the bridge.
+        {
             const auto bridge = bridgeInfo();
             const auto diag   = g_diagnostics.snapshot();
             // Snapshots held for the whole block: MqttOutput::DeviceView keeps raw pointers
@@ -1824,7 +1830,6 @@ void rs485Task(void* /*arg*/) {
                     views.push_back({id, held.back().get(), id == g_primaryDeviceId});
                 }
             }
-            const auto first = g_state->snapshot();
             // Every device, one Modbus unit id each: configuration slot i is served at
             // inverterUnitId + i (#36).
             //
@@ -2098,7 +2103,6 @@ void setup() {
         if (g_driver == nullptr) {
             g_driver  = g_drivers.front().get();
             g_context = g_contexts.front().get();
-            g_state   = store;
         }
     }
     if (!g_drivers.empty()) {

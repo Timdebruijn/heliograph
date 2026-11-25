@@ -93,7 +93,11 @@ the bookkeeping rather than being recorded as cleared. Not covered:
 
 > **Which device is "first" comes from the configuration, not from boot order.** It is the
 > `driver` entry. If it fails to start, no device takes over the bridge-scoped topics — that is
-> deliberate, so a bad boot cannot transplant one inverter's history onto another.
+> deliberate, so a bad boot cannot transplant one inverter's history onto another. The bridge's
+> own part of that tree does not wait for it: `availability`, `diagnostics`, the bridge
+> diagnostic entities and the relay/DRM switches, select and command subscriptions are announced
+> on every connection whether any device started or not, so a relay board with no inverter (or
+> with a dead one) is still `online` and controllable.
 
 **Last Will and Testament:** topic `availability`, payload `offline`, retained, QoS 1. On a
 clean shutdown, the bridge publishes `offline` itself.
@@ -304,7 +308,8 @@ discovers that half the outputs ignored it. Now the behavior is enforced by test
 ## Reconnect
 
 Exponential back-off 1 s → 2 s → 4 s → … → max 60 s. After connecting: availability `online`,
-then identity/capabilities/discovery, then state. The poll cycle keeps running in the
+the bridge's own discovery and the relay/DRM subscriptions, then per device
+identity/capabilities/discovery, then state. The poll cycle keeps running in the
 meantime — `mqttTask` and `rs485Task` share nothing but the `StateStore`.
 
 ## Changing the base topic or the discovery prefix
