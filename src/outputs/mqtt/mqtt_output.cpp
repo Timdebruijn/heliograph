@@ -374,7 +374,7 @@ bool MqttOutput::onConnected(Channel& channel, const DeviceState& state,
 
     // This channel's OWN command topic -- commandSet() differs per device (primary vs
     // device-scoped prefix), unlike the relay/DRM topics, which belong to the bridge and are
-    // subscribed once, by announceBridge(). Whether commanding does anything is a capabilities
+    // subscribed once, by subscribeBridge(). Whether commanding does anything is a capabilities
     // question the driver and CommandDispatcher answer, not this subscription: a read-only
     // driver still receives the message, and still answers Unsupported.
     if (commandSubmit_ != nullptr) {
