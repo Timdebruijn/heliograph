@@ -243,6 +243,9 @@ Two deliberate properties:
 - **A pre-release keeps the version of the release it leads to.** `v0.19.0-rc1` matches a
   source declaring `0.19.0`; requiring the label in the source would mean a commit per
   release candidate.
+  Because it carries that version, a candidate must never reach the update feed: release.yml
+  publishes a tag with a suffix as a GitHub pre-release and leaves the flasher site and
+  `latest.json` on the last final release.
 - **Wired into the wrong workflow, it does nothing rather than breaking.** In ordinary CI
   `GITHUB_REF_NAME` holds a branch name, and a check that read `main` as a version would fail
   every pull request for a reason unrelated to the change. An explicit argument is always

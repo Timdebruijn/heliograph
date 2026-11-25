@@ -37,6 +37,19 @@
 #
 # NOT "Re-run all jobs". That runs publish again, which uploads a second `github-pages`
 # artifact to the same run, and the deploy action refuses a run that has two.
+#
+# A PRE-RELEASE TAG (v0.36.0-rc1) SHIPS NOWHERE BUT THE RELEASES PAGE. tools/check_version.sh
+# accepts the suffix on purpose (docs/decisions.md), and this workflow used to treat such a tag
+# exactly like a final one: a normal release marked "latest", and a Pages deploy that replaced
+# latest.json and the flasher images with the candidate. Every bridge's update check reads that
+# feed, so a candidate meant for one test board was offered to all of them -- under the final
+# version number, because a candidate carries the version it leads to. The final tag then built
+# a second, different image that bridges already on the candidate would never be offered (same
+# number). Now a tag with a `-` is published as a GitHub pre-release, which GitHub never marks
+# latest, and the flasher site and feed are neither rebuilt nor deployed; they keep serving the
+# last final release. Install a candidate by downloading its .bin from the release and using
+# the dashboard's file upload. `-` is the test because it is what separates a pre-release
+# suffix in the one tag shape check_version.sh accepts (vMAJOR.MINOR.PATCH[-label]).
 
 name: Release
 
@@ -245,13 +258,19 @@ jobs:
           done
           ls -l dist
 
+      # `prerelease` for a tag with a suffix; see "A PRE-RELEASE TAG" in the header. GitHub
+      # refuses to mark a pre-release as latest, so no `make_latest` is needed beside it.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
+      # The three steps below build what Pages serves to every bridge and every flasher user.
+      # Skipped for a pre-release, which must not replace the final release there.
       - name: Build flasher site
+        if: ${{ !contains(github.ref_name, '-') }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p site
@@ -277,6 +296,7 @@ jobs:
       # project published -- anyone who could replace the binary could replace this file too.
       # Said plainly in docs/security.md rather than implied by the presence of a checksum.
       - name: Build update feed
+        if: ${{ !contains(github.ref_name, '-') }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           {
@@ -301,6 +321,7 @@ jobs:
           cat site/latest.json
 
       - name: Upload Pages artifact
+        if: ${{ !contains(github.ref_name, '-') }}
         uses: actions/upload-pages-artifact@v5
         with:
           path: site
@@ -321,6 +342,9 @@ jobs:
     name: Deploy flasher and update feed
     runs-on: ubuntu-latest
     needs: publish
+    # Same test as the publish steps that build the site: a pre-release uploads no site
+    # artifact, and deploying without one would fail the run after the release was created.
+    if: ${{ !contains(github.ref_name, '-') }}
     steps:
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v5
