@@ -87,6 +87,7 @@ def main() -> int:
                 status |= check_state_event_gate(script, scratch)
                 status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
+                status |= check_inverters_single_flight(script, scratch)
                 status |= check_guarded_poll(script, scratch)
                 status |= check_device_rows_fresh(script, scratch)
                 status |= check_asleep(script, scratch)
@@ -700,6 +701,85 @@ const tick = guarded(slow);
 """
     )
     return run_node("guarded polling", "guarded.js", harness, scratch)
+
+
+def check_inverters_single_flight(script, scratch):
+    """A refresh asked for by an action is never dropped, and never runs alongside another.
+
+    The Inverters tab reloads after a save, a removal or an added row (force). One that landed
+    while the five-second background pass was out used to return at once: the pass that was
+    running had read the list before the save, its paint was the last word, and the row just
+    added stayed missing until the next timer.
+    """
+    body = extract_function(script, "loadInverters")
+    held = extract_function(script, "invHeldMs")
+    if body is None or held is None:
+        print(
+            "FAIL: loadInverters()/invHeldMs() not found in index_html.h; this check needs updating"
+        )
+        return 1
+    harness = (
+        """
+process.exitCode = 1;
+let invBusy=false, invNextMs=0, invIds=[], invPass=null;
+const invFetchedAt={}, invMissed={}, INV_STALE_MS=15000, devCache={}, measCache={}, capsCache={};
+let tab='other', panel=null;
+const readerIsBusy=()=>false, paintInverters=()=>{};
+let passes=0, inFlight=0, maxInFlight=0, gate=null, failNext=false, failAt=null, list=['a'];
+const getJson=async (u)=>{
+  if(u==='/api/v1/devices'){
+    passes++; inFlight++; maxInFlight=Math.max(maxInFlight,inFlight);
+    if(gate) await gate;
+    inFlight--;
+    if(failNext){failNext=false; throw new Error('timed out');}
+    return {devices:list};
+  }
+  if(failAt&&u.includes('/devices/'+failAt+'/measurements')){failAt=null; throw new Error('timed out');}
+  return {measurements:{}};
+};
+"""
+        + body
+        + held
+        + """
+(async () => {
+  let bad = 0;
+  let open; gate = new Promise(r => { open = r; });
+  const background = loadInverters(false);              // the timer's pass, held open
+  const timer = loadInverters(false);                    // another timer tick meanwhile
+  let forcedDone = false;
+  const forced = loadInverters(true).then(() => { forcedDone = true; });
+  await new Promise(r => setTimeout(r, 10));
+  if (passes !== 1) { console.error(`passes while one was out: ${passes}, want 1`); bad++; }
+  if (forcedDone) { console.error('the forced refresh returned before any pass after it ran'); bad++; }
+  gate = null; open();
+  await background; await timer; await forced;
+  if (passes !== 2) { console.error(`forced refresh during a pass ran ${passes - 1} extra, want 1`); bad++; }
+  if (maxInFlight !== 1) { console.error(`${maxInFlight} passes ran at once`); bad++; }
+  // A pass that fails records no fresh answer, so the card can say its numbers are old.
+  invFetchedAt.a = 1;  // an answer from long ago
+  failNext = true; await loadInverters(true);
+  if (invFetchedAt.a !== 1) { console.error('a failed pass still marked the device as freshly read'); bad++; }
+  if (invPass !== null || invBusy) { console.error('a failed pass left the loader marked busy'); bad++; }
+  if (invHeldMs('a', 20001) !== 20000) { console.error(`a device the bridge did not answer for reads held ${invHeldMs('a', 20001)} ms, want 20000`); bad++; }
+  // Old but never missed is NOT held: another tab was in front, or the pass has not run yet.
+  await loadInverters(true);
+  invFetchedAt.a = 1;
+  if (invHeldMs('a', 60000) !== 0) { console.error('an old copy no pass has failed to refresh reads as held'); bad++; }
+  // A pass that fails halfway: the devices before the failure are fresh, the rest are held.
+  list = ['a', 'b', 'c'];
+  await loadInverters(true);
+  for (const id of list) invFetchedAt[id] = 1;
+  failAt = 'b'; await loadInverters(true);
+  const heldNow = list.map(id => invHeldMs(id, 30000) > 0);
+  if (heldNow.join() !== 'false,true,true') { console.error(`after a failure at b, held = ${heldNow}, want false,true,true`); bad++; }
+  // A device that left the list leaves no record behind to be read as held if it comes back.
+  list = ['a']; await loadInverters(true);
+  if ('b' in invFetchedAt || 'b' in invMissed) { console.error('a removed device kept its record'); bad++; }
+  process.exit(bad === 0 ? 0 : 1);
+})();
+"""
+    )
+    return run_node("inverters single flight", "inv_flight.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):
