@@ -341,14 +341,19 @@ bool MqttOutput::announceBridge(const BridgeInfo& bridge) {
             ok = publishTracked(e.configTopic.c_str(), 1, true, e.payload.c_str()) && ok;
         }
     }
+    return ok;
+}
+
+bool MqttOutput::subscribeBridge() {
     // Once per connection, from here. They were subscribed from every device channel's
     // onConnected(), so a bridge with no started device never subscribed at all, and one with N
     // devices subscribed N times (and had a retained message replayed N times).
-    if (relayCount_ > 0) {
-        ok = g_client.subscribe(topics_.relaySetWildcard().c_str(), 1) != 0 && ok;
-        ok = g_client.subscribe(topics_.drmSet().c_str(), 1) != 0 && ok;
-        relayStateForced_ = true;  // fresh session: ack the current states once
+    if (relayCount_ == 0) {
+        return true;
     }
+    bool ok = g_client.subscribe(topics_.relaySetWildcard().c_str(), 1) != 0;
+    ok      = g_client.subscribe(topics_.drmSet().c_str(), 1) != 0 && ok;
+    relayStateForced_ = true;  // fresh session: ack the current states once
     return ok;
 }
 
@@ -425,13 +430,17 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
             c.throttle.reset();
             c.discoveryPublished = false;
         }
-        bridgeAnnounced_ = false;
+        bridgeAnnounced_  = false;
+        bridgeSubscribed_ = false;
     }
 
     // The bridge first, and whatever devices there are or are not: `online` must precede any
     // device's state, and none of it may wait for a device that never started.
     if (!bridgeAnnounced_) {
         bridgeAnnounced_ = announceBridge(bridge);
+    }
+    if (!bridgeSubscribed_) {
+        bridgeSubscribed_ = subscribeBridge();
     }
 
     // Per device: its own discovery announcement, its own throttle. Re-announce when the
@@ -525,7 +534,8 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         if (bridge.relaysOpen() != lastRelaysEnabled_ || rolesSig != lastRelayRolesSig_) {
             lastRelaysEnabled_  = bridge.relaysOpen();
             lastRelayRolesSig_  = rolesSig;
-            bridgeAnnounced_    = false;  // relay entities are the bridge's; re-announce next tick
+            bridgeAnnounced_    = false;  // relay entities are the bridge's; re-announce, no
+                                          // re-subscribe (see subscribeBridge)
             relayStateForced_ = true;
         }
         if (relayStateForced_ || relayAckRequested_.exchange(false) ||

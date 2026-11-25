@@ -202,14 +202,18 @@ private:
     /// Assistant never got the entities -- and, since the signature would already match on the
     /// next tick, nothing would ever retry short of an actual reconnect.
     bool onConnected(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
-    /// The bridge's own announcement: availability `online`, the bridge diagnostic and relay/DRM
-    /// discovery entities, and the relay/DRM command subscriptions. Once per connection, and
-    /// owned by NO device. It used to ride on the primary device's channel, so a bridge whose
+    /// The bridge's own announcement: availability `online` and the bridge diagnostic and
+    /// relay/DRM discovery entities. Once per connection (and again after a relay enable/role
+    /// change), owned by NO device. It used to ride on the primary device's channel, so a bridge whose
     /// first configured inverter failed to start -- or a relay board with none -- never said
     /// `online`, never announced its relay switches and DRM select, and (with no device at all)
-    /// never subscribed to the topics that move them. True when every publish and subscribe was
-    /// accepted; loop() retries until then.
+    /// never subscribed to the topics that move them (that half is subscribeBridge()). True when
+    /// every publish was accepted; loop() retries until then.
     bool announceBridge(const BridgeInfo& bridge);
+    /// The relay/DRM command subscriptions, once per connection. Apart from announceBridge() so a
+    /// relay role change re-announces the entities without re-subscribing: every SUBSCRIBE makes
+    /// the broker replay what is retained on those topics. True when both were accepted.
+    bool subscribeBridge();
     bool publishDiscovery(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
 
     MqttConfig   config_;
@@ -250,6 +254,8 @@ private:
     /// announceBridge() has landed on the current connection. Cleared by a resync and by a relay
     /// enable/role change, which renames or removes the relay entities. loop() task only.
     bool bridgeAnnounced_ = false;
+    /// subscribeBridge() has landed on the current connection. Cleared by a resync only.
+    bool bridgeSubscribed_ = false;
     /// Edge detection for the reconnect counter. `wasConnected_` tracks the previous loop's
     /// link state so a false→true transition is counted once; `everConnected_` makes the
     /// FIRST connect at boot not count as a reconnect. See loop().

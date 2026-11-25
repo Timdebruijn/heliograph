@@ -97,7 +97,10 @@ the bookkeeping rather than being recorded as cleared. Not covered:
 > own part of that tree does not wait for it: `availability`, `diagnostics`, the bridge
 > diagnostic entities and the relay/DRM switches, select and command subscriptions are announced
 > on every connection whether any device started or not, so a relay board with no inverter (or
-> with a dead one) is still `online` and controllable.
+> with a dead one) is still `online` and controllable. The flip side: a configured device that
+> failed to start leaves its last retained `state` on the broker, and because availability is
+> the bridge's, Home Assistant shows those last values as current until the device is back.
+> `GET /api/v1/status` names it in `bridge.device_problems`.
 
 **Last Will and Testament:** topic `availability`, payload `offline`, retained, QoS 1. On a
 clean shutdown, the bridge publishes `offline` itself.

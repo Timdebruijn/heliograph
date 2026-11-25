@@ -1503,8 +1503,10 @@ void reconcileAnnouncedDevices(const BridgeInfo& bridge) {
     // gets corrected in a minute is worse than leaving them one boot longer. Nothing here can
     // know the id of a device that never got a driver -- the id comes from the driver -- so the
     // honest move is to defer the whole reconciliation and leave the bookkeeping untouched
-    // (review, 2026-07-26). Zero configured devices lands here too, and never reaches this
-    // function at all: with nothing started there is no state and MQTT does not run.
+    // (review, 2026-07-26). A bridge with devices configured and none started stops here too.
+    // One with NO devices configured passes (0 of 0), and that is right: whatever non-primary
+    // device trees an earlier configuration announced are now genuinely removed, and the
+    // bridge-scoped tree is never cleared by devicesToForget.
     if (g_deviceIds.size() != g_devicesConfigured) {
         log::warn("MQTT: not clearing retained device topics this boot -- %u of %u configured "
                   "devices started; fix them and reboot",
@@ -1810,8 +1812,9 @@ void rs485Task(void* /*arg*/) {
         // Unconditionally, and that is the point: this block used to sit under a guard that was
         // true only once some device had started. A relay board with no inverter, or a bridge
         // whose configured devices all failed to start, ran no output at all -- MQTT never said
-        // `online` and never subscribed to the relay/DRM topics, Modbus TCP never refreshed.
-        // With no device the views are empty and every output reports just the bridge.
+        // `online` and never subscribed to the relay/DRM topics. With no device the views are
+        // empty: MQTT announces the bridge alone, and Modbus TCP, which updates a unit's map only
+        // for a device that started, keeps every unit at its "unknown" sentinels as before.
         {
             const auto bridge = bridgeInfo();
             const auto diag   = g_diagnostics.snapshot();
