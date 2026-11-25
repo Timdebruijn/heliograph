@@ -54,11 +54,12 @@ The bridge clears up after the devices that publish on `…/device/<device_id>/`
 which devices it announced and on which topic tree, and on the first connection after a restart
 it publishes empty retained payloads for any that no longer owns that tree — the device's own
 `state`, `identity` and `capabilities`, and every Home Assistant discovery config it could have
-announced there. Home Assistant drops those entities.
+announced there, its control entities (number, select, button) included. Home Assistant drops
+those entities.
 
 Two things follow from *could have*: the topics are enumerated from the canonical measurement
-ids rather than derived from the device's readings, because by then the device is gone and so
-are its readings; and clearing a topic that was never used is harmless.
+ids and command types rather than derived from the device's readings, because by then the device
+is gone and so are its readings; and clearing a topic that was never used is harmless.
 
 It matters because of how availability works here. Availability is bridge-scoped, deliberately,
 so a sleeping inverter does not make its entities unavailable every night — which means an

@@ -926,6 +926,34 @@ static DeviceState pollWritableMockState() {
     return *store.snapshot();
 }
 
+// forgetDevice() clears deviceConfigTopics(). Its list used to be kept by hand and lacked the
+// command entities, so a removed device left its number/select/button behind in Home Assistant.
+// The invariant that keeps them in step: every config topic the builders can produce for a
+// device -- announcements and removals, commands open -- is in the list.
+static void test_every_topic_a_device_can_announce_is_one_forget_clears() {
+    const auto       bridge = makeBridge();
+    const std::string base  = bridge.bridgeId + "_modbus_profile-2";
+    const auto       clears = deviceConfigTopics(kDefaultDiscoveryPrefix, base);
+    const auto       has    = [&](const std::string& t) {
+        return std::find(clears.begin(), clears.end(), t) != clears.end();
+    };
+    const MqttTopics topics(kDefaultBaseTopic, bridge.bridgeId, "modbus_profile-2");
+
+    Rig r;
+    for (const DeviceState& state : {pollWritableMockState(), r.poll()}) {
+        for (const auto& e : buildDiscoveryEntities(state, bridge, topics, topics.availability(),
+                                                    kDefaultDiscoveryPrefix, base)) {
+            TEST_ASSERT_TRUE_MESSAGE(has(e.configTopic), e.configTopic.c_str());
+        }
+        for (const auto& e : buildCommandRemovals(state, bridge, kDefaultDiscoveryPrefix, base)) {
+            TEST_ASSERT_TRUE_MESSAGE(has(e.configTopic), e.configTopic.c_str());
+        }
+    }
+    // And the command entities specifically, the ones that used to be missed.
+    TEST_ASSERT_TRUE(has(kDefaultDiscoveryPrefix + std::string("/number/") + base +
+                         "/set_active_power_limit_percent/config"));
+}
+
 static void test_a_writable_numeric_command_gets_a_number_entity() {
     const auto state  = pollWritableMockState();
     const auto bridge = makeBridge();
@@ -1963,6 +1991,7 @@ int main(int, char**) {
     RUN_TEST(test_no_control_entities_for_a_read_only_driver);
     RUN_TEST(test_control_entities_follow_the_write_gates);
     RUN_TEST(test_config_topics_are_well_formed);
+    RUN_TEST(test_every_topic_a_device_can_announce_is_one_forget_clears);
     RUN_TEST(test_a_writable_numeric_command_gets_a_number_entity);
     RUN_TEST(test_start_and_stop_get_button_entities);
     RUN_TEST(test_an_enum_command_without_options_gets_no_entity);
