@@ -20,6 +20,23 @@ ASSETS = [
 ]
 
 
+def check_no_referrer_policy(name: str, source: str) -> int:
+    """Refuse a page-wide Referrer-Policy on the bridge's own pages.
+
+    The REST API refuses a write whose Origin is not the bridge's own (src/outputs/rest/
+    cross_site.h, CSRF). A `<meta name="referrer" content="no-referrer">` would make the browser
+    send `Origin: null` on the page's OWN writes, and every save would answer 403. A per-link
+    `rel="noreferrer"` is fine: it applies to that navigation only.
+    """
+    if re.search(r"<meta[^>]*name\s*=\s*[\"']?referrer", source, re.I):
+        print(
+            f"{name}: FAIL (a <meta name=referrer> would turn the page's own writes into "
+            "Origin: null, which the REST API refuses as cross-site)"
+        )
+        return 1
+    return 0
+
+
 def main() -> int:
     root = pathlib.Path(__file__).resolve().parent.parent
     status = 0
@@ -30,6 +47,7 @@ def main() -> int:
         for name in ASSETS:
             source = (root / name).read_text()
             status |= check_no_code_in_handlers(name, source)
+            status |= check_no_referrer_policy(name, source)
             scripts = re.findall(r"<script>(.*?)</script>", source, re.S)
             if not scripts:
                 print(f"{name}: FAIL (no <script> blocks found)")

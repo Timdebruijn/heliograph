@@ -14,6 +14,7 @@ the same LAN", not "someone holding the PCB in their hands".
 | Raw TCP bridge | Not implemented |
 | REST GET | Unsecured (local network) |
 | REST PATCH/POST | HTTP Basic required; **rejected** without a configured password, not left open |
+| Cross-site requests (CSRF) | A write a browser sends from another site's page is refused with 403, by `Origin`/`Sec-Fetch-Site`; clients that send neither (curl, scripts) are unaffected. See `docs/rest-api.md` → Auth |
 | OTA | Same auth + firmware magic check (0xE9) before the first byte hits flash |
 | Completing setup | Refuses without an admin password |
 | Secrets in logs/REST/MQTT/Prometheus | Never. `serializeConfig()` omits every password **and both usernames** — the MQTT one and `security.admin_username` (not masked, absent); `serializeConfigForStorage()` is the only one that writes them |
@@ -67,6 +68,12 @@ protocol, not our implementation. Only offer it on a trusted or filtered network
 **HTTP Basic over unencrypted HTTP.** The admin password travels base64-encoded (i.e.
 readable) over the network. TLS on an ESP32 with an async web server isn't worth the
 complexity here; anyone who wants it should put a reverse proxy in front.
+
+**The cross-site check does not stop DNS rebinding.** A page whose own name has been re-pointed
+at the bridge sends an `Origin` equal to its `Host`. It holds no credential for the bridge (a
+browser keys those to the bridge's own name), so it reaches only what needs none: the read-only
+GETs, and the setup portal's provision and restore routes while no admin password exists, which
+anyone on the open setup AP can reach anyway.
 
 **NVS is not encrypted.** The stored configuration contains the wifi and MQTT password in
 plain text. Anyone who can read the flash over USB can read them. Flash encryption would solve

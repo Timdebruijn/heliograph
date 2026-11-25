@@ -19,6 +19,7 @@
 #include "diagnostics/logger.h"
 #include "outputs/json_util.h"
 #include "outputs/prometheus/prometheus_metrics.h"
+#include "outputs/rest/cross_site.h"
 #include "outputs/rest/rest_payloads.h"
 #include "config/configuration_store.h"
 #include "ota/ota_manager.h"
@@ -204,10 +205,54 @@ bool RestApi::begin() {
     g_events->authorizeConnect(
         [](AsyncWebServerRequest*) { return g_events->count() < kMaxSseClients; });
 
+    // A state-changing request a browser sent from ANOTHER site's page (CSRF); see
+    // cross_site.h for why Basic auth alone does not stop it and what the rule is. Answers 403
+    // and returns true when refused. GET and HEAD are never refused: they change nothing, and a
+    // link from elsewhere to a page or a backup download must keep working.
+    //
+    // Called from authorised(), so every admin route has it, and separately on the two routes
+    // that skip authorised() while the setup portal is unsealed (provision, restore). A NEW
+    // route that changes anything must go through one of the two; no host test can see it.
+    //
+    // The log line is throttled to one per 10 s with a count: a refused request needs no
+    // credential, so without it any page could flood the log ring and push out boot and fault
+    // history, and stall this task on the serial console.
+    auto crossSiteRefused = [this](AsyncWebServerRequest* request) -> bool {
+        const WebRequestMethod method = request->method();
+        if (method == HTTP_GET || method == HTTP_HEAD) {
+            return false;
+        }
+        const auto header = [request](const char* name) -> std::string {
+            const AsyncWebHeader* h = request->getHeader(name);
+            return h != nullptr ? std::string(h->value().c_str()) : std::string();
+        };
+        if (!isCrossSiteRequest(header("Sec-Fetch-Site"), header("Origin"), header("Host"))) {
+            return false;
+        }
+        ++crossSiteRefusals_;
+        const uint64_t now = context_.clock();
+        if (!crossSiteLogged_ || now - lastCrossSiteLogMs_ >= kCrossSiteLogIntervalMs) {
+            log::warn("REST: refused %u cross-site write(s), latest %s %.48s from Origin '%.64s'",
+                      static_cast<unsigned>(crossSiteRefusals_), request->methodToString(),
+                      request->url().c_str(), header("Origin").c_str());
+            crossSiteRefusals_  = 0;
+            crossSiteLogged_    = true;
+            lastCrossSiteLogMs_ = now;
+        }
+        sendError(request, {403, "cross_site",
+                            "refused: this request came from another site's page. Use the "
+                            "bridge's own page; if that is where it came from, a browser "
+                            "setting or extension is hiding the page's origin (Origin: null)"});
+        return true;
+    };
+
     // Authentication for every mutating endpoint. Without a configured password these are
     // refused outright rather than left open -- an unprovisioned device must not be
     // controllable by whoever finds it first.
-    auto authorised = [this](AsyncWebServerRequest* request) -> bool {
+    auto authorised = [this, crossSiteRefused](AsyncWebServerRequest* request) -> bool {
+        if (crossSiteRefused(request)) {
+            return false;
+        }
         const auto& sec = context_.config->security;
         if (sec.adminPassword.empty()) {
             sendError(request, {401, "not_configured",
@@ -309,7 +354,7 @@ bool RestApi::begin() {
 
     g_server->on(
         "/api/v1/provision", HTTP_POST,
-        [this, authorised](AsyncWebServerRequest* request) {
+        [this, authorised, crossSiteRefused](AsyncWebServerRequest* request) {
             // The request handler forms the response; the body handler only collects. If the
             // body never completed, nothing was queued and this is a genuinely empty POST.
             if (bodyMissing(request, "a JSON body is required")) {
@@ -334,6 +379,12 @@ bool RestApi::begin() {
             if (!context_.config->security.adminPassword.empty() && !authorised(request)) {
                 releaseBody();
                 return;  // authorised() stored the 401
+            }
+            // Also while unsealed, when authorised() is not reached: a page of another site,
+            // opened on a phone joined to the setup AP, must not be the one that provisions.
+            if (crossSiteRefused(request)) {
+                releaseBody();
+                return;
             }
 
             Configuration updated = *context_.config;
@@ -784,7 +835,7 @@ bool RestApi::begin() {
     // second browser tab, or to apply something other than what was shown.
     g_server->on(
         AsyncURIMatcher::exact("/api/v1/config/restore"), HTTP_POST,
-        [this, authorised](AsyncWebServerRequest* request) {
+        [this, authorised, crossSiteRefused](AsyncWebServerRequest* request) {
             // The same gate as /provision, for the same reason: the setup portal also returns
             // on an ALREADY-CONFIGURED bridge after repeated WiFi failures, and its AP is open.
             // Gated on whether a credential exists yet, not on whether the portal happens to be
@@ -795,6 +846,11 @@ bool RestApi::begin() {
             if (!(portal && unsealed) && !authorised(request)) {
                 releaseBody();
                 return;  // authorised() stored the 401
+            }
+            // The unsealed path skips authorised(), and with it this check; see /provision.
+            if (crossSiteRefused(request)) {
+                releaseBody();
+                return;
             }
             if (bodyMissing(request, "a backup file is required")) {
                 return;

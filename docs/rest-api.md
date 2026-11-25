@@ -205,6 +205,7 @@ Uniform, for every error:
 |---|---|
 | 400 | Invalid JSON, unknown config field, value out of range, or a configuration too large to store |
 | 401 | Auth missing/incorrect on a secured endpoint |
+| 403 | `cross_site`: a browser sent a write from another site's page (see [Auth](#auth)); `portal_only`: a setup-only route outside setup |
 | 404 | Unknown device or path |
 | 409 | Discovery already in progress; RS485 bus busy |
 | 413 | Body > 4 KB (8 KB on `/config/restore`, which carries a whole configuration) |
@@ -888,6 +889,25 @@ ESP32 with an async web server isn't worth the complexity here. This is stated e
 
 Default username `admin`; the password **must** be set during provisioning —
 no hardcoded default. Without a password, all mutating endpoints refuse with 401.
+
+**Writes from another site's page are refused (403 `cross_site`).** A browser attaches Basic
+credentials it has cached for the bridge by itself, so without this any web page an admin
+visits could POST a factory reset or a restore. Every request other than GET/HEAD that carries
+an `Origin` header must come from the bridge's own address (Origin host = `Host`; `Origin: null`
+is refused), and one that carries `Sec-Fetch-Site` must say `same-origin` or `none`. Browsers
+send `Sec-Fetch-Site` only to https and localhost, so on the bridge's own `http://` address the
+`Origin` rule decides.
+
+- A client that sends neither header — curl, Home Assistant's `rest_command`, a script — is not
+  a browser and is unaffected.
+- A dashboard or card running in a browser on another origin is refused by design: call the
+  bridge from its server side instead.
+- Behind an HTTPS reverse proxy the browser's `Sec-Fetch-Site` decides, whatever `Host` the
+  proxy passes on. Behind a plain-HTTP one, pass the original `Host` through (nginx:
+  `proxy_set_header Host $http_host`; `$host` drops a non-default port, and the comparison
+  includes it).
+- A browser setting or extension that forces `Referrer-Policy: no-referrer` makes even the
+  bridge's own page send `Origin: null`, and its writes are refused.
 
 ## SSE
 
