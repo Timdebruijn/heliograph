@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "configuration.h"
 #include "outputs/mqtt/announced_devices.h"
@@ -75,9 +76,16 @@ class ConfigurationStore {
 public:
     explicit ConfigurationStore(KeyValueBackend& backend);
 
-    /// Reads, migrates if needed, and validates. On anything other than Ok/Migrated, `out` is
-    /// left at its defaults -- never partially populated.
+    /// Reads, migrates if needed, and validates. On FutureVersion or Corrupt, `out` holds the
+    /// defaults plus the network identity salvaged from the refused document (WiFi, hostname,
+    /// static address, admin account) -- only as much of it as passes validate(), so the
+    /// result can be saved. Everything else stays at its defaults.
     LoadResult load(Configuration& out);
+
+    /// What the last load() left out of a salvage, one line each, for the caller to log. Not
+    /// logged by load() itself: it runs before the timezone is set, and a stamped line written
+    /// then comes out in UTC with nothing saying so (main.cpp, tools/check_layering.sh).
+    const std::vector<std::string>& salvageNotes() const { return salvageNotes_; }
 
     /// Writes atomically enough for NVS: one blob, one version. Returns false if the backend
     /// refused, so the caller can report a real failure instead of pretending it saved.
@@ -149,8 +157,9 @@ public:
     LoadResult peekRollback(Configuration& out, bool& sameAsLive);
 
 private:
-    KeyValueBackend&   backend_;
-    mutable std::mutex mutex_;
+    KeyValueBackend&         backend_;
+    mutable std::mutex       mutex_;
+    std::vector<std::string> salvageNotes_;  // written by load() only, read once after it
 };
 
 /// Serialises INCLUDING secrets. For ConfigurationStore only.

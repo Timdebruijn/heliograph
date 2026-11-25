@@ -689,7 +689,8 @@ static void test_a_newer_version_is_refused_not_guessed_at() {
 // the device its network identity. After a rollback the OLDER binary reads a NEWER config;
 // refusing the whole document put the device in the setup AP at exactly the moment the
 // rollback safety net fired -- worse off than before the update. Credentials (WiFi + admin)
-// have been stable since version 1 and are salvaged; feature settings stay at defaults.
+// have been stable since version 1 and are salvaged (with the hostname and static address, see
+// the tests below); feature settings stay at defaults.
 static void test_a_newer_version_still_keeps_the_network_identity() {
     MemoryBackend      backend;
     ConfigurationStore store(backend);
@@ -1629,6 +1630,93 @@ static void test_a_stored_short_admin_password_still_loads() {
     TEST_ASSERT_EQUAL_STRING("broker.lan", loaded.mqtt.host.c_str());
 }
 
+// A rollback used to bring a static-IP bridge back on a DHCP lease: an address nobody is looking
+// at, with the bookmark, the reverse proxy and the Home Assistant integration all pointing at
+// the old one. The static address is identity too, and salvaged like the rest of it.
+static void test_a_rollback_keeps_a_static_address() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    backend.write(kStorageKeyConfig,
+                  R"({"version":99,"wifi":{"ssid":"thuis","password":"geheim",)"
+                  R"("hostname":"dak","ip":"192.168.20.254","gateway":"192.168.20.1",)"
+                  R"("subnet":"255.255.255.0","dns1":"192.168.20.1"},)"
+                  R"("security":{"admin_username":"admin","admin_password":"GeheimGenoeg"}})");
+    Configuration c;
+    TEST_ASSERT_EQUAL(LoadResult::FutureVersion, store.load(c));
+    TEST_ASSERT_EQUAL_STRING("192.168.20.254", c.wifi.ip.c_str());
+    TEST_ASSERT_EQUAL_STRING("192.168.20.1", c.wifi.gateway.c_str());
+    TEST_ASSERT_EQUAL_STRING("255.255.255.0", c.wifi.subnet.c_str());
+    TEST_ASSERT_EQUAL_STRING("192.168.20.1", c.wifi.dns1.c_str());
+    // And the result is savable: the first settings change after the rollback must not fail.
+    TEST_ASSERT_TRUE(store.save(c));
+}
+
+// Whatever is salvaged must pass validate(), or save() refuses every later change: the operator
+// could not alter one setting until they found a field they never touched. A static address
+// that is invalid next to the defaults it now sits beside (no DNS, and the default NTP server is
+// a name), and a hostname this firmware does not accept, each fall back to what it would use.
+static void test_a_salvage_that_would_block_every_save_falls_back() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    backend.write(kStorageKeyConfig,
+                  R"({"version":99,"wifi":{"ssid":"thuis","password":"geheim",)"
+                  R"("hostname":"dak_noord","ip":"192.168.20.254","gateway":"192.168.20.1",)"
+                  R"("subnet":"255.255.255.0"},)"
+                  R"("security":{"admin_username":"admin","admin_password":"GeheimGenoeg"}})");
+    Configuration c;
+    TEST_ASSERT_EQUAL(LoadResult::FutureVersion, store.load(c));
+    TEST_ASSERT_EQUAL_STRING("thuis", c.wifi.ssid.c_str());  // identity still kept
+    TEST_ASSERT_TRUE(c.wifi.ip.empty());                     // DHCP, whole
+    TEST_ASSERT_TRUE(c.wifi.gateway.empty());
+    TEST_ASSERT_EQUAL_STRING(Configuration{}.wifi.hostname.c_str(), c.wifi.hostname.c_str());
+    TEST_ASSERT_TRUE(store.save(c));
+}
+
+// Only the field validate() names is reset, so a good hostname survives a bad username. And the
+// Corrupt path (a stored document that no longer validates) takes the same fallbacks, with an
+// address that lacks its gateway dropped whole.
+static void test_a_refused_document_resets_only_the_salvaged_field_that_fails() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    const std::string  longUser(40, 'u');  // salvage takes up to 64, validate() allows 32
+    backend.write(kStorageKeyConfig,
+                  std::string(R"({"version":2,"bridge_name":")") + std::string(80, 'x') +
+                      R"(","wifi":{"ssid":"thuis","password":"geheim","hostname":"dak",)"
+                      R"("ip":"192.168.20.254"},"security":{"admin_username":")" + longUser +
+                      R"(","admin_password":"GeheimGenoeg"}})");
+    Configuration c;
+    TEST_ASSERT_EQUAL(LoadResult::Corrupt, store.load(c));  // bridge_name too long
+    TEST_ASSERT_EQUAL_STRING("dak", c.wifi.hostname.c_str());
+    TEST_ASSERT_EQUAL_STRING(Configuration{}.security.adminUsername.c_str(),
+                             c.security.adminUsername.c_str());
+    TEST_ASSERT_TRUE(c.wifi.ip.empty());  // no gateway: not an address
+    TEST_ASSERT_TRUE(store.save(c));
+    // Both left-outs are reported for the boot log (logged by main after tzset, not here).
+    TEST_ASSERT_EQUAL(2, static_cast<int>(store.salvageNotes().size()));
+}
+
+// A bad hostname must not sink a good address: the identity fields are repaired first, the
+// address is judged on its own.
+static void test_a_bad_hostname_does_not_cost_a_good_static_address() {
+    MemoryBackend      backend;
+    ConfigurationStore store(backend);
+    backend.write(kStorageKeyConfig,
+                  R"({"version":99,"wifi":{"ssid":"thuis","password":"geheim",)"
+                  R"("hostname":"dak_noord","ip":"192.168.20.254","gateway":"192.168.20.1",)"
+                  R"("subnet":"255.255.255.0","dns1":"192.168.20.1"},)"
+                  R"("security":{"admin_username":"admin","admin_password":"GeheimGenoeg"}})");
+    Configuration c;
+    TEST_ASSERT_EQUAL(LoadResult::FutureVersion, store.load(c));
+    TEST_ASSERT_EQUAL_STRING("192.168.20.254", c.wifi.ip.c_str());
+    TEST_ASSERT_EQUAL_STRING(Configuration{}.wifi.hostname.c_str(), c.wifi.hostname.c_str());
+    TEST_ASSERT_EQUAL(1, static_cast<int>(store.salvageNotes().size()));
+    TEST_ASSERT_TRUE(store.save(c));
+
+    // A clean load leaves nothing to report.
+    TEST_ASSERT_EQUAL(LoadResult::Ok, store.load(c));
+    TEST_ASSERT_EQUAL(0, static_cast<int>(store.salvageNotes().size()));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_boot_is_confirmed_only_when_networked_and_settled);
@@ -1719,5 +1807,9 @@ int main(int, char**) {
     RUN_TEST(test_factory_reset_takes_the_rollback_slot_with_it);
     RUN_TEST(test_a_new_admin_password_must_be_long_enough_and_cannot_be_cleared);
     RUN_TEST(test_a_stored_short_admin_password_still_loads);
+    RUN_TEST(test_a_rollback_keeps_a_static_address);
+    RUN_TEST(test_a_salvage_that_would_block_every_save_falls_back);
+    RUN_TEST(test_a_refused_document_resets_only_the_salvaged_field_that_fails);
+    RUN_TEST(test_a_bad_hostname_does_not_cost_a_good_static_address);
     return UNITY_END();
 }
