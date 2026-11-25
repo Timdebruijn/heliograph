@@ -871,8 +871,8 @@ BridgeInfo bridgeInfo() {
     info.boardId          = board::kId;
     info.bridgeId         = g_wifi.bridgeId();
     {
-        // bridgeInfo() runs on loop() and rs485Task; the AsyncTCP task can be replacing
-        // g_config concurrently (see g_configMutex).
+        // bridgeInfo() runs on loop() and rs485Task (and on AsyncTCP for REST); the AsyncTCP
+        // task can be replacing g_config concurrently (see g_configMutex).
         std::lock_guard<std::mutex> lock(g_configMutex);
         info.name     = g_config.bridgeName;
         info.staticIp = g_config.wifi.staticIp();  // reads the string: same hazard

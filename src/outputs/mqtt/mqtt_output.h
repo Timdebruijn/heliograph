@@ -223,7 +223,7 @@ private:
     bool subscribeBridge();
     bool publishDiscovery(Channel& channel, const DeviceState& state, const BridgeInfo& bridge);
 
-    MqttConfig   config_;
+    const MqttConfig config_;  // never reassigned: baseTopic()/discoveryPrefix() rely on it
     /// Bridge-scoped: availability, diagnostics, relay and DRM. Never a device's.
     MqttTopics   topics_;
     Diagnostics* diagnostics_ = nullptr;
