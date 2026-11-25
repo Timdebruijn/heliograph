@@ -776,6 +776,14 @@ const getJson=async (u)=>{
   if (invFetchedAt.a !== 1) { console.error('a failed pass still marked the device as freshly read'); bad++; }
   if (invPass !== null || invBusy) { console.error('a failed pass left the loader marked busy'); bad++; }
   if (invHeldMs('a', 20001) !== 20000) { console.error(`a device the bridge did not answer for reads held ${invHeldMs('a', 20001)} ms, want 20000`); bad++; }
+  // A healthy pass under way is not a bridge that did not answer: the tab's first paint comes
+  // before the pass, and must not call an old copy held.
+  invMissed.a = false; invFetchedAt.a = 1;
+  { let open2; gate = new Promise(r => { open2 = r; });
+    const p = loadInverters(true);
+    await new Promise(r => setTimeout(r, 5));
+    if (invHeldMs('a', 60000) !== 0) { console.error('a pass still under way already reads as held'); bad++; }
+    gate = null; open2(); await p; }
   // Old but never missed is NOT held: another tab was in front, or the pass has not run yet.
   await loadInverters(true);
   invFetchedAt.a = 1;
