@@ -1569,6 +1569,40 @@ function wireNetForm(){
   }
   if($('#nw_tzc'))$('#nw_tzc').classList.toggle('hide',$('#nw_tz').value!=='__custom');
 }
+// What each DRM role asks of the inverter, per AS/NZS 4777.2. A bare "drm0" in a dropdown said
+// nothing about the one role that switches an inverter off. What a given inverter does with a
+// line is in its own manual; this is what the standard asks for.
+const DRM_ROLES={none:'not used',drm0:'disconnect: inverter off',drm1:'do not consume',
+  drm2:'consume at most 50%',drm3:'consume at most 75%, source reactive power',drm4:'increase consumption',
+  drm5:'do not generate',drm6:'generate at most 50%',drm7:'generate at most 75%, sink reactive power',
+  drm8:'increase generation'};
+const roleLabel=r=>(r==='none'?'None':r.toUpperCase())+' — '+(DRM_ROLES[r]||'unknown role');
+
+// The confirmation a Save asks for, or '' when it needs none. Only what OPENS is asked about,
+// and only what opens in effect: a path is open when Allow control AND its own switch are on,
+// so ticking either half alone moves nothing and asks nothing -- the prompt comes with the
+// second half. Turning anything off is never asked: it is always safe, and a prompt in the way
+// of it is one prompt too many. A role change is asked about only while the relays are open,
+// because only then can it move a contact; with either gate shut it changes a name.
+function controlConfirmText(was,now){
+  const wOpen=now.ctl&&now.iw, rOpen=now.ctl&&now.rl;
+  const opens=[];
+  if(wOpen&&!(was.ctl&&was.iw))opens.push('Inverter writes open: Home Assistant, MQTT and the API can send setpoints, such as a power limit, to an inverter.');
+  const rOpens=rOpen&&!(was.ctl&&was.rl);
+  if(rOpens)opens.push('Relays open: Home Assistant, MQTT and the API can move the contacts.');
+  const changed=rOpen&&now.roles.some((r,i)=>r!=='none'&&r!==(was.roles[i]||'none'));
+  if(!opens.length&&!changed)return '';
+  let t=opens.join('\n');
+  const roles=rOpens||changed?now.roles.map((r,i)=>r==='none'?'':`Relay ${i+1}: ${roleLabel(r)}`).filter(Boolean):[];
+  if(roles.length)t+=(t?'\n\n':'')+'The relays then act as:\n'+roles.join('\n')+
+    '\n\nA dead bridge must leave the inverter running: check that each line is on the terminal (NO or NC) that does that.';
+  return t+'\n\nSave?';
+}
+// The control state a config describes, in the shape controlConfirmText compares.
+function controlState(c){
+  return {ctl:(c.security||{}).read_only_mode===false,iw:!!(c.control||{}).inverter_writes_enabled,
+    rl:!!(c.relays||{}).enabled,roles:(c.relays||{}).roles||[]};
+}
 function accessForm(c,b){
   return `<div class="hair" data-form="access">
     <span class="tag">applied immediately</span>
@@ -1580,10 +1614,10 @@ function accessForm(c,b){
     <label class="check"><input id="ac_iw" type="checkbox" ${(c.control||{}).inverter_writes_enabled?'checked':''}> Inverter writes enabled</label>
     <div class="hint">Lets Home Assistant, MQTT and the REST API send setpoints (such as a power limit) to an inverter. <i>Allow control</i> must also be on. A control appears only where the device has one confirmed on real hardware, or where its device settings allow unverified writes.</div>
     ${(b.relays||[]).length?`<label class="check"><input id="ac_rl" type="checkbox" ${(c.relays||{}).enabled?'checked':''}> Relays enabled</label>
-      <div class="hint">Both this and <i>Allow control</i> are required before a contact can move. Disabling releases every relay. See docs/drm.md for the wiring rule: a dead bridge must leave the inverter running.</div>
+      <div class="hint">Both this and <i>Allow control</i> are required before a contact can move. Disabling releases every relay. <b>A dead bridge must leave the inverter running:</b> put a line that asserts when closed on <b>NO</b>, and one that asserts when open on <b>NC</b> — the inverter's manual says which. Signal contacts only, never mains.</div>
       ${b.relays.map((_,i)=>`<label for="ac_r${i}">Relay ${i+1} role</label>
-        <select id="ac_r${i}" data-role="${i}" class="sh">${['none','drm0','drm1','drm2','drm3','drm4','drm5','drm6','drm7','drm8'].map(r=>
-          `<option ${r===(((c.relays||{}).roles||[])[i]||'none')?'selected':''}>${r}</option>`).join('')}</select>`).join('')}`:''}
+        <select id="ac_r${i}" data-role="${i}" class="sh">${Object.keys(DRM_ROLES).map(r=>
+          `<option value="${r}" ${r===(((c.relays||{}).roles||[])[i]||'none')?'selected':''}>${esc(roleLabel(r))}</option>`).join('')}</select>`).join('')}`:''}
     <div class="acts"><button onclick="saveAccess()">Save</button><button class="alt" onclick="togglePanel(null)">Cancel</button></div>
     <div id="ac_msg" class="msg hide"></div></div>`;
 }
@@ -1762,6 +1796,16 @@ async function saveAccess(){
   const relays=document.querySelectorAll('[data-role]');
   if($('#ac_rl'))body.relays={enabled:chk('ac_rl'),
     roles:[...relays].map(e=>e.value)};
+  // Against what the bridge does NOW, fetched fresh: this page's cfg is as old as its last own
+  // save, and another tab (or Home Assistant) may have closed a gate since -- a Save from here
+  // would then reopen it without a word. The cached copy only when the fetch fails.
+  let fresh=cfg;
+  try{fresh=await getJson('/api/v1/config')}catch(e){}
+  const was=controlState(fresh);
+  const now={ctl:!body.security.read_only_mode,iw:body.control.inverter_writes_enabled,
+    rl:body.relays?body.relays.enabled:was.rl,roles:body.relays?body.relays.roles:was.roles};
+  const ask=controlConfirmText(was,now);
+  if(ask&&!confirm(ask))return;
   const r=await patch(body);
   if(!r.ok){say('#ac_msg','err',esc(r.why));return}
   paintBridge();

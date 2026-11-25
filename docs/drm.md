@@ -11,8 +11,10 @@ proven and the inverter side as entirely untried.
 
 AS/NZS 4777.2 defines **demand response modes (DRM)** for inverters: a set of dry-contact
 signal lines on a dedicated port (usually an RJ45 socket labelled DRM/DRED). Closing a
-line's circuit asserts a mode — DRM0 demands shutdown, DRM1-4 limit consumption/charge,
-DRM5-8 limit generation/discharge. Heliograph's relay boards can drive those lines as
+line's circuit asserts a mode — DRM0 operates the disconnection device (inverter off),
+DRM1-3 limit consumption (charging) and DRM4 increases it, DRM5-7 limit generation and
+DRM8 increases it. The web UI names each role by what the standard asks of it; what a given
+inverter does with a line is in its own manual. Heliograph's relay boards can drive those lines as
 **potential-free contacts**: the bridge becomes the "demand response enabling device"
 for an inverter that cannot be curtailed over RS485.
 
@@ -26,7 +28,7 @@ Three layers, all of which must agree before a contact moves:
    inverted as *Allow control* under *Access & safety*; turn that on (or send
    `{"security":{"read_only_mode":false}}` over the API). It opens nothing on its own.
 2. `relays.enabled` — the feature flag, off by default. A relay board with factory
-   settings is inert. *Settings → Relays* warns while this one is open and the first
+   settings is inert. *Bridge → Access & safety* warns while this one is open and the first
    is still closed; enabling relays alone actuates nothing.
 3. The rate limiter — asserting is throttled; **releasing is never throttled**.
 
@@ -54,7 +56,7 @@ inverter down. Check with a multimeter before connecting anything.
 
 ## Configuration
 
-Each relay gets a role in *Settings → Relays* (or `relays.roles` over the API):
+Each relay gets a role in *Bridge → Access & safety* (or `relays.roles` over the API):
 `none`, or `drm0`..`drm8`. Roles do three things:
 
 - the Home Assistant switch is named after the role ("Relay 1 (DRM0)");
