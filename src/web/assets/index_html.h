@@ -352,20 +352,42 @@ async function getJson(url){
 // The bridge stores no time series and gains no endpoint for this. Samples come from the
 // /api/v1/status payload the page already fetches, and live in sessionStorage so a reload keeps
 // the curve. Capped, so a tab left open for a week cannot grow without bound.
+//
+// Each sample's time is kept beside it (histT), because the curve is headed with where it
+// starts. It was headed "Today" -- but at most 720 samples, one per refresh, is an hour or two of
+// this page being open, and a chart opened at 14:00 still read "Today" at 17:00 while it showed
+// 15:30 onwards. Values and times are stored as ONE item, so a save cannot keep one half.
 const HMAX=720;
-let hist=(()=>{try{return JSON.parse(sessionStorage.getItem('hg_hist')||'{}')}catch(e){return{}}})();
+let hist={}, histT={};
+try{const h=JSON.parse(sessionStorage.getItem('hg_hist2')||'null');
+  if(h&&typeof h.v==='object'&&h.v&&typeof h.t==='object'&&h.t){hist=h.v;histT=h.t}}catch(e){}
 let histSaveDue=0;
-function record(key,watts){
+function record(key,watts,now=Date.now()){
   if(watts===null||watts===undefined)return;
   const a=hist[key]||(hist[key]=[]);
+  // Values without times beside them (saved by a page from before histT) start over: a curve
+  // whose span is unknown would carry the wrong heading for as long as the tab stays open.
+  if(!Array.isArray(histT[key])||histT[key].length!==a.length){a.length=0;histT[key]=[]}
   a.push(Math.round(watts));
-  if(a.length>HMAX)a.splice(0,a.length-HMAX);
+  histT[key].push(now);
+  if(a.length>HMAX){a.splice(0,a.length-HMAX);histT[key].splice(0,histT[key].length-HMAX)}
 }
 function saveHist(){
   const now=Date.now();
   if(now<histSaveDue)return;
   histSaveDue=now+20000;
-  try{sessionStorage.setItem('hg_hist',JSON.stringify(hist))}catch(e){}
+  try{sessionStorage.setItem('hg_hist2',JSON.stringify({v:hist,t:histT}));sessionStorage.removeItem('hg_hist')}catch(e){}
+}
+/// Where the curve for `key` starts, as a heading: "Since 14:05", "Since yesterday 23:40".
+/// "Recent" when its times are not known. A start, not a span: the x-axis is samples, and a tab
+/// hidden for an hour records nothing for that hour -- "Last 1 h 5 min" over ten minutes of
+/// samples would be a span the curve does not have; "Since 14:05" is true either way.
+function histSpan(key,now=Date.now()){
+  const t=histT[key];
+  if(!t||t.length<2||!(t[0]>0))return 'Recent';
+  const d=new Date(t[0]);
+  const day=d.toDateString()===new Date(now).toDateString()?'':'yesterday ';
+  return 'Since '+day+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
 }
 /// An SVG polyline of one history series. Below two points it says so instead of drawing: a
 /// single sample is a dot pretending to be a trend.
@@ -673,7 +695,7 @@ function paintLive(){
                :`${esc(expected)} of ${esc(expected)} inverters answering`}</div>
       </div>
       <div>
-        <div class="between"><span class="k">Today, all inverters stacked</span><span class="hint" style="margin:0">held in this browser</span></div>
+        <div class="between"><span class="k">${esc(histSpan('all'))} · all inverters stacked</span><span class="hint" style="margin:0">recorded by this browser while open</span></div>
         ${spark('all',460,76,{base:true})}
         <div class="totals">
           <div><div class="v">${fmt(tot.energy_today_kwh,2)}<span class="u"> kWh</span></div><div class="hint">today${
@@ -702,7 +724,7 @@ function paintLive(){
           S.status_text?' · '+esc(S.status_text):''}</div>
       </div>
       <div>
-        <div class="between"><span class="k">Today</span><span class="hint" style="margin:0">in this browser only</span></div>
+        <div class="between"><span class="k">${esc(histSpan('all'))}</span><span class="hint" style="margin:0">recorded by this browser while open</span></div>
         ${spark('all',460,72,{base:true})}
         <div class="totals">
           <div><div class="v">${reading(m,'energy.today')}</div><div class="hint">today</div></div>
