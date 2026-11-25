@@ -87,6 +87,24 @@ jobs:
       - name: Tag matches the version the firmware reports
         run: bash tools/check_version.sh
 
+      # Only a commit that is on main ships. `v*` triggers on ANY pushed tag, so a tag on a
+      # feature-branch commit, or one never merged at all, built and published firmware and the
+      # update feed -- a release nobody reviewed, offered to every bridge. Asked of the API rather
+      # than of git: the checkout is shallow, and comparing main with the tagged commit needs no
+      # history. "behind" or "identical" means main already contains it; anything else
+      # ("ahead", "diverged") means it is not on main.
+      - name: Tagged commit is on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          status=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" --jq .status)
+          echo "main...${GITHUB_SHA}: ${status}"
+          case "$status" in
+            behind|identical) ;;
+            *) echo "::error::${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on main (${status}); tag a merge commit on main" >&2
+               exit 1 ;;
+          esac
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -109,6 +127,10 @@ jobs:
 
       - name: Layering invariants
         run: bash tools/check_layering.sh
+
+      # The same as CI's, so a release cannot ship a measurement id the Prometheus gauges lack.
+      - name: Measurement ids
+        run: python3 tools/check_measurement_ids.py
 
       - name: Embedded JS syntax
         run: python3 tools/check_web_js.py
