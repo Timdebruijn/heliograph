@@ -554,6 +554,9 @@ function groupsFor(m,skipHeadline){
 // ponytail: fixed hours and threshold in the browser's clock, no sun position or latitude. Far
 // north in winter an inverter may stop before 15:00 and show red until it wakes.
 const ASLEEP_BELOW_W=50, DUSK_FROM_H=15, NIGHT_UNTIL_H=4, WAKE_BY_H=10;
+// Never pass this to filter() or map() bare: they hand it the array index as `now`, and the
+// clock test then runs in 1970 -- a noon dropout counted as asleep in the header while its own
+// row said otherwise. Wrap it: fleet.filter(f=>asleep(f)).
 function asleep(f,now=Date.now()){
   if(!f||f.online||f.last_successful_poll_seconds_ago==null||f.last_ac_power_w==null||
      Math.abs(f.last_ac_power_w)>=ASLEEP_BELOW_W)return false;
@@ -589,7 +592,7 @@ function paintChrome(){
   // Green means ALL of them are answering; anything less is red, unless every one missing is
   // asleep (above), which is grey. An orange "some" is a state you learn to ignore. With one
   // device this is the header it has always been, stale tag included.
-  const sleeping=fleet.filter(asleep).length;
+  const sleeping=fleet.filter(f=>asleep(f)).length;
   const inv=multi
     ?chip(fleetVerdict(answering,expected,sleeping),
        `Inverters ${esc(answering)}/${esc(expected)} answering`+(sleeping?` · ${esc(sleeping)} asleep`:''))
@@ -690,7 +693,7 @@ function paintLive(){
   let h='';
   if(multi){
     const answering=tot.devices_answering??0;
-    const sleeping=fleet.filter(asleep).length;
+    const sleeping=fleet.filter(f=>asleep(f)).length;
     const short=answering!==expected, dark=fleetVerdict(answering,expected,sleeping)==='off';
     h+=`<div class="hero">
       <div>

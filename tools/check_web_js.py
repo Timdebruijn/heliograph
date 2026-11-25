@@ -394,6 +394,18 @@ def check_asleep(script, scratch):
     inverter behind a grey dot, too strict brings the nightly red back. Times are local, built with
     the Date constructor, so the cases hold in any timezone the check runs in.
     """
+    # asleep(f, now=Date.now()) and its siblings take a defaulted clock as the second argument,
+    # and filter()/map() hand a callback the array INDEX there: the clock test then ran in 1970,
+    # and a noon dropout at low output turned the header grey while its own row stayed red.
+    bare = re.findall(
+        r"\.(?:filter|map|some|every|find|findIndex)\((?:asleep|quietSince|histSpan)\)",
+        script,
+    )
+    if bare:
+        print(
+            f"asleep versus fault: FAIL\n  passed bare to an array method, which supplies the index as `now`: {bare}"
+        )
+        return 1
     parts = []
     for fn in ("asleep", "quietSince", "fleetVerdict"):
         body = extract_function(script, fn)
