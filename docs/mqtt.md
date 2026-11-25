@@ -148,7 +148,8 @@ ACLs (see [security.md](security.md#what-can-reach-the-inverter)). See
 [docs/security.md](security.md#what-can-reach-the-inverter) for which drivers can write and under
 what conditions; the honest summary is "gated", not "absent".
 
-The outcome of a submitted command is published on `<device>/command/result`.
+The outcome of a submitted command is published on `<device>/command/result`. A command that
+waits more than 30 s for the bus is not sent late; its outcome is `rejected`, reason `expired`.
 
 ## Publishing strategy
 

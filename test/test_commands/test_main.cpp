@@ -4,6 +4,7 @@
 #include <unity.h>
 
 #include <cmath>
+#include <cstring>
 
 #include "commands/command_dispatcher.h"
 #include "commands/command_queue.h"
@@ -704,18 +705,18 @@ static void test_a_submitted_request_is_taken_exactly_once() {
     CommandQueue q;
     TEST_ASSERT_TRUE(q.submit(queuedRequest("inv-1", "r1")));
 
-    auto taken = q.take();
+    auto taken = q.take(0);
     TEST_ASSERT_TRUE(taken.has_value());
     TEST_ASSERT_EQUAL_STRING("inv-1", taken->deviceId.c_str());
     TEST_ASSERT_EQUAL_STRING("r1", taken->command.requestId.c_str());
 
     // The slot is empty again: a second take() finds nothing left to consume.
-    TEST_ASSERT_FALSE(q.take().has_value());
+    TEST_ASSERT_FALSE(q.take(0).has_value());
 }
 
 static void test_take_on_an_empty_queue_returns_nothing() {
     CommandQueue q;
-    TEST_ASSERT_FALSE(q.take().has_value());
+    TEST_ASSERT_FALSE(q.take(0).has_value());
 }
 
 // Mirrors the one-in-flight rule g_manualPollRequested already applies: a second submission
@@ -727,7 +728,7 @@ static void test_a_second_submission_is_refused_while_one_is_pending() {
 
     // The ORIGINAL request is still the one waiting -- the refused second submission left no
     // trace.
-    auto taken = q.take();
+    auto taken = q.take(0);
     TEST_ASSERT_TRUE(taken.has_value());
     TEST_ASSERT_EQUAL_STRING("first", taken->command.requestId.c_str());
 }
@@ -735,7 +736,7 @@ static void test_a_second_submission_is_refused_while_one_is_pending() {
 static void test_a_taken_slot_accepts_a_new_submission() {
     CommandQueue q;
     TEST_ASSERT_TRUE(q.submit(queuedRequest("inv-1", "first")));
-    q.take();
+    q.take(0);
     TEST_ASSERT_TRUE(q.submit(queuedRequest("inv-1", "second")));
 }
 
@@ -754,16 +755,76 @@ static void test_a_recorded_outcome_is_readable_by_its_request_id() {
     TEST_ASSERT_EQUAL_STRING("accepted", outcome->reason.c_str());
 }
 
-// Only one outcome is remembered at a time, matching submit()'s one-slot rule: a caller asking
-// about a request that has since been superseded gets "unknown", not a stale answer.
-static void test_a_later_outcome_supersedes_an_earlier_one() {
+// take() frees the pending slot BEFORE dispatch runs, so a second client can submit and complete
+// before the first one reads its result. With one outcome slot that overwrote the first
+// client's answer and left it polling "pending" for good. The last few are kept; only once
+// kCommandOutcomeSlots later outcomes have arrived is an old one pushed out.
+static void test_an_outcome_survives_a_later_client_and_is_pushed_out_only_by_several() {
     CommandQueue q;
     q.recordOutcome("inv1", "first", DispatchOutcome{CommandResult::Ok, "accepted"});
     q.recordOutcome("inv1", "second",
                     DispatchOutcome{CommandResult::RateLimited, "too many commands"});
+    TEST_ASSERT_TRUE(q.outcomeFor("inv1", "first").has_value());
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited, q.outcomeFor("inv1", "second")->result);
 
-    TEST_ASSERT_FALSE(q.outcomeFor("inv1", "first").has_value());
-    TEST_ASSERT_TRUE(q.outcomeFor("inv1", "second").has_value());
+    for (size_t i = 0; i < kCommandOutcomeSlots - 1; ++i) {
+        q.recordOutcome("inv1", "later-" + std::to_string(i),
+                        DispatchOutcome{CommandResult::Ok, "accepted"});
+    }
+    TEST_ASSERT_FALSE(q.outcomeFor("inv1", "first").has_value());  // pushed out
+    TEST_ASSERT_TRUE(q.outcomeFor("inv1", "second").has_value());  // still among the last few
+}
+
+// A caller may reuse its own request id. Once the new request is queued, the old outcome must not
+// answer for it -- that read back as the previous command's result the moment the new one was
+// submitted, and MQTT published it as such. Once it completes, its own outcome answers, newest
+// first even with another id recorded in between.
+static void test_a_reused_request_id_never_answers_with_the_previous_outcome() {
+    CommandQueue q;
+    q.recordOutcome("inv1", "same", DispatchOutcome{CommandResult::Ok, "accepted"});
+    TEST_ASSERT_TRUE(q.submit(queuedRequest("inv1", "same")));
+    TEST_ASSERT_FALSE(q.outcomeFor("inv1", "same").has_value());  // pending, not "accepted"
+
+    q.take(0);
+    q.recordOutcome("inv1", "other", DispatchOutcome{CommandResult::Ok, "accepted"});
+    q.recordOutcome("inv1", "same", DispatchOutcome{CommandResult::RateLimited, "too many"});
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited, q.outcomeFor("inv1", "same")->result);
+
+    // Forgetting is scoped like everything else: another device's same id is left alone.
+    q.recordOutcome("inv2", "same", DispatchOutcome{CommandResult::Ok, "accepted"});
+    TEST_ASSERT_TRUE(q.submit(queuedRequest("inv1", "same")));
+    TEST_ASSERT_TRUE(q.outcomeFor("inv2", "same").has_value());
+}
+
+// A setpoint is sent for now. One that waited longer than kMaxCommandAgeMs for the bus (a
+// discovery scan, a capture, a run of timeouts) is not run late: it is refused, and the refusal
+// is the outcome its sender reads back.
+static void test_a_request_that_waited_too_long_is_refused_not_run() {
+    CommandQueue q;
+    auto r          = queuedRequest("inv1", "late");
+    r.submittedAtMs = 1000;
+    TEST_ASSERT_TRUE(q.submit(r));
+
+    std::optional<CommandQueue::Request> expired;
+    TEST_ASSERT_FALSE(q.take(1000 + kMaxCommandAgeMs + 1, &expired).has_value());
+    TEST_ASSERT_TRUE(expired.has_value());  // handed back for the caller to log
+    TEST_ASSERT_EQUAL_STRING("late", expired->command.requestId.c_str());
+    const auto outcome = q.outcomeFor("inv1", "late");
+    TEST_ASSERT_TRUE(outcome.has_value());
+    TEST_ASSERT_EQUAL(CommandResult::Rejected, outcome->result);
+    TEST_ASSERT_NOT_NULL(std::strstr(outcome->reason.c_str(), "expired"));
+    TEST_ASSERT_TRUE(q.submit(queuedRequest("inv1", "next")));  // the slot is free again
+
+    // At the limit it still runs, and a clock behind the stamp is "just submitted", not expired.
+    CommandQueue edge;
+    auto         onTime = queuedRequest("inv1", "on-time");
+    onTime.submittedAtMs = 1000;
+    edge.submit(onTime);
+    TEST_ASSERT_TRUE(edge.take(1000 + kMaxCommandAgeMs).has_value());
+    auto early          = queuedRequest("inv1", "early");
+    early.submittedAtMs = 5000;
+    edge.submit(early);
+    TEST_ASSERT_TRUE(edge.take(10).has_value());
 }
 
 // A request id is the CALLER's to choose (REST and MQTT both accept one), so two devices can
@@ -1005,7 +1066,9 @@ int main(int, char**) {
     RUN_TEST(test_a_taken_slot_accepts_a_new_submission);
     RUN_TEST(test_outcome_is_unknown_before_it_is_recorded);
     RUN_TEST(test_a_recorded_outcome_is_readable_by_its_request_id);
-    RUN_TEST(test_a_later_outcome_supersedes_an_earlier_one);
+    RUN_TEST(test_an_outcome_survives_a_later_client_and_is_pushed_out_only_by_several);
+    RUN_TEST(test_a_reused_request_id_never_answers_with_the_previous_outcome);
+    RUN_TEST(test_a_request_that_waited_too_long_is_refused_not_run);
     RUN_TEST(test_an_outcome_is_not_readable_through_another_device);
 
     RUN_TEST(test_command_type_from_name_round_trips_every_type);

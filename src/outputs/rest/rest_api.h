@@ -159,9 +159,8 @@ struct RestContext {
     std::function<std::optional<std::string>(const std::string& deviceId, InverterCommand command)>
         submitCommand;
     /// The outcome of the most recently completed command with this request id. Empty while
-    /// it is still pending, was never submitted, or has since been superseded by a later
-    /// request -- only one outcome is remembered at a time, matching submitCommand's
-    /// one-in-flight rule.
+    /// it is still pending, was never submitted, or has since been pushed out by later
+    /// outcomes (CommandQueue keeps the last kCommandOutcomeSlots).
     std::function<std::optional<DispatchOutcome>(const std::string& deviceId,
                                                  const std::string& requestId)>
         commandOutcome;
