@@ -48,10 +48,16 @@ code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
 /* --- chrome ------------------------------------------------------------------------ */
 header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 header b{font-size:16px}
-nav{display:flex;gap:4px;padding:8px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-nav button{background:none;border:0;color:var(--dim);padding:6px 12px;margin:0;border-radius:6px;cursor:pointer;font:inherit}
+/* One row that scrolls sideways rather than wrapping: on a phone the fifth tab dropped onto a
+   line of its own, and with the chips below the headline wattage sat under the fold. */
+nav{display:flex;gap:4px;padding:8px 20px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin}
+nav button{background:none;border:0;color:var(--dim);padding:6px 12px;margin:0;border-radius:6px;cursor:pointer;font:inherit;white-space:nowrap;flex:0 0 auto}
 nav button.on{background:var(--card);color:var(--fg)}
 .chips{display:flex;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
+/* Same on a narrow screen while everything is fine: the status chips take one line and scroll,
+   the first one -- the inverters -- always in view. Not while one is red (.alarm, set in
+   paintChrome): a fault must never sit behind a swipe, so then they wrap and all show. */
+@media(max-width:600px){.chips:not(.alarm){flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}.chips:not(.alarm) .chip{white-space:nowrap;flex:0 0 auto}}
 .chip{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--dim)}
 /* One centred column for the whole page, chrome included, so the header lines up with the
    content under it. The borders still run edge to edge; only the contents are held in. */
@@ -594,10 +600,12 @@ function paintChrome(){
     :asleep(fleet[0])?chip('off','Inverter asleep '+esc(quietSince(fleet[0])))
     :chip(d.online?'ok':'bad','Inverter'+(d.data_stale?' <span class="tag">stale</span>':'')+
        (d.data_valid?'':' <span class="tag">no data</span>'));
-  $('#chips').innerHTML=inv+
+  const chipsEl=$('#chips');
+  chipsEl.innerHTML=inv+
     chip(b.wifi_connected?'ok':'bad','WiFi '+(b.wifi_rssi_dbm!=null?b.wifi_rssi_dbm+' dBm':'not connected'))+
     chip(b.mqtt_connected?'ok':'off',b.mqtt_connected?'MQTT to '+esc((cfg&&cfg.mqtt&&cfg.mqtt.host)||'broker'):'MQTT off')+
     chip(b.modbus_listening?'ok':'off','Modbus TCP · '+(b.modbus_clients??0)+' clients');
+  chipsEl.classList.toggle('alarm',!!chipsEl.querySelector('.dot.bad'));
   // One line that must be visible from any tab: a configured device is not running. Detail
   // stays on the Inverters tab; this only says look there.
   const problems=(b.device_problems||[]).length, started=b.devices_started;
@@ -755,19 +763,22 @@ function paintLive(){
     const idle=!unknownP&&Math.round(Math.abs(p))===0;
     const state=unknownP?'unknown':idle?'idle':(p>0?'charging':'discharging');
     // Direction, not level -- the bar below answers the other question. Up and green is the
-    // battery gaining, down and red is it giving back, so every cue on this card points the
-    // same way: green and upward mean more energy available.
+    // battery gaining; down is it giving back, in the neutral text colour, NOT red: a battery
+    // running the house at night is doing its job, and a card that is red every evening teaches
+    // people to ignore red. Red on this card belongs to the bar, for a level that is low.
     //
     // The arrow shows the state of charge moving, NOT the direction of power flow. Those are
     // opposites at the terminals -- current goes INTO a battery that is charging -- and the
     // earlier version chose the flow reading. One of the two has to lose, and a reader looking
     // at a percentage is asking which way that number is heading.
-    const dirColour=state==='charging'?'var(--ok)':state==='discharging'?'var(--bad)':'var(--dim)';
+    const dirColour=state==='charging'?'var(--ok)':state==='discharging'?'var(--mid)':'var(--dim)';
     const arrow=state==='charging'?'\u2191':state==='discharging'?'\u2193':'';
     const rows=f.single
       ?MEAS.filter(([id,,g])=>g==='Battery'&&shown(m,id)).map(([id,label])=>
         `<div class="fact"><div class="k">${esc(label)}</div><div>${esc(reading(m,id))}</div></div>`).join('')
-      :`<div class="fact"><div class="k">Power</div><div>${unknownP?'—':`${esc(fmt(Math.abs(p),0))} W ${state==='charging'?'in':'out'}`}</div></div>`;
+      // Nothing for a fleet row: its one reading, the power, is already the line above the bar
+      // ("discharging at 1 240 W"), and a second "1 240 W out" below it said it twice.
+      :'';
     h+=`<div class="card" style="margin-top:20px">
       <div class="between"><div class="k">Battery${f.single?'':' · '+esc(f.label||f.id)}</div>
         <div style="font-size:13px;color:${dirColour}" title="${esc(state)}">${arrow} ${esc(unknownP?'power —':idle?'idle':state+' at '+fmt(Math.abs(p),0)+' W')}</div></div>
@@ -777,7 +788,7 @@ function paintLive(){
           <rect x="0" y="0" width="${Math.max(0,Math.min(100,Number(soc)||0))}" height="8" fill="${socColour(soc)}"></rect></svg></div>
           <div class="between hint" style="margin-top:4px"><span>empty</span><span>full</span></div></div>
       </div>
-      <div class="cols" style="margin-top:16px">${rows}</div>
+      ${rows?`<div class="cols" style="margin-top:16px">${rows}</div>`:''}
       <div class="hint" style="margin-top:12px">↑ filling, ↓ running on stored sun. The bar is the level and not the direction: red below ${SOC_LOW}%, orange below ${SOC_HALF}%.</div>
     </div>`;
   }
