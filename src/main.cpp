@@ -1919,6 +1919,11 @@ void setup() {
     tzset();
 
     log::info("config: %s (log level %s)", loadResultName(loaded), logLevelName(g_config.logLevel));
+    // What a salvage of a refused configuration had to leave out -- collected by load() and
+    // logged here, after tzset, for the reason above.
+    for (const auto& note : g_store.salvageNotes()) {
+        log::warn("config: %s", note.c_str());
+    }
 
     // Once per boot, before anything else can panic on top of it. A dump here means the PREVIOUS
     // run crashed; saying so in the boot log is half the value, because that log is what gets

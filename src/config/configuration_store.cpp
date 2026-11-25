@@ -146,11 +146,11 @@ size_t storedConfigSize(const Configuration& config) {
 
 namespace {
 
-/// Copies the network identity -- WiFi credentials, hostname and the admin account -- out
-/// of a config document this firmware otherwise refuses (FutureVersion, failed validation).
-/// These five fields have existed unchanged since version 1 and are individually
-/// length-checked here; everything else in the refused document stays untouched, so the
-/// caller keeps defaults for all feature settings.
+/// Copies the network identity -- WiFi credentials, hostname, static address and the admin
+/// account -- out of a config document this firmware otherwise refuses (FutureVersion, failed
+/// validation). Each field is length-checked here; whether the result as a whole is usable is
+/// ConfigurationStore::load's call (see there). Everything else in the refused document stays
+/// untouched, so the caller keeps defaults for all feature settings.
 void salvageIdentity(const JsonDocument& doc, Configuration& out) {
     const auto take = [](JsonVariantConst v, std::string& into, size_t maxLen) {
         if (v.is<const char*>()) {
@@ -165,6 +165,14 @@ void salvageIdentity(const JsonDocument& doc, Configuration& out) {
         take(wifi["ssid"], out.wifi.ssid, 32);       // 802.11 SSID limit
         take(wifi["password"], out.wifi.password, 64);
         take(wifi["hostname"], out.wifi.hostname, 63);  // DNS label limit
+        // The static address, because a bridge that comes back on a DHCP lease after a rollback
+        // is at an address nobody is looking at: a bookmark, a reverse proxy, a Home Assistant
+        // integration and a firewall rule all point at the old one. 15 = "255.255.255.255".
+        take(wifi["ip"], out.wifi.ip, 15);
+        take(wifi["gateway"], out.wifi.gateway, 15);
+        take(wifi["subnet"], out.wifi.subnet, 15);
+        take(wifi["dns1"], out.wifi.dns1, 15);
+        take(wifi["dns2"], out.wifi.dns2, 15);
     }
     JsonObjectConst security = doc["security"];
     if (!security.isNull()) {
@@ -188,8 +196,8 @@ LoadResult deserializeConfigFromStorage(const std::string& json, Configuration& 
     if (stored > kConfigVersion) {
         // Written by newer firmware -- the OTA-rollback direction. Reinterpreting feature
         // fields we do not understand is worse than defaults, because the result looks
-        // plausible. But the network identity (WiFi + admin credentials, stable since
-        // version 1) is salvaged into the caller's config: without it, the rollback safety
+        // plausible. But the network identity (WiFi credentials, hostname, static address and
+        // the admin account) is salvaged into the caller's config: without it, the rollback safety
         // net dropped the device into the setup AP at a customer's house -- unreachable at
         // exactly the moment the net fired (review, 2026-07-21).
         salvageIdentity(doc, out);
@@ -332,6 +340,7 @@ ConfigurationStore::ConfigurationStore(KeyValueBackend& backend) : backend_(back
 LoadResult ConfigurationStore::load(Configuration& out) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::string                 blob;
+    salvageNotes_.clear();
     // Only the current namespace is read. Before 0.5.0 the configuration lived under the
     // project's previous name and load() used to adopt it from there. That fallback is gone
     // because factoryReset() erases only this namespace: on a board that had ever run 0.4.x,
@@ -345,9 +354,10 @@ LoadResult ConfigurationStore::load(Configuration& out) {
     if (result == LoadResult::Ok || result == LoadResult::Migrated) {
         out = parsed;
     } else if (result == LoadResult::FutureVersion || result == LoadResult::Corrupt) {
-        // The refused document may still have yielded a salvaged network identity (WiFi +
-        // admin credentials -- see salvageIdentity). Carry exactly those five fields over
+        // The refused document may still have yielded a salvaged network identity (WiFi,
+        // hostname, static address, admin credentials -- see salvageIdentity). Carry those over
         // so a rollback keeps the device reachable; everything else stays at defaults.
+        const Configuration defaults = out;
         out.wifi.ssid                = parsed.wifi.ssid;
         out.wifi.password            = parsed.wifi.password;
         out.wifi.hostname            = parsed.wifi.hostname.empty() ? out.wifi.hostname
@@ -356,6 +366,55 @@ LoadResult ConfigurationStore::load(Configuration& out) {
                                            ? out.security.adminUsername
                                            : parsed.security.adminUsername;
         out.security.adminPassword   = parsed.security.adminPassword;
+
+        // Only as much as passes validate(): save() refuses anything that does not, so a
+        // salvaged field that fails it would make every later save fail -- the operator could
+        // not change a single setting until they found and fixed a field they never touched.
+        //
+        // First the fields whose rules can differ between firmware versions (hostname, admin
+        // username), one at a time and only the one validate() names: resetting a field that
+        // was fine would not make the result savable. Before the address, so a bad hostname
+        // cannot sink a good address. The SSID and both passwords carry no rule here beyond
+        // the length salvageIdentity already applied.
+        ConfigError error;
+        for (int pass = 0; pass < 2 && !validate(out, error); ++pass) {
+            std::string*       field    = nullptr;
+            const std::string* fallback = nullptr;
+            if (error.field == "wifi.hostname") {
+                field    = &out.wifi.hostname;
+                fallback = &defaults.wifi.hostname;
+            } else if (error.field == "security.admin_username") {
+                field    = &out.security.adminUsername;
+                fallback = &defaults.security.adminUsername;
+            }
+            if (field == nullptr || *field == *fallback) {
+                break;  // not one of ours: nothing a salvage fallback can fix
+            }
+            salvageNotes_.push_back(error.field + " not kept (" + error.message + "); using " +
+                                    *fallback);
+            *field = *fallback;
+        }
+        // Then the static address, whole or not at all (a gateway without its address is not an
+        // address), checked next to the defaults it now sits beside. Those are the defaults and
+        // not the refused document's own settings, which are not reinterpreted: with no DNS
+        // configured, the default NTP server (a name) makes validate() refuse a static address,
+        // so such a bridge still comes up on DHCP. A static address without a resolver would be
+        // half-dead anyway.
+        if (parsed.wifi.staticIp()) {
+            Configuration withAddress = out;
+            withAddress.wifi.ip       = parsed.wifi.ip;
+            withAddress.wifi.gateway  = parsed.wifi.gateway;
+            withAddress.wifi.subnet   = parsed.wifi.subnet;
+            withAddress.wifi.dns1     = parsed.wifi.dns1;
+            withAddress.wifi.dns2     = parsed.wifi.dns2;
+            if (validate(withAddress, error)) {
+                out = withAddress;
+            } else {
+                salvageNotes_.push_back("static address " + parsed.wifi.ip + " not kept (" +
+                                        error.field + ": " + error.message +
+                                        "); coming up on DHCP");
+            }
+        }
     }
     return result;
 }
