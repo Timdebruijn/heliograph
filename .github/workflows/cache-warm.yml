@@ -28,6 +28,11 @@ concurrency:
   group: cache-warm
   cancel-in-progress: true
 
+# Read-only. Nothing in this workflow writes to the repository; without the block it would run
+# with the repository's default token scope, which can be read-write.
+permissions:
+  contents: read
+
 jobs:
   # The ONLY writer of the ESP32 toolchain cache, and the reason it exists on main rather than in
   # firmware.yml or release.yml where the builds actually are.
