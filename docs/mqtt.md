@@ -162,7 +162,9 @@ waits more than 30 s for the bus is not sent late; its outcome is `rejected`, re
   changes it. (This line said "configurable" and there has never been a setting for it.)
 - `identity` and `capabilities` only on change or after (re)connection.
 - JSON document is bounded: `JsonDocument` with explicit capacity checking; exceeding it
-  logs an error and does not publish — never a truncated JSON message.
+  logs a warning naming the topic and does not publish — never a truncated JSON message. A state
+  payload that does not fit is tried again with the next change or forced refresh, not every
+  tick; a discovery config that does not fit is left out of the announcement.
 
 ## `state` — example
 

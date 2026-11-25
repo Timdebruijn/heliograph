@@ -4,11 +4,14 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
 
 #include "device/command.h"
+#include "diagnostics/logger.h"
 #include "json_limits.h"
 #include "mqtt_payloads.h"
 #include "relays/drm.h"
@@ -199,8 +202,29 @@ void addDeviceBlock(JsonObject entity, const BridgeInfo& bridge, const DeviceIde
 //
 // Now the shared one, at the same ceiling the state payloads use. One point of truth: a change
 // to how a payload is bounded should not need finding in two places.
-bool serialise(const JsonDocument& doc, std::string& out) {
-    return json_limits::finish(doc, out, kMaxPayloadBytes);
+//
+// A refused entity is left out of the announcement, and that used to be all: Home Assistant
+// silently lacked one sensor and nothing anywhere said so. Named here with the topic that is
+// missing. Not retried: a config that does not fit will not fit next tick either.
+//
+// Once per topic, not once per build. The builders run again on every tick while some OTHER
+// publish of the announcement keeps being refused (the outbox full, the memory guard), and a
+// warning per build would then be four lines a second per oversized entity, pushing the boot and
+// fault history out of the log ring. The last few topics named are remembered; only the MQTT
+// output's own task builds discovery, so no lock.
+bool serialise(const JsonDocument& doc, DiscoveryEntity& entity) {
+    if (json_limits::finish(doc, entity.payload, kMaxPayloadBytes)) {
+        return true;
+    }
+    static std::array<std::string, 8> named;
+    static size_t                     next = 0;
+    if (std::find(named.begin(), named.end(), entity.configTopic) == named.end()) {
+        log::warn("MQTT: discovery config %s exceeds %u bytes and was not announced",
+                  entity.configTopic.c_str(), static_cast<unsigned>(kMaxPayloadBytes));
+        named[next] = entity.configTopic;
+        next        = (next + 1) % named.size();
+    }
+    return false;
 }
 
 }  // namespace
@@ -440,7 +464,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         // the last one -- the unique_id alone was not enough (caught by its own test).
         entity.configTopic = discoveryPrefix + (flag ? "/binary_sensor/" : "/sensor/") +
                              uniqueBase + "/" + slug + "/config";
-        if (serialise(doc, entity.payload)) {
+        if (serialise(doc, entity)) {
             entities.push_back(std::move(entity));
         }
     }
@@ -461,7 +485,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         DiscoveryEntity entity;
         entity.uniqueId    = e["unique_id"].as<std::string>();
         entity.configTopic = discoveryPrefix + "/sensor/" + uniqueBase + "/status/config";
-        if (serialise(doc, entity.payload)) {
+        if (serialise(doc, entity)) {
             entities.push_back(std::move(entity));
         }
     }
@@ -484,7 +508,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         entity.uniqueId = e["unique_id"].as<std::string>();
         entity.configTopic =
             discoveryPrefix + "/binary_sensor/" + uniqueBase + "/inverter_online/config";
-        if (serialise(doc, entity.payload)) {
+        if (serialise(doc, entity)) {
             entities.push_back(std::move(entity));
         }
     }
@@ -568,7 +592,7 @@ std::vector<DiscoveryEntity> buildDiscoveryEntities(const DeviceState& state,
         DiscoveryEntity entity;
         entity.uniqueId    = e["unique_id"].as<std::string>();
         entity.configTopic = commandConfigTopic(type, discoveryPrefix, uniqueBase);
-        if (serialise(doc, entity.payload)) {
+        if (serialise(doc, entity)) {
             entities.push_back(std::move(entity));
         }
     }
@@ -676,7 +700,7 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
         entity.uniqueId = e["unique_id"].as<std::string>();
         entity.configTopic =
             discoveryPrefix + "/sensor/" + bridge.bridgeId + "/" + spec.slug + "/config";
-        if (serialise(doc, entity.payload)) {
+        if (serialise(doc, entity)) {
             entities.push_back(std::move(entity));
         }
     }
@@ -705,7 +729,7 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
         entity.uniqueId    = e["unique_id"].as<std::string>();
         entity.configTopic =
             discoveryPrefix + "/binary_sensor/" + bridge.bridgeId + "/coredump/config";
-        if (serialise(doc, entity.payload)) {
+        if (serialise(doc, entity)) {
             entities.push_back(std::move(entity));
         }
     }
@@ -740,7 +764,7 @@ std::vector<DiscoveryEntity> buildBridgeDiagnosticEntities(const BridgeInfo&  br
         entity.uniqueId    = e["unique_id"].as<std::string>();
         entity.configTopic =
             discoveryPrefix + "/sensor/" + bridge.bridgeId + "/diagnostics/config";
-        if (serialise(doc, entity.payload)) {
+        if (serialise(doc, entity)) {
             entities.push_back(std::move(entity));
         }
     }
@@ -796,7 +820,7 @@ std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
         addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true, bridge.bridgeId);
 
         entity.uniqueId = e["unique_id"].as<std::string>();
-        if (serialise(doc, entity.payload)) {
+        if (serialise(doc, entity)) {
             entities.push_back(std::move(entity));
         }
     }
@@ -833,7 +857,7 @@ std::vector<DiscoveryEntity> buildRelayEntities(const BridgeInfo&  bridge,
         opts.add(drm::kModeCustom);
         e["availability_topic"] = topics.availability();
         addDeviceBlock(e, bridge, DeviceIdentity{}, /*isBridgeEntity=*/true, bridge.bridgeId);
-        if (serialise(doc, entity.payload)) {
+        if (serialise(doc, entity)) {
             entities.push_back(std::move(entity));
         }
     }

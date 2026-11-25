@@ -429,6 +429,7 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
         for (auto& c : channels_) {
             c.throttle.reset();
             c.discoveryPublished = false;
+            c.stateRefusalLogged = false;  // a refusal that persists is named again per session
         }
         bridgeAnnounced_  = false;
         bridgeSubscribed_ = false;
@@ -519,9 +520,21 @@ void MqttOutput::loop(const std::vector<DeviceView>& devices, const BridgeInfo& 
                 publishTracked(channel.topics.state().c_str(), config_.qos, true,
                                  payload.c_str());
                 channel.throttle.recordPublished(state, nowMs);
+                channel.stateRefusalLogged = false;
+            } else {
+                // Too large: dropped rather than truncated. It used to be dropped silently and
+                // the throttle left untouched, so the whole document was rebuilt and refused
+                // again on every 250 ms tick -- forever, on a fragmenting heap, with nothing in
+                // the log. Named once, and the throttle advanced as if it had gone out: the next
+                // attempt comes with the next real change or the forced refresh, when the
+                // measurement set may have shrunk, not four times a second.
+                if (!channel.stateRefusalLogged) {
+                    log::warn("MQTT: state for %s exceeds %u bytes and was not published",
+                              channel.id.c_str(), static_cast<unsigned>(kMaxStatePayloadBytes));
+                    channel.stateRefusalLogged = true;
+                }
+                channel.throttle.recordPublished(state, nowMs);
             }
-            // If the payload did not fit it is dropped rather than truncated, and the throttle
-            // is left untouched so the next attempt retries.
         }
     }
 
