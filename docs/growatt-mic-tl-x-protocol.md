@@ -301,7 +301,7 @@ address in turn and confirm exactly one answers, at the address you expect.
 > - no battery rows, and a steadily climbing RS485 error count, because the SPH map also reads a
 >   1000-block a MIC does not implement.
 >
-> Two consequences for checking your work. The wizard's own test poll **cannot** confirm the map:
+> Two consequences for checking your work. The wizard's own bus check **cannot** confirm the map:
 > it displays exactly the AC power figure that coincides. Neither can the raw dump in step 4 —
 > the dump is raw registers, byte-identical under either map, so it confirms the addresses in the
 > TOML rather than which map is configured. Compare the **published measurements**: the

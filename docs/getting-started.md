@@ -234,9 +234,9 @@ and is how you check that the addresses you assigned to several inverters actual
    open an issue.
 
 <p align="center">
-  <img src="images/discovery.png" width="480" alt="The Discovery wizard stepping through interface, mode, probing, candidates, confirm, test poll and save">
+  <img src="images/discovery.png" width="480" alt="The Discovery wizard stepping through mode, probing, candidates, confirm, bus check and save">
   <br>
-  <em>Discovery is a guided wizard: it probes the bus, proposes a driver, and lets you confirm with a test poll before anything is saved.</em>
+  <em>Discovery is a guided wizard: it probes the bus, proposes a driver in plain words, and saves only after you confirm. Whether the choice is right shows after the restart, in the readings it publishes.</em>
 </p>
 
 ## 6. Connect your tooling
