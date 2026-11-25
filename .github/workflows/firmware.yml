@@ -119,6 +119,13 @@ jobs:
       - name: Build ${{ matrix.env }}
         run: pio run -e ${{ matrix.env }}
 
+      # The firmware-only sources get the analysis CI's "Static analysis" step cannot give them:
+      # that one runs `pio check -e native`, which sees only what compiles on the host. Same
+      # threshold. Per board, because board headers select code (the relay paths). Seconds,
+      # against the toolchain and libraries the build just installed.
+      - name: Static analysis ${{ matrix.env }}
+        run: pio check -e ${{ matrix.env }} --severity=high --fail-on-defect=high
+
       - name: Upload firmware artifacts
         if: matrix.env != 'mock'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
