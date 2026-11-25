@@ -904,7 +904,8 @@ send `Sec-Fetch-Site` only to https and localhost, so on the bridge's own `http:
   bridge from its server side instead.
 - Behind an HTTPS reverse proxy the browser's `Sec-Fetch-Site` decides, whatever `Host` the
   proxy passes on. Behind a plain-HTTP one, pass the original `Host` through (nginx:
-  `proxy_set_header Host $host`).
+  `proxy_set_header Host $http_host`; `$host` drops a non-default port, and the comparison
+  includes it).
 - A browser setting or extension that forces `Referrer-Policy: no-referrer` makes even the
   bridge's own page send `Origin: null`, and its writes are refused.
 
