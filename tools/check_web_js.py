@@ -604,13 +604,11 @@ def check_auth_fetch_unreachable(script, scratch):
     and none of the callers catch it: a save left "Applying…" on screen for good. authFetch turns
     that into the same not-ok response every caller already handles, carrying a reason.
     """
-    parts = []
-    for fn in ("authFetch",):
-        body = extract_function(script, fn)
-        if body is None:
-            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
-            return 1
-        parts.append(body)
+    auth_fetch = extract_function(script, "authFetch")
+    if auth_fetch is None:
+        print("FAIL: authFetch() not found in index_html.h; this check needs updating")
+        return 1
+    helpers = []
     for name in ("noAnswer", "unreachable"):
         m = re.search(r"^const " + name + r"=.*?;$", script, re.M | re.S)
         if m is None:
@@ -618,7 +616,7 @@ def check_auth_fetch_unreachable(script, scratch):
                 f"FAIL: const {name} not found in index_html.h; this check needs updating"
             )
             return 1
-        parts.append(m.group(0))
+        helpers.append(m.group(0))
     harness = (
         """
 const store = {hg_auth:'GOOD'};
@@ -630,9 +628,9 @@ const rememberUser = () => {};
 const authCancelled = () => ({ok:false,status:0,cancelled:true});
 async function askAuth(){ return true; }
 """
-        + "\n".join(parts[1:])
+        + "\n".join(helpers)
         + "\n"
-        + parts[0]
+        + auth_fetch
         + """
 let bad = 0;
 const fail = m => { console.error(m); bad++; };
@@ -650,7 +648,13 @@ const fail = m => { console.error(m); bad++; };
       fail(label + ': no reason a caller can show: ' + JSON.stringify(d));
     }
     if (label === 'timed out' && !/timed out/.test(d.error.message)) fail('a timeout is not called one');
+    if (!/took effect/.test(d.error.message)) fail(label + ': a lost write does not say to check it');
   }
+  // A read that gets no answer changed nothing, so it must not tell anyone to check a change.
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  const g = await authFetch('/api/v1/config/backup');
+  if (g.ok || !g.networkError) fail('a lost read is not reported as one');
+  if (/took effect/.test((await g.json()).error.message)) fail('a lost read talks about a change');
   process.exit(bad === 0 ? 0 : 1);
 })();
 """

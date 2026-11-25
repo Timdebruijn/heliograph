@@ -304,10 +304,11 @@ const authCancelled=()=>({ok:false,status:0,cancelled:true,
 // screen forever and the console got an unhandled rejection. Answered like authCancelled(), as a
 // failed response every caller already handles, and worded for the case that matters: a save or
 // restore the bridge may well have applied before it restarted.
-const noAnswer=e=>'No answer from the bridge ('+(e&&e.name==='TimeoutError'?'timed out':'connection lost')+
-  '). If it was restarting, reload in about 30 s and check whether the change took effect.';
-const unreachable=e=>({ok:false,status:0,networkError:true,why:noAnswer(e),
-  json:async()=>({error:{code:'unreachable',message:noAnswer(e)}}),text:async()=>'',
+// The advice to check whether a change took effect only on a request that could have made one.
+const noAnswer=(e,write)=>'No answer from the bridge ('+(e&&e.name==='TimeoutError'?'timed out':'connection lost')+
+  ').'+(write?' If it was restarting, reload in about 30 s and check whether the change took effect.':'');
+const unreachable=(e,write)=>({ok:false,status:0,networkError:true,why:noAnswer(e,write),
+  json:async()=>({error:{code:'unreachable',message:noAnswer(e,write)}}),text:async()=>'',
   headers:{get:()=>null}});
 const httpWhy=r=>r.cancelled?'cancelled (admin password required)':r.networkError?r.why:'HTTP '+r.status;
 // timeoutMs bounds each request on its own: a single AbortSignal would also count the time
@@ -316,7 +317,7 @@ const httpWhy=r=>r.cancelled?'cancelled (admin password required)':r.networkErro
 // anything the bridge takes to answer, a WiFi scan and a restore included.
 async function authFetch(url,{timeoutMs=30000,...opts}={}){
   const go=()=>fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()},
-    signal:AbortSignal.timeout(timeoutMs)}).catch(unreachable);
+    signal:AbortSignal.timeout(timeoutMs)}).catch(e=>unreachable(e,(opts.method||'GET')!=='GET'));
   if(!sessionStorage.getItem('hg_auth')&&!await askAuth(false))return authCancelled();
   const used=sessionStorage.getItem('hg_auth');
   let r=await go();
@@ -331,7 +332,8 @@ async function authFetch(url,{timeoutMs=30000,...opts}={}){
   }
   // Only an answer that got past the password check proves the credentials. A 429 auth_locked
   // never looked at them, so it must not promote an unproven username either.
-  if(r.status!==401&&r.status!==429)rememberUser();
+  // Nor does no answer at all.
+  if(!r.networkError&&r.status!==401&&r.status!==429)rememberUser();
   return r;
 }
 async function getJson(url){
@@ -1218,7 +1220,7 @@ function paintHealth(){
   if(driverCapture)renderDriverCapture(driverCapture);
   renderLogs();
 }
-let logLines=[], logMeta='', logStop=false;
+let logLines=[], logMeta='', logStop=false, logBusy=false, logNote='';
 async function loadLogs(force){
   // Never prompts by itself. The log is admin-gated, and opening a tab must not raise a password
   // dialog nobody asked for -- especially not on a timer, which is how the old page could make
@@ -1230,7 +1232,13 @@ async function loadLogs(force){
     return;
   }
   if(logStop||(logPaused&&!force))return;
-  const r=await authFetch('/api/v1/logs?limit=64');
+  // One at a time. This runs on every refresh tick, and against a bridge that has stopped
+  // answering each request now waits out its timeout -- without the guard they stack up and take
+  // the browser's few connections to the host away from everything else.
+  if(logBusy)return;
+  logBusy=true;
+  let r;
+  try{r=await authFetch('/api/v1/logs?limit=64')}finally{logBusy=false}
   // A 401 latches as well as a cancel: this runs on a timer, and without the latch the dialog
   // reappears every few seconds and cannot be escaped except by leaving the tab.
   if(r.cancelled||r.status===401){
@@ -1240,7 +1248,7 @@ async function loadLogs(force){
       ' <a href="#" onclick="logStop=false;loadLogs(true);return false">Try again</a></span>';
     return;
   }
-  if(!r.ok){$('#loginfo').textContent=httpWhy(r);return}
+  if(!r.ok){const li=$('#loginfo');if(li)li.textContent=httpWhy(r);return}
   const d=await r.json();
   logLines=d.lines||[];
   logMeta=`level ${d.level} — ${d.total} lines since boot, showing last ${d.returned}`;
@@ -1270,7 +1278,8 @@ function countersHtml(){
 }
 function renderLogs(){
   const box=$('#logbox');if(!box)return;
-  $('#loginfo').textContent=logMeta;
+  const li=$('#loginfo');
+  if(li)li.textContent=logMeta+(logNote?' · '+logNote:'');
   const keep=l=>logFilter==='all'?true:logFilter==='warn'?(l.includes('[W]')||l.includes('[E]'))
     :/rs485|modbus|poll|crc|checksum|timeout/i.test(l);
   const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;
@@ -1283,12 +1292,15 @@ function renderLogs(){
 }
 async function setLogLevel(level){
   const r=await patch({logging:{level}});
-  if(r.ok){if(cfg)cfg.logging.level=level;loadLogs(true);return}
+  if(r.ok){logNote='';if(cfg)cfg.logging.level=level;loadLogs(true);return}
   // Refused or unreachable: the select already shows the new level, the bridge still runs the old
-  // one. Put the select back and say why, or the log silently never gets verbose.
+  // one. Put the select back and say why, or the log silently never gets verbose. Kept in logNote
+  // so the next log refresh, a second later, does not wipe the reason off the line it shares.
   const sel=$('#loglevel');
   if(sel&&cfg)sel.value=cfg.logging.level;
-  $('#loginfo').textContent='Log level not changed: '+r.why;
+  logNote='log level not changed: '+r.why;
+  const li=$('#loginfo');
+  if(li)li.textContent=logMeta+' · '+logNote;
 }
 // Confirms in the button itself. Silent success is indistinguishable from a broken button.
 //
@@ -1898,14 +1910,14 @@ async function saveUpdateCheck(on){
 }
 async function reboot(sel){
   const r=await authFetch('/api/v1/actions/reboot',{method:'POST'});
-  if(!r.ok&&r.status!==202){say(sel,'err','Restart refused: '+esc(httpWhy(r)));return}
+  if(!r.ok&&r.status!==202){say(sel,'err',r.networkError?esc(r.why):'Restart refused: '+esc(httpWhy(r)));return}
   pending=[];$('#pending').classList.add('hide');
   say(sel,'ok','Restarting. This page will go blank for a few seconds — reload it after.');
 }
 async function factoryReset(){
   if(!confirm('Erase all settings including WiFi and passwords?'))return;
   const r=await authFetch('/api/v1/actions/factory-reset',{method:'POST'});
-  alert(r.ok?'Erased. The bridge is restarting into setup mode.':'Failed: '+httpWhy(r));
+  alert(r.ok?'Erased. The bridge is restarting into setup mode.':r.networkError?r.why:'Failed: '+httpWhy(r));
 }
 
 // ---------------- discovery wizard ----------------
@@ -2539,6 +2551,7 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
   const btn=$(btnSel), pb=$(progSel), pf=pb&&pb.firstElementChild;
   let nextSaid=25, sent=false;
   const send=mayRetry=>{
+    sent=false;  // per attempt: a 401 retry must not inherit the first attempt's 100 %
     const x=new XMLHttpRequest();
     x.open('POST',url);
     // Generous: the upload, then the checksum and the flash write, over a LAN. Without one a hung
@@ -2552,7 +2565,7 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
       if(pb)pb.setAttribute('aria-valuenow',p);
       // say() keeps progress quiet; a quarter at a time is enough to know it is moving.
       // At 100 % the wait that follows is the flash write, so that is what gets said.
-      if(p>=100)sent=true;
+      if(e.loaded>=e.total)sent=true;  // the last byte, not a percentage that rounds to 100
       if(p>=nextSaid){announce(p<100?p+'%':'Upload complete, verifying and writing flash.');nextSaid=Math.floor(p/25)*25+25}
       say(msgSel,'',p<100?'Uploading to the bridge… '+p+'%':'Upload complete — verifying the checksum and writing flash…');
     };
@@ -2595,10 +2608,9 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
 // as everywhere else. Times out after 10 s and never throws: both callers re-enable their
 // button on false.
 async function adminProven(msgSel){
-  let r;
-  try{r=await authFetch('/api/v1/logs?limit=1',{timeoutMs:10000})}
-  catch(e){say(msgSel,'err','Could not reach the bridge: '+esc(e.message)+' — nothing was sent.');return false}
+  const r=await authFetch('/api/v1/logs?limit=1',{timeoutMs:10000});
   if(r.ok)return true;
+  if(r.networkError){say(msgSel,'err','Could not reach the bridge — nothing was sent.');return false}
   const d=await r.json().catch(()=>({}));
   const why=r.cancelled?'Cancelled':r.status===401&&!(d.error&&d.error.message)?'Wrong password':
     esc((d.error&&d.error.message)||httpWhy(r)).replace(/\.$/,'');
