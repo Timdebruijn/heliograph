@@ -55,8 +55,8 @@ struct DeviceIdentity {
     /// Every character outside [A-Za-z0-9_-] replaced by '_'.
     ///
     /// The id ends up in an MQTT topic, a Home Assistant discovery node id and a REST path, and
-    /// a serial number is whatever the inverter sends: SunSpec passes any byte but trailing
-    /// spaces, a SolaX serial may carry any printable ASCII. A '+' or '#' in a PUBLISH topic is
+    /// a serial number is whatever the inverter sends: one protocol's string field passes any
+    /// byte but trailing spaces, another's any printable ASCII. A '+' or '#' in a PUBLISH topic is
     /// a protocol violation -- the broker drops the connection and the reconnect loop repeats
     /// it forever; a '/' splits the topic and the REST path (the device answers 404); anything
     /// outside this set in the node id makes Home Assistant ignore the discovery config. Ids
