@@ -795,7 +795,18 @@ function paintLive(){
 }
 
 // ---------------- Inverters ----------------
-let invBusy=false, invNextMs=0, invIds=[];
+let invBusy=false, invNextMs=0, invIds=[], invPass=null;
+// When this page last got each device's own answer, and whether a pass has since tried and
+// failed to get it. A failed pass leaves what is on screen -- one failed request must not wipe a
+// page being read -- but then "replied 3 s ago" stays frozen at 3 for as long as the bridge stays
+// silent, which is a lie. Age alone is not the test: the copy also ages while another tab is in
+// front, and a pass that has not run yet is not a bridge that did not answer.
+const invFetchedAt={}, invMissed={}, INV_STALE_MS=15000;
+// How long a card has been showing an old answer because the bridge did not give a new one; 0 when
+// it is current, never fetched, or simply not asked again yet.
+function invHeldMs(id,now){
+  return invMissed[id]&&invFetchedAt[id]?Math.max(0,now-invFetchedAt[id]):0;
+}
 // Identity and capabilities are fixed by the driver at boot and never change while the firmware
 // runs, so they are cached ACROSS refreshes. Keeping them on the per-poll device object meant
 // they were re-fetched every five seconds -- three requests per inverter instead of two, on the
@@ -805,21 +816,37 @@ async function loadInverters(force){
   // Rate-limited independently of what triggered it: refresh() runs on a timer AND on every SSE
   // state event, and this tab costs 1+3N requests on the board that is also driving the bus.
   const now=Date.now();
-  if(invBusy||(!force&&now<invNextMs))return;
+  if(invPass){
+    // A person's action (force) landing while a background pass is out. That pass may have read
+    // the list before the save, and its paint would then be the last word -- the row just added
+    // missing for another five seconds. It used to return here, dropping the action's refresh.
+    // Wait for the pass, then run one of our own; a timer call has nothing to add and leaves.
+    if(!force)return;
+    await invPass;
+    return loadInverters(true);
+  }
+  if(!force&&now<invNextMs)return;
   invBusy=true;invNextMs=now+5000;
-  try{
-    invIds=((await getJson('/api/v1/devices')).devices)||[];
-    for(const id of invIds){
-      // Sequential, not parallel: N devices is N handlers on the web task.
-      devCache[id]=await getJson('/api/v1/devices/'+encodeURIComponent(id));
-      measCache[id]=(await getJson('/api/v1/devices/'+encodeURIComponent(id)+'/measurements')).measurements||{};
-      if(capsCache[id]===undefined){
-        try{capsCache[id]=await getJson('/api/v1/devices/'+encodeURIComponent(id)+'/capabilities')}
-        catch(e){capsCache[id]=null}
+  invPass=(async()=>{
+    // Every device this pass means to read counts as missed until its answer is in: a pass that
+    // fails at the list, or halfway down it, leaves exactly the unread ones marked.
+    for(const id of invIds)invMissed[id]=true;
+    try{
+      invIds=((await getJson('/api/v1/devices')).devices)||[];
+      for(const id in invFetchedAt)if(!invIds.includes(id)){delete invFetchedAt[id];delete invMissed[id]}
+      for(const id of invIds){
+        // Sequential, not parallel: N devices is N handlers on the web task.
+        devCache[id]=await getJson('/api/v1/devices/'+encodeURIComponent(id));
+        measCache[id]=(await getJson('/api/v1/devices/'+encodeURIComponent(id)+'/measurements')).measurements||{};
+        invFetchedAt[id]=Date.now();invMissed[id]=false;
+        if(capsCache[id]===undefined){
+          try{capsCache[id]=await getJson('/api/v1/devices/'+encodeURIComponent(id)+'/capabilities')}
+          catch(e){capsCache[id]=null}
+        }
       }
-    }
-  }catch(e){/* leave what is on screen: one failed request must not wipe a page being read */}
-  finally{invBusy=false}
+    }catch(e){/* leave what is on screen: one failed request must not wipe a page being read */}
+  })();
+  try{await invPass}finally{invPass=null;invBusy=false}
   // `force` means a person just did something -- saved a device, removed one, added a row --
   // and the result is the whole point of the repaint. Without it this is the five-second
   // refresh arriving, which must not tear the page out from under someone using a control on
@@ -894,7 +921,11 @@ function paintInverters(){
     const ago=dev.last_successful_poll_seconds_ago;
     // Asleep is judged on the /status row: only that one carries the last reading.
     const row=(S&&S.devices||[]).find(x=>x.id===id), zz=asleep(row);
-    const live=ago==null?'<span style="color:var(--bad)">never answered</span>'
+    // This page's copy first: when the bridge has not answered for it lately, every number on
+    // the card -- "replied N s ago" included -- is from then, and the reader has to know.
+    const held=invHeldMs(id,Date.now());
+    const live=held>INV_STALE_MS?`<span style="color:var(--warn)">no answer from the bridge for ${esc(Math.round(held/1000))} s — showing what it said then</span>`
+      :ago==null?'<span style="color:var(--bad)">never answered</span>'
       :zz?`<span class="dim">asleep ${esc(quietSince(row))} — normal after sunset</span>`
       :dev.data_stale?`<span class="dim">stale — last reply ${esc(ago)} s ago</span>`
                      :`<span class="dim">replied ${esc(ago)} s ago</span>`;
@@ -3122,6 +3153,10 @@ async function refreshOnce(){
       el.textContent='Cannot reach the bridge: '+e.message;
       showBanner(el,true);
     }
+    // The Inverters cards are only repainted by their own loader, which /status succeeding is
+    // what normally starts. With the bridge silent it never ran, and the cards kept saying
+    // "replied 3 s ago". Its own failure is what marks them as held (invHeldMs) and repaints.
+    if(tab==='inv')loadInverters(false);
   }
 }
 
