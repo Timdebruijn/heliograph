@@ -100,12 +100,12 @@ def main() -> int:
     for key, value in (
         ("address", write["address"] + 1),
         ("space", "input"),
-        ("scale", 0.1),
+        ("scale", write.get("scale", 1.0) * 10),
         ("type", "s16" if write["type"] == "u16" else "u16"),
     ):
         refused(
             moved(key, value),
-            "read-back",
+            "needs a read-back",
             f"a read-back with a different {key} must not count as one",
         )
 
@@ -124,6 +124,18 @@ def main() -> int:
     refused(
         negative_minimum, "minimum must be >= 0", "a negative minimum must be refused"
     )
+
+    # The boundary itself is legal: maximum / scale at the type's limit is accepted, so a
+    # future `>=` cannot quietly refuse a profile that fits.
+    def s16_at_limit(d):
+        d["write"][0]["type"] = "s16"
+        d["write"][0]["scale"] = 1.0
+        d["write"][0]["maximum"] = 32767  # exactly the largest s16
+        readback_row(d)["type"] = "s16"
+        readback_row(d)["scale"] = 1.0
+
+    at_limit = parse(s16_at_limit)["writes"][0]
+    assert at_limit["maximum"] == 32767, "an s16 range at its limit must be accepted"
     print("read-back rule: OK")
     return 0
 

@@ -130,6 +130,17 @@ review and then misbehaves:
 Both remain legal on **read** rows, where a negative scale is the supported way to correct a
 device that reports the opposite sign convention.
 
+### Signed setpoints and the register's range
+
+A **negative `minimum`** is rejected for the same reason as a negative scale: `execute()` refuses a
+negative raw value, because it has no two's-complement encoding for an `s16`. A signed setpoint —
+battery charge/discharge power, a signed grid exchange — therefore cannot be expressed yet; that
+needs the encoding in `execute()` first, not a looser check here.
+
+And **`maximum / scale` must fit the `type`**: at most 32767 for an `s16`, 65535 for a `u16`. Past
+that the register receives a different number than the one requested — an `s16` given 35000 reads
+it as −30536.
+
 ### A read-back is required
 
 Writing a register does not make its value readable. A row is therefore served only when the
