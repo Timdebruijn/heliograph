@@ -871,9 +871,11 @@ async function loadInverters(force){
   if(!force&&now<invNextMs)return;
   invBusy=true;invNextMs=now+5000;
   invPass=(async()=>{
-    // Every device this pass means to read counts as missed until its answer is in: a pass that
-    // fails at the list, or halfway down it, leaves exactly the unread ones marked.
-    for(const id of invIds)invMissed[id]=true;
+    // Marked as missed only once the pass has FAILED, and only the devices it did not get to: the
+    // ones before a failure halfway down are fresh. Marking them all up front, as this first did,
+    // painted "no answer" on every card while a healthy pass was still under way -- each time
+    // the tab was opened after a while elsewhere, since the first paint comes before the pass.
+    const passStart=Date.now();
     try{
       invIds=((await getJson('/api/v1/devices')).devices)||[];
       for(const id in invFetchedAt)if(!invIds.includes(id)){delete invFetchedAt[id];delete invMissed[id]}
@@ -887,7 +889,11 @@ async function loadInverters(force){
           catch(e){capsCache[id]=null}
         }
       }
-    }catch(e){/* leave what is on screen: one failed request must not wipe a page being read */}
+    }catch(e){
+      // Leave what is on screen -- one failed request must not wipe a page being read -- but
+      // say which of it this pass could not refresh.
+      for(const id of invIds)if(!(invFetchedAt[id]>=passStart))invMissed[id]=true;
+    }
   })();
   try{await invPass}finally{invPass=null;invBusy=false}
   // `force` means a person just did something -- saved a device, removed one, added a row --
