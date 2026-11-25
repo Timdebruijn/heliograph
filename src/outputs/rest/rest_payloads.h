@@ -25,7 +25,7 @@ namespace heliograph::rest {
 inline constexpr size_t kMaxResponseBytes = 8192;
 /// The two responses that carry a device's whole measurement list: /status and
 /// /devices/<id>/measurements. Measured with every canonical id valid and long values (the test
-/// that pins it): /measurements 8642 bytes, /status 8303, both past kMaxResponseBytes, so a
+/// that pins it): /measurements 8642 bytes, /status 8783, both past kMaxResponseBytes, so a
 /// hybrid with three phases, several MPPTs and two battery ports got a 500 and a blank
 /// dashboard tab. Held only while one response is built; see sendMeasurementBody in
 /// rest_api.cpp for the copy the web server makes of it.
@@ -93,6 +93,13 @@ struct DeviceSummary {
     uint32_t    lastPollSecondsAgo  = 0;
     bool        hasAcPower       = false;
     double      acPowerW         = 0.0;
+    /// The last AC power this device reported, kept after it stops answering -- unlike
+    /// `acPowerW`, which goes absent the moment the reading is stale. Never summed and never a
+    /// live value: it is what lets a client tell an inverter that went quiet at dusk, near 0 W,
+    /// from one that went quiet mid-afternoon at 2 kW. The first is asleep; the second is the
+    /// fault an operator needs to see, and both look identical as "not answering".
+    bool        hasLastAcPower   = false;
+    double      lastAcPowerW     = 0.0;
     bool        hasEnergyToday   = false;
     double      energyTodayKwh   = 0.0;
     bool        hasEnergyTotal   = false;

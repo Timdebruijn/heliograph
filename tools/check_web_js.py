@@ -87,6 +87,7 @@ def main() -> int:
                 status |= check_state_event_gate(script, scratch)
                 status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
+                status |= check_asleep(script, scratch)
                 status |= check_address_collision(script, scratch)
     # A final verdict, because the per-check lines are not the last thing printed: a failing
     # check dumps node's stderr after its own FAIL line, and any tail of this output then shows
@@ -372,6 +373,72 @@ process.exit(bad === 0 ? 0 : 1);
 """
     )
     return run_node("fleet mode", "fleet_mode.js", harness, scratch)
+
+
+def check_asleep(script, scratch):
+    """Grey for an inverter asleep since dusk, red for every way that grey could hide a fault.
+
+    Every evening used to turn the dashboard red. The rule that replaces that alarm must not swallow
+    the states that are faults, and a mistake in either direction is silent: too eager hides a dead
+    inverter behind a grey dot, too strict brings the nightly red back. Times are local, built with
+    the Date constructor, so the cases hold in any timezone the check runs in.
+    """
+    parts = []
+    for fn in ("asleep", "quietSince", "fleetVerdict"):
+        body = extract_function(script, fn)
+        if body is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(body)
+    consts = re.search(r"const ASLEEP_BELOW_W=.*?;\n", script)
+    if consts is None:
+        print(
+            "FAIL: ASLEEP_BELOW_W constants not found in index_html.h; this check needs updating"
+        )
+        return 1
+    harness = (
+        consts.group(0)
+        + "\n".join(parts)
+        + """
+const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
+// A row that went quiet at `quiet` with `watts` as its last reading, seen at `now`.
+const row = (quiet, now, o = {}) => Object.assign({online:false,
+  last_successful_poll_seconds_ago: Math.round((now - quiet) / 1000), last_ac_power_w: 12}, o);
+const cases = [
+  ['quiet at dusk, seen that evening', at(25,17,40), at(25,22), {}, true],
+  ['quiet at dusk, seen at 09:59 next day', at(25,17,40), at(26,9,59), {}, true],
+  ['quiet at dusk, not awake by 10:00', at(25,17,40), at(26,10,0), {}, false],
+  ['quiet at dusk, seen the next afternoon', at(25,17,40), at(26,14), {}, false],
+  ['quiet at 0 W', at(25,17), at(25,23), {last_ac_power_w:0}, true],
+  ['quiet at 02:00, seen at 03:00', at(26,2), at(26,3), {}, true],
+  ['quiet at full output in the evening', at(25,19), at(25,20), {last_ac_power_w:2100}, false],
+  ['quiet while importing hard', at(25,19), at(25,20), {last_ac_power_w:-1500}, false],
+  ['quiet at low output at noon', at(25,12), at(25,12,30), {}, false],
+  ['quiet at low output at dawn', at(26,7), at(26,7,30), {}, false],
+  ['never answered', at(25,17), at(25,22), {last_successful_poll_seconds_ago:null, last_ac_power_w:null}, false],
+  ['answered, no power channel', at(25,17), at(25,22), {last_ac_power_w:null}, false],
+  ['a reading but no poll time', at(25,17), at(25,22), {last_successful_poll_seconds_ago:null}, false],
+  ['field absent (older firmware)', at(25,17), at(25,22), {last_ac_power_w:undefined}, false],
+  ['still online', at(25,17), at(25,22), {online:true}, false],
+];
+let bad = 0;
+for (const [label, quiet, now, o, want] of cases) {
+  const got = asleep(row(quiet, now, o), now);
+  if (got !== want) { console.error(`asleep: ${label} = ${got}, want ${want}`); bad++; }
+}
+if (asleep(undefined)) { console.error('asleep: no row = true'); bad++; }
+const t1 = quietSince(row(at(25,17,40), at(25,22)), at(25,22));
+const t2 = quietSince(row(at(25,17,40), at(26,8)), at(26,8));
+if (t1 !== 'since 17:40') { console.error(`quietSince same day = ${t1}`); bad++; }
+if (t2 !== 'since yesterday 17:40') { console.error(`quietSince next day = ${t2}`); bad++; }
+for (const [a, e, z, want] of [[2,2,0,'ok'],[0,2,2,'off'],[1,2,1,'off'],[0,3,2,'bad'],[1,3,0,'bad'],[0,1,0,'bad']]) {
+  const got = fleetVerdict(a, e, z);
+  if (got !== want) { console.error(`fleetVerdict(${a},${e},${z}) = ${got}, want ${want}`); bad++; }
+}
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("asleep versus fault", "asleep.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):
