@@ -1740,7 +1740,8 @@ void rs485Task(void* /*arg*/) {
         // driver's execute() returns CommandResult::Unsupported, so this drains a queue that
         // can genuinely fill but can never yet succeed, following the same request/consume
         // shape already established above for discovery and capture.
-        if (auto request = g_commandQueue.take(nowMs())) {
+        std::optional<CommandQueue::Request> expired;
+        if (auto request = g_commandQueue.take(nowMs(), &expired)) {
             DeviceContext* target = nullptr;
             for (size_t i = 0; i < g_deviceIds.size(); ++i) {
                 if (g_deviceIds[i] == request->deviceId) {
@@ -1757,6 +1758,11 @@ void rs485Task(void* /*arg*/) {
                       request->deviceId.c_str(), outcome.reason.c_str());
             g_commandQueue.recordOutcome(request->deviceId, request->command.requestId, outcome);
             continue;
+        }
+        if (expired) {
+            log::warn("command %s on %s: refused, waited more than %u s for the bus",
+                      commandTypeName(expired->command.type), expired->deviceId.c_str(),
+                      static_cast<unsigned>(kMaxCommandAgeMs / 1000));
         }
         // At most ONE device per iteration, round-robin. Not a loop over all of them: the
         // watchdog is fed once per iteration, and a bus of eight silent devices would spend

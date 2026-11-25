@@ -2,9 +2,9 @@
 // The read-only guarantee, as a tested contract rather than a promise.
 
 #include <unity.h>
-#include <cstring>
 
 #include <cmath>
+#include <cstring>
 
 #include "commands/command_dispatcher.h"
 #include "commands/command_queue.h"
@@ -775,12 +775,25 @@ static void test_an_outcome_survives_a_later_client_and_is_pushed_out_only_by_se
     TEST_ASSERT_TRUE(q.outcomeFor("inv1", "second").has_value());  // still among the last few
 }
 
-// A caller may reuse its own request id; the answer is the latest outcome for it.
-static void test_a_reused_request_id_answers_with_its_latest_outcome() {
+// A caller may reuse its own request id. Once the new request is queued, the old outcome must not
+// answer for it -- that read back as the previous command's result the moment the new one was
+// submitted, and MQTT published it as such. Once it completes, its own outcome answers, newest
+// first even with another id recorded in between.
+static void test_a_reused_request_id_never_answers_with_the_previous_outcome() {
     CommandQueue q;
-    q.recordOutcome("inv1", "same", DispatchOutcome{CommandResult::RateLimited, "too many"});
     q.recordOutcome("inv1", "same", DispatchOutcome{CommandResult::Ok, "accepted"});
-    TEST_ASSERT_EQUAL(CommandResult::Ok, q.outcomeFor("inv1", "same")->result);
+    TEST_ASSERT_TRUE(q.submit(queuedRequest("inv1", "same")));
+    TEST_ASSERT_FALSE(q.outcomeFor("inv1", "same").has_value());  // pending, not "accepted"
+
+    q.take(0);
+    q.recordOutcome("inv1", "other", DispatchOutcome{CommandResult::Ok, "accepted"});
+    q.recordOutcome("inv1", "same", DispatchOutcome{CommandResult::RateLimited, "too many"});
+    TEST_ASSERT_EQUAL(CommandResult::RateLimited, q.outcomeFor("inv1", "same")->result);
+
+    // Forgetting is scoped like everything else: another device's same id is left alone.
+    q.recordOutcome("inv2", "same", DispatchOutcome{CommandResult::Ok, "accepted"});
+    TEST_ASSERT_TRUE(q.submit(queuedRequest("inv1", "same")));
+    TEST_ASSERT_TRUE(q.outcomeFor("inv2", "same").has_value());
 }
 
 // A setpoint is sent for now. One that waited longer than kMaxCommandAgeMs for the bus (a
@@ -792,7 +805,10 @@ static void test_a_request_that_waited_too_long_is_refused_not_run() {
     r.submittedAtMs = 1000;
     TEST_ASSERT_TRUE(q.submit(r));
 
-    TEST_ASSERT_FALSE(q.take(1000 + kMaxCommandAgeMs + 1).has_value());
+    std::optional<CommandQueue::Request> expired;
+    TEST_ASSERT_FALSE(q.take(1000 + kMaxCommandAgeMs + 1, &expired).has_value());
+    TEST_ASSERT_TRUE(expired.has_value());  // handed back for the caller to log
+    TEST_ASSERT_EQUAL_STRING("late", expired->command.requestId.c_str());
     const auto outcome = q.outcomeFor("inv1", "late");
     TEST_ASSERT_TRUE(outcome.has_value());
     TEST_ASSERT_EQUAL(CommandResult::Rejected, outcome->result);
@@ -1051,7 +1067,7 @@ int main(int, char**) {
     RUN_TEST(test_outcome_is_unknown_before_it_is_recorded);
     RUN_TEST(test_a_recorded_outcome_is_readable_by_its_request_id);
     RUN_TEST(test_an_outcome_survives_a_later_client_and_is_pushed_out_only_by_several);
-    RUN_TEST(test_a_reused_request_id_answers_with_its_latest_outcome);
+    RUN_TEST(test_a_reused_request_id_never_answers_with_the_previous_outcome);
     RUN_TEST(test_a_request_that_waited_too_long_is_refused_not_run);
     RUN_TEST(test_an_outcome_is_not_readable_through_another_device);
 

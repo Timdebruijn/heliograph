@@ -102,8 +102,9 @@ what became of it.
 - A command that waits longer than 30 s for the bus (a discovery scan, a capture, a run of
   timeouts) is not sent late: its outcome is `rejected` with a reason starting `expired`. Send it
   again if it still applies.
-- The last four outcomes are kept, so another client's command does not erase yours before you
-  read it.
+- The last eight outcomes are kept, so other clients' commands do not erase yours before you
+  read it. Reusing a `request_id` is fine: once the new command is queued, the old outcome no
+  longer answers for that id.
 
 **No shipped configuration ends in a device being written to**, and the endpoint says so rather
 than pretending. Most drivers answer `Unsupported`; the two that do not are listed in
