@@ -57,10 +57,13 @@ on:
   push:
     tags: ["v*"]
 
+# Read-only for every job unless it says otherwise, and each write is granted to the one job that
+# needs it. These used to be workflow-wide, so `verify` and `build` -- which pip-install
+# PlatformIO, download a toolchain and fetch libraries from git tags -- ran with a token that
+# could push to the repository and create releases. A compromised package in that chain had the
+# same rights as the release itself.
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: read
 
 env:
   # One list, read by the staging loop, the flasher site and the update feed. The matrix below
@@ -207,11 +210,18 @@ jobs:
   publish:
     name: Publish release
     runs-on: ubuntu-latest
+    # Creating the GitHub Release and attaching its assets. Nothing here pip-installs or builds.
+    permissions:
+      contents: write
     # BOTH. This is the ordering guarantee the single job used to give for free: no image is
     # attached and no feed is deployed unless every board built and every check passed.
     needs: [verify, build]
     steps:
+      # The write-scoped token is not left in .git/config for the steps that follow, the
+      # third-party release action among them; it takes the token from its own input.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # No PlatformIO and no toolchain here: this job only moves finished binaries around.
       # Each artifact lands in fw/<artifact-name>/, so the images are at fw/fw-<board>/.
@@ -342,6 +352,10 @@ jobs:
     name: Deploy flasher and update feed
     runs-on: ubuntu-latest
     needs: publish
+    # What actions/deploy-pages requires, and nothing else: no checkout, no repository write.
+    permissions:
+      pages: write
+      id-token: write
     # Same test as the publish steps that build the site: a pre-release uploads no site
     # artifact, and deploying without one would fail the run after the release was created.
     if: ${{ !contains(github.ref_name, '-') }}
