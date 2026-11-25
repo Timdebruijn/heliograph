@@ -76,6 +76,14 @@ bool applyScaleAcc32(uint16_t high, uint16_t low, const ScaleFactor& sf, double&
         return false;
     }
     const uint32_t raw = (static_cast<uint32_t>(high) << 16) | low;
+    // 0 is the specification's "not implemented" value for an accumulator, as 0x8000/0xFFFF
+    // are for the 16-bit types above. Read as a real reading it published 0 kWh lifetime for a
+    // device that has no counter, and Home Assistant's total_increasing sensor then saw the
+    // total collapse to 0 and back. A unit that has truly produced nothing yet reads as unknown
+    // until its first watt-hour, which is the honest direction to be wrong in.
+    if (raw == 0) {
+        return false;
+    }
     out                = static_cast<double>(raw) * powerOfTen(sf.exponent);
     return true;
 }

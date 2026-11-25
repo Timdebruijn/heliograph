@@ -179,7 +179,7 @@ those fields simply do not exist in the payload:
   "manufacturer": "Ever-Solar",
   "model": "TL3000-20",
   "serial_number": "XH300060115506193600V610",
-  "last_successful_poll_ms": 1752670000000,
+  "last_successful_poll_ms": 1843250,
   "measurements": {
     "ac.power.total":       { "value": 1842.0, "unit": "W",   "valid": true, "stale": false },
     "ac.phase_l1.voltage":  { "value": 233.4,  "unit": "V",   "valid": true, "stale": false },
@@ -219,6 +219,10 @@ Deliberate choices:
    `null` until that baseline exists. Home Assistant shows both as binary sensors
    (`inverter.fault` with device class `problem`), and a `null` shows as "unknown", never
    "off". The flags are only published by drivers that read the underlying mode or words.
+5. **`last_successful_poll_ms` is uptime, and `null` until the first poll.** Milliseconds of bridge
+   uptime at the last successful poll, not a wall-clock time. Before the first one it is `null`;
+   it used to be `0`, which a consumer could not tell from a value. The diagnostics payload carries
+   the same field with the same rule. A template that reads it should allow for `None`.
 
 On a nighttime outage:
 

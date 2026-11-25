@@ -127,16 +127,24 @@ static void test_lifetime_energy_is_converted_to_kwh() {
     TEST_ASSERT_DOUBLE_WITHIN(0.001, 2220.608, r.energyTotalKwh);
 }
 
-// A brand-new inverter really has produced zero, so an accumulator of 0 is a reading.
-static void test_a_zero_accumulator_is_a_real_reading() {
+// 0 is the specification's "not implemented" for an accumulator, like 0x8000/0xFFFF for the
+// 16-bit types. This test used to pin the opposite ("a brand-new inverter really has produced
+// zero"), but a device without the counter then reported 0 kWh lifetime forever, and Home
+// Assistant's total_increasing sensor saw the total collapse to 0 whenever it alternated. A
+// new unit reads unknown until its first watt-hour instead; one watt-hour later it is a value.
+static void test_a_zero_accumulator_is_not_implemented_not_zero() {
     auto b = blankInverter();
     b[inverter::kWH]     = 0;
     b[inverter::kWH + 1] = 0;
     b[inverter::kWH_SF]  = sf(0);
     InverterReadings r;
     TEST_ASSERT_TRUE(decodeInverter(b.data(), b.size(), r));
+    TEST_ASSERT_FALSE(r.hasEnergyTotal);
+
+    b[inverter::kWH + 1] = 1;  // one watt-hour: a reading
+    TEST_ASSERT_TRUE(decodeInverter(b.data(), b.size(), r));
     TEST_ASSERT_TRUE(r.hasEnergyTotal);
-    TEST_ASSERT_DOUBLE_WITHIN(0.001, 0.0, r.energyTotalKwh);
+    TEST_ASSERT_DOUBLE_WITHIN(0.0001, 0.001, r.energyTotalKwh);
 }
 
 // A short read must never be decoded from whatever happened to be in the buffer.
@@ -270,7 +278,7 @@ void run_sunspec_parser() {
     RUN_TEST(test_not_implemented_values_are_absent_not_zero);
     RUN_TEST(test_an_absurd_scale_factor_is_refused);
     RUN_TEST(test_lifetime_energy_is_converted_to_kwh);
-    RUN_TEST(test_a_zero_accumulator_is_a_real_reading);
+    RUN_TEST(test_a_zero_accumulator_is_not_implemented_not_zero);
     RUN_TEST(test_a_truncated_block_is_refused);
     RUN_TEST(test_common_model_strings);
     RUN_TEST(test_common_model_too_short_is_refused);

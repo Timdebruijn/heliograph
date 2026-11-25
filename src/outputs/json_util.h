@@ -245,7 +245,12 @@ inline void writeDiagnostics(JsonObject doc, const DiagnosticsSnapshot& d,
     doc["modbus_client_connections_total"] = d.modbusClientConnections;
     doc["rest_requests_total"]             = d.restRequestTotal;
     doc["mqtt_publish_failure_total"]      = d.mqttPublishFailureTotal;
-    doc["last_successful_poll_ms"]         = d.lastSuccessfulPollMs;
+    // Null before the first successful poll; see the state payload for why not 0.
+    if (d.lastSuccessfulPollMs != 0) {
+        doc["last_successful_poll_ms"] = d.lastSuccessfulPollMs;
+    } else {
+        doc["last_successful_poll_ms"] = nullptr;
+    }
     // Null until the first sample, not 0: a monitoring rule on "stack headroom == 0" must not
     // fire during the first seconds after boot.
     if (d.rs485StackFreeBytes > 0) {

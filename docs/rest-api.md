@@ -302,7 +302,9 @@ does not report them".
 not the inverter has ever replied — with A and B swapped it never will. Per device,
 `/api/v1/devices/<id>` carries `online`, `data_valid`, `data_stale`,
 `consecutive_poll_failures` and `last_successful_poll_seconds_ago` (`null` when it has never
-answered, which is a different thing from `0`).
+answered, which is a different thing from `0`). `GET /api/v1/diagnostics` carries the bridge-wide
+`last_successful_poll_ms`: uptime milliseconds at the last successful poll of any device, `null`
+before the first.
 
 `GET /api/v1/status` answers **200 even when nothing is polling**, with an empty device object.
 That is the case where these fields matter most, and refusing the payload for lack of a device

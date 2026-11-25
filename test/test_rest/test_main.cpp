@@ -2209,6 +2209,19 @@ static void test_poll_duration_math() {
     TEST_ASSERT_EQUAL_UINT32(3, s.pollDurationCount);
 }
 
+// The diagnostics' last successful poll, like the state payload's: null until there was one.
+static void test_diagnostics_last_successful_poll_is_null_until_the_first_success() {
+    Diagnostics d;
+    std::string json;
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), makeBridge(), json));
+    auto doc = parse(json);
+    TEST_ASSERT_TRUE(doc["last_successful_poll_ms"].isNull());
+    d.recordPollSuccess(1234);
+    TEST_ASSERT_TRUE(rest::buildDiagnosticsPayload(d.snapshot(), makeBridge(), json));
+    doc = parse(json);
+    TEST_ASSERT_EQUAL_UINT64(1234, doc["last_successful_poll_ms"].as<uint64_t>());
+}
+
 /// Absent-not-zero on the wire: no fields before the first sample, all five after -- and a
 /// 0 ms mock poll must still count as present.
 static void test_poll_duration_payload_absent_until_sampled() {
@@ -4151,6 +4164,7 @@ int main(int, char**) {
     RUN_TEST(test_drivers_payload_keeps_headroom);
     RUN_TEST(test_a_save_refused_for_size_says_so);
     RUN_TEST(test_poll_duration_math);
+    RUN_TEST(test_diagnostics_last_successful_poll_is_null_until_the_first_success);
     RUN_TEST(test_poll_duration_payload_absent_until_sampled);
     RUN_TEST(test_breadcrumbs_cold_then_warm);
     RUN_TEST(test_breadcrumbs_corruption_reads_as_cold);
