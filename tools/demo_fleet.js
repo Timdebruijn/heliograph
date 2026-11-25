@@ -39,13 +39,13 @@
       'inverter.temperature':{value:34.4,unit:'°C'},'inverter.operating_hours':{value:21877,unit:'h'}},
     devices:[
       {id:'eversolar_legacy-EU00T112345678',label:'Schuur',online:true,data_valid:true,
-       data_stale:false,last_successful_poll_seconds_ago:3,ac_power_w:197,energy_today_kwh:8.16,
+       data_stale:false,last_successful_poll_seconds_ago:3,ac_power_w:197,last_ac_power_w:197,energy_today_kwh:8.16,
        ac_voltage_v:229.8,temperature_c:34.4,battery_soc_pct:null,battery_power_w:null},
       {id:'modbus_profile-GW2400ABC',label:'Garage',online:true,data_valid:true,data_stale:false,
-       last_successful_poll_seconds_ago:11,ac_power_w:1840,energy_today_kwh:11.4,
+       last_successful_poll_seconds_ago:11,ac_power_w:1840,last_ac_power_w:1840,energy_today_kwh:11.4,
        ac_voltage_v:231.2,temperature_c:41.2,battery_soc_pct:batt.soc,battery_power_w:batt.power},
       {id:'modbus_profile-GW3300XYZ',label:'Dak achter',online:false,data_valid:false,
-       data_stale:true,last_successful_poll_seconds_ago:null,ac_power_w:null,
+       data_stale:true,last_successful_poll_seconds_ago:null,ac_power_w:null,last_ac_power_w:null,
        energy_today_kwh:null,ac_voltage_v:null,temperature_c:null,battery_soc_pct:null,
        battery_power_w:null}],
     totals:{ac_power_w:2037,ac_power_devices:2,energy_today_kwh:19.56,energy_today_devices:2,
@@ -195,6 +195,8 @@
     const w = (base, amp) => Math.max(0, Math.round(base + amp * Math.sin(tick / 3) + amp * 0.4 * Math.sin(tick / 1.7)));
     status.devices[0].ac_power_w = w(197, 60);
     status.devices[1].ac_power_w = w(1840, 420);
+    status.devices[0].last_ac_power_w = status.devices[0].ac_power_w;
+    status.devices[1].last_ac_power_w = status.devices[1].ac_power_w;
     status.totals.ac_power_w = status.devices[0].ac_power_w + status.devices[1].ac_power_w;
     status.measurements['ac.power.total'].value = status.devices[0].ac_power_w;
     status.bridge.time = '2026-07-26 ' + now();

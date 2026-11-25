@@ -87,6 +87,7 @@ def main() -> int:
                 status |= check_state_event_gate(script, scratch)
                 status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
+                status |= check_asleep(script, scratch)
                 status |= check_address_collision(script, scratch)
     # A final verdict, because the per-check lines are not the last thing printed: a failing
     # check dumps node's stderr after its own FAIL line, and any tail of this output then shows
@@ -372,6 +373,50 @@ process.exit(bad === 0 ? 0 : 1);
 """
     )
     return run_node("fleet mode", "fleet_mode.js", harness, scratch)
+
+
+def check_asleep(script, scratch):
+    """Grey for an inverter asleep since dusk, red for one that died at output or never answered.
+
+    Every evening used to turn the dashboard red. The rule that replaces that alarm must not swallow
+    the two states that are faults, and a mistake in either direction is silent: too eager hides a
+    dead inverter behind a grey dot, too strict brings the nightly red back.
+    """
+    parts = []
+    for fn in ("asleep", "quietSince"):
+        body = extract_function(script, fn)
+        if body is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(body)
+    harness = (
+        "const ASLEEP_BELOW_W=50;\n"
+        + "\n".join(parts)
+        + """
+const row = (o) => Object.assign({online:false, last_successful_poll_seconds_ago:3600, last_ac_power_w:12}, o);
+const cases = [
+  ['quiet at dusk near 0 W', row({}), true],
+  ['quiet at exactly 0 W', row({last_ac_power_w:0}), true],
+  ['quiet at full output', row({last_ac_power_w:2100}), false],
+  ['quiet while importing hard', row({last_ac_power_w:-1500}), false],
+  ['never answered', row({last_successful_poll_seconds_ago:null, last_ac_power_w:null}), false],
+  ['answered, no power channel', row({last_ac_power_w:null}), false],
+  ['a reading but no poll time (quietSince needs one)', row({last_successful_poll_seconds_ago:null}), false],
+  ['field absent (older firmware)', {online:false, last_successful_poll_seconds_ago:3600}, false],
+  ['still online', row({online:true}), false],
+  ['no row at all', undefined, false],
+];
+let bad = 0;
+for (const [label, f, want] of cases) {
+  const got = asleep(f);
+  if (got !== want) { console.error(`asleep: ${label} = ${got}, want ${want}`); bad++; }
+}
+const since = quietSince({last_successful_poll_seconds_ago:0});
+if (!/^since \\d\\d:\\d\\d$/.test(since)) { console.error(`quietSince = ${since}`); bad++; }
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("asleep versus fault", "asleep.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):

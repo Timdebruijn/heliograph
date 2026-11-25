@@ -632,6 +632,9 @@ static void test_a_device_that_reports_nothing_does_not_count_towards_a_total() 
     TEST_ASSERT_EQUAL_UINT32(1, doc["totals"]["devices_answering"].as<uint32_t>());
     TEST_ASSERT_TRUE(doc["devices"][1]["ac_power_w"].isNull());
     TEST_ASSERT_TRUE(doc["devices"][1]["last_successful_poll_seconds_ago"].isNull());
+    // Never read, so there is no last reading either -- not a 0 W one that would read as asleep.
+    TEST_ASSERT_TRUE(doc["devices"][1]["last_ac_power_w"].isNull());
+    TEST_ASSERT_EQUAL_DOUBLE(1200.0, doc["devices"][0]["last_ac_power_w"].as<double>());
 }
 
 // A stale reading leaves the total, and the row says when the device last answered instead.
@@ -678,6 +681,10 @@ static void test_the_night_state_reports_no_production() {
     TEST_ASSERT_TRUE(doc["totals"]["ac_power_w"].isNull());
     TEST_ASSERT_EQUAL_UINT32(0, doc["totals"]["ac_power_devices"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(0, doc["totals"]["devices_answering"].as<uint32_t>());
+    // The live value is gone, the last one is not: it is how the web UI tells an inverter
+    // asleep since dusk from one that died at full output.
+    TEST_ASSERT_TRUE(doc["devices"][0]["ac_power_w"].isNull());
+    TEST_ASSERT_EQUAL_DOUBLE(m->value, doc["devices"][0]["last_ac_power_w"].as<double>());
 }
 
 // A bridge with nothing polling still answers /status -- it is the only payload that says how

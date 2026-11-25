@@ -126,6 +126,13 @@ DeviceSummary summariseDevice(const DeviceState& state, const std::string& devic
         }
     };
     take(measurement_id::kAcPowerTotal, s.hasAcPower, s.acPowerW);
+    // Valid only, deliberately not fresh: the point is the reading from before the device went
+    // quiet, which markAllStale() keeps. Gone after a reboot, since nothing has been read yet.
+    if (const Measurement* m = state.measurements.find(measurement_id::kAcPowerTotal);
+        m != nullptr && m->valid) {
+        s.hasLastAcPower = true;
+        s.lastAcPowerW   = m->value;
+    }
     take(measurement_id::kEnergyToday, s.hasEnergyToday, s.energyTodayKwh);
     take(measurement_id::kEnergyTotal, s.hasEnergyTotal, s.energyTotalKwh);
     // L1 specifically, not "the AC voltage": a three-phase inverter has three, and picking one
@@ -303,6 +310,11 @@ bool buildStatusPayload(const DeviceState& state, const std::string& deviceId,
             o["ac_power_w"] = f.acPowerW;
         } else {
             o["ac_power_w"] = nullptr;
+        }
+        if (f.hasLastAcPower) {
+            o["last_ac_power_w"] = f.lastAcPowerW;
+        } else {
+            o["last_ac_power_w"] = nullptr;
         }
     }
     JsonObject t = doc["totals"].to<JsonObject>();

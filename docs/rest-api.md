@@ -154,9 +154,10 @@ knowing if you are building against this API.
   },
   "devices": [
     { "id": "modbus_profile-1", "label": "Schuur", "online": true, "data_valid": true,
-      "data_stale": false, "last_successful_poll_seconds_ago": 3, "ac_power_w": 1240.0 },
+      "data_stale": false, "last_successful_poll_seconds_ago": 3, "ac_power_w": 1240.0,
+      "last_ac_power_w": 1240.0 },
     { "id": "modbus_profile-2", "online": false, "data_valid": false, "data_stale": false,
-      "last_successful_poll_seconds_ago": null, "ac_power_w": null }
+      "last_successful_poll_seconds_ago": null, "ac_power_w": null, "last_ac_power_w": null }
   ],
   "totals": {
     "devices_polled": 2, "devices_answering": 1,
@@ -180,13 +181,18 @@ anything presenting itself as the bridge's health must use. Compare them against
 `devices_configured`, not against each other: a device that failed to start has no row at all,
 and the built-in web UI counts it as not reporting rather than leaving it out of the question.
 
-Four rules, all of which exist because the alternative reads as a fact:
+Five rules, all of which exist because the alternative reads as a fact:
 
 - **A reading counts only while it is valid and fresh.** When a device goes offline the firmware
   marks its measurements stale but keeps them *valid*, so a summary that checked validity alone
   kept a dead inverter's last daylight value in the household total until the next reboot. Both
   `devices[].ac_power_w` and the sums go `null` instead; `last_successful_poll_seconds_ago` is
   what the reading has been replaced by.
+- **`devices[].last_ac_power_w` is not a live value.** It is the last AC power the device
+  reported, kept after it stops answering (`null` until the first reading, and again after a
+  reboot), and it is never summed. It exists to tell an inverter that went quiet at dusk near
+  0 W — asleep — from one that went quiet at full output, which is a fault. The web UI shows the
+  first in grey and the second in red.
 - **`devices_answering`** counts devices that are online, hold valid data and are not stale.
   Started is not answering (see below), and neither is a device whose reading has aged out.
 - **A sum is `null` when no device reported the channel**, never `0`.

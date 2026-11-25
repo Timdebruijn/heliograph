@@ -508,6 +508,24 @@ function groupsFor(m,skipHeadline){
   return html?`<div class="groups">${html}</div>`:'';
 }
 
+// An inverter that answered earlier and went quiet while producing next to nothing has switched
+// off for the night: a PV inverter runs on its own panels and goes dark with them. That is the
+// normal state for half of every day, so it is grey, not red -- a red alarm every evening is one
+// people learn to ignore, and then they miss the real one. Red stays for the two cases that are
+// faults: never answered at all, and went quiet at real output (last_ac_power_w, the reading from
+// before it went quiet; the live ac_power_w is null by then).
+// ponytail: a fixed threshold and no sun position. An inverter that fails on a dull winter noon
+// below it reads as asleep, but with the time it went quiet on screen ("since 12:40").
+const ASLEEP_BELOW_W=50;
+function asleep(f){
+  return !!f&&!f.online&&f.last_successful_poll_seconds_ago!=null&&
+    f.last_ac_power_w!=null&&Math.abs(f.last_ac_power_w)<ASLEEP_BELOW_W;
+}
+function quietSince(f){
+  const t=new Date(Date.now()-f.last_successful_poll_seconds_ago*1000);
+  return 'since '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+}
+
 // ---------------- header, chips, banner ----------------
 function paintChrome(){
   if(!S)return;
@@ -520,14 +538,18 @@ function paintChrome(){
   $('#host').textContent=b.hostname?b.hostname+'.local':location.hostname;
   $('#ver').textContent='v'+b.firmware_version;
   const chip=(cls,text)=>`<span class="chip"><span class="dot ${cls}"></span>${text}</span>`;
-  // Green means ALL of them are answering; anything less is red. An orange "some" is a state you
-  // learn to ignore. With one device this is the header it has always been, stale tag included.
+  // Green means ALL of them are answering; anything less is red, unless every one missing is
+  // asleep (above), which is grey. An orange "some" is a state you learn to ignore. With one
+  // device this is the header it has always been, stale tag included.
+  const sleeping=fleet.filter(asleep).length;
   const inv=multi
-    ?chip(answering===expected?'ok':'bad',`Inverters ${esc(answering)}/${esc(expected)} answering`)
+    ?chip(answering===expected?'ok':answering+sleeping===expected?'off':'bad',
+       `Inverters ${esc(answering)}/${esc(expected)} answering`+(sleeping?` · ${esc(sleeping)} asleep`:''))
     // Orange, not red, and no stale/no-data tags: a bridge nobody has configured is not failing
     // at anything. It wants attention, which is what orange says, and the wiring alarm belongs
     // to a bus somebody has actually connected.
     :neverConfigured()?chip('warn','No inverter set up yet')
+    :asleep(fleet[0])?chip('off','Inverter asleep '+esc(quietSince(fleet[0])))
     :chip(d.online?'ok':'bad','Inverter'+(d.data_stale?' <span class="tag">stale</span>':'')+
        (d.data_valid?'':' <span class="tag">no data</span>'));
   $('#chips').innerHTML=inv+
@@ -615,14 +637,16 @@ function paintLive(){
   let h='';
   if(multi){
     const answering=tot.devices_answering??0;
-    const short=answering!==expected;
+    const sleeping=fleet.filter(asleep).length;
+    const short=answering!==expected, dark=short&&answering+sleeping===expected;
     h+=`<div class="hero">
       <div>
         <div class="k">Output now · all inverters</div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px">
           <span class="big">${esc(tot.ac_power_w==null?'—':sp(Math.round(tot.ac_power_w)))}</span><span style="font-size:20px" class="dim">W</span></div>
-        <div class="hint" style="margin-top:2px${short?';color:var(--bad)':''}">${
-          short?`${esc(answering)} of ${esc(expected)} inverters answering — this total is short`
+        <div class="hint" style="margin-top:2px${short&&!dark?';color:var(--bad)':''}">${
+          dark?`${esc(answering)} of ${esc(expected)} inverters answering · ${esc(sleeping)} asleep`
+          :short?`${esc(answering)} of ${esc(expected)} inverters answering — this total is short`
                :`${esc(expected)} of ${esc(expected)} inverters answering`}</div>
       </div>
       <div>
@@ -649,7 +673,9 @@ function paintLive(){
         <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px">
           <span class="big">${esc(now==null?'—':sp(Math.round(now)))}</span><span style="font-size:20px" class="dim">W</span></div>
         ${rated&&now!=null?bar(now/rated*100)+`<div class="hint">${Math.round(now/rated*100)}% of this inverter's ${esc(sp(rated))} W</div>`:''}
-        <div class="hint">${d.online?'Last reply '+esc(d.last_successful_poll_seconds_ago??'—')+' s ago':'<span style="color:var(--bad)">not replying</span>'}${
+        <div class="hint">${d.online?'Last reply '+esc(d.last_successful_poll_seconds_ago??'—')+' s ago'
+          :asleep(fleet[0])?'Asleep '+esc(quietSince(fleet[0]))+' — normal after sunset'
+          :'<span style="color:var(--bad)">not replying</span>'}${
           S.status_text?' · '+esc(S.status_text):''}</div>
       </div>
       <div>
@@ -713,13 +739,14 @@ function paintLive(){
   if(multi){
     h+='<div class="stack" style="margin-top:20px">';
     for(const f of fleet){
-      const answering=f.online&&f.data_valid&&!f.data_stale;
+      const answering=f.online&&f.data_valid&&!f.data_stale, zz=!answering&&asleep(f);
       const ago=f.last_successful_poll_seconds_ago;
       const when=(ago===null||ago===undefined)?'<span style="color:var(--bad)">never answered</span>'
+        :zz?`<span class="dim">asleep ${esc(quietSince(f))} · last ${esc(sp(Math.round(f.last_ac_power_w)))} W</span>`
         :`<span class="dim">${f.data_stale?'stale — ':''}replied ${esc(ago)} s ago</span>`;
-      h+=`<div class="fleetrow${answering?'':' bad'}">
+      h+=`<div class="fleetrow${answering||zz?'':' bad'}">
         <div class="name">
-          <div style="display:flex;align-items:center;gap:8px"><span class="dot ${answering?'ok':'bad'}"></span><b>${esc(f.label||f.id)}</b></div>
+          <div style="display:flex;align-items:center;gap:8px"><span class="dot ${answering?'ok':zz?'off':'bad'}"></span><b>${esc(f.label||f.id)}</b></div>
           ${f.label?`<div class="hint" style="margin-top:2px">${esc(f.id)}</div>`:''}
         </div>
         <div class="mini">${spark('d:'+f.id,150,34,{weight:1.5,stroke:answering?'var(--acc)':'var(--dim)'})}</div>
@@ -842,14 +869,17 @@ function paintInverters(){
     const dev=devCache[id]||{}, m=measCache[id]||{}, caps=capsCache[id];
     const ident=dev.identity||{}, drv=dev.driver||{};
     const ago=dev.last_successful_poll_seconds_ago;
+    // Asleep is judged on the /status row: only that one carries the last reading.
+    const row=(S&&S.devices||[]).find(x=>x.id===id), zz=asleep(row);
     const live=ago==null?'<span style="color:var(--bad)">never answered</span>'
+      :zz?`<span class="dim">asleep ${esc(quietSince(row))} — normal after sunset</span>`
       :dev.data_stale?`<span class="dim">stale — last reply ${esc(ago)} s ago</span>`
                      :`<span class="dim">replied ${esc(ago)} s ago</span>`;
     const count=Object.keys(m).length;
     h+=`<div class="card${ago==null?' bad':''}">
       <div class="between">
         <div style="display:flex;align-items:center;gap:8px">
-          <span class="dot ${ago!=null&&dev.online&&dev.data_valid&&!dev.data_stale?'ok':'bad'}"></span>
+          <span class="dot ${ago!=null&&dev.online&&dev.data_valid&&!dev.data_stale?'ok':zz?'off':'bad'}"></span>
           <b>${esc(dev.label||id)}</b>
           ${drv.support_level?`<span class="tag">${esc(drv.support_level)}</span>`:''}
         </div>
