@@ -87,6 +87,7 @@ def main() -> int:
                 status |= check_state_event_gate(script, scratch)
                 status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
+                status |= check_device_rows_fresh(script, scratch)
                 status |= check_asleep(script, scratch)
                 status |= check_control_confirm(script, scratch)
                 status |= check_new_boot(script, scratch)
@@ -572,6 +573,58 @@ process.exit(bad === 0 ? 0 : 1);
 """
     )
     return run_node("new boot", "new_boot.js", harness, scratch)
+
+
+def check_device_rows_fresh(script, scratch):
+    """A write to additional_devices starts from the stored rows, not this page's old copy.
+
+    The API replaces the array whole. Built from a config this page read an hour ago, a removal in
+    one tab came back from another, and "remove row 1" removed whatever had moved into position 1.
+    Both are silent: the save succeeds, with the wrong rows.
+    """
+    parts = []
+    for fn in ("rowsOf", "sameRow", "freshRows", "removeExtraAt"):
+        body = extract_function(script, fn)
+        if body is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(body)
+    harness = (
+        """
+const A = {driver_id:'x', label:'A', options:{unit_id:'2'}};
+const B = {driver_id:'x', label:'B', options:{unit_id:'3'}};
+const C = {driver_id:'x', label:'C', options:{unit_id:'4'}};
+let cfg, stored, patched, alerted, panel, invNextMs;
+const getJson = async () => JSON.parse(JSON.stringify(stored));
+const patch = async (body) => { patched = body; return {ok:true}; };
+const confirm = () => true;
+const alert = (t) => { alerted = t; };
+const loadInverters = () => {};
+const $ = () => null;
+const say = () => {};
+"""
+        + "\n".join(parts)
+        + """
+let bad = 0;
+const run = async (label, pageRows, storedRows, idx, want) => {
+  cfg = {driver:{id:'x'}, additional_devices: pageRows};
+  stored = {driver:{id:'x'}, additional_devices: storedRows};
+  patched = undefined; alerted = undefined;
+  await removeExtraAt(idx);
+  const got = patched ? patched.additional_devices.map(r => r.label).join(',') : 'refused';
+  if (got !== want) { console.error(`${label}: got ${got}, want ${want}`); bad++; }
+};
+(async () => {
+  await run('nothing changed elsewhere', [A,B,C], [A,B,C], 1, 'A,C');
+  await run('a row before it was removed elsewhere', [A,B,C], [B,C], 1, 'refused');
+  await run('a row was added elsewhere after it', [A,B], [A,B,C], 1, 'A,C');
+  await run('the row itself was edited elsewhere', [A,B], [A,{...B, label:'B2'}], 1, 'refused');
+  await run('the row is gone', [A,B], [A], 1, 'refused');
+  process.exit(bad === 0 ? 0 : 1);
+})();
+"""
+    )
+    return run_node("device rows fresh", "device_rows.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):
