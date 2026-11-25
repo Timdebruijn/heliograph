@@ -88,6 +88,7 @@ def main() -> int:
                 status |= check_bridge_clock(script, scratch)
                 status |= check_fleet_mode(script, scratch)
                 status |= check_asleep(script, scratch)
+                status |= check_control_confirm(script, scratch)
                 status |= check_address_collision(script, scratch)
     # A final verdict, because the per-check lines are not the last thing printed: a failing
     # check dumps node's stderr after its own FAIL line, and any tail of this output then shows
@@ -439,6 +440,74 @@ process.exit(bad === 0 ? 0 : 1);
 """
     )
     return run_node("asleep versus fault", "asleep.js", harness, scratch)
+
+
+def check_control_confirm(script, scratch):
+    """A Save that opens a control path asks first; one that only closes does not.
+
+    The access form applies immediately, and before this a tick on "Relays enabled" moved from a
+    checkbox to live contacts on an inverter's DRM port with no question asked. The rule has two
+    silent failure modes: asking for nothing (the old state) and asking on every save, which
+    trains people to click OK. Both directions are cases below.
+    """
+    body = extract_function(script, "controlConfirmText")
+    state = extract_function(script, "controlState")
+    roles = re.search(r"const DRM_ROLES=\{.*?\};", script, re.S)
+    label = re.search(r"const roleLabel=.*?;\n", script)
+    if body is None or state is None or roles is None or label is None:
+        print(
+            "FAIL: controlConfirmText/DRM_ROLES/roleLabel not found in index_html.h; this check needs updating"
+        )
+        return 1
+    harness = (
+        roles.group(0)
+        + "\n"
+        + label.group(0)
+        + body
+        + "\n"
+        + state
+        + """
+const off = {ctl:false, iw:false, rl:false, roles:['none','none']};
+const S = (o) => Object.assign({}, off, o);
+const cases = [
+  ['nothing changes', off, off, null],
+  ['allow control alone opens nothing', off, S({ctl:true}), null],
+  ['relays alone, control off, open nothing', off, S({rl:true, roles:['drm0','none']}), null],
+  ['writes alone, control off, open nothing', off, S({iw:true}), null],
+  ['inverter writes open', S({ctl:true}), S({ctl:true, iw:true}), 'Inverter writes open'],
+  ['control opens what was ticked below it', S({iw:true}), S({ctl:true, iw:true}), 'Inverter writes open'],
+  ['relays open, roles already stored', S({ctl:true, roles:['drm0','none']}), S({ctl:true, rl:true, roles:['drm0','none']}), 'Relays open'],
+  ['relays open, role set', S({ctl:true}), S({ctl:true, rl:true, roles:['drm0','none']}), 'Relay 1: DRM0 — disconnect'],
+  ['wiring rule shown with live roles', S({ctl:true}), S({ctl:true, rl:true, roles:['drm5','none']}), 'NO or NC'],
+  ['everything off again', S({ctl:true, iw:true, rl:true, roles:['drm0','drm5']}), off, null],
+  ['role change while control is off', off, S({roles:['drm0','none']}), null],
+  ['role change while relays are off', S({ctl:true}), S({ctl:true, roles:['drm0','none']}), null],
+  ['live role cleared to none', S({ctl:true, rl:true, roles:['drm0','none']}), S({ctl:true, rl:true}), null],
+  ['live role drm5 -> drm0', S({ctl:true, rl:true, roles:['drm5','none']}), S({ctl:true, rl:true, roles:['drm0','none']}), 'DRM0'],
+  ['saving an unchanged live setup', S({ctl:true, rl:true, roles:['drm0','none']}), S({ctl:true, rl:true, roles:['drm0','none']}), null],
+];
+let bad = 0;
+for (const [label, was, now, want] of cases) {
+  const got = controlConfirmText(was, now);
+  const ok = want === null ? got === '' : got.includes(want);
+  if (!ok) { console.error(`${label}: got ${JSON.stringify(got)}, want ${want === null ? 'no prompt' : JSON.stringify(want)}`); bad++; }
+}
+for (const r of Object.keys(DRM_ROLES)) if (roleLabel(r).includes('unknown')) { console.error(`no label for ${r}`); bad++; }
+// Opening writes beside relays that are already live and unchanged asks about the writes only.
+const wOnly = controlConfirmText(S({ctl:true, rl:true, roles:['drm0','none']}), S({ctl:true, iw:true, rl:true, roles:['drm0','none']}));
+if (!wOnly.includes('Inverter writes open') || wOnly.includes('Relay 1')) { console.error(`writes beside live relays: ${JSON.stringify(wOnly)}`); bad++; }
+// The firmware accepts exactly these (configuration.cpp); a role offered here and refused there is a Save that fails.
+if (Object.keys(DRM_ROLES).join(',') !== 'none,drm0,drm1,drm2,drm3,drm4,drm5,drm6,drm7,drm8') { console.error('DRM_ROLES keys changed'); bad++; }
+const st = [
+  [controlState({security:{read_only_mode:true}}), {ctl:false, iw:false, rl:false, roles:[]}],
+  [controlState({security:{read_only_mode:false}, control:{inverter_writes_enabled:true}, relays:{enabled:true, roles:['drm0']}}), {ctl:true, iw:true, rl:true, roles:['drm0']}],
+  [controlState({security:{}}), {ctl:false, iw:false, rl:false, roles:[]}],
+];
+for (const [got, want] of st) if (JSON.stringify(got) !== JSON.stringify(want)) { console.error(`controlState = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); bad++; }
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("control confirmation", "control_confirm.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):
