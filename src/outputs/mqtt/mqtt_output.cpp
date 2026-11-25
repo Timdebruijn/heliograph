@@ -14,6 +14,14 @@
 
 #include "diagnostics/logger.h"
 
+namespace heliograph::mqtt {
+
+bool MqttOutput::isLiveCommand(bool retained, size_t index, size_t len, size_t total) {
+    return !retained && index == 0 && len == total;
+}
+
+}  // namespace heliograph::mqtt
+
 #if defined(ESP32)
 
 #include <espMqttClient.h>
@@ -107,11 +115,23 @@ bool MqttOutput::begin(const BridgeInfo& bridge) {
         // RelayController's gates (or, for a command, CommandDispatcher's) decide. Runs on
         // the MQTT task -- the relay handler installed by main serialises against REST with
         // a mutex; commandSubmit_ needs none, because CommandQueue is its own lock.
-        g_client.onMessage([this](const espMqttClientTypes::MessageProperties&,
+        g_client.onMessage([this](const espMqttClientTypes::MessageProperties& properties,
                                   const char* topic, const uint8_t* payload, size_t len,
                                   size_t index, size_t total) {
-            if (topic == nullptr || index != 0 || len != total) {
-                return;  // fragmented messages are never valid for these short payloads
+            if (topic == nullptr) {
+                return;
+            }
+            if (!isLiveCommand(properties.retain, index, len, total)) {
+                // Named, because a retained command sits on the broker and is refused again on
+                // every reconnect: without a line nobody learns why "it does nothing". Once per
+                // delivery, not per poll -- and a delivery per subscribe, which for the bridge's
+                // relay/DRM topics happens once per device channel on each connect.
+                if (properties.retain && index == 0) {
+                    log::warn("MQTT: ignored a retained message on %s -- commands act only when "
+                              "published live; clear it with an empty retained publish",
+                              topic);
+                }
+                return;
             }
             const std::string t(topic);
             if (commandSubmit_ != nullptr) {

@@ -31,7 +31,8 @@ Three layers, all of which must agree before a contact moves:
 3. The rate limiter — asserting is throttled; **releasing is never throttled**.
 
 Closing either gate (read-only on, or relays off) releases every relay immediately: a
-closed gate can only leave the failsafe state behind. On boot everything starts released.
+closed gate can only leave the failsafe state behind. On boot everything starts released, and
+stays released: a retained MQTT command is not replayed into it ([mqtt.md](mqtt.md)).
 
 ## Failsafe and the NO/NC wiring rule
 

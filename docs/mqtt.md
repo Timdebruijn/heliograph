@@ -114,6 +114,15 @@ The bridge subscribes to **three** things:
 Relay commands pass the RelayController's gates, and the acknowledged state follows on
 `relay/<n>/state`, so a refused command visibly snaps the Home Assistant switch back.
 
+**A retained message on any of these topics is ignored.** A command acts when it is published;
+the broker's replay of a stored one, which it sends on every new subscription (each boot, each
+reconnect, each time a gate reopens), is refused and logged. Without this a retained `drm1`
+would curtail again after every reboot, undoing the release-on-boot failsafe. A retained
+publish still acts once, when it is sent to a connected bridge, because a live delivery never
+carries the retain flag. A command published while the bridge is offline is lost, retained or
+not: send it again once the bridge reports `online`. To clear one that is stored:
+`mosquitto_pub -t '<topic>' -r -n`.
+
 **This section used to say the relay topics were the only subscription, and that there were no
 command topics for the inverter because the active driver had no write capabilities.** Both
 stopped being true when the command queue landed: the subscription is unconditional wherever a
