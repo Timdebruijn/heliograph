@@ -89,6 +89,7 @@ def main() -> int:
                 status |= check_fleet_mode(script, scratch)
                 status |= check_asleep(script, scratch)
                 status |= check_control_confirm(script, scratch)
+                status |= check_new_boot(script, scratch)
                 status |= check_address_collision(script, scratch)
     # A final verdict, because the per-check lines are not the last thing printed: a failing
     # check dumps node's stderr after its own FAIL line, and any tail of this output then shows
@@ -508,6 +509,69 @@ process.exit(bad === 0 ? 0 : 1);
 """
     )
     return run_node("control confirmation", "control_confirm.js", harness, scratch)
+
+
+def check_new_boot(script, scratch):
+    """A restart is noticed, and the page reloads unless that would eat someone's typing.
+
+    After a restart the old page kept running against the new boot: config, driver list and the
+    "waiting for a restart" list all from before, and after an OTA the page's own code from the
+    previous firmware. Missing a boot is silent, and so is the opposite mistake -- reloading while
+    a form is open throws away what was typed.
+    """
+    parts = []
+    for fn in ("isNewBoot", "newBootAction", "askedForRestart"):
+        body = extract_function(script, fn)
+        if body is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(body)
+    harness = (
+        "\n".join(parts)
+        + """
+let bad = 0;
+const b = (v, up) => ({firmware_version: v, uptime_seconds: up});
+const T = 1_000_000;  // "now" in ms; prev.at is how long before it the last sample came in
+const p = (v, up, agoS) => ({v, up, at: T - agoS * 1000});
+const boots = [
+  ['first sample', null, b('0.37.0', 50), false],
+  ['same boot, 5 s later', p('0.37.0', 50, 5), b('0.37.0', 55), false],
+  ['same boot, same second', p('0.37.0', 50, 0), b('0.37.0', 50), false],
+  ['same boot, slow reply (10 s late)', p('0.37.0', 50, 20), b('0.37.0', 60), false],
+  ['restart', p('0.37.0', 5000, 20), b('0.37.0', 12), true],
+  ['restart noticed late (tab in background)', p('0.37.0', 20, 600), b('0.37.0', 400), true],
+  ['OTA', p('0.37.0', 5000, 20), b('0.38.0', 12), true],
+  ['OTA, slow to notice', p('0.37.0', 20, 600), b('0.38.0', 400), true],
+  ['older firmware without uptime', p('0.37.0', undefined, 20), b('0.37.0', undefined), false],
+  ['null uptime is not a boot', p('0.37.0', 5000, 20), b('0.37.0', null), false],
+];
+// A restart this page asked for, then lost the bridge: a boot even when the last sample was young.
+if (!isNewBoot(p('0.37.0', 10, 30), b('0.37.0', 15), T, true)) { console.error('isNewBoot: asked-for restart after a gap = false'); bad++; }
+if (isNewBoot(null, b('0.37.0', 15), T, true)) { console.error('isNewBoot: gap on the first sample = true'); bad++; }
+for (const [label, prev, now, want] of boots) {
+  const got = isNewBoot(prev, now, T);
+  if (got !== want) { console.error(`isNewBoot: ${label} = ${got}, want ${want}`); bad++; }
+}
+const acts = [
+  ['nothing open', false, false, false, 'reload'],
+  ['typing, unexpected restart', false, false, true, 'banner'],
+  ['typing, but this page asked for it', false, true, true, 'reload'],
+  ['typing, new firmware', true, false, true, 'reload'],
+];
+for (const [label, v, asked, typing, want] of acts) {
+  const got = newBootAction(v, asked, typing);
+  if (got !== want) { console.error(`newBootAction: ${label} = ${got}, want ${want}`); bad++; }
+}
+let restarting = 0;
+if (askedForRestart(T)) { console.error('askedForRestart with nothing asked = true'); bad++; }
+restarting = T - 30_000;
+if (!askedForRestart(T)) { console.error('askedForRestart 30 s after the click = false'); bad++; }
+restarting = T - 3_600_000;
+if (askedForRestart(T)) { console.error('askedForRestart an hour after the click = true'); bad++; }
+process.exit(bad === 0 ? 0 : 1);
+"""
+    )
+    return run_node("new boot", "new_boot.js", harness, scratch)
 
 
 def check_address_collision(script, scratch):

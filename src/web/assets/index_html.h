@@ -580,7 +580,10 @@ function paintChrome(){
   // stays on the Inverters tab; this only says look there.
   const problems=(b.device_problems||[]).length, started=b.devices_started;
   const el=$('#banner');
-  if(b.devices_configured!==undefined&&started!==undefined&&(problems||started<b.devices_configured)){
+  if(bootChanged){
+    el.innerHTML='<div><b>The bridge restarted.</b> This page still shows it as it was before. <a href="#" onclick="reloadHere();return false">Reload</a></div>';
+    showBanner(el,false);
+  }else if(b.devices_configured!==undefined&&started!==undefined&&(problems||started<b.devices_configured)){
     el.innerHTML=`<div><b>${esc(started)} of ${esc(b.devices_configured)} configured inverters started.</b></div>
       <div style="color:var(--mid);font-size:14px;margin-top:4px">The other inverters answer on this bus, so the bridge and the line speed are fine — which narrows it down.
       <a href="#" onclick="goTab('inv');return false">Three things to check →</a></div>`;
@@ -2006,11 +2009,20 @@ async function saveUpdateCheck(on){
   if(!r.ok){$('#upd_en').checked=!on;$('#upd_toggle_msg').textContent='Could not save: '+r.why;return}
   $('#upd_toggle_msg').textContent=on?'Checking for updates is on.':'Checking for updates is off.';
 }
+// Work a restart would cut off, as words for the confirmation; empty when nothing is running.
+function busyWork(){
+  return [wizReport&&wizReport.busy&&'a device search',capTimer&&'a bus capture',
+    dcapTimer&&'a driver capture',uploading&&'a firmware upload']
+    .filter(Boolean);
+}
 async function reboot(sel){
+  const busy=busyWork();
+  if(busy.length&&!confirm('Restarting stops '+busy.join(' and ')+', still running. Restart anyway?'))return;
   const r=await authFetch('/api/v1/actions/reboot',{method:'POST'});
   if(!r.ok&&r.status!==202){say(sel,'err',r.networkError?esc(r.why):'Restart refused: '+esc(httpWhy(r)));return}
   pending=[];$('#pending').classList.add('hide');
-  say(sel,'ok','Restarting. This page will go blank for a few seconds — reload it after.');
+  restarting=Date.now();
+  say(sel,'ok','Restarting. This page reloads by itself when the bridge is back, usually within 30 s.');
 }
 async function factoryReset(){
   if(!confirm('Erase all settings including WiFi and passwords?'))return;
@@ -2504,7 +2516,7 @@ async function applyRestore(){
   if(!r.ok){say('#rs_msg','err',esc((d.error&&d.error.message)||httpWhy(r)));return}
   rsPending=null;
   say('#rs_msg','ok','Restored '+esc(d.changed_fields||0)+' setting(s).'+
-    (d.reboot_required?' The bridge is restarting — reload this page in ~30 seconds.':' No restart needed.')+
+    (d.reboot_required?(restarting=Date.now(),' The bridge is restarting — this page reloads by itself when it is back.'):' No restart needed.')+
     (d.rollback_stored?' To go back, press “Undo the last restore” in the Backup card.':' No undo point was stored for this restore, so “Undo the last restore” cannot bring back the configuration from just before it. Usually that means the flash had no room for a second copy.'));
 }
 // The bridge swaps the undo point with the running configuration, so this button toggles
@@ -2558,7 +2570,7 @@ async function undoRestore(){
   const r=await authFetch('/api/v1/actions/undo-restore',{method:'POST'});
   const d=await r.json().catch(()=>({}));
   if(!r.ok){say('#bk_msg','err',esc((d.error&&d.error.message)||httpWhy(r)));return}
-  say('#bk_msg','ok','Switched.'+(d.rebooting?' The bridge is restarting — reload in ~30 seconds.':' No restart needed.')+
+  say('#bk_msg','ok','Switched.'+(d.rebooting?(restarting=Date.now(),' The bridge is restarting — this page reloads by itself when it is back.'):' No restart needed.')+
     ' Pressing this again switches back.');
 }
 
@@ -2645,6 +2657,10 @@ async function manualCheck(){
 }
 // XMLHttpRequest, not fetch: fetch cannot report UPLOAD progress, and a minute of silent
 // "uploading…" reads as a hang.
+// True only while bytes are on their way or the bridge is writing them: what a restart would cut.
+// A flag, not the button's disabled state -- the button also stays disabled after a finished
+// upload, and a repaint of its card re-enables it mid-upload.
+let uploading=false;
 function upload(url,blob,filename,btnSel,progSel,msgSel,done){
   const btn=$(btnSel), pb=$(progSel), pf=pb&&pb.firstElementChild;
   let nextSaid=25, sent=false;
@@ -2668,6 +2684,7 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
       say(msgSel,'',p<100?'Uploading to the bridge… '+p+'%':'Upload complete — verifying the checksum and writing flash…');
     };
     x.onload=()=>{
+      uploading=false;
       if(x.status===401&&mayRetry){
         clearAuth();
         askAuth(true).then(ok=>{if(ok)send(false);else{if(btn)btn.disabled=false;say(msgSel,'err','Cancelled.')}});
@@ -2680,14 +2697,18 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
         say(msgSel,'err','Refused: '+esc((d.error&&d.error.message)||('HTTP '+x.status))+' — the running firmware is untouched.');
         return;
       }
+      // The bridge restarts into the image it just took. Asked for, so the page reloads when it is
+      // back even with this panel open -- also when the image carries the same version.
+      restarting=Date.now();
       say(msgSel,'ok',done);
     };
     // Lost connection. Before the last byte the bridge aborts the half-written image, so nothing
     // changed. AFTER it, the bridge may have verified the image, switched partitions and
     // restarted before its answer got out -- this page cannot know, so it must not claim either.
-    x.onerror=x.ontimeout=()=>{if(pb)pb.style.display='none';if(btn)btn.disabled=false;
+    x.onerror=x.ontimeout=()=>{uploading=false;if(pb)pb.style.display='none';if(btn)btn.disabled=false;
+      if(sent)restarting=Date.now();
       say(msgSel,'err',sent
-        ?'The connection dropped after the upload finished. The bridge may be restarting into the new firmware: reload in about 30 s and check the version.'
+        ?'The connection dropped after the upload finished. The bridge may be restarting into the new firmware: if it does, this page reloads by itself when it is back — check the version then.'
         :'Upload failed: the connection dropped before it finished — nothing was installed, the running firmware is untouched.')};
     say(msgSel,'','Uploading to the bridge… 0%');
     announce('Uploading to the bridge.');nextSaid=25;
@@ -2696,6 +2717,7 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
     // FormData: the browser sets the multipart boundary itself; setting Content-Type by hand
     // here breaks the upload.
     const fd=new FormData();fd.append('firmware',blob,filename);
+    uploading=true;
     x.send(fd);
   };
   send(true);
@@ -2723,7 +2745,7 @@ async function otaUpload(){
   $('#ota_btn').disabled=true;
   if(!await adminProven('#ota_msg')){$('#ota_btn').disabled=false;return}
   upload('/api/v1/ota',f,f.name,'#ota_btn','#ota_prog','#ota_msg',
-    'Verified and installed. Rebooting into the new firmware — reload this page in ~15 seconds.');
+    'Verified and installed. Rebooting into the new firmware — this page reloads by itself when it is back.');
 }
 async function installUpdate(){
   const board=(S&&S.bridge&&S.bridge.board_id)||'';
@@ -2754,7 +2776,7 @@ async function installUpdate(){
   // that does not hash to what the release promised -- before the boot partition flips.
   upload('/api/v1/ota?board='+encodeURIComponent(board)+'&sha256='+encodeURIComponent(asset.sha256||''),
     blob,asset.file,'#upd_btn','#upd_prog','#upd_msg',
-    'Verified and installed. Rebooting into '+esc(updLatest.version)+' — reload this page in ~15 seconds.');
+    'Verified and installed. Rebooting into '+esc(updLatest.version)+' — this page reloads by itself when it is back.');
 }
 
 // ---------------- timezones ----------------
@@ -2922,6 +2944,38 @@ function drawTab(){
 // /drivers were each fetched more than once. A call that lands mid-flight is not dropped -- it
 // asks for exactly one more pass when the current one finishes, so nothing goes stale.
 let refreshBusy=false, refreshAgain=false, bootTried=0;
+
+// A new boot, seen from here: the version changed (an OTA) or the uptime went backwards (any
+// restart -- asked for, a watchdog, a power cut). Everything this page holds beyond /status
+// belongs to the bridge as it was: the config, the driver list, capabilities, the list of
+// changes waiting for a restart, and after an OTA the page's own code, which ships inside the
+// firmware. So the page reloads itself, back to the tab it was on. One exception: a restart this
+// page did not ask for, while a form is open or a field has focus -- reloading then would throw
+// away what someone is typing, so the banner says what happened and offers the reload instead.
+let lastBoot=null, restarting=0, bootChanged=false, sawGap=false;
+// The uptime test allows for the time between the two samples: a tab left in the background saw
+// 20 s, came back ten minutes later and read 400 s -- larger, yet a new boot. 30 s of slack
+// covers request latency (a /status times out at 10 s); a restart both quicker than that and
+// unseen in between is the one this misses -- unless this page asked for it and has lost the
+// bridge since (gap), which is a restart whatever the uptime says.
+function isNewBoot(prev,b,now,gap){
+  if(!prev)return false;
+  if(gap||prev.v!==b.firmware_version)return true;
+  if(b.uptime_seconds==null||prev.up==null)return false;
+  return b.uptime_seconds<prev.up+(now-prev.at)/1000-30;
+}
+// A restart this page asked for counts as asked for while it can still be under way: two minutes
+// is longer than any restart this firmware does. Past that a reload is no longer the answer to
+// the click, and a later, unrelated restart must not take it as one while someone is typing.
+function askedForRestart(now){return !!restarting&&now-restarting<120000}
+function reloadHere(){try{sessionStorage.setItem('hg_tab',tab)}catch(e){}location.reload()}
+function newBootAction(versionChanged,askedFor,typing){
+  return versionChanged||askedFor||!typing?'reload':'banner';
+}
+function onNewBoot(versionChanged){
+  if(newBootAction(versionChanged,askedForRestart(Date.now()),!!(panel||readerIsBusy()))==='reload')reloadHere();
+  else bootChanged=true;
+}
 async function refresh(){
   if(refreshBusy){refreshAgain=true;return}
   refreshBusy=true;
@@ -2933,6 +2987,10 @@ async function refreshOnce(){
   try{
     S=await getJson('/api/v1/status');
     sAt=Date.now();
+    const bb=S.bridge||{};
+    const gap=sawGap&&askedForRestart(Date.now());sawGap=false;
+    if(isNewBoot(lastBoot,bb,Date.now(),gap)){onNewBoot(lastBoot.v!==bb.firmware_version);if(!bootChanged)return}
+    lastBoot={v:bb.firmware_version,up:bb.uptime_seconds,at:Date.now()};
     // One request feeds the whole Live tab: /status already carries devices[] and totals, so
     // the fleet rows need no per-device fetch. The sparkline series come from here too.
     const tot=S.totals||{}, fleet=S.devices||[];
@@ -2971,8 +3029,16 @@ async function refreshOnce(){
     paintTick();
   }catch(e){
     const el=$('#banner');
-    el.textContent='Cannot reach the bridge: '+e.message;
-    showBanner(el,true);
+    // Asked for: not an alarm. Two minutes is longer than any restart this firmware does; past
+    // it the bridge has not come back, and that is one.
+    if(askedForRestart(Date.now())){
+      sawGap=true;
+      el.textContent='Restarting — waiting for the bridge to come back ('+Math.round((Date.now()-restarting)/1000)+' s).';
+      showBanner(el,false);
+    }else{
+      el.textContent='Cannot reach the bridge: '+e.message;
+      showBanner(el,true);
+    }
   }
 }
 
@@ -3014,7 +3080,10 @@ function onVisibility(){
   else{refresh();connect()}
 }
 document.addEventListener('visibilitychange',onVisibility);
-refresh();connect();
+// Back to the tab a reload after a restart left (reloadHere); a plain reload starts on Live.
+let tab0=null;try{tab0=sessionStorage.getItem('hg_tab');sessionStorage.removeItem('hg_tab')}catch(e){}
+if(tab0&&TABS.includes(tab0)&&tab0!==tab)goTab(tab0);else refresh();
+connect();
 setInterval(()=>{if(!document.hidden&&Date.now()-lastEvent>15000)refresh()},5000);
 // The clock ticks between fetches (see clockText). It stops once the last reading is 15 s old:
 // a bridge that stopped answering should not show a clock that looks alive.
