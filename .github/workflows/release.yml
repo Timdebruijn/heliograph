@@ -92,7 +92,9 @@ jobs:
       # update feed -- a release nobody reviewed, offered to every bridge. Asked of the API rather
       # than of git: the checkout is shallow, and comparing main with the tagged commit needs no
       # history. "behind" or "identical" means main already contains it; anything else
-      # ("ahead", "diverged") means it is not on main.
+      # ("ahead", "diverged") means it is not on main. Release candidates too: a candidate is a
+      # GitHub pre-release anyone can download, so it is cut from main like the release it leads
+      # to, never from a branch. A failed API call fails the step (bash -e), closed.
       - name: Tagged commit is on main
         env:
           GH_TOKEN: ${{ github.token }}
