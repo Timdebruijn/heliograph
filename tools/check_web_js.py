@@ -81,6 +81,7 @@ def main() -> int:
                 status |= check_version_compare(script, scratch)
                 status |= check_auth_prompt_reentrancy(script, scratch)
                 status |= check_auth_fetch_race(script, scratch)
+                status |= check_auth_fetch_unreachable(script, scratch)
                 status |= check_diag_single_flight(script, scratch)
                 status |= check_sse_lifecycle(script, scratch)
                 status |= check_state_event_gate(script, scratch)
@@ -596,6 +597,69 @@ const fail = m => {{ console.error(m); bad++; }};
     return run_node("auth prompt re-entrancy", "auth_prompt.js", harness, scratch)
 
 
+def check_auth_fetch_unreachable(script, scratch):
+    """A request that gets no answer resolves as a failure; it never rejects.
+
+    fetch() rejects when the bridge reboots mid-request, the WiFi drops or the timeout runs out,
+    and none of the callers catch it: a save left "Applying…" on screen for good. authFetch turns
+    that into the same not-ok response every caller already handles, carrying a reason.
+    """
+    parts = []
+    for fn in ("authFetch",):
+        body = extract_function(script, fn)
+        if body is None:
+            print(f"FAIL: {fn}() not found in index_html.h; this check needs updating")
+            return 1
+        parts.append(body)
+    for name in ("noAnswer", "unreachable"):
+        m = re.search(r"^const " + name + r"=.*?;$", script, re.M | re.S)
+        if m is None:
+            print(
+                f"FAIL: const {name} not found in index_html.h; this check needs updating"
+            )
+            return 1
+        parts.append(m.group(0))
+    harness = (
+        """
+const store = {hg_auth:'GOOD'};
+const sessionStorage = {getItem:k=>k in store?store[k]:null, setItem:(k,v)=>{store[k]=v},
+                        removeItem:k=>{delete store[k]}};
+const authHeader = () => ({'Authorization':'Basic GOOD'});
+const clearAuth = () => {};
+const rememberUser = () => {};
+const authCancelled = () => ({ok:false,status:0,cancelled:true});
+async function askAuth(){ return true; }
+"""
+        + "\n".join(parts[1:])
+        + "\n"
+        + parts[0]
+        + """
+let bad = 0;
+const fail = m => { console.error(m); bad++; };
+(async () => {
+  for (const [label, err] of [['dropped', new TypeError('Failed to fetch')],
+                              ['timed out', Object.assign(new Error('t'), {name:'TimeoutError'})]]) {
+    globalThis.fetch = async () => { throw err; };
+    let r;
+    try { r = await authFetch('/api/v1/config', {method:'PATCH'}); }
+    catch (e) { fail(label + ': authFetch rejected instead of answering: ' + e); continue; }
+    if (r.ok) fail(label + ': an unanswered request reported ok');
+    if (!r.networkError) fail(label + ': not marked as a network error');
+    const d = await r.json();
+    if (!(d.error && /No answer from the bridge/.test(d.error.message))) {
+      fail(label + ': no reason a caller can show: ' + JSON.stringify(d));
+    }
+    if (label === 'timed out' && !/timed out/.test(d.error.message)) fail('a timeout is not called one');
+  }
+  process.exit(bad === 0 ? 0 : 1);
+})();
+"""
+    )
+    return run_node(
+        "auth fetch unreachable", "auth_fetch_unreachable.js", harness, scratch
+    )
+
+
 def check_auth_fetch_race(script, scratch):
     """A late 401 must not throw away credentials another caller just got accepted.
 
@@ -620,6 +684,7 @@ const authHeader = () => store['hg_auth'] ? {'Authorization':'Basic '+store['hg_
 const clearAuth = () => { delete store['hg_auth'] };
 const rememberUser = () => {};
 const authCancelled = () => ({ok:false,status:0,cancelled:true});
+const unreachable = e => ({ok:false,status:0,networkError:true});
 const btoa = s => Buffer.from(s, 'binary').toString('base64');
 let authPrompt = null;
 let prompts = 0;

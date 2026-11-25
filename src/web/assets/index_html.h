@@ -299,12 +299,24 @@ function rememberUser(){const u=sessionStorage.getItem('hg_pending');if(u)sessio
 const authCancelled=()=>({ok:false,status:0,cancelled:true,
   json:async()=>({error:{code:'cancelled',message:'Admin password required.'}}),text:async()=>'',
   headers:{get:()=>null}});
-const httpWhy=r=>r.cancelled?'cancelled (admin password required)':'HTTP '+r.status;
-// timeoutMs, when given, bounds each request on its own: a single AbortSignal would also count
-// the time someone spends typing into the password dialog between the two fetches.
-async function authFetch(url,{timeoutMs,...opts}={}){
+// No answer at all: the bridge rebooted mid-request, the WiFi dropped, or the timeout below ran
+// out. fetch() REJECTS then, and none of the twenty-odd callers caught it -- "Applying…" stayed on
+// screen forever and the console got an unhandled rejection. Answered like authCancelled(), as a
+// failed response every caller already handles, and worded for the case that matters: a save or
+// restore the bridge may well have applied before it restarted.
+const noAnswer=e=>'No answer from the bridge ('+(e&&e.name==='TimeoutError'?'timed out':'connection lost')+
+  '). If it was restarting, reload in about 30 s and check whether the change took effect.';
+const unreachable=e=>({ok:false,status:0,networkError:true,why:noAnswer(e),
+  json:async()=>({error:{code:'unreachable',message:noAnswer(e)}}),text:async()=>'',
+  headers:{get:()=>null}});
+const httpWhy=r=>r.cancelled?'cancelled (admin password required)':r.networkError?r.why:'HTTP '+r.status;
+// timeoutMs bounds each request on its own: a single AbortSignal would also count the time
+// someone spends typing into the password dialog between the two fetches. 30 s by default -- a
+// half-dead WiFi socket can otherwise hold a request open for minutes -- which is far above
+// anything the bridge takes to answer, a WiFi scan and a restore included.
+async function authFetch(url,{timeoutMs=30000,...opts}={}){
   const go=()=>fetch(url,{...opts,headers:{...(opts.headers||{}),...authHeader()},
-    ...(timeoutMs?{signal:AbortSignal.timeout(timeoutMs)}:{})});
+    signal:AbortSignal.timeout(timeoutMs)}).catch(unreachable);
   if(!sessionStorage.getItem('hg_auth')&&!await askAuth(false))return authCancelled();
   const used=sessionStorage.getItem('hg_auth');
   let r=await go();
@@ -1182,7 +1194,7 @@ function paintHealth(){
           `<button class="pill${logFilter===k?'':' off'}" data-act="log-filter" data-val="${k}">${esc(n)}</button>`).join('')}
         <span style="width:1px;height:18px;background:var(--line)"></span>
         <span class="hint" style="margin:0">level</span>
-        <select class="tiny" onchange="setLogLevel(this.value)">${['error','warn','info','debug','trace'].map(l=>
+        <select id="loglevel" class="tiny" onchange="setLogLevel(this.value)">${['error','warn','info','debug','trace'].map(l=>
           `<option ${cfg&&cfg.logging.level===l?'selected':''}>${l}</option>`).join('')}</select>
         <label class="check" style="margin:0;font-size:12px;color:var(--dim)"><input type="checkbox" ${logPaused?'checked':''} onchange="logPaused=this.checked"> pause</label>
         <button class="alt pill" onclick="copyForIssue(this)">Copy for an issue</button>
@@ -1271,7 +1283,12 @@ function renderLogs(){
 }
 async function setLogLevel(level){
   const r=await patch({logging:{level}});
-  if(r.ok){if(cfg)cfg.logging.level=level;loadLogs(true)}
+  if(r.ok){if(cfg)cfg.logging.level=level;loadLogs(true);return}
+  // Refused or unreachable: the select already shows the new level, the bridge still runs the old
+  // one. Put the select back and say why, or the log silently never gets verbose.
+  const sel=$('#loglevel');
+  if(sel&&cfg)sel.value=cfg.logging.level;
+  $('#loginfo').textContent='Log level not changed: '+r.why;
 }
 // Confirms in the button itself. Silent success is indistinguishable from a broken button.
 //
@@ -2520,10 +2537,13 @@ async function manualCheck(){
 // "uploading…" reads as a hang.
 function upload(url,blob,filename,btnSel,progSel,msgSel,done){
   const btn=$(btnSel), pb=$(progSel), pf=pb&&pb.firstElementChild;
-  let nextSaid=25;
+  let nextSaid=25, sent=false;
   const send=mayRetry=>{
     const x=new XMLHttpRequest();
     x.open('POST',url);
+    // Generous: the upload, then the checksum and the flash write, over a LAN. Without one a hung
+    // socket left the button disabled and the bar up for good.
+    x.timeout=300000;
     x.setRequestHeader('Authorization','Basic '+sessionStorage.getItem('hg_auth'));
     x.upload.onprogress=e=>{
       if(!e.lengthComputable)return;
@@ -2532,6 +2552,7 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
       if(pb)pb.setAttribute('aria-valuenow',p);
       // say() keeps progress quiet; a quarter at a time is enough to know it is moving.
       // At 100 % the wait that follows is the flash write, so that is what gets said.
+      if(p>=100)sent=true;
       if(p>=nextSaid){announce(p<100?p+'%':'Upload complete, verifying and writing flash.');nextSaid=Math.floor(p/25)*25+25}
       say(msgSel,'',p<100?'Uploading to the bridge… '+p+'%':'Upload complete — verifying the checksum and writing flash…');
     };
@@ -2550,8 +2571,13 @@ function upload(url,blob,filename,btnSel,progSel,msgSel,done){
       }
       say(msgSel,'ok',done);
     };
-    x.onerror=()=>{if(pb)pb.style.display='none';if(btn)btn.disabled=false;
-      say(msgSel,'err','Upload failed: network error — the running firmware is untouched.')};
+    // Lost connection. Before the last byte the bridge aborts the half-written image, so nothing
+    // changed. AFTER it, the bridge may have verified the image, switched partitions and
+    // restarted before its answer got out -- this page cannot know, so it must not claim either.
+    x.onerror=x.ontimeout=()=>{if(pb)pb.style.display='none';if(btn)btn.disabled=false;
+      say(msgSel,'err',sent
+        ?'The connection dropped after the upload finished. The bridge may be restarting into the new firmware: reload in about 30 s and check the version.'
+        :'Upload failed: the connection dropped before it finished — nothing was installed, the running firmware is untouched.')};
     say(msgSel,'','Uploading to the bridge… 0%');
     announce('Uploading to the bridge.');nextSaid=25;
     if(pb){pb.style.display='block';pf.style.width='0%';pb.setAttribute('aria-valuenow',0)}
