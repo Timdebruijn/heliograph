@@ -15,6 +15,9 @@
 
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -24,11 +27,22 @@
 
 namespace heliograph {
 
+/// How long a request may wait for the bus before it is refused instead of run. A setpoint is
+/// sent for NOW -- "limit to 0 % while the price is negative" -- and rs485Task can be busy for
+/// minutes (a discovery scan, a capture, a run of timeouts against a silent device). Executed
+/// that late it would act on a moment that has passed, with nothing telling the sender it did.
+inline constexpr uint64_t kMaxCommandAgeMs = 30000;
+
+/// How many completed outcomes are kept for callers to read back.
+inline constexpr std::size_t kCommandOutcomeSlots = 4;
+
 class CommandQueue {
 public:
     struct Request {
         std::string     deviceId;
         InverterCommand command;
+        /// When it was submitted, on the same monotonic clock take() is given.
+        uint64_t submittedAtMs = 0;
     };
 
     /// False, with no state change, if a request is already pending -- the same one-in-flight
@@ -37,11 +51,15 @@ public:
     bool submit(Request request);
 
     /// Consumed by the bus owner: takes the pending request if there is one, clearing the slot.
-    std::optional<Request> take();
+    /// A request older than kMaxCommandAgeMs is not handed out: its outcome is recorded as
+    /// Rejected ("expired") and nothing is returned, so the sender learns it was not run.
+    std::optional<Request> take(uint64_t nowMs);
 
-    /// Recorded by the bus owner once dispatch() has returned. Overwrites whatever the previous
-    /// outcome was -- only the most recent request's outcome is kept, matching submit()'s
-    /// one-slot rule.
+    /// Recorded by the bus owner once dispatch() has returned. The last kCommandOutcomeSlots
+    /// outcomes are kept, newest first. One slot used to be all there was, and take() frees the
+    /// pending slot BEFORE dispatch runs, so a second client could submit, complete and
+    /// overwrite the first client's outcome before the first one ever read it -- leaving it
+    /// polling "pending" forever (MQTT would never publish its result).
     /// Scoped by device as well as request id. A caller may choose its own request id, so two
     /// devices can legitimately carry the same one; keyed on the id alone, polling device A
     /// could return device B's result. Dispatch was never affected -- that is scoped by
@@ -50,17 +68,24 @@ public:
                        DispatchOutcome outcome);
 
     /// The outcome of the most recently COMPLETED request with this id. Empty if that id was
-    /// never submitted, is still pending, or has since been superseded by a later request's
-    /// outcome.
+    /// never submitted, is still pending, or has since been pushed out by kCommandOutcomeSlots
+    /// later outcomes.
     std::optional<DispatchOutcome> outcomeFor(const std::string& deviceId,
                                              const std::string& requestId) const;
 
 private:
-    mutable std::mutex             mutex_;
-    std::optional<Request>         pending_;
-    std::string                    lastOutcomeDeviceId_;
-    std::string                    lastOutcomeRequestId_;
-    std::optional<DispatchOutcome> lastOutcome_;
+    struct Outcome {
+        std::string     deviceId;
+        std::string     requestId;
+        DispatchOutcome outcome;
+    };
+    void recordLocked(const std::string& deviceId, const std::string& requestId,
+                      DispatchOutcome outcome);
+
+    mutable std::mutex                                 mutex_;
+    std::optional<Request>                             pending_;
+    std::array<std::optional<Outcome>, kCommandOutcomeSlots> outcomes_{};
+    std::size_t                                        next_ = 0;  // slot the next outcome takes
 };
 
 }  // namespace heliograph

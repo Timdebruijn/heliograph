@@ -701,7 +701,7 @@ std::optional<std::string> submitCommand(const std::string& deviceId, InverterCo
             kAutoRequestIdPrefix + std::to_string(g_commandRequestCounter.fetch_add(1) + 1);
     }
     const std::string requestId = command.requestId;
-    if (!g_commandQueue.submit({deviceId, std::move(command)})) {
+    if (!g_commandQueue.submit({deviceId, std::move(command), nowMs()})) {
         return std::nullopt;
     }
     return requestId;
@@ -1740,7 +1740,7 @@ void rs485Task(void* /*arg*/) {
         // driver's execute() returns CommandResult::Unsupported, so this drains a queue that
         // can genuinely fill but can never yet succeed, following the same request/consume
         // shape already established above for discovery and capture.
-        if (auto request = g_commandQueue.take()) {
+        if (auto request = g_commandQueue.take(nowMs())) {
             DeviceContext* target = nullptr;
             for (size_t i = 0; i < g_deviceIds.size(); ++i) {
                 if (g_deviceIds[i] == request->deviceId) {
