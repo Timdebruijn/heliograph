@@ -217,7 +217,11 @@ jobs:
     # attached and no feed is deployed unless every board built and every check passed.
     needs: [verify, build]
     steps:
+      # The write-scoped token is not left in .git/config for the steps that follow, the
+      # third-party release action among them; it takes the token from its own input.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # No PlatformIO and no toolchain here: this job only moves finished binaries around.
       # Each artifact lands in fw/<artifact-name>/, so the images are at fw/fw-<board>/.
