@@ -23,7 +23,7 @@
     device:{manufacturer:'EverSolar',model:'TL3000',serial_number:'EU00T112345678',
       driver_id:'eversolar_legacy',support_level:'stable',online:true,data_valid:true,
       data_stale:false,last_successful_poll_seconds_ago:3},
-    bridge:{firmware_version:'0.37.0',board_id:'waveshare-rs485-can',
+    bridge:{firmware_version:'0.37.0',board_id:'rs485-can',
       board_name:'Waveshare ESP32-S3-RS485-CAN',hostname:'heliograph-a1b2c3',
       uptime_seconds:5061,wifi_connected:true,wifi_rssi_dbm:-54,mqtt_connected:true,
       modbus_listening:true,modbus_clients:0,time_synced:true,time:'2026-07-26 '+now(),

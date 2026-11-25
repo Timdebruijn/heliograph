@@ -3,7 +3,7 @@
 (function(){
   const status = {
     device:{online:false,data_valid:false,data_stale:true,last_successful_poll_seconds_ago:null},
-    bridge:{firmware_version:'0.23.0',board_id:'waveshare-rs485-can',
+    bridge:{firmware_version:'0.23.0',board_id:'rs485-can',
       board_name:'Waveshare ESP32-S3-RS485-CAN',hostname:'heliograph-a1b2c3',
       uptime_seconds:41,wifi_connected:true,wifi_rssi_dbm:-61,mqtt_connected:false,
       modbus_listening:true,modbus_clients:0,time_synced:true,time:'2026-07-29 09:12:03',

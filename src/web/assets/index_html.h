@@ -1554,6 +1554,7 @@ function paintBridge(){
     ${panel==='ota'?`<div class="hair">
       <label for="ota_file">Firmware image (.bin)</label>
       <input id="ota_file" type="file" accept=".bin">
+      <div class="hint">Use the image for <b>this board</b>: <code>heliograph-…-${esc((S&&S.bridge&&S.bridge.board_id)||'board')}.bin</code>, not the <code>-factory.bin</code> (that one is for the USB flasher). Keep this tab open and the bridge powered until it says installed.</div>
       <div class="acts"><button id="ota_btn" onclick="otaUpload()">Upload and install</button></div>
       <div id="ota_prog" class="prog" role="progressbar" aria-label="Firmware upload" aria-valuemin="0" aria-valuemax="100"><div></div></div>
       <div id="ota_msg" class="msg hide"></div>
@@ -1563,6 +1564,7 @@ function paintBridge(){
     <b>Factory reset</b>
     <div class="hint">Erases everything, including WiFi and passwords, and restarts into the setup portal. Download a backup first — with passwords, since a reset board has none to keep. The board's physical RESET button only reboots; holding <b>BOOT</b> for five seconds does what this does, and is the way back when you cannot reach this page.</div>
     <div class="acts"><button class="danger sm" onclick="factoryReset()">Erase and restart</button></div>
+    <div id="fr_msg" class="msg hide"></div>
   </div></div>`;
   $('#bridge').innerHTML=h;
   liveFields();  // the card was just rebuilt; put the moving readouts back straight away
@@ -2120,10 +2122,22 @@ async function reboot(sel){
   restarting=Date.now();
   say(sel,'ok','Restarting. This page reloads by itself when the bridge is back, usually within 30 s.');
 }
+// The one action here nothing can undo, so it asks for a word rather than an OK: a confirm()
+// is clicked through by habit, and its text was the bare "Erase all settings?" while the card
+// above it explained the backup and the way back. The prompt now says both.
 async function factoryReset(){
-  if(!confirm('Erase all settings including WiFi and passwords?'))return;
+  const typed=prompt('This erases every setting: WiFi, the admin password, the inverters, MQTT, everything. '
+    +'The bridge then restarts into its setup portal. It cannot be undone; a downloaded backup (with passwords) '
+    +'is the only way to get this configuration back.\n\nType ERASE to go ahead.');
+  if(typed===null)return;
+  if(typed.trim().toUpperCase()!=='ERASE'){say('#fr_msg','err','Nothing was erased: that was not ERASE.');return}
   const r=await authFetch('/api/v1/actions/factory-reset',{method:'POST'});
-  alert(r.ok?'Erased. The bridge is restarting into setup mode.':r.networkError?r.why:'Failed: '+httpWhy(r));
+  if(!r.ok){say('#fr_msg','err',r.networkError?esc(r.why):'Not erased: '+esc(httpWhy(r)));return}
+  // An alert, deliberately, unlike the refusals above: this is the last thing this page will
+  // ever say about this bridge, and a message inside the card can be wiped by the repaint that
+  // a last answer from the bridge still triggers.
+  alert('Erased. The bridge is restarting into its setup portal, and this page will lose it. '
+    +'Join the Heliograph-Setup WiFi network to set it up again.');
 }
 
 // One request in flight per polling loop. setInterval fires every second whether or not the last
@@ -2873,14 +2887,33 @@ async function adminProven(msgSel){
   say(msgSel,'err',why+' — nothing was sent.');
   return false;
 }
+// The board an image's file name says it is for. Release images are named
+// heliograph-<version>-<board>.bin (heliograph-<board>.bin on the flasher site); 'factory' is the
+// USB flasher's full image, which carries a bootloader and a partition table and is no OTA image.
+// null when the name says nothing -- a renamed or self-built file. The board list is release.yml's
+// BOARDS; nothing in the image itself says which board it was built for (see the OTA handler).
+const BOARD_IDS=['rs485-can','relay-1ch','relay-6ch'];
+function imageBoard(name){
+  const n=String(name||'').toLowerCase();
+  if(/-factory\.bin$/.test(n))return 'factory';
+  return BOARD_IDS.find(b=>n.endsWith('-'+b+'.bin'))||null;
+}
 async function otaUpload(){
   const f=$('#ota_file').files[0];
   if(!f){say('#ota_msg','err','Choose a firmware .bin first.');return}
+  // An image for another board boots happily on the wrong pins, and the rollback does not catch
+  // it because the bridge looks healthy. The name is all there is to go on, so it is read: a
+  // mismatch is refused here, and a named board travels as ?board= so the bridge checks too.
+  const board=(S&&S.bridge&&S.bridge.board_id)||'', named=imageBoard(f.name);
+  if(named==='factory'){say('#ota_msg','err','That is the full factory image, for the USB flasher. Over the air this bridge takes the image without “-factory” in its name.');return}
+  if(named&&board&&named!==board){say('#ota_msg','err','That file is named for the '+esc(named)+' board, and this bridge is the '+esc(board)+' board. Use heliograph-…-'+esc(board)+'.bin.');return}
+  if(!named&&!confirm('The file name does not say which board it is for, so this page cannot check it. '
+    +'An image for another board starts on the wrong pins. Install '+f.name+' on this '+(board?board+' board':'bridge')+' anyway?'))return;
   // Disabled across the check: upload() disables it too, but only once the check is done, and a
   // second click in between would start a second OTA sharing this progress bar.
   $('#ota_btn').disabled=true;
   if(!await adminProven('#ota_msg')){$('#ota_btn').disabled=false;return}
-  upload('/api/v1/ota',f,f.name,'#ota_btn','#ota_prog','#ota_msg',
+  upload('/api/v1/ota'+(named?'?board='+encodeURIComponent(named):''),f,f.name,'#ota_btn','#ota_prog','#ota_msg',
     'Verified and installed. Rebooting into the new firmware — this page reloads by itself when it is back.');
 }
 async function installUpdate(){
