@@ -365,8 +365,8 @@ static void test_a_serial_number_outranks_the_address() {
     TEST_ASSERT_EQUAL_STRING("eversolar_legacy-XH300060115506193600V610", id.deviceId().c_str());
 }
 
-// A serial is whatever the inverter sends, and the id lands in MQTT topics, a Home Assistant node
-// id and a REST path. '+' or '#' in a topic drops the broker connection, '/' splits topic and
+// Defensive (no driver has its serial when the id is registered, see idSafe), and pinned because
+// the day one does, its serial lands in MQTT topics, a Home Assistant node id and a REST path. '+' or '#' in a topic drops the broker connection, '/' splits topic and
 // path, anything outside [A-Za-z0-9_-] makes Home Assistant ignore the device. Those become '_';
 // a serial already in the set (every one seen so far) is untouched, so nothing existing moves.
 static void test_a_device_id_carries_only_topic_and_path_safe_characters() {
