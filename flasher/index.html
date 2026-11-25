@@ -49,7 +49,7 @@ a{color:inherit;text-decoration-color:var(--dim);text-underline-offset:2px}
   <b>Install</b>
   <label for="board" style="display:block;font-size:13px;color:var(--dim);margin:8px 0 4px">
     Which board do you have? It is printed on the PCB.</label>
-  <select id="board" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;margin-bottom:12px">
+  <select id="board" autocomplete="off" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;margin-bottom:12px">
     <option value="rs485-can">Waveshare ESP32-S3-RS485-CAN</option>
     <option value="relay-1ch">Waveshare ESP32-S3-Relay-1CH</option>
     <option value="relay-6ch">Waveshare ESP32-S3-Relay-6CH</option>
@@ -65,9 +65,15 @@ a{color:inherit;text-decoration-color:var(--dim);text-underline-offset:2px}
 </div>
 
 <script>
-document.getElementById('board').addEventListener('change', e => {
-  document.getElementById('install').setAttribute('manifest', 'manifest-' + e.target.value + '.json');
-});
+// Read the manifest from what the select shows, not only from 'change': a browser that
+// restores the select after a reload or Back fires no 'change', and the button would then
+// flash the image of the board that was selected before.
+const board = document.getElementById('board');
+const syncManifest = () =>
+  document.getElementById('install').setAttribute('manifest', 'manifest-' + board.value + '.json');
+board.addEventListener('change', syncManifest);
+window.addEventListener('pageshow', syncManifest);
+syncManifest();
 </script>
 
 <script type="module" src="https://unpkg.com/esp-web-tools@10.5.2/dist/web/install-button.js?module"></script>
