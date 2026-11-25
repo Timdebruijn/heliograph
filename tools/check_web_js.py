@@ -595,20 +595,23 @@ const A = {driver_id:'x', label:'A', options:{unit_id:'2'}};
 const B = {driver_id:'x', label:'B', options:{unit_id:'3'}};
 const C = {driver_id:'x', label:'C', options:{unit_id:'4'}};
 let cfg, stored, patched, alerted, panel, invNextMs;
-const getJson = async () => JSON.parse(JSON.stringify(stored));
+const getJson = async () => { if (stored === null) throw new Error('timed out'); return JSON.parse(JSON.stringify(stored)); };
 const patch = async (body) => { patched = body; return {ok:true}; };
 const confirm = () => true;
 const alert = (t) => { alerted = t; };
 const loadInverters = () => {};
 const $ = () => null;
 const say = () => {};
+const ROWS_UNREAD = 'unread';
 """
         + "\n".join(parts)
         + """
+// An async harness that never finishes exits 0 in node. Fail unless it reaches the end.
+process.exitCode = 1;
 let bad = 0;
 const run = async (label, pageRows, storedRows, idx, want) => {
   cfg = {driver:{id:'x'}, additional_devices: pageRows};
-  stored = {driver:{id:'x'}, additional_devices: storedRows};
+  stored = storedRows === null ? null : {driver:{id:'x'}, additional_devices: storedRows};
   patched = undefined; alerted = undefined;
   await removeExtraAt(idx);
   const got = patched ? patched.additional_devices.map(r => r.label).join(',') : 'refused';
@@ -620,6 +623,7 @@ const run = async (label, pageRows, storedRows, idx, want) => {
   await run('a row was added elsewhere after it', [A,B], [A,B,C], 1, 'A,C');
   await run('the row itself was edited elsewhere', [A,B], [A,{...B, label:'B2'}], 1, 'refused');
   await run('the row is gone', [A,B], [A], 1, 'refused');
+  await run('the bridge did not answer the read', [A,B,C], null, 1, 'refused');
   process.exit(bad === 0 ? 0 : 1);
 })();
 """
