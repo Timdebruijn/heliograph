@@ -192,7 +192,8 @@ Five rules, all of which exist because the alternative reads as a fact:
   reported, kept after it stops answering (`null` until the first reading, and again after a
   reboot), and it is never summed. It exists to tell an inverter that went quiet at dusk near
   0 W — asleep — from one that went quiet at full output, which is a fault. The web UI shows the
-  first in grey and the second in red.
+  first in grey, but only in the evening and the night (quiet since after 15:00, until 10:00 the
+  next morning), and the second in red at any hour.
 - **`devices_answering`** counts devices that are online, hold valid data and are not stale.
   Started is not answering (see below), and neither is a device whose reading has aged out.
 - **A sum is `null` when no device reported the channel**, never `0`.
