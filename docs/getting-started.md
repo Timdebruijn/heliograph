@@ -31,11 +31,11 @@ faster way in than reading this top to bottom.
   it. That flag is the guarantee, not an absence of capability, and anyone with the admin
   password can turn it off — see [security.md](security.md).
 - **One thing is transmitted regardless, on EverSolar and SolaX.** Those inverters are found by
-  being *given* a bus address, so discovery broadcasts a re-register and then assigns one.
-  There is no read-only way to discover an inverter of that family. The address is volatile and
-  the inverter forgets it on power loss, no configuration is altered, and nothing persists. But
-  if a second inverter of the same family shares the line, that broadcast makes it forget its
-  address too, and it re-registers afterwards.
+  being *given* a bus address, so discovery assigns one. There is no read-only way to discover
+  an inverter of that family. The address is volatile and the inverter forgets it on power loss,
+  no configuration is altered, and nothing persists. EverSolar also broadcasts a re-register
+  first, so if a second EverSolar inverter shares the line, it forgets its address too and
+  re-registers afterwards. SolaX never sends that broadcast.
 
 ---
 
