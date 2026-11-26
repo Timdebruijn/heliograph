@@ -40,11 +40,14 @@ matters here: it said no driver in this build can write to an inverter. Two of t
 | `sunspec` | **Declares it and implements it.** `execute()` writes the power-limit registers and the connect/disconnect register. It requires that the inverter published SunSpec model 123, that the block was read, **and** the device's `allow_unverified_writes` opt-in, because SunSpec has no per-row `verified` flag |
 
 One thing bypasses all of this, because it is not a command. The AA55/PMU family — EverSolar
-and SolaX — is discovered by being *assigned* a bus address, so `probe()` transmits a
-re-register broadcast and an address assignment by design, outside the dispatcher and outside
-`read_only_mode`. There is no read-only way to discover such an inverter. It configures nothing
-and the address is volatile, but a second inverter of that family on the same line is made to
-forget its address and re-register. See [architecture.md](architecture.md) § discovery.
+and SolaX — is discovered by being *assigned* a bus address, so discovery transmits an address
+assignment by design, outside the dispatcher and outside `read_only_mode`. There is no read-only
+way to discover such an inverter. SolaX stops there: a broadcast offline query, which a
+registered inverter ignores, and the assignment; its driver never sends a re-register. EverSolar
+also broadcasts a re-register ("forget your address") when the first instance starts and in
+`probe()`, so a second EverSolar inverter on the same line is made to forget its address and
+re-register. Nothing is configured and the address is volatile. See
+[architecture.md](architecture.md) § discovery.
 
 **So what protects the inverter with the shipped configuration is a chain of gates, all closed
 by default:** `security.read_only_mode` (*Allow control* off), then `control.inverter_writes_enabled`,
@@ -148,8 +151,15 @@ plain HTTP, but the setup AP is the case where the network itself is open by des
 matters to you, do the recovery with the board on a cable-fed network, or factory-reset and
 re-provision instead of authenticating over the air.
 
-**No brute-force protection on HTTP Basic.** Rate limiting is on `/actions/*`, not on the
-auth itself.
+**Brute-force protection on HTTP Basic is a throttle, not a barrier.** Every endpoint that asks
+for the admin password goes through one check, so the limits below apply to all of them (REST
+writes, the admin-only GETs, OTA, and provision/restore once a password exists). Five wrong
+passwords in a row from one address lock that address out for 30 s, doubling per further
+failure up to 15 min, and the right password is refused too while it lasts. Across all addresses,
+20 failures within a minute refuse every sign-in for 60 s, except the last four addresses that
+signed in correctly since boot. The counters are in RAM, so a reboot clears them. That caps a
+guesser at roughly 20 tries a minute, not at zero: a weak password still falls. The 1 req/s on
+`/actions/*` is a separate limit and has nothing to do with passwords.
 
 **Nothing in the firmware generates a secret, and there is no random number generator in the
 tree at all.** The admin password is set by the operator, every request re-presents it, and
