@@ -42,11 +42,12 @@ matters here: it said no driver in this build can write to an inverter. Two of t
 One thing bypasses all of this, because it is not a command. The AA55/PMU family — EverSolar
 and SolaX — is discovered by being *assigned* a bus address, so discovery transmits an address
 assignment by design, outside the dispatcher and outside `read_only_mode`. There is no read-only
-way to discover such an inverter. SolaX stops there: a broadcast offline query, which a
-registered inverter ignores, and the assignment; its driver never sends a re-register. EverSolar
-also broadcasts a re-register ("forget your address") when the first instance starts and in
-`probe()`, so a second EverSolar inverter on the same line is made to forget its address and
-re-register. Nothing is configured and the address is volatile. See
+way to discover such an inverter. SolaX sends a broadcast offline query, which a registered
+inverter ignores, the assignment, and addressed reads; its driver never sends a re-register.
+EverSolar also broadcasts a re-register ("forget your address") when the first instance starts
+and during probing and cold-start registration, so a second EverSolar inverter on the same line
+is made to forget its address and re-register. Nothing is configured and the address is
+volatile. See
 [architecture.md](architecture.md) § discovery.
 
 **So what protects the inverter with the shipped configuration is a chain of gates, all closed
